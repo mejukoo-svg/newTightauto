@@ -1,0 +1,92 @@
+name: Meta Ads + Mixpanel → Google Sheets
+
+on:
+  schedule:
+    # KST = UTC+9
+    # 0시 KST = 15:00 UTC (전날)
+    # 9시 KST = 00:00 UTC
+    # 12시 KST = 03:00 UTC
+    # 18시 KST = 09:00 UTC
+    # 21시 KST = 12:00 UTC
+    - cron: '0 15 * * *'
+    - cron: '0 0 * * *'
+    - cron: '0 3 * * *'
+    - cron: '0 9 * * *'
+    - cron: '0 12 * * *'
+  workflow_dispatch:  # 수동 실행
+
+jobs:
+  vanced:
+    name: Vanced 세트별
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth requests pandas
+      - run: python vanced_세트별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_VANCED }}
+
+  kr-adset:
+    name: 국내 세트별
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth requests pandas yfinance
+      - run: python 국내_세트별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_KR_ADSET }}
+
+  kr-creative:
+    name: 국내 소재별
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth requests pandas
+      - run: python 국내_소재별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_KR_CREATIVE }}
+
+  tw-adset:
+    name: 글로벌 세트별
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth requests pandas yfinance
+      - run: python 글로벌_세트별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_TW_ADSET }}
