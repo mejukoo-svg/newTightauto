@@ -2,74 +2,92 @@ name: Meta Ads Report
 
 on:
   schedule:
-    # KST 0시 = UTC 15시(전날), 9시 = UTC 0시, 12시 = UTC 3시
-    # KST 15시 = UTC 6시, 18시 = UTC 9시, 21시 = UTC 12시
     - cron: '0 15 * * *'   # KST 00:00
     - cron: '0 0 * * *'    # KST 09:00
     - cron: '0 3 * * *'    # KST 12:00
     - cron: '0 6 * * *'    # KST 15:00
     - cron: '0 9 * * *'    # KST 18:00
     - cron: '0 12 * * *'   # KST 21:00
-  workflow_dispatch:          # 수동 실행용
+  workflow_dispatch:
+    inputs:
+      script:
+        description: '실행할 스크립트 선택'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - 글로벌_세트별
+          - 국내_세트별
+          - 국내_소재별
+          - vanced_세트별
+
+env:
+  GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+  META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+  META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+  MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+  MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+  MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+  SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
 
 jobs:
-  run-reports:
+  글로벌_세트별:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == '글로벌_세트별'
     runs-on: ubuntu-latest
     timeout-minutes: 120
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 글로벌_세트별.py
 
-      - name: Install dependencies
-        run: |
-          pip install gspread google-auth pandas requests yfinance
+  국내_세트별:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == '국내_세트별'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 국내_세트별.py
 
-      - name: Run 글로벌_세트별
-        env:
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
-          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
-          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
-          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
-          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
-          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
-        run: python 글로벌_세트별.py
+  국내_소재별:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == '국내_소재별'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 국내_소재별.py
 
-      - name: Run 국내_세트별
-        env:
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
-          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
-          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
-          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
-          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
-          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
-        run: python 국내_세트별.py
-
-      - name: Run 국내_소재별
-        env:
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
-          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
-          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
-          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
-          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
-          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
-        run: python 국내_소재별.py
-
-      - name: Run vanced_세트별
-        env:
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
-          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
-          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
-          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
-          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
-          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
-        run: python vanced_세트별.py
+  vanced_세트별:
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'vanced_세트별'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python vanced_세트별.py
