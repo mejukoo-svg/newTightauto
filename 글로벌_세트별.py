@@ -283,17 +283,19 @@ def clean_id(val):
     return numeric_only if numeric_only else s
 
 def extract_product(adset_name):
+    """광고 세트 이름에서 제품명 추출. 패턴: 국가_날짜_제품명_... (3번째 위치)
+    인식 제품: solo, money, starsun → 나머지는 '기타'"""
     if not adset_name: return "기타"
     name_lower = str(adset_name).lower()
+    # 1) 알려진 키워드가 이름 어디든 있으면 바로 반환
     for kw in PRODUCT_KEYWORDS:
         if kw in name_lower: return kw
-    parts = re.split(r'[_\-\s]+', name_lower)
-    for part in parts:
-        p = part.strip()
-        if not p or not p.isalpha(): continue
-        if len(p) < 3: continue
-        if p in SKIP_WORDS: continue
-        return p
+    # 2) 언더스코어 3번째 위치 체크 (국가_날짜_제품명_... 패턴)
+    parts = name_lower.split('_')
+    if len(parts) >= 3:
+        candidate = parts[2].strip()
+        if candidate in PRODUCT_KEYWORDS:
+            return candidate
     return "기타"
 
 def _to_num(x):
@@ -665,14 +667,25 @@ def fetch_mixpanel_data(from_date, to_date):
     except Exception as e: print(f"  ❌ Mixpanel 오류: {e}"); return []
 
 def find_last_data_row(all_values, structure):
+    """데이터 영역의 마지막 행 찾기. 연속 빈 행 2개 만나면 중단 (요약표 침범 방지)"""
     actual_asid_col = get_col_index(structure, 2)
-    last_data_sheet_row = 1; data_rows = []
+    last_data_sheet_row = 1; data_rows = []; consecutive_empty = 0
     for idx, row in enumerate(all_values[1:], start=2):
-        if not row: continue
+        if not row:
+            consecutive_empty += 1
+            if consecutive_empty >= 2: break
+            continue
         cn = str(row[0]).strip() if len(row) > 0 else ""
         asid = str(row[actual_asid_col]).strip() if len(row) > actual_asid_col else ""
-        if cn in ["캠페인 이름","전체","합계","Total"]: continue
-        if not cn and not asid: continue
+        if cn in ["캠페인 이름","전체","합계","Total"]:
+            consecutive_empty += 1
+            if consecutive_empty >= 2: break
+            continue
+        if not cn and not asid:
+            consecutive_empty += 1
+            if consecutive_empty >= 2: break
+            continue
+        consecutive_empty = 0  # 데이터 행이면 카운터 리셋
         data_rows.append(row); last_data_sheet_row = idx
     return last_data_sheet_row, data_rows
 
@@ -737,12 +750,12 @@ def generate_date_tab_summary(rows, structure="new"):
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
-    sp = sorted([p for p in prod_spend if (prod_spend[p] > 0 or prod_revenue[p] > 0) and p != "기타"],
+    # ★ 인식된 제품(PRODUCT_KEYWORDS)만 표시, 기타 제외
+    sp = sorted([p for p in prod_spend if p in PRODUCT_KEYWORDS and (prod_spend[p] > 0 or prod_revenue[p] > 0)],
                 key=lambda p: prod_spend[p], reverse=True)
-    if prod_spend.get("기타", 0) > 0 or prod_revenue.get("기타", 0) > 0: sp.append("기타")
     num_products = len(sp); NC = 25
     sum_col_idx = 9 + num_products
-    summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC)
+    summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC); summary_data.append([""]*NC)  # ★ 3줄 공백 구분선 (find_last_data_row가 2줄 연속 공백에서 중단)
     r_title=[""]*NC; r_title[14]="전체"; summary_data.append(r_title)
     r_hdr=[""]*NC; r_hdr[11]="본계정";r_hdr[12]="부계정";r_hdr[13]="3rd 계정"
     r_hdr[14]="지출 금액 (KRW)";r_hdr[15]="구매 (메타)";r_hdr[16]="구매 (믹스패널)"
@@ -783,24 +796,24 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
     C_LGREEN={"red":0.851,"green":0.918,"blue":0.827}; C_GRAY={"red":0.69,"green":0.7,"blue":0.698}
     C_DGRAY={"red":0.6,"green":0.6,"blue":0.6}; C_BLACK={"red":0,"green":0,"blue":0}
     C_WHITE={"red":1,"green":1,"blue":1}; C_LYELLOW={"red":1,"green":1,"blue":0.8}
-    fmt_requests=[]; r=base+2
+    fmt_requests=[]; r=base+3  # ★ 3줄 공백 후 "전체" 타이틀
     fmt_requests.append(create_format_request(sid,r,r+1,14,21,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
     fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":14,"endColumnIndex":21},"mergeType":"MERGE_ALL"}})
-    r=base+3; hdr_fmt_base={"textFormat":{"bold":True,"foregroundColor":C_BLACK},"horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE"}
+    r=base+4; hdr_fmt_base={"textFormat":{"bold":True,"foregroundColor":C_BLACK},"horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE"}
     fmt_requests.append(create_format_request(sid,r,r+1,11,12,{**hdr_fmt_base,"backgroundColor":C_PINK}))
     fmt_requests.append(create_format_request(sid,r,r+1,12,13,{**hdr_fmt_base,"backgroundColor":C_ORANGE}))
     fmt_requests.append(create_format_request(sid,r,r+1,13,14,{**hdr_fmt_base,"backgroundColor":C_LGREEN}))
     fmt_requests.append(create_format_request(sid,r,r+1,14,20,{**hdr_fmt_base,"backgroundColor":C_GRAY}))
     fmt_requests.append(create_format_request(sid,r,r+1,20,21,{**hdr_fmt_base,"backgroundColor":C_DGRAY}))
-    r=base+4
+    r=base+5
     fmt_requests.append(create_number_format_request(sid,r,r+1,11,20,"NUMBER","#,##0"))
     fmt_requests.append(create_number_format_request(sid,r,r+1,19,20,"NUMBER","#,##0.0"))
     fmt_requests.append(create_number_format_request(sid,r,r+1,20,21,"NUMBER","0.00%"))
-    fmt_requests.append(create_border_request(sid,base+3,base+5,11,21))
+    fmt_requests.append(create_border_request(sid,base+4,base+6,11,21))
     if num_products == 0: return fmt_requests
     sum_col = 9 + num_products; prod_end_col = 9 + num_products + 1
     table_formats=[("ROAS","0.00%"),("순이익","[$₩-412]#,##0"),("매출","#,##0"),("순이익율","0.00%"),("예산","[$₩-412]#,##0"),("예산비중","0.00%")]
-    prod_hdr_fmt={**hdr_fmt_base,"backgroundColor":C_GRAY}; offset=base+5
+    prod_hdr_fmt={**hdr_fmt_base,"backgroundColor":C_GRAY}; offset=base+6
     for t_idx,(tname,nfmt) in enumerate(table_formats):
         t_start=offset+t_idx*4
         fmt_requests.append(create_format_request(sid,t_start+1,t_start+2,12,prod_end_col,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
@@ -1150,8 +1163,7 @@ all_products_in_budget = set()
 for dk in date_names:
     for p in budget_by_date[dk]:
         if budget_by_date[dk][p]['spend'] > 0 or budget_by_date[dk][p]['revenue'] > 0: all_products_in_budget.add(p)
-product_order = sorted([p for p in all_products_in_budget if p != "기타"], key=lambda p: sum(budget_by_date[dk][p]['spend'] for dk in date_names), reverse=True)
-if "기타" in all_products_in_budget: product_order.append("기타")
+product_order = sorted([p for p in all_products_in_budget if p in PRODUCT_KEYWORDS], key=lambda p: sum(budget_by_date[dk][p]['spend'] for dk in date_names), reverse=True)
 print(f"\n📦 제품 순서: {product_order}")
 chart_dn = list(reversed(date_names)); chart_sd = chart_dn[:7]
 print(f"📊 추이차트: 전체 {len(chart_dn)}개 날짜 사용")
@@ -1382,8 +1394,8 @@ all_found_products = set()
 for dn in date_names:
     for p in daily_product_data[dn]:
         if daily_product_data[dn][p]['spend'] > 0 or daily_product_data[dn][p]['revenue'] > 0: all_found_products.add(p)
-products = sorted([p for p in all_found_products if p != "기타"], key=lambda p: sum(daily_product_data[dn][p]['spend'] for dn in date_names), reverse=True)
-if "기타" in all_found_products: products.append("기타")
+# ★ 인식된 제품만 (solo, money, starsun), 기타 제외
+products = sorted([p for p in all_found_products if p in PRODUCT_KEYWORDS], key=lambda p: sum(daily_product_data[dn][p]['spend'] for dn in date_names), reverse=True)
 SUMMARY_PRODUCTS = products
 print(f"📆 월:{len(month_names_list)}, 주:{len(week_keys)}, 일:{len(date_names)}")
 print(f"📦 감지된 상품: {products}")
