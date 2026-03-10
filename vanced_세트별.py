@@ -50,7 +50,7 @@ load_env()
 def get_config():
     """환경변수에서 설정값을 읽어 dict로 반환"""
     cfg = {}
-    cfg['META_ACCESS_TOKEN']   = os.environ.get('META_TOKEN_1', '')
+    cfg['META_ACCESS_TOKEN']   = os.environ.get('META_TOKEN_VANCED', '')
     cfg['META_AD_ACCOUNT_ID']  = os.environ.get('META_AD_ACCOUNT_ID', 'act_25183853061243175')
     cfg['META_API_VERSION']    = os.environ.get('META_API_VERSION', 'v21.0')
     cfg['META_BASE_URL']       = f"https://graph.facebook.com/{cfg['META_API_VERSION']}"
@@ -60,7 +60,7 @@ def get_config():
     cfg['MIXPANEL_SECRET']     = os.environ.get('MIXPANEL_SECRET', '')
     cfg['MIXPANEL_EVENT_NAME'] = os.environ.get('MIXPANEL_EVENT_NAME', '결제완료')
 
-    cfg['SPREADSHEET_URL']     = os.environ.get('SPREADSHEET_URL', '')
+    cfg['SPREADSHEET_URL']     = os.environ.get('SPREADSHEET_URL_VANCED', '')
     cfg['GCP_SA_KEY_JSON']     = os.environ.get('GCP_SERVICE_ACCOUNT_KEY', '')
 
     cfg['FROM_DATE'] = os.environ.get('FROM_DATE', '2025-11-09')
@@ -68,9 +68,9 @@ def get_config():
 
     # ── 필수값 검증 ──
     missing = []
-    if not cfg['META_ACCESS_TOKEN']:   missing.append('META_TOKEN_1')
+    if not cfg['META_ACCESS_TOKEN']:   missing.append('META_TOKEN_VANCED')
     if not cfg['GCP_SA_KEY_JSON']:     missing.append('GCP_SERVICE_ACCOUNT_KEY')
-    if not cfg['SPREADSHEET_URL']:     missing.append('SPREADSHEET_URL')
+    if not cfg['SPREADSHEET_URL']:     missing.append('SPREADSHEET_URL_VANCED')
     if not cfg['MIXPANEL_USERNAME']:   missing.append('MIXPANEL_USERNAME')
     if not cfg['MIXPANEL_SECRET']:     missing.append('MIXPANEL_SECRET')
 
@@ -80,9 +80,9 @@ def get_config():
             print(f"   - {m}")
         print("\n💡 Colab에서는 아래처럼 셀에서 먼저 설정하세요:")
         print("   import os")
-        print("   os.environ['META_TOKEN_1'] = '...'")
+        print("   os.environ['META_TOKEN_VANCED'] = '...'")
         print("   os.environ['GCP_SERVICE_ACCOUNT_KEY'] = '{...}'")
-        print("   os.environ['SPREADSHEET_URL'] = 'https://docs.google.com/...'")
+        print("   os.environ['SPREADSHEET_URL_VANCED'] = 'https://docs.google.com/...'")
         print("   os.environ['MIXPANEL_USERNAME'] = '...'")
         print("   os.environ['MIXPANEL_SECRET'] = '...'")
         raise ValueError(f"필수 환경변수 누락: {', '.join(missing)}")
