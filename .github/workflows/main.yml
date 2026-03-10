@@ -17,10 +17,10 @@ on:
         type: choice
         options:
           - all
-          - 글로벌_세트별
-          - 국내_세트별
-          - 국내_소재별
-          - vanced_세트별
+          - global_adset
+          - domestic_adset
+          - domestic_creative
+          - vanced_adset
 
 env:
   GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
@@ -32,11 +32,12 @@ env:
   SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL }}
 
 jobs:
-  글로벌_세트별:
+  global_adset:
+    name: 글로벌_세트별
     if: >-
       github.event_name == 'schedule' ||
       github.event.inputs.script == 'all' ||
-      github.event.inputs.script == '글로벌_세트별'
+      github.event.inputs.script == 'global_adset'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -47,11 +48,12 @@ jobs:
       - run: pip install gspread google-auth pandas requests yfinance
       - run: python 글로벌_세트별.py
 
-  국내_세트별:
+  domestic_adset:
+    name: 국내_세트별
     if: >-
       github.event_name == 'schedule' ||
       github.event.inputs.script == 'all' ||
-      github.event.inputs.script == '국내_세트별'
+      github.event.inputs.script == 'domestic_adset'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -62,11 +64,12 @@ jobs:
       - run: pip install gspread google-auth pandas requests yfinance
       - run: python 국내_세트별.py
 
-  국내_소재별:
+  domestic_creative:
+    name: 국내_소재별
     if: >-
       github.event_name == 'schedule' ||
       github.event.inputs.script == 'all' ||
-      github.event.inputs.script == '국내_소재별'
+      github.event.inputs.script == 'domestic_creative'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -77,11 +80,12 @@ jobs:
       - run: pip install gspread google-auth pandas requests yfinance
       - run: python 국내_소재별.py
 
-  vanced_세트별:
+  vanced_adset:
+    name: vanced_세트별
     if: >-
       github.event_name == 'schedule' ||
       github.event.inputs.script == 'all' ||
-      github.event.inputs.script == 'vanced_세트별'
+      github.event.inputs.script == 'vanced_adset'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
