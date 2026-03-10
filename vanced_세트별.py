@@ -60,7 +60,7 @@ def get_config():
     cfg['MIXPANEL_SECRET']     = os.environ.get('MIXPANEL_SECRET', '')
     cfg['MIXPANEL_EVENT_NAME'] = os.environ.get('MIXPANEL_EVENT_NAME', '결제완료')
 
-    cfg['SPREADSHEET_URL']     = os.environ.get('SPREADSHEET_URL_VANCED', '')
+    cfg['SPREADSHEET_URL']     = os.environ.get('SPREADSHEET_URL', '')
     cfg['GCP_SA_KEY_JSON']     = os.environ.get('GCP_SERVICE_ACCOUNT_KEY', '')
 
     cfg['FROM_DATE'] = os.environ.get('FROM_DATE', '2025-11-09')
@@ -70,7 +70,7 @@ def get_config():
     missing = []
     if not cfg['META_ACCESS_TOKEN']:   missing.append('META_TOKEN_VANCED')
     if not cfg['GCP_SA_KEY_JSON']:     missing.append('GCP_SERVICE_ACCOUNT_KEY')
-    if not cfg['SPREADSHEET_URL']:     missing.append('SPREADSHEET_URL_VANCED')
+    if not cfg['SPREADSHEET_URL']:     missing.append('SPREADSHEET_URL')
     if not cfg['MIXPANEL_USERNAME']:   missing.append('MIXPANEL_USERNAME')
     if not cfg['MIXPANEL_SECRET']:     missing.append('MIXPANEL_SECRET')
 
@@ -82,7 +82,7 @@ def get_config():
         print("   import os")
         print("   os.environ['META_TOKEN_VANCED'] = '...'")
         print("   os.environ['GCP_SERVICE_ACCOUNT_KEY'] = '{...}'")
-        print("   os.environ['SPREADSHEET_URL_VANCED'] = 'https://docs.google.com/...'")
+        print("   os.environ['SPREADSHEET_URL'] = 'https://docs.google.com/...'")
         print("   os.environ['MIXPANEL_USERNAME'] = '...'")
         print("   os.environ['MIXPANEL_SECRET'] = '...'")
         raise ValueError(f"필수 환경변수 누락: {', '.join(missing)}")
