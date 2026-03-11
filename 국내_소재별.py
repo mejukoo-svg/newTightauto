@@ -148,7 +148,7 @@ COLORS = {
 }
 
 SUMMARY_PRODUCTS = ["집착", "결혼", "커리어", "1%", "별해", "솔로", "재물", "재회", "29금궁합", "자녀", "29금"]
-ANALYSIS_TAB_NAMES = ["추이차트", "추이차트(주간)", "증감액", "예산", "주간종합", "주간종합_2", "주간종합_3", "마스터탭"]
+ANALYSIS_TAB_NAMES = ["추이차트", "추이차트(주간)", "증감액", "예산", "주간종합", "주간종합_2", "주간종합_3", "마스터탭", "소재랭킹"]
 
 # =========================================================
 # 유틸리티 함수 (원본과 동일)
@@ -1647,7 +1647,6 @@ def ccb(pn, d, pd, sid, cr, fr, im=False):
     block.append(["지출 금액","구매(메타)","구매(믹스패널)","매출","이익","ROAS","CVR","전체"]+[""]*(nc-8))
     fr.append(create_format_request(sid,cr,cr+1,0,8,get_cell_format(cb,COLORS["white"],bold=True))); cr+=1
     block.append([d['spend'],0,0,d['revenue'],d['profit'],rv,0,""]+[""]*(nc-8))
-    fr.append(create_format_request(sid,cr,cr+1,0,8,get_cell_format(COLORS["light_gray"])))
     fr.append(create_number_format_request(sid,cr,cr+1,0,1,"NUMBER","#,##0"))
     fr.append(create_number_format_request(sid,cr,cr+1,3,5,"NUMBER","#,##0"))
     fr.append(create_number_format_request(sid,cr,cr+1,5,7,"PERCENT","0.00%")); cr+=1
@@ -1665,7 +1664,7 @@ def ccb(pn, d, pd, sid, cr, fr, im=False):
         elif dk=="ratio": r.append(1.0)
         else: r.append(sum(pd[p][dk] for p in products))
         block.append(r)
-        fr.append(create_format_request(sid,cr,cr+1,0,1,get_cell_format(COLORS["light_gray2"],bold=True)))
+        fr.append(create_format_request(sid,cr,cr+1,0,1,get_cell_format(bold=True)))
         fr.append(create_format_request(sid,cr,cr+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"])))
         fr.append(create_number_format_request(sid,cr,cr+1,1,len(products)+2,ft,fp)); cr+=1
     fr.append(create_border_request(sid,bs,cr,0,len(products)+2))
@@ -1718,7 +1717,7 @@ ar2.append(["기간","유형","지출금액","매출","이익","ROAS","CVR"]); f
 t1s=cr2
 for rd in stl:
     ar2.append([rd['period'],rd['type'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0])
-    bg=COLORS["light_blue"] if rd['im'] else COLORS["light_gray"]
+    bg=COLORS["light_blue"] if rd['im'] else COLORS["white"]
     fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(bg)))
     fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,5,"NUMBER","#,##0"))
     fr2.append(create_number_format_request(sid2,cr2,cr2+1,5,7,"PERCENT","0.00%")); cr2+=1
@@ -1739,7 +1738,7 @@ for tt,tc,dk in [("📈 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 제�
         if dk=="roas": r.append((trv/tsp) if tsp>0 else 0)
         elif dk=="ratio": r.append(1.0)
         else: r.append(sum(pd_r[p][dk] for p in products))
-        ar2.append(r); bg=COLORS["light_blue"] if rd['im'] else COLORS["light_gray"]
+        ar2.append(r); bg=COLORS["light_blue"] if rd['im'] else COLORS["white"]
         fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(bg)))
         ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER"; fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
         fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,npc,ft,fp)); cr2+=1
@@ -1770,7 +1769,7 @@ ar3.append(["날짜","요일","지출금액","매출","이익","ROAS","CVR",""])
 t1s3=cr3
 for rd in dsr:
     ar3.append([rd['period'],rd['weekday'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0,""])
-    bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["light_gray"]
+    bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["white"]
     fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(bg)))
     fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,5,"NUMBER","#,##0"))
     fr3.append(create_number_format_request(sid3,cr3,cr3+1,5,7,"PERCENT","0.00%")); cr3+=1
@@ -1791,7 +1790,7 @@ for tt,tc,dk in [("📈 일별 제품별 ROAS",COLORS["dark_green"],"roas"),("�
         if dk=="roas": r.append((trv/tsp) if tsp>0 else 0)
         elif dk=="ratio": r.append(1.0)
         else: r.append(sum(pd_r[p][dk] for p in products))
-        ar3.append(r); bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["light_gray"]
+        ar3.append(r); bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["white"]
         fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(bg)))
         ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER"; fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
         fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,ndc,ft,fp)); cr3+=1
