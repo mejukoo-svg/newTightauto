@@ -143,7 +143,7 @@ CURRENT_MONTH = TODAY.month
 # True  → 1월1일부터 전체 기간 Meta+Mixpanel 호출 (최초 실행, ~30분)
 # False → 최근 7일만 갱신 (일상 운영, ~5분)
 # GitHub Actions: 환경변수 FULL_REFRESH=true/false 로 제어
-FULL_REFRESH = os.environ.get("FULL_REFRESH", "true").lower() == "true"
+FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2026, 1, 1)
 
 if FULL_REFRESH:
@@ -1330,11 +1330,16 @@ for asid,d in ad_sets.items():
                 vv=d['dates'][dn].get('cvr',0)
                 if vv>0:wvs+=vv;wvc+=1
         if ws_v>0 or wr_v>0: adset_weekly[asid]['weeks'][wk]={'profit':wp,'revenue':wr_v,'spend':ws_v,'cpm':(wcs/wcc) if wcc>0 else 0,'cvr':(wvs/wvc) if wvc>0 else 0}
+# ★ v20: 다중 기준 정렬 — 최신 날짜 지출 > 전날 지출 > 그 전날 지출 순
 sorted_list=[]
 for asid,d in ad_sets.items():
-    sp=d['dates'].get(latest_date,{}).get('spend',0)
-    sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d,'spend':sp})
-sorted_list.sort(key=lambda x:x['spend'],reverse=True); chart_wk=list(reversed(week_keys))
+    sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d})
+
+def _multi_spend_key(item):
+    """최신 날짜부터 차례로 지출금액 튜플 생성 (내림차순용)"""
+    return tuple(item['data']['dates'].get(d,{}).get('spend',0) for d in chart_dn)
+
+sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk=list(reversed(week_keys))
 
 # 9: 마스터탭
 print("\n9단계: 마스터탭 생성")
