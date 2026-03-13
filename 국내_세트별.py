@@ -282,11 +282,11 @@ def reorder_tabs(sh):
             if tn in ANALYSIS_TABS_SET: analysis_tabs.append(ws)
             elif parse_date_tab(tn) is not None: date_tabs.append(ws)
             else: other_tabs.append(ws)
-        date_tabs.sort(key=lambda ws: parse_date_tab(ws.title))
+        date_tabs.sort(key=lambda ws: parse_date_tab(ws.title), reverse=True)
         analysis_tabs.sort(key=lambda ws: analysis_order_map.get(ws.title, 999))
-        final_order = other_tabs + date_tabs + analysis_tabs
-        print(f"  📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📊 분석: {len(analysis_tabs)}개")
-        if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (과거) → {date_tabs[-1].title} (최신)")
+        final_order = analysis_tabs + other_tabs + date_tabs
+        print(f"  📊 분석: {len(analysis_tabs)}개 | 📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개")
+        if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (최신) → {date_tabs[-1].title} (과거)")
         if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)}")
         with_retry(sh.batch_update, body={"requests": [
             {"updateSheetProperties": {"properties": {"sheetId": ws.id, "index": idx}, "fields": "index"}}
