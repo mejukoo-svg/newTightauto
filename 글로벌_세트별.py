@@ -9,21 +9,11 @@
 #   - 탭 순서: [기타] + [날짜탭 과거→최신] + [분석탭]
 #   - 구 구조(25열) / 신 구조(23열) 자동 판별
 #   - Mixpanel 전체 날짜탭 기간으로 조회, profit/ROAS/CVR 직접 계산
-#   - ★ FIX v3: clean_id() float 정밀도 손실 방지 + 매칭 디버그
-#   - ★ FIX v4: 하단 요약표가 데이터 행과 겹치지 않도록 수정
-#   - ★ FIX v7: ABC 하이라이트 보존 + 기존예산/증액률/변동예산/메모 보존
-#   - ★ FIX v10: safe_add_worksheet Rate Limit 방어 + 8.5→9단계 쿨다운
-#   - ★ FIX v11: stale sheetId 방어 (refresh_ws) — 동시 실행 시 서식 오류 방지
-#   - ★ FIX v12: 요약표 grid limits 방지 (시트 행 확장) + ws_ex 재조회
-#   - ★ FIX v13: 추이차트 전체 날짜탭 사용 확인 + 날짜탭 요약표에 실제 데이터 있는 상품만 표시
-#   - ★ FIX v14: Mixpanel도 7일치만 호출 (이전 날짜탭은 스프레드시트 기존값 유지)
-#   - ★ FIX v15: 상품명을 세트명(adset_name) 영어 키워드로 추출 + 동적 상품 목록 + 필터 재설정
-#   - ★ FIX v16: 날짜탭 요약표 컴팩트 레이아웃 리디자인 + 가독성 서식
-#   - ★ FIX v17: 요약표 조건부서식 누적 방지 + 테두리 완전 초기화 → 탭 간 일관된 스타일
+#   - ★ FIX v19: 날짜탭 누락 진단 로그 + parse_date_tab strip 개선 + find_last_data_row 완화
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v18]")
+print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v19 - 탭누락 진단]")
 print("="*60)
 
 # =========================================================
@@ -33,28 +23,19 @@ import os
 import json
 
 if 'GCP_SERVICE_ACCOUNT_KEY' in os.environ:
-    # ── GitHub Actions 환경 ──
     import gspread
     from google.oauth2.service_account import Credentials
-
     service_account_info = json.loads(os.environ['GCP_SERVICE_ACCOUNT_KEY'])
-    scopes = [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive'
-    ]
+    scopes = ['https://www.googleapis.com/auth/spreadsheets','https://www.googleapis.com/auth/drive']
     creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
     gc = gspread.authorize(creds)
     print("✅ GitHub Actions 서비스 계정 인증 완료")
 else:
-    # ── Google Colab 환경 (폴백) ──
     from google.colab import auth
     auth.authenticate_user()
     import gspread
     from google.auth import default
-    creds, _ = default(scopes=[
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ])
+    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"])
     gc = gspread.authorize(creds)
     print("✅ Google Colab 인증 완료")
 
@@ -77,11 +58,10 @@ from decimal import Decimal
 # =========================================================
 # ★ FIX v12: USD → KRW, TWD → KRW 일별 환율 조회
 # =========================================================
-FALLBACK_USD_KRW = 1450  # API 실패 시 폴백
-FALLBACK_TWD_KRW = 45    # API 실패 시 폴백
+FALLBACK_USD_KRW = 1450
+FALLBACK_TWD_KRW = 45
 
 def fetch_daily_exchange_rates(start_date, end_date, currency="USD"):
-    """yfinance로 일별 환율 조회 (USD/KRW 또는 TWD/KRW), 실패 시 API 폴백"""
     rates = {}
     pair = f"{currency}KRW=X"
     fallback = FALLBACK_USD_KRW if currency == "USD" else FALLBACK_TWD_KRW
@@ -94,7 +74,7 @@ def fetch_daily_exchange_rates(start_date, end_date, currency="USD"):
     try:
         if yf:
             ticker = yf.Ticker(pair)
-            hist = ticker.history(start=start_date.strftime('%Y-%m-%d'), 
+            hist = ticker.history(start=start_date.strftime('%Y-%m-%d'),
                                  end=(end_date + timedelta(days=3)).strftime('%Y-%m-%d'))
             if not hist.empty:
                 for idx, row in hist.iterrows():
@@ -123,9 +103,7 @@ def fetch_daily_exchange_rates(start_date, end_date, currency="USD"):
     return rates
 
 def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
-    """날짜키에 해당하는 환율 반환, 없으면 가장 가까운 값 또는 폴백"""
-    if dk in rates:
-        return rates[dk]
+    if dk in rates: return rates[dk]
     if rates:
         sorted_keys = sorted(rates.keys())
         prev = [k for k in sorted_keys if k <= dk]
@@ -134,23 +112,19 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
     return fallback
 
 # =========================================================
-# Meta Ads API 설정 — ★ 수정: 환경변수에서 토큰 로드
+# Meta Ads API 설정
 # =========================================================
 META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
-
 META_TOKENS = {
-    "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),   # Sajutight_tw
-    "act_2677707262628563": os.environ.get("META_TOKEN_3", ""),   # TTsaju
+    "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),
+    "act_2677707262628563": os.environ.get("META_TOKEN_3", ""),
 }
-
-def get_token(acc_id):
-    return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
-
+def get_token(acc_id): return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
 # =========================================================
-# Mixpanel 설정 — ★ 수정: 환경변수에서 인증정보 로드
+# Mixpanel 설정
 # =========================================================
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
@@ -168,10 +142,8 @@ CURRENT_MONTH = TODAY.month
 REFRESH_DAYS = 7
 META_COLLECT_DAYS = REFRESH_DAYS
 DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
-
 WEEKLY_TREND_REFRESH_WEEKS = 2
 
-# 신 구조: 23열
 DATE_TAB_HEADERS = [
     "캠페인 이름", "광고 세트 이름", "광고 세트 ID",
     "지출 금액 (KRW)", "결과당 비용", "구매 ROAS(광고 지출 대비 수익률)",
@@ -283,19 +255,14 @@ def clean_id(val):
     return numeric_only if numeric_only else s
 
 def extract_product(adset_name):
-    """광고 세트 이름에서 제품명 추출. 패턴: 국가_날짜_제품명_... (3번째 위치)
-    인식 제품: solo, money, starsun → 나머지는 '기타'"""
     if not adset_name: return "기타"
     name_lower = str(adset_name).lower()
-    # 1) 알려진 키워드가 이름 어디든 있으면 바로 반환
     for kw in PRODUCT_KEYWORDS:
         if kw in name_lower: return kw
-    # 2) 언더스코어 3번째 위치 체크 (국가_날짜_제품명_... 패턴)
     parts = name_lower.split('_')
     if len(parts) >= 3:
         candidate = parts[2].strip()
-        if candidate in PRODUCT_KEYWORDS:
-            return candidate
+        if candidate in PRODUCT_KEYWORDS: return candidate
     return "기타"
 
 def _to_num(x):
@@ -333,8 +300,7 @@ def safe_add_worksheet(sh, title, rows, cols):
             try:
                 existing = with_retry(sh.worksheet, title)
                 if existing:
-                    with_retry(sh.del_worksheet, existing)
-                    print(f"  🗑️ 기존 '{title}' 삭제 후 재생성"); time.sleep(2)
+                    with_retry(sh.del_worksheet, existing); print(f"  🗑️ 기존 '{title}' 삭제 후 재생성"); time.sleep(2)
             except gspread.exceptions.WorksheetNotFound: pass
             except: pass
         else: print(f"  ⚠️ safe_add_worksheet 오류: {e}")
@@ -414,14 +380,42 @@ def get_week_range_short(d):
 def get_month_range_display(f, l): return f"'{f.month}.{f.day}~{l.month}.{l.day}"
 def get_week_monday(d): return d - timedelta(days=d.weekday())
 
+
+# =========================================================
+# ★ FIX v19: parse_date_tab - strip 강화 + 실패 로그 + 연도 추론 개선
+# =========================================================
 def parse_date_tab(tab_name):
-    if '/' not in tab_name: return None
-    try:
-        parts = tab_name.split('/')
-        if len(parts) == 3: y,m,d = int(parts[0]),int(parts[1]),int(parts[2]); return datetime(2000+y,m,d)
-        elif len(parts) == 2: m,d = int(parts[0]),int(parts[1]); year = 2026 if m <= 3 else 2025; return datetime(year,m,d)
+    """날짜탭 이름 파싱. 지원 형식: YY/MM/DD, M/D
+    ★ v19: strip 강화, 파싱 실패 시 로그, 2자리 연도 추론 개선"""
+    if not tab_name or '/' not in tab_name:
         return None
-    except: return None
+    try:
+        # ★ 공백, 작은따옴표(Google Sheets 텍스트 강제), 유니코드 공백 제거
+        clean_name = tab_name.strip().strip("'").strip('\u200b\ufeff\xa0').strip()
+        parts = clean_name.split('/')
+        parts = [p.strip() for p in parts]
+
+        if len(parts) == 3:
+            y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+            return datetime(2000 + y, m, d)
+        elif len(parts) == 2:
+            m, d = int(parts[0]), int(parts[1])
+            # ★ 개선: 현재 날짜 기준으로 연도 추론 (하드코딩 제거)
+            now = datetime.now()
+            candidate = datetime(now.year, m, d)
+            if candidate > now + timedelta(days=7):
+                candidate = datetime(now.year - 1, m, d)
+            return candidate
+        else:
+            print(f"  ⚠️ parse_date_tab: '{tab_name}' → {len(parts)}파트 (지원: 2 또는 3)")
+            return None
+    except ValueError as e:
+        print(f"  ⚠️ parse_date_tab 실패: '{tab_name}' → {e}")
+        return None
+    except Exception as e:
+        print(f"  ⚠️ parse_date_tab 예외: '{tab_name}' → {e}")
+        return None
+
 
 def get_cell_format(bg=None, tc=None, bold=False, ha="CENTER"):
     f = {"horizontalAlignment": ha, "verticalAlignment": "MIDDLE"}
@@ -666,51 +660,88 @@ def fetch_mixpanel_data(from_date, to_date):
         return data
     except Exception as e: print(f"  ❌ Mixpanel 오류: {e}"); return []
 
+
+# =========================================================
+# ★ FIX v19: find_last_data_row - consecutive_empty 기준 완화
+# =========================================================
 def find_last_data_row(all_values, structure):
-    """데이터 영역의 마지막 행 찾기. 연속 빈 행 2개 만나면 중단 (요약표 침범 방지)"""
+    """데이터 영역의 마지막 행 찾기.
+    ★ v19: 연속 빈 행 기준 2→3으로 완화 (중간 빈 행 1개 허용)"""
     actual_asid_col = get_col_index(structure, 2)
     last_data_sheet_row = 1; data_rows = []; consecutive_empty = 0
+    EMPTY_THRESHOLD = 3  # ★ 기존 2 → 3
     for idx, row in enumerate(all_values[1:], start=2):
         if not row:
             consecutive_empty += 1
-            if consecutive_empty >= 2: break
+            if consecutive_empty >= EMPTY_THRESHOLD: break
             continue
         cn = str(row[0]).strip() if len(row) > 0 else ""
         asid = str(row[actual_asid_col]).strip() if len(row) > actual_asid_col else ""
         if cn in ["캠페인 이름","전체","합계","Total"]:
             consecutive_empty += 1
-            if consecutive_empty >= 2: break
+            if consecutive_empty >= EMPTY_THRESHOLD: break
             continue
         if not cn and not asid:
             consecutive_empty += 1
-            if consecutive_empty >= 2: break
+            if consecutive_empty >= EMPTY_THRESHOLD: break
             continue
-        consecutive_empty = 0  # 데이터 행이면 카운터 리셋
+        consecutive_empty = 0
         data_rows.append(row); last_data_sheet_row = idx
     return last_data_sheet_row, data_rows
 
+
+# =========================================================
+# ★ FIX v19: read_all_date_tabs - 상세 진단 로그 추가
+# =========================================================
 def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=None):
     print("\n"+"="*60); print("★ 8.5단계: 전체 날짜탭 읽기"); print("="*60)
     all_ad_sets = defaultdict(lambda: {'campaign_name':'','adset_name':'','adset_id':'','dates':{}})
     all_budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend':0.0,'revenue':0.0}))
     all_master_raw_data = []; all_date_objects = {}; all_date_names = []
     master_headers_local = ["Date"] + DATE_TAB_HEADERS
+
     analysis_set = set(analysis_tab_names); all_ws = sh.worksheets(); date_tabs_found = []
+
+    # ★ v19: 전체 탭 스캔 + 진단 로그
+    print(f"\n  📋 전체 워크시트: {len(all_ws)}개")
+    skipped_analysis = []; skipped_no_slash = []; skipped_parse_fail = []
+
     for ws_ex in all_ws:
         tn = ws_ex.title
-        if tn in analysis_set: continue
+        if tn in analysis_set:
+            skipped_analysis.append(tn); continue
         dt_obj = parse_date_tab(tn)
-        if dt_obj is None: continue
+        if dt_obj is None:
+            if '/' in tn: skipped_parse_fail.append(tn)  # ★ 슬래시 있지만 파싱 실패!
+            else: skipped_no_slash.append(tn)
+            continue
         date_tabs_found.append((dt_obj, ws_ex, tn))
-    date_tabs_found.sort(key=lambda x: x[0]); print(f"  📅 날짜탭 발견: {len(date_tabs_found)}개")
+
+    date_tabs_found.sort(key=lambda x: x[0])
+
+    # ★ v19: 진단 리포트
+    print(f"  ✅ 날짜탭 파싱 성공: {len(date_tabs_found)}개")
+    print(f"  ⏭️ 분석탭 스킵: {len(skipped_analysis)}개 → {skipped_analysis}")
+    print(f"  ⏭️ 비날짜탭 스킵: {len(skipped_no_slash)}개 → {skipped_no_slash}")
+    if skipped_parse_fail:
+        print(f"  ❌ 슬래시 있지만 파싱 실패: {len(skipped_parse_fail)}개 → {skipped_parse_fail}")
+        for t in skipped_parse_fail:
+            print(f"     '{t}' ← repr: {repr(t)}")
+        print(f"     ⚠️ 이 탭들이 추이차트 누락 원인일 수 있습니다!")
+    if date_tabs_found:
+        print(f"  📅 범위: {date_tabs_found[0][2]} ~ {date_tabs_found[-1][2]}")
+
     _mp_val = mp_value_map or {}; _mp_cnt = mp_count_map or {}
+    empty_tabs = []; error_tabs = []; zero_data_tabs = []
+
     for dt_obj, ws_ex, tn in date_tabs_found:
         dk = f"{dt_obj.year%100:02d}/{dt_obj.month:02d}/{dt_obj.day:02d}"
         all_date_objects[dk]=dt_obj; all_date_names.append(dk)
         try:
             print(f"  📖 {dk} 읽기...", end=" ", flush=True)
             all_values = with_retry(ws_ex.get_all_values); time.sleep(0.3)
-            if not all_values or len(all_values) < 2: print("빈 탭"); continue
+            if not all_values or len(all_values) < 2:
+                print("빈 탭"); empty_tabs.append(dk); continue
             structure = detect_tab_structure(all_values[0]); print(f"[{'구' if structure=='old' else '신'} 구조] ", end="", flush=True)
             _, scan_rows = find_last_data_row(all_values, structure); row_count = 0
             for row in scan_rows:
@@ -730,9 +761,81 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
                 while len(mrd)<len(master_headers_local): mrd.append("")
                 all_master_raw_data.append({'date':dk,'date_obj':dt_obj,'spend':spend,'row_data':mrd[:len(master_headers_local)]}); row_count+=1
             print(f"{row_count}행")
-        except Exception as e: print(f"오류: {e}")
-    print(f"\n  ✅ 전체 날짜탭 읽기 완료"); print(f"     날짜: {len(all_date_names)}개 | 광고 세트: {len(all_ad_sets)}개 | 마스터행: {len(all_master_raw_data)}개")
+            if row_count == 0: zero_data_tabs.append(dk)
+        except Exception as e:
+            print(f"오류: {e}"); error_tabs.append((dk, str(e)))
+
+    # ★ v19: 최종 진단 리포트
+    print(f"\n  {'='*50}")
+    print(f"  📊 날짜탭 읽기 최종 리포트")
+    print(f"  {'='*50}")
+    print(f"  ✅ 전체 날짜탭: {len(date_tabs_found)}개")
+    print(f"  ✅ date_names 등록: {len(all_date_names)}개")
+    print(f"  ✅ 광고 세트: {len(all_ad_sets)}개")
+    print(f"  ✅ 마스터행: {len(all_master_raw_data)}개")
+    if empty_tabs: print(f"  ⚠️ 빈 탭 (데이터 <2행): {len(empty_tabs)}개 → {empty_tabs}")
+    if zero_data_tabs: print(f"  ⚠️ 0행 탭 (헤더만): {len(zero_data_tabs)}개 → {zero_data_tabs}")
+    if error_tabs:
+        print(f"  ❌ 오류 탭: {len(error_tabs)}개")
+        for dk, err in error_tabs: print(f"     {dk}: {err}")
+
+    # ★ v19: adset 데이터 없는 날짜 체크
+    dates_with_adset_data = set()
+    for asid, d in all_ad_sets.items():
+        for dk2 in d['dates']: dates_with_adset_data.add(dk2)
+    orphan_dates = [dk for dk in all_date_names if dk not in dates_with_adset_data]
+    if orphan_dates:
+        print(f"  ⚠️ date_names에 있지만 adset 데이터 없음: {len(orphan_dates)}개 → {orphan_dates}")
+        print(f"     → 추이차트에 칼럼은 있지만 값이 빈 상태")
+
     return all_ad_sets, all_budget_by_date, all_master_raw_data, all_date_objects, all_date_names
+
+
+# =========================================================
+# ★ v19: 진단 함수 추가 - 추이차트 커버리지 확인
+# =========================================================
+def diagnose_chart_coverage(sh, date_names, ad_sets, analysis_tabs_set):
+    """추이차트에 포함될 날짜 vs 전체 워크시트 비교 진단"""
+    print("\n" + "=" * 60)
+    print("★ 진단: 추이차트 커버리지 확인")
+    print("=" * 60)
+
+    all_ws = sh.worksheets()
+    all_tab_names = [ws.title for ws in all_ws]
+    slash_tabs = [t for t in all_tab_names if '/' in t]
+    parsed_tabs = []; failed_tabs = []
+
+    for t in slash_tabs:
+        dt = parse_date_tab(t)
+        if dt:
+            dk = f"{dt.year%100:02d}/{dt.month:02d}/{dt.day:02d}"
+            parsed_tabs.append((t, dk, dt))
+        else:
+            failed_tabs.append(t)
+
+    date_names_set = set(date_names)
+    in_chart = [(t, dk) for t, dk, dt in parsed_tabs if dk in date_names_set]
+    not_in_chart = [(t, dk) for t, dk, dt in parsed_tabs if dk not in date_names_set]
+
+    print(f"  📋 슬래시 포함 탭: {len(slash_tabs)}개")
+    print(f"  ✅ 파싱 성공: {len(parsed_tabs)}개")
+    print(f"  ✅ 추이차트 포함: {len(in_chart)}개")
+
+    if not_in_chart:
+        print(f"  ❌ 파싱됐지만 추이차트 누락: {len(not_in_chart)}개")
+        for tab_name, dk in not_in_chart: print(f"     '{tab_name}' → dk='{dk}'")
+
+    if failed_tabs:
+        print(f"  ❌ 파싱 실패 (날짜 인식 불가): {len(failed_tabs)}개")
+        for t in failed_tabs: print(f"     '{t}' ← repr: {repr(t)}")
+
+    if date_names:
+        print(f"\n  📊 추이차트 날짜 범위:")
+        print(f"     가장 오래된: {date_names[0]}")
+        print(f"     가장 최근:  {date_names[-1]}")
+        print(f"     총 일수:    {len(date_names)}일")
+
+    return failed_tabs
 
 
 def generate_date_tab_summary(rows, structure="new"):
@@ -750,12 +853,11 @@ def generate_date_tab_summary(rows, structure="new"):
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
-    # ★ 인식된 제품(PRODUCT_KEYWORDS)만 표시, 기타 제외
     sp = sorted([p for p in prod_spend if p in PRODUCT_KEYWORDS and (prod_spend[p] > 0 or prod_revenue[p] > 0)],
                 key=lambda p: prod_spend[p], reverse=True)
     num_products = len(sp); NC = 25
     sum_col_idx = 9 + num_products
-    summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC); summary_data.append([""]*NC)  # ★ 3줄 공백 구분선 (find_last_data_row가 2줄 연속 공백에서 중단)
+    summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC); summary_data.append([""]*NC)
     r_title=[""]*NC; r_title[14]="전체"; summary_data.append(r_title)
     r_hdr=[""]*NC; r_hdr[11]="본계정";r_hdr[12]="부계정";r_hdr[13]="3rd 계정"
     r_hdr[14]="지출 금액 (KRW)";r_hdr[15]="구매 (메타)";r_hdr[16]="구매 (믹스패널)"
@@ -796,7 +898,7 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
     C_LGREEN={"red":0.851,"green":0.918,"blue":0.827}; C_GRAY={"red":0.69,"green":0.7,"blue":0.698}
     C_DGRAY={"red":0.6,"green":0.6,"blue":0.6}; C_BLACK={"red":0,"green":0,"blue":0}
     C_WHITE={"red":1,"green":1,"blue":1}; C_LYELLOW={"red":1,"green":1,"blue":0.8}
-    fmt_requests=[]; r=base+3  # ★ 3줄 공백 후 "전체" 타이틀
+    fmt_requests=[]; r=base+3
     fmt_requests.append(create_format_request(sid,r,r+1,14,21,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
     fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":14,"endColumnIndex":21},"mergeType":"MERGE_ALL"}})
     r=base+4; hdr_fmt_base={"textFormat":{"bold":True,"foregroundColor":C_BLACK},"horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE"}
@@ -1157,6 +1259,13 @@ mp_value_map_krw = {}
 for (d, ut), v in mp_value_map.items():
     fx = get_rate_for_date(twd_krw_rates, d, fallback=FALLBACK_TWD_KRW); mp_value_map_krw[(d, ut)] = v * fx
 ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map_krw, mp_count_map=mp_count_map)
+
+# ★ v19: 추이차트 커버리지 진단
+failed_tabs = diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET)
+if failed_tabs:
+    print(f"\n  🔧 파싱 실패 탭 {len(failed_tabs)}개를 수동 확인하세요:")
+    print(f"     탭 이름에 공백, 특수문자, 또는 다른 형식이 있을 수 있습니다")
+
 print("\n⏳ 8.5→9단계 전환: Rate Limit 쿨다운 60초 대기..."); time.sleep(60)
 master_headers = ["Date"] + DATE_TAB_HEADERS; latest_date = date_names[-1] if date_names else ""
 all_products_in_budget = set()
@@ -1394,7 +1503,6 @@ all_found_products = set()
 for dn in date_names:
     for p in daily_product_data[dn]:
         if daily_product_data[dn][p]['spend'] > 0 or daily_product_data[dn][p]['revenue'] > 0: all_found_products.add(p)
-# ★ 인식된 제품만 (solo, money, starsun), 기타 제외
 products = sorted([p for p in all_found_products if p in PRODUCT_KEYWORDS], key=lambda p: sum(daily_product_data[dn][p]['spend'] for dn in date_names), reverse=True)
 SUMMARY_PRODUCTS = products
 print(f"📆 월:{len(month_names_list)}, 주:{len(week_keys)}, 일:{len(date_names)}")
