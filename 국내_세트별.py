@@ -288,11 +288,11 @@ def reorder_tabs(sh):
         print(f"  📊 분석: {len(analysis_tabs)}개 | 📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개")
         if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (최신) → {date_tabs[-1].title} (과거)")
         if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)}")
-        with_retry(sh.batch_update, body={"requests": [
-            {"updateSheetProperties": {"properties": {"sheetId": ws.id, "index": idx}, "fields": "index"}}
-            for idx, ws in enumerate(final_order)
-        ]})
-        print("  ✅ 탭 순서 정리 완료"); time.sleep(2)
+        print(f"  📋 최종 순서 (왼→오): {' | '.join(ws.title for ws in final_order[:10])}{'...' if len(final_order)>10 else ''}")
+        with_retry(sh.reorder_worksheets, final_order)
+        time.sleep(2)
+        verify_ws = sh.worksheets()
+        print(f"  ✅ 탭 순서 정리 완료 — 검증: {' | '.join(ws.title for ws in verify_ws[:10])}{'...' if len(verify_ws)>10 else ''}")
     except Exception as e: print(f"  ⚠️ 탭 순서 정리 오류: {e}")
 
 def cell_text(profit, revenue, spend, cpm=0, cvr=0):
