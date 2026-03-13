@@ -284,8 +284,8 @@ def reorder_tabs(sh):
             else: other_tabs.append(ws)
         date_tabs.sort(key=lambda ws: parse_date_tab(ws.title), reverse=True)
         analysis_tabs.sort(key=lambda ws: analysis_order_map.get(ws.title, 999))
-        final_order = analysis_tabs + other_tabs + date_tabs
-        print(f"  📊 분석: {len(analysis_tabs)}개 | 📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개")
+        final_order = analysis_tabs + date_tabs + other_tabs
+        print(f"  📊 분석: {len(analysis_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📋 기타: {len(other_tabs)}개")
         if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (최신) → {date_tabs[-1].title} (과거)")
         if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)}")
         print(f"  📋 최종 순서 (왼→오): {' | '.join(ws.title for ws in final_order[:10])}{'...' if len(final_order)>10 else ''}")
