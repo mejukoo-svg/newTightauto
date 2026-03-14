@@ -23,10 +23,11 @@ Original file is located at
 #   - ★ FIX v7: ABC 하이라이트 보존 + 기존예산/증액률/변동예산/메모 보존
 #   - ★ FIX v10: safe_add_worksheet Rate Limit 방어 + 8.5→9단계 쿨다운
 #   - ★ FIX v11: PRODUCT_KEYWORDS에 집착/결혼/커리어 추가
+#   - ★ FIX v12: 추이차트 정렬 기준을 하루 전 날짜 지출액으로 변경
 #   - ★ GitHub Actions 호환: 서비스 계정 인증 + GitHub Secrets
 
 print("="*60)
-print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v11]")
+print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v12]")
 print("="*60)
 
 # =========================================================
@@ -664,7 +665,7 @@ def match_summary_product(campaign_name, product_keyword):
 def generate_date_tab_summary(rows, structure="new"):
     total_spend=0.0;total_meta_purchase=0.0;total_mp_purchase=0.0;total_revenue=0.0;total_profit=0.0;total_unique_clicks=0.0
     spend_by_account={"본계정":0.0,"부계정":0.0,"3rd계정":0.0}
-    prod_spend={p:0.0 for p in SUMMARY_PRODUCTS};prod_revenue={p:0.0 for p in SUMMARY_PRODUCTS};prod_profit={p:0.0 for p in SUMMARY_PRODUCTS}
+    prod_spend={p:0.0 for p in SUMMARY_PRODUCTS};prod_revenue={p:0.0 for p in SUMMARY_PRODUCTS};prod_profit={p:0.0 for p in SUMMARY_PRODUCTS};prod_clicks={p:0.0 for p in SUMMARY_PRODUCTS};prod_mpc={p:0.0 for p in SUMMARY_PRODUCTS}
     for row in rows:
         nr=normalize_row_to_new(row,structure);cn=str(nr[0]);adset_id=str(nr[2]);spend=_to_num(nr[3]);meta_p=_to_num(nr[13]);mp_p=_to_num(nr[14]);rev=_to_num(nr[15]);prof=_to_num(nr[16]);uc=_to_num(nr[9])
         if not cn or cn in ["전체","합계","Total"]: continue
@@ -673,7 +674,7 @@ def generate_date_tab_summary(rows, structure="new"):
         elif adset_id.startswith("12024"): spend_by_account["부계정"]+=spend
         elif adset_id.startswith("6"): spend_by_account["3rd계정"]+=spend
         for p in SUMMARY_PRODUCTS:
-            if match_summary_product(cn,p): prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof; break
+            if match_summary_product(cn,p): prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof;prod_clicks[p]+=uc;prod_mpc[p]+=mp_p; break
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0; total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
     summary_data=[]
     summary_data.append([""]*25); summary_data.append([""]*25)
@@ -685,7 +686,7 @@ def generate_date_tab_summary(rows, structure="new"):
     r_val[19]=round(total_roas,1);r_val[20]=total_cvr/100 if total_cvr else 0
     summary_data.append(r_val)
     sp=SUMMARY_PRODUCTS;total_prod_spend=sum(prod_spend[p] for p in sp);total_prod_revenue=sum(prod_revenue[p] for p in sp);total_prod_profit=sum(prod_profit[p] for p in sp)
-    tables=[("제품별 ROAS","roas"),("제품별 순이익","profit"),("제품별 매출","revenue"),("제품별 순이익율","profit_margin"),("제품별 예산","spend"),("제품별 예산 비중","spend_ratio")]
+    tables=[("제품별 ROAS","roas"),("제품별 순이익","profit"),("제품별 매출","revenue"),("제품별 순이익율","profit_margin"),("제품별 예산","spend"),("제품별 예산 비중","spend_ratio"),("제품별 CVR","cvr")]
     for table_title, data_type in tables:
         summary_data.append([""]*25)
         r_tt=[""]*25;r_tt[12]=table_title;summary_data.append(r_tt)
@@ -701,12 +702,14 @@ def generate_date_tab_summary(rows, structure="new"):
             elif data_type=="profit_margin": r_pv[9+i]=pp/pr if pr>0 else 0
             elif data_type=="spend": r_pv[9+i]=round(ps)
             elif data_type=="spend_ratio": r_pv[9+i]=ps/total_prod_spend if total_prod_spend>0 else 0
+            elif data_type=="cvr": r_pv[9+i]=prod_mpc[p]/prod_clicks[p] if prod_clicks[p]>0 else 0
         if data_type=="roas": r_pv[20]=total_prod_revenue/total_prod_spend if total_prod_spend>0 else 0
         elif data_type=="profit": r_pv[20]=round(total_prod_profit)
         elif data_type=="revenue": r_pv[20]=round(total_prod_revenue)
         elif data_type=="profit_margin": r_pv[20]=total_prod_profit/total_prod_revenue if total_prod_revenue>0 else 0
         elif data_type=="spend": r_pv[20]=round(total_prod_spend)
         elif data_type=="spend_ratio": r_pv[20]=""
+        elif data_type=="cvr": total_pc=sum(prod_clicks[p] for p in sp);total_pm=sum(prod_mpc[p] for p in sp);r_pv[20]=total_pm/total_pc if total_pc>0 else 0
         summary_data.append(r_pv)
     return summary_data
 
@@ -728,7 +731,7 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count):
     fmt_requests.append(create_number_format_request(sid,r,r+1,19,20,"NUMBER","#,##0.0"))
     fmt_requests.append(create_number_format_request(sid,r,r+1,20,21,"NUMBER","0.00%"))
     fmt_requests.append(create_border_request(sid,base+3,base+5,11,21))
-    table_formats=[("ROAS","0.00%"),("순이익","[$₩-412]#,##0"),("매출","#,##0"),("순이익율","0.00%"),("예산","[$₩-412]#,##0"),("예산비중","0.00%")]
+    table_formats=[("ROAS","0.00%"),("순이익","[$₩-412]#,##0"),("매출","#,##0"),("순이익율","0.00%"),("예산","[$₩-412]#,##0"),("예산비중","0.00%"),("CVR","0.00%")]
     offset=base+5; prod_hdr_fmt={**hdr_fmt_base,"backgroundColor":C_GRAY}
     for t_idx,(tname,nfmt) in enumerate(table_formats):
         t_start=offset+t_idx*4
@@ -1050,6 +1053,15 @@ if "기타" in product_order and product_spend.get("기타",0) == 0: product_ord
 print(f"\n📦 제품 순서: {product_order}")
 chart_dn = list(reversed(date_names)); chart_sd = chart_dn[:7]
 
+# ★ FIX v12: 정렬 기준을 하루 전 날짜(어제) 지출액으로 변경
+sort_date = date_names[-2] if len(date_names) >= 2 else (date_names[-1] if date_names else "")
+print(f"📊 정렬 기준 날짜: {sort_date} (하루 전)")
+sorted_list=[]
+for asid,d in ad_sets.items():
+    sp=d['dates'].get(sort_date,{}).get('spend',0)
+    sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d,'spend':sp})
+sorted_list.sort(key=lambda x:x['spend'],reverse=True); chart_wk=list(reversed(week_keys))
+
 print("\n5.5단계: 주간 집계")
 week_groups=defaultdict(list);week_display_names={}
 for t in date_names: do=date_objects[t];wk=get_week_range_short(do);wd=get_week_range(do);week_groups[wk].append(t);week_display_names[wk]=wd
@@ -1072,11 +1084,8 @@ for asid,d in ad_sets.items():
                 if vv>0:wvs+=vv;wvc+=1
         if ws_v>0 or wr_v>0: adset_weekly[asid]['weeks'][wk]={'profit':wp,'revenue':wr_v,'spend':ws_v,'cpm':(wcs/wcc) if wcc>0 else 0,'cvr':(wvs/wvc) if wvc>0 else 0}
 
-sorted_list=[]
-for asid,d in ad_sets.items():
-    sp=d['dates'].get(latest_date,{}).get('spend',0)
-    sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d,'spend':sp})
-sorted_list.sort(key=lambda x:x['spend'],reverse=True); chart_wk=list(reversed(week_keys))
+# sorted_list는 이미 sort_date 기준으로 정렬됨 (위에서 처리)
+chart_wk=list(reversed(week_keys))
 
 print("\n9단계: 마스터탭 생성")
 ws_m=safe_add_worksheet(sh,"마스터탭",rows=max(2000,len(master_raw_data)+100),cols=len(master_headers)+5); time.sleep(3)
@@ -1263,24 +1272,24 @@ print("\n14단계: 주간종합 데이터 준비")
 month_groups=defaultdict(list)
 for t in date_names: do=date_objects[t];mk=f"{do.year}년 {do.month}월";month_groups[mk].append(t)
 month_names_list=sorted(month_groups.keys(),key=lambda x:(int(x.split('년')[0]),int(x.split('년')[1].replace('월','').strip())),reverse=True)
-daily_data=defaultdict(lambda:{'spend':0,'revenue':0,'profit':0});daily_product_data=defaultdict(lambda:defaultdict(lambda:{'spend':0,'revenue':0,'profit':0}))
+daily_data=defaultdict(lambda:{'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0});daily_product_data=defaultdict(lambda:defaultdict(lambda:{'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0}))
 for t in date_names:
     for it in sorted_list:
         if t in it['data']['dates']:
-            dt=it['data']['dates'][t];daily_data[t]['spend']+=dt['spend'];daily_data[t]['revenue']+=dt['revenue'];daily_data[t]['profit']+=dt['profit']
-            p=extract_product(it['campaign_name']);daily_product_data[t][p]['spend']+=dt['spend'];daily_product_data[t][p]['revenue']+=dt['revenue'];daily_product_data[t][p]['profit']+=dt['profit']
+            dt=it['data']['dates'][t];daily_data[t]['spend']+=dt['spend'];daily_data[t]['revenue']+=dt['revenue'];daily_data[t]['profit']+=dt['profit'];daily_data[t]['unique_clicks']+=dt.get('unique_clicks',0);daily_data[t]['mpc']+=dt.get('mpc',0)
+            p=extract_product(it['campaign_name']);daily_product_data[t][p]['spend']+=dt['spend'];daily_product_data[t][p]['revenue']+=dt['revenue'];daily_product_data[t][p]['profit']+=dt['profit'];daily_product_data[t][p]['unique_clicks']+=dt.get('unique_clicks',0);daily_product_data[t][p]['mpc']+=dt.get('mpc',0)
 wsd={};wps={}
 for wk in week_keys:
-    wsd[wk]={'spend':0,'revenue':0,'profit':0};wps[wk]=defaultdict(lambda:{'spend':0,'revenue':0,'profit':0})
+    wsd[wk]={'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0};wps[wk]=defaultdict(lambda:{'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0})
     for dn in week_groups[wk]:
-        wsd[wk]['spend']+=daily_data[dn]['spend'];wsd[wk]['revenue']+=daily_data[dn]['revenue'];wsd[wk]['profit']+=daily_data[dn]['profit']
-        for p in PRODUCT_KEYWORDS+["기타"]: wps[wk][p]['spend']+=daily_product_data[dn][p]['spend'];wps[wk][p]['revenue']+=daily_product_data[dn][p]['revenue'];wps[wk][p]['profit']+=daily_product_data[dn][p]['profit']
+        wsd[wk]['spend']+=daily_data[dn]['spend'];wsd[wk]['revenue']+=daily_data[dn]['revenue'];wsd[wk]['profit']+=daily_data[dn]['profit'];wsd[wk]['unique_clicks']+=daily_data[dn]['unique_clicks'];wsd[wk]['mpc']+=daily_data[dn]['mpc']
+        for p in PRODUCT_KEYWORDS+["기타"]: wps[wk][p]['spend']+=daily_product_data[dn][p]['spend'];wps[wk][p]['revenue']+=daily_product_data[dn][p]['revenue'];wps[wk][p]['profit']+=daily_product_data[dn][p]['profit'];wps[wk][p]['unique_clicks']+=daily_product_data[dn][p]['unique_clicks'];wps[wk][p]['mpc']+=daily_product_data[dn][p]['mpc']
 msd={};mps={}
 for mk in month_names_list:
-    msd[mk]={'spend':0,'revenue':0,'profit':0};mps[mk]=defaultdict(lambda:{'spend':0,'revenue':0,'profit':0})
+    msd[mk]={'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0};mps[mk]=defaultdict(lambda:{'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0})
     for dn in month_groups[mk]:
-        msd[mk]['spend']+=daily_data[dn]['spend'];msd[mk]['revenue']+=daily_data[dn]['revenue'];msd[mk]['profit']+=daily_data[dn]['profit']
-        for p in PRODUCT_KEYWORDS+["기타"]: mps[mk][p]['spend']+=daily_product_data[dn][p]['spend'];mps[mk][p]['revenue']+=daily_product_data[dn][p]['revenue'];mps[mk][p]['profit']+=daily_product_data[dn][p]['profit']
+        msd[mk]['spend']+=daily_data[dn]['spend'];msd[mk]['revenue']+=daily_data[dn]['revenue'];msd[mk]['profit']+=daily_data[dn]['profit'];msd[mk]['unique_clicks']+=daily_data[dn]['unique_clicks'];msd[mk]['mpc']+=daily_data[dn]['mpc']
+        for p in PRODUCT_KEYWORDS+["기타"]: mps[mk][p]['spend']+=daily_product_data[dn][p]['spend'];mps[mk][p]['revenue']+=daily_product_data[dn][p]['revenue'];mps[mk][p]['profit']+=daily_product_data[dn][p]['profit'];mps[mk][p]['unique_clicks']+=daily_product_data[dn][p]['unique_clicks'];mps[mk][p]['mpc']+=daily_product_data[dn][p]['mpc']
 products=SUMMARY_PRODUCTS; print(f"📆 월:{len(month_names_list)}, 주:{len(week_keys)}, 일:{len(date_names)}")
 
 print("\n15단계: 주간종합")
@@ -1288,20 +1297,22 @@ try:
     ws_ws=safe_add_worksheet(sh,"주간종합",rows=2000,cols=20); time.sleep(3)
     sid_ws=ws_ws.id;fr_ws=[];ar_ws=[];cr_ws=0
     def ccb(pn,d,pd,sid,cr,fr,im=False):
-        block=[];bs=cr;rv=(d['revenue']/d['spend']) if d['spend']>0 else 0;hb=COLORS["dark_blue"] if im else COLORS["dark_gray"];cb=COLORS["navy"] if im else COLORS["black"];nc=len(products)+2
+        block=[];bs=cr;rv=(d['revenue']/d['spend']) if d['spend']>0 else 0;cvr_overall=(d['mpc']/d['unique_clicks']) if d.get('unique_clicks',0)>0 else 0;hb=COLORS["dark_blue"] if im else COLORS["dark_gray"];cb=COLORS["navy"] if im else COLORS["black"];nc=len(products)+2
         block.append([pn]+[""]*(nc-1));fr.append(create_format_request(sid,cr,cr+1,0,nc,get_cell_format(hb,COLORS["white"],bold=True)));cr+=1
         block.append(["지출 금액","구매(메타)","구매(믹스패널)","매출","이익","ROAS","CVR","전체"]+[""]*(nc-8));fr.append(create_format_request(sid,cr,cr+1,0,8,get_cell_format(cb,COLORS["white"],bold=True)));cr+=1
-        block.append([d['spend'],0,0,d['revenue'],d['profit'],rv,0,""]+[""]*(nc-8));fr.append(create_format_request(sid,cr,cr+1,0,8,get_cell_format(COLORS["light_gray"])))
+        block.append([d['spend'],0,0,d['revenue'],d['profit'],rv,cvr_overall,""]+[""]*(nc-8));fr.append(create_format_request(sid,cr,cr+1,0,8,get_cell_format(COLORS["light_gray"])))
         fr.append(create_number_format_request(sid,cr,cr+1,0,1,"NUMBER","#,##0"));fr.append(create_number_format_request(sid,cr,cr+1,3,5,"NUMBER","#,##0"));fr.append(create_number_format_request(sid,cr,cr+1,5,7,"PERCENT","0.00%"));cr+=1
         block.append([""]+products+["합"]);fr.append(create_format_request(sid,cr,cr+1,1,len(products)+1,get_cell_format(cb,COLORS["white"],bold=True)));fr.append(create_format_request(sid,cr,cr+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"],bold=True)));cr+=1
-        for lb,dk,ft,fp in [("제품별 ROAS","roas","PERCENT","0.00%"),("제품별 순이익","profit","NUMBER","#,##0"),("제품별 매출","revenue","NUMBER","#,##0"),("제품별 예산","spend","NUMBER","#,##0"),("제품별 예산 비중","ratio","PERCENT","0.00%")]:
+        for lb,dk,ft,fp in [("제품별 ROAS","roas","PERCENT","0.00%"),("제품별 순이익","profit","NUMBER","#,##0"),("제품별 매출","revenue","NUMBER","#,##0"),("제품별 예산","spend","NUMBER","#,##0"),("제품별 예산 비중","ratio","PERCENT","0.00%"),("제품별 CVR","cvr","PERCENT","0.00%")]:
             r=[lb];tsp=sum(pd[p]['spend'] for p in products);trv=sum(pd[p]['revenue'] for p in products)
             for p in products:
                 if dk=="roas":r.append((pd[p]['revenue']/pd[p]['spend']) if pd[p]['spend']>0 else 0)
                 elif dk=="ratio":r.append((pd[p]['spend']/tsp) if tsp>0 else 0)
+                elif dk=="cvr":r.append((pd[p]['mpc']/pd[p]['unique_clicks']) if pd[p].get('unique_clicks',0)>0 else 0)
                 else:r.append(pd[p][dk])
             if dk=="roas":r.append((trv/tsp) if tsp>0 else 0)
             elif dk=="ratio":r.append(1.0)
+            elif dk=="cvr":tc=sum(pd[p].get('unique_clicks',0) for p in products);tm=sum(pd[p].get('mpc',0) for p in products);r.append((tm/tc) if tc>0 else 0)
             else:r.append(sum(pd[p][dk] for p in products))
             block.append(r);fr.append(create_format_request(sid,cr,cr+1,0,1,get_cell_format(COLORS["light_gray2"],bold=True)));fr.append(create_format_request(sid,cr,cr+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"])));fr.append(create_number_format_request(sid,cr,cr+1,1,len(products)+2,ft,fp));cr+=1
         fr.append(create_border_request(sid,bs,cr,0,len(products)+2));block.append([""]*nc);cr+=1
@@ -1330,30 +1341,33 @@ try:
     sid2=ws2.id;fr2=[];ar2=[];cr2=0;npc=len(products)+3;stl=[]
     for mk in month_names_list:
         yr=int(mk.split('년')[0]);mn=int(mk.split('년')[1].replace('월','').strip());d=msd[mk];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0
-        stl.append({'period':f"'{mk}",'type':'월별','spend':d['spend'],'revenue':d['revenue'],'profit':d['profit'],'roas':roas,'im':True,'mk':mk,'yr':yr,'mn':mn})
+        stl.append({'period':f"'{mk}",'type':'월별','spend':d['spend'],'revenue':d['revenue'],'profit':d['profit'],'roas':roas,'unique_clicks':d.get('unique_clicks',0),'mpc':d.get('mpc',0),'im':True,'mk':mk,'yr':yr,'mn':mn})
         mw=[wk for wk in week_keys if any(date_objects[dn].year==yr and date_objects[dn].month==mn for dn in week_groups[wk])];mw.reverse()
-        for wk in mw: wd=wsd[wk];wr=(wd['revenue']/wd['spend']) if wd['spend']>0 else 0;stl.append({'period':week_display_names[wk],'type':'주간','spend':wd['spend'],'revenue':wd['revenue'],'profit':wd['profit'],'roas':wr,'im':False,'mk':None,'wk':wk})
+        for wk in mw: wd=wsd[wk];wr=(wd['revenue']/wd['spend']) if wd['spend']>0 else 0;stl.append({'period':week_display_names[wk],'type':'주간','spend':wd['spend'],'revenue':wd['revenue'],'profit':wd['profit'],'roas':wr,'unique_clicks':wd.get('unique_clicks',0),'mpc':wd.get('mpc',0),'im':False,'mk':None,'wk':wk})
     ar2.append(["📊 기간별 전체 요약"]+[""]*6);fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(COLORS["navy"],COLORS["white"],bold=True)));cr2+=1
     ar2.append(["기간","유형","지출금액","매출","이익","ROAS","CVR"]);fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(COLORS["dark_blue"],COLORS["white"],bold=True)));cr2+=1;t1s=cr2
     for rd in stl:
-        ar2.append([rd['period'],rd['type'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0]);bg=COLORS["light_blue"] if rd['im'] else COLORS["light_gray"]
+        cvr_v=(rd['mpc']/rd['unique_clicks']) if rd.get('unique_clicks',0)>0 else 0
+        ar2.append([rd['period'],rd['type'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],cvr_v]);bg=COLORS["light_blue"] if rd['im'] else COLORS["light_gray"]
         fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(bg)));fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,5,"NUMBER","#,##0"));fr2.append(create_number_format_request(sid2,cr2,cr2+1,5,7,"PERCENT","0.00%"));cr2+=1
     fr2.append(create_border_request(sid2,t1s-1,cr2,0,7));ar2+=[[""]*(npc),[""]*(npc)];cr2+=2
-    for tt,tc,dk in [("📈 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 제품별 순이익",COLORS["dark_green"],"profit"),("💵 제품별 매출",COLORS["orange"],"revenue"),("💸 제품별 예산",COLORS["purple"],"spend"),("📊 제품별 예산 비중",COLORS["purple"],"ratio")]:
+    for tt,tc,dk in [("📈 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 제품별 순이익",COLORS["dark_green"],"profit"),("💵 제품별 매출",COLORS["orange"],"revenue"),("💸 제품별 예산",COLORS["purple"],"spend"),("📊 제품별 예산 비중",COLORS["purple"],"ratio"),("📊 제품별 CVR",COLORS["dark_green"],"cvr")]:
         ar2.append([tt]+[""]*(npc-1));fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(tc,COLORS["white"],bold=True)));cr2+=1
         ar2.append(["기간","유형"]+products+["합계"]);fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(COLORS["dark_gray"],COLORS["white"],bold=True)));cr2+=1;tds=cr2
         for rd in stl:
-            pd_r=mps.get(rd['mk'],defaultdict(lambda:{'spend':0,'revenue':0,'profit':0})) if rd['im'] else wps.get(rd.get('wk',''),defaultdict(lambda:{'spend':0,'revenue':0,'profit':0}))
+            pd_r=mps.get(rd['mk'],defaultdict(lambda:{'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0})) if rd['im'] else wps.get(rd.get('wk',''),defaultdict(lambda:{'spend':0,'revenue':0,'profit':0,'unique_clicks':0,'mpc':0}))
             r=[rd['period'],rd['type']];tsp=sum(pd_r[p]['spend'] for p in products);trv=sum(pd_r[p]['revenue'] for p in products)
             for p in products:
                 if dk=="roas":r.append((pd_r[p]['revenue']/pd_r[p]['spend']) if pd_r[p]['spend']>0 else 0)
                 elif dk=="ratio":r.append((pd_r[p]['spend']/tsp) if tsp>0 else 0)
+                elif dk=="cvr":r.append((pd_r[p]['mpc']/pd_r[p]['unique_clicks']) if pd_r[p].get('unique_clicks',0)>0 else 0)
                 else:r.append(pd_r[p][dk])
             if dk=="roas":r.append((trv/tsp) if tsp>0 else 0)
             elif dk=="ratio":r.append(1.0)
+            elif dk=="cvr":tc=sum(pd_r[p].get('unique_clicks',0) for p in products);tm=sum(pd_r[p].get('mpc',0) for p in products);r.append((tm/tc) if tc>0 else 0)
             else:r.append(sum(pd_r[p][dk] for p in products))
             ar2.append(r);bg=COLORS["light_blue"] if rd['im'] else COLORS["light_gray"];fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(bg)))
-            ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER";fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
+            ft="PERCENT" if dk in ["roas","ratio","cvr"] else "NUMBER";fp="0.00%" if dk in ["roas","ratio","cvr"] else "#,##0"
             fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,npc,ft,fp));cr2+=1
         fr2.append(create_border_request(sid2,tds-1,cr2,0,npc));ar2+=[[""]*(npc),[""]*(npc)];cr2+=2
     with_retry(ws2.update,values=ar2,range_name="A1",value_input_option="USER_ENTERED"); time.sleep(3)
@@ -1368,14 +1382,15 @@ print("\n17단계: 주간종합_3 (일별)")
 try:
     ws3=safe_add_worksheet(sh,"주간종합_3",rows=3000,cols=20); time.sleep(3)
     sid3=ws3.id;fr3=[];ar3=[];cr3=0;ndc=len(products)+4;dsr=[]
-    for t in reversed(date_names): do=date_objects[t];d=daily_data[t];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0;wd=WEEKDAY_NAMES[do.weekday()];dsr.append({'period':f"'{do.month}.{do.day}({wd})",'weekday':wd,'spend':d['spend'],'revenue':d['revenue'],'profit':d['profit'],'roas':roas,'tab_name':t})
+    for t in reversed(date_names): do=date_objects[t];d=daily_data[t];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0;wd=WEEKDAY_NAMES[do.weekday()];dsr.append({'period':f"'{do.month}.{do.day}({wd})",'weekday':wd,'spend':d['spend'],'revenue':d['revenue'],'profit':d['profit'],'roas':roas,'unique_clicks':d.get('unique_clicks',0),'mpc':d.get('mpc',0),'tab_name':t})
     ar3.append(["📊 일별 전체 요약"]+[""]*7);fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["navy"],COLORS["white"],bold=True)));cr3+=1
     ar3.append(["날짜","요일","지출금액","매출","이익","ROAS","CVR",""]);fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["dark_blue"],COLORS["white"],bold=True)));cr3+=1;t1s3=cr3
     for rd in dsr:
-        ar3.append([rd['period'],rd['weekday'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0,""]);bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["light_gray"]
+        cvr_v=(rd['mpc']/rd['unique_clicks']) if rd.get('unique_clicks',0)>0 else 0
+        ar3.append([rd['period'],rd['weekday'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],cvr_v,""]);bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["light_gray"]
         fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(bg)));fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,5,"NUMBER","#,##0"));fr3.append(create_number_format_request(sid3,cr3,cr3+1,5,7,"PERCENT","0.00%"));cr3+=1
     fr3.append(create_border_request(sid3,t1s3-1,cr3,0,8));ar3+=[[""]*(ndc),[""]*(ndc)];cr3+=2
-    for tt,tc,dk in [("📈 일별 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 일별 제품별 순이익",COLORS["dark_green"],"profit"),("💵 일별 제품별 매출",COLORS["orange"],"revenue"),("💸 일별 제품별 예산",COLORS["purple"],"spend"),("📊 일별 제품별 예산 비중",COLORS["purple"],"ratio")]:
+    for tt,tc,dk in [("📈 일별 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 일별 제품별 순이익",COLORS["dark_green"],"profit"),("💵 일별 제품별 매출",COLORS["orange"],"revenue"),("💸 일별 제품별 예산",COLORS["purple"],"spend"),("📊 일별 제품별 예산 비중",COLORS["purple"],"ratio"),("📊 일별 제품별 CVR",COLORS["dark_green"],"cvr")]:
         ar3.append([tt]+[""]*(ndc-1));fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(tc,COLORS["white"],bold=True)));cr3+=1
         ar3.append(["날짜","요일"]+products+["합계"]);fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(COLORS["dark_gray"],COLORS["white"],bold=True)));cr3+=1;tds=cr3
         for rd in dsr:
@@ -1383,12 +1398,14 @@ try:
             for p in products:
                 if dk=="roas":r.append((pd_r[p]['revenue']/pd_r[p]['spend']) if pd_r[p]['spend']>0 else 0)
                 elif dk=="ratio":r.append((pd_r[p]['spend']/tsp) if tsp>0 else 0)
+                elif dk=="cvr":r.append((pd_r[p]['mpc']/pd_r[p]['unique_clicks']) if pd_r[p].get('unique_clicks',0)>0 else 0)
                 else:r.append(pd_r[p][dk])
             if dk=="roas":r.append((trv/tsp) if tsp>0 else 0)
             elif dk=="ratio":r.append(1.0)
+            elif dk=="cvr":tc=sum(pd_r[p].get('unique_clicks',0) for p in products);tm=sum(pd_r[p].get('mpc',0) for p in products);r.append((tm/tc) if tc>0 else 0)
             else:r.append(sum(pd_r[p][dk] for p in products))
             ar3.append(r);bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["light_gray"];fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(bg)))
-            ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER";fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
+            ft="PERCENT" if dk in ["roas","ratio","cvr"] else "NUMBER";fp="0.00%" if dk in ["roas","ratio","cvr"] else "#,##0"
             fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,ndc,ft,fp));cr3+=1
         fr3.append(create_border_request(sid3,tds-1,cr3,0,ndc));ar3+=[[""]*(ndc),[""]*(ndc)];cr3+=2
     with_retry(ws3.update,values=ar3,range_name="A1",value_input_option="USER_ENTERED"); time.sleep(3)
@@ -1411,4 +1428,5 @@ print(f"📊 분석탭: 전체 {len(date_names)}일치 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행")
 print(f"   → 추이차트: {len(date_names)}개 날짜")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
+print(f"   → 정렬 기준: {sort_date} (하루 전 날짜 지출액)")
 print(f"\n📊 {SPREADSHEET_URL}")
