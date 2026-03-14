@@ -273,6 +273,16 @@ def safe_add_worksheet(sh, title, rows, cols):
         print(f"  ⚠️ safe_add_worksheet 기타 오류: {e}")
     return with_retry(sh.add_worksheet, title=title, rows=rows, cols=cols)
 
+def move_analysis_tab(sh, ws, tab_name):
+    """생성 직후 분석탭을 왼쪽(index 0)으로 이동"""
+    try:
+        with_retry(sh.batch_update, body={"requests": [
+            {"updateSheetProperties": {"properties": {"sheetId": ws.id, "index": 0}, "fields": "index"}}
+        ]})
+        print(f"  📌 '{tab_name}' → 왼쪽 이동 완료"); time.sleep(1)
+    except Exception as e:
+        print(f"  ⚠️ '{tab_name}' 이동 오류: {e}")
+
 def reorder_tabs(sh):
     try:
         all_ws = sh.worksheets()
@@ -1089,6 +1099,7 @@ chart_wk=list(reversed(week_keys))
 
 print("\n9단계: 마스터탭 생성")
 ws_m=safe_add_worksheet(sh,"마스터탭",rows=max(2000,len(master_raw_data)+100),cols=len(master_headers)+5); time.sleep(3)
+move_analysis_tab(sh, ws_m, "마스터탭")
 master_raw_data.sort(key=lambda x:(x['date_obj'],-x['spend']),reverse=True)
 for item in master_raw_data:
     while len(item['row_data'])<len(master_headers): item['row_data'].append("")
@@ -1103,6 +1114,7 @@ print(f"✅ 마스터탭 완료 ({len(master_raw_data)}행)"); time.sleep(2)
 
 print("\n10단계: 추이차트")
 ws_t=safe_add_worksheet(sh,"추이차트",rows=1000,cols=min(len(chart_dn)+10,200)); time.sleep(3)
+move_analysis_tab(sh, ws_t, "추이차트")
 dhw=[];sci=[]
 for i,n in enumerate(chart_dn): do=date_objects[n];wd=WEEKDAY_NAMES[do.weekday()];dhw.append(f"{n}({wd})"); (sci.append(4+i) if do.weekday()==6 else None)
 hdr_t=['캠페인 이름','광고 세트 이름','광고 세트 ID','7일 평균']+dhw
@@ -1148,6 +1160,7 @@ apply_c2_label_formatting(sh,ws_t); print("⏳ 30초 대기..."); time.sleep(30)
 
 print("\n11단계: 추이차트(주간)")
 ws_tw=safe_add_worksheet(sh,"추이차트(주간)",rows=1000,cols=min(len(chart_wk)+10,100)); time.sleep(3)
+move_analysis_tab(sh, ws_tw, "추이차트(주간)")
 wdl=[week_display_names[wk] for wk in chart_wk]; hdr_w=['캠페인 이름','광고 세트 이름','광고 세트 ID','전체 평균']+wdl
 srw=["종합","",""];tap,tar,tas=0,0,0;tacs,tacc=0,0;tavs,tavc=0,0
 for wk in chart_wk:
@@ -1195,6 +1208,7 @@ apply_c2_label_formatting(sh,ws_tw); print("⏳ 30초 대기..."); time.sleep(30
 
 print("\n12단계: 증감액")
 ws_c=safe_add_worksheet(sh,"증감액",rows=1000,cols=min(len(chart_dn)+10,200)); time.sleep(3)
+move_analysis_tab(sh, ws_c, "증감액")
 hdr_c=['캠페인 이름','광고 세트 이름','광고 세트 ID','7일 평균']+chart_dn
 src=["종합","",""];t7r,t7s=0,0;t7cs,t7cc=0,0;t7vs,t7vc=0,0
 for d in chart_sd:
@@ -1253,6 +1267,7 @@ apply_trend_chart_formatting(sh,ws_c,hdr_c,len(rtc),is_change_tab=True); print("
 try:
     print("\n13단계: 예산")
     bw=safe_add_worksheet(sh,"예산",rows=1000,cols=min(len(chart_dn)+10,200)); time.sleep(3)
+    move_analysis_tab(sh, bw, "예산")
     br=[[""] + chart_dn]
     br.append(["전체 쓴돈"]+[sum(budget_by_date[d][p]['spend'] for p in product_order) for d in chart_dn])
     br.append(["전체 번돈"]+[sum(budget_by_date[d][p]['revenue'] for p in product_order) for d in chart_dn])
@@ -1295,6 +1310,7 @@ products=SUMMARY_PRODUCTS; print(f"📆 월:{len(month_names_list)}, 주:{len(we
 print("\n15단계: 주간종합")
 try:
     ws_ws=safe_add_worksheet(sh,"주간종합",rows=2000,cols=20); time.sleep(3)
+    move_analysis_tab(sh, ws_ws, "주간종합")
     sid_ws=ws_ws.id;fr_ws=[];ar_ws=[];cr_ws=0
     def ccb(pn,d,pd,sid,cr,fr,im=False):
         block=[];bs=cr;rv=(d['revenue']/d['spend']) if d['spend']>0 else 0;cvr_overall=(d['mpc']/d['unique_clicks']) if d.get('unique_clicks',0)>0 else 0;hb=COLORS["dark_blue"] if im else COLORS["dark_gray"];cb=COLORS["navy"] if im else COLORS["black"];nc=len(products)+2
@@ -1338,6 +1354,7 @@ print("⏳ 15→16단계 쿨다운 30초 대기..."); time.sleep(30)
 print("\n16단계: 주간종합_2")
 try:
     ws2=safe_add_worksheet(sh,"주간종합_2",rows=2000,cols=20); time.sleep(3)
+    move_analysis_tab(sh, ws2, "주간종합_2")
     sid2=ws2.id;fr2=[];ar2=[];cr2=0;npc=len(products)+3;stl=[]
     for mk in month_names_list:
         yr=int(mk.split('년')[0]);mn=int(mk.split('년')[1].replace('월','').strip());d=msd[mk];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0
@@ -1381,6 +1398,7 @@ print("⏳ 16→17단계 쿨다운 30초 대기..."); time.sleep(30)
 print("\n17단계: 주간종합_3 (일별)")
 try:
     ws3=safe_add_worksheet(sh,"주간종합_3",rows=3000,cols=20); time.sleep(3)
+    move_analysis_tab(sh, ws3, "주간종합_3")
     sid3=ws3.id;fr3=[];ar3=[];cr3=0;ndc=len(products)+4;dsr=[]
     for t in reversed(date_names): do=date_objects[t];d=daily_data[t];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0;wd=WEEKDAY_NAMES[do.weekday()];dsr.append({'period':f"'{do.month}.{do.day}({wd})",'weekday':wd,'spend':d['spend'],'revenue':d['revenue'],'profit':d['profit'],'roas':roas,'unique_clicks':d.get('unique_clicks',0),'mpc':d.get('mpc',0),'tab_name':t})
     ar3.append(["📊 일별 전체 요약"]+[""]*7);fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["navy"],COLORS["white"],bold=True)));cr3+=1
