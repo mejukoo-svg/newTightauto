@@ -1060,7 +1060,7 @@ sorted_list=[]
 for asid,d in ad_sets.items():
     sp=d['dates'].get(sort_date,{}).get('spend',0)
     sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d,'spend':sp})
-sorted_list.sort(key=lambda x:x['spend'],reverse=True); chart_wk=list(reversed(week_keys))
+sorted_list.sort(key=lambda x:x['spend'],reverse=True)
 
 print("\n5.5단계: 주간 집계")
 week_groups=defaultdict(list);week_display_names={}
