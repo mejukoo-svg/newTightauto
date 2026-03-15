@@ -181,8 +181,8 @@ RED          = {"red": 0.85, "green": 0, "blue": 0}
 def _fmt(color):
     return {"foregroundColor": color, "bold": True, "fontFamily": "Arial"}
 
-def apply_rich_text(sh, sheet_name, data_2d, start_row_idx, start_col_idx, cell_type='trend'):
-    ws = sh.worksheet(sheet_name)
+def apply_rich_text(sh, ws, data_2d, start_row_idx, start_col_idx, cell_type='trend'):
+    """ws: 이미 캐싱된 워크시트 객체를 직접 받음 (API 호출 절약)"""
     sheet_id = ws.id
     api_rows = []
     for row_data in data_2d:
@@ -237,6 +237,7 @@ def apply_rich_text(sh, sheet_name, data_2d, start_row_idx, start_col_idx, cell_
             },
             "fields": "userEnteredValue,userEnteredFormat,textFormatRuns"
         }}]})
+        time.sleep(1)  # ★ 청크 간 sleep 추가
     print(f"      → 리치텍스트 포맷 적용 ({len(api_rows)}행)")
 
 # =============================================================================
@@ -497,9 +498,14 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     sh = gc.open_by_url(cfg['SPREADSHEET_URL'])
     dc = all_dates
 
+    # ★ 워크시트 객체 한 번에 캐싱 (fetch_sheet_metadata 호출 최소화)
+    print(f"   워크시트 목록 캐싱...")
+    all_ws = {ws.title: ws for ws in sh.worksheets()}
+    print(f"   ✅ {len(all_ws)}개 탭 캐싱 완료: {list(all_ws.keys())}")
+
     # --- 5a. 마스터탭 ---
     print(f"\n   [1/7] 마스터탭...")
-    ws = sh.worksheet('마스터탭')
+    ws = all_ws['마스터탭']
     ms = []
     for r in master_rows:
         dt = date_key_to_dt(r['date'])
@@ -516,10 +522,10 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     if ms:
         ws.update(range_name='A2', values=ms)
     print(f"   ✅ 마스터탭: {len(ms)}행")
-    time.sleep(2)
+    time.sleep(3)
 
     # --- 광고세트 순서 ---
-    ws_t = sh.worksheet('추이차트')
+    ws_t = all_ws['추이차트']
     existing = ws_t.get_all_values()
     tao = []
     for row in existing[1:]:
@@ -533,6 +539,7 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
             tao.append((info['campaign_name'], info['adset_name'], aid))
     if not any(t[0] == '종합' for t in tao):
         tao.insert(0, ('종합', None, None))
+    time.sleep(3)
 
     # --- 5b. 추이차트 ---
     print(f"\n   [2/7] 추이차트...")
@@ -560,12 +567,13 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     ws_t.clear()
     ws_t.update(range_name='A1', values=td)
     print(f"   ✅ {len(td) - 1}행 × {len(dc) + 4}열")
-    apply_rich_text(sh, '추이차트', [row[3:] for row in td[1:]], 1, 3, 'trend')
-    time.sleep(2)
+    time.sleep(3)
+    apply_rich_text(sh, ws_t, [row[3:] for row in td[1:]], 1, 3, 'trend')
+    time.sleep(5)
 
     # --- 5c. 증감액 ---
     print(f"\n   [3/7] 증감액...")
-    ws_c = sh.worksheet('증감액')
+    ws_c = all_ws['증감액']
     cd = [['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dc]
     for cn, an, aid in tao:
         if cn == '종합':
@@ -600,12 +608,13 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     ws_c.clear()
     ws_c.update(range_name='A1', values=cd)
     print(f"   ✅ {len(cd) - 1}행")
-    apply_rich_text(sh, '증감액', [row[3:] for row in cd[1:]], 1, 3, 'change')
-    time.sleep(2)
+    time.sleep(3)
+    apply_rich_text(sh, ws_c, [row[3:] for row in cd[1:]], 1, 3, 'change')
+    time.sleep(5)
 
     # --- 5d. 예산 ---
     print(f"\n   [4/7] 예산...")
-    ws_b = sh.worksheet('예산')
+    ws_b = all_ws['예산']
     bd = [[''] + dc]
     bd.append(['전체 쓴돈'] + [round(daily_total.get(d, {}).get('spend', 0)) for d in dc])
     bd.append(['전체 번돈'] + [round(daily_total.get(d, {}).get('revenue', 0)) for d in dc])
@@ -616,11 +625,11 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     ws_b.clear()
     ws_b.update(range_name='A1', values=bd)
     print(f"   ✅ {len(bd)}행")
-    time.sleep(2)
+    time.sleep(3)
 
     # --- 5e. 추이차트(주간) ---
     print(f"\n   [5/7] 추이차트(주간)...")
-    ws_wt = sh.worksheet('추이차트(주간)')
+    ws_wt = all_ws['추이차트(주간)']
     wp = OrderedDict()
     for date in all_dates:
         dt = date_key_to_dt(date)
@@ -665,8 +674,9 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     ws_wt.clear()
     ws_wt.update(range_name='A1', values=wtd)
     print(f"   ✅ {len(wtd) - 1}행")
-    apply_rich_text(sh, '추이차트(주간)', [row[3:] for row in wtd[1:]], 1, 3, 'trend')
-    time.sleep(2)
+    time.sleep(3)
+    apply_rich_text(sh, ws_wt, [row[3:] for row in wtd[1:]], 1, 3, 'trend')
+    time.sleep(10)  # ★ 주간종합 진입 전 넉넉한 대기
 
     # --- 5f. 주간종합 + _2 + _3 ---
     print(f"\n   [6/7] 주간종합 + _2 + _3...")
@@ -755,12 +765,14 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
         for wk in wks:
             if any(d in set(mps.get(mk, [])) for d in wp.get(wk, [])):
                 wsd.extend(bwb(wk, wtf[wk], {p: wprod[wk].get(p, {'spend': 0, 'revenue': 0, 'pm': 0}) for p in PRODUCTS}))
-    sh.worksheet('주간종합').clear()
-    sh.worksheet('주간종합').update(range_name='A1', values=wsd)
-    print(f"   ✅ 주간종합: {len(wsd)}행")
-    time.sleep(2)
 
-    ws2 = sh.worksheet('주간종합_2')
+    ws_weekly1 = all_ws['주간종합']
+    ws_weekly1.clear()
+    ws_weekly1.update(range_name='A1', values=wsd)
+    print(f"   ✅ 주간종합: {len(wsd)}행")
+    time.sleep(5)
+
+    ws2 = all_ws['주간종합_2']
     w2 = [
         ['📊 기간별 전체 요약', '', '', '', '', '', ''],
         ['기간', '유형', '지출금액', '매출', '이익', 'ROAS', 'CVR'],
@@ -789,11 +801,11 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     ws2.clear()
     ws2.update(range_name='A1', values=w2)
     print(f"   ✅ 주간종합_2: {len(w2)}행")
-    time.sleep(2)
+    time.sleep(5)
 
     # --- 5g. 주간종합_3 ---
     print(f"\n   [7/7] 주간종합_3...")
-    ws3 = sh.worksheet('주간종합_3')
+    ws3 = all_ws['주간종합_3']
     w3 = [
         ['📊 일별 전체 요약', '', '', '', '', '', '', ''],
         ['날짜', '요일', '지출금액', '매출', '이익', 'ROAS', 'CVR', ''],
