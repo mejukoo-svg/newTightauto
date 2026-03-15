@@ -115,9 +115,16 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
 # Meta Ads API 설정
 # =========================================================
 META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
+
+# ★ act_2677707262628563 전용 토큰 추가
+META_TOKEN_ACT_2677 = os.environ.get(
+    "META_TOKEN_3",
+    "EAANmrZA47Te4BQwq5pCam7jr57CzXfDSXVwNPOI0RCHLCZCYdgGoqI2XLFG4PQZBnddmZCVJkzmfcgJJCrSO4cWUTK2WdSpfq5hFQpxzoDkUpR1xXgceTTDrF5iwCIZC8jubufWpWR5Y3FUuO9ZCsiCiMKDJYOj6wmZAVd6GO818wZCJXW81CsByd80EujvlwQn1cAZDZD"
+)
+
 META_TOKENS = {
     "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),
-    "act_2677707262628563": os.environ.get("META_TOKEN_3", ""),
+    "act_2677707262628563": META_TOKEN_ACT_2677,
 }
 def get_token(acc_id): return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
 META_API_VERSION = "v21.0"
