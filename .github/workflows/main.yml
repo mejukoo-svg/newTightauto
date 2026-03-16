@@ -43,6 +43,7 @@ jobs:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
           META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
@@ -68,6 +69,7 @@ jobs:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
           META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
@@ -93,6 +95,7 @@ jobs:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
           META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
@@ -118,6 +121,7 @@ jobs:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
           META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
