@@ -116,11 +116,9 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
 # =========================================================
 META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
 
-# ★ act_2677707262628563 전용 토큰 추가
-META_TOKEN_ACT_2677 = os.environ.get(
-    "META_TOKEN_3",
-    "EAANmrZA47Te4BQwq5pCam7jr57CzXfDSXVwNPOI0RCHLCZCYdgGoqI2XLFG4PQZBnddmZCVJkzmfcgJJCrSO4cWUTK2WdSpfq5hFQpxzoDkUpR1xXgceTTDrF5iwCIZC8jubufWpWR5Y3FUuO9ZCsiCiMKDJYOj6wmZAVd6GO818wZCJXW81CsByd80EujvlwQn1cAZDZD"
-)
+# ★ META_TOKEN_4 추가: act_2677707262628563 전용 (TOKEN_4 우선, TOKEN_3 폴백)
+META_TOKEN_4 = os.environ.get("META_TOKEN_4", "")
+META_TOKEN_ACT_2677 = META_TOKEN_4 or os.environ.get("META_TOKEN_3", "")
 
 META_TOKENS = {
     "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),
@@ -129,6 +127,13 @@ META_TOKENS = {
 def get_token(acc_id): return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
+
+# 토큰 상태 로그
+print("🔑 Meta 토큰 상태:")
+print(f"  TOKEN_1 (act_1054): {'✅ 설정됨' if META_TOKENS['act_1054081590008088'] else '❌ 비어있음'}")
+print(f"  TOKEN_4 (act_2677 우선): {'✅ 설정됨' if META_TOKEN_4 else '❌ 비어있음'}")
+print(f"  TOKEN_3 (act_2677 폴백): {'✅ 설정됨' if os.environ.get('META_TOKEN_3', '') else '❌ 비어있음'}")
+print(f"  act_2677 최종 토큰: {'✅ 설정됨' if META_TOKEN_ACT_2677 else '❌ 비어있음'}")
 
 # =========================================================
 # Mixpanel 설정
