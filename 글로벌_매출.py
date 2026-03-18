@@ -291,14 +291,12 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     try:
         ws = ss.worksheet(DAILY_SHEET_NAME)
         ws.clear()
-        others = [w for w in all_worksheets if w.id != ws.id]
-        ss.reorder_worksheets(others + [ws])
-        print(f"📋 기존 시트 초기화 + 맨 오른쪽 이동: {DAILY_SHEET_NAME}")
+        print(f"📋 기존 시트 초기화: {DAILY_SHEET_NAME}")
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(
             title=DAILY_SHEET_NAME, rows=100, cols=len(all_dates) + 3, index=total_sheets,
         )
-        print(f"📋 새 시트 생성 (맨 오른쪽): {DAILY_SHEET_NAME}")
+        print(f"📋 새 시트 생성: {DAILY_SHEET_NAME}")
 
     # 데이터 구성
     rows = []
@@ -348,6 +346,13 @@ def write_daily_sheet(revenue, all_dates, all_countries):
 
     # 서식
     _apply_daily_formatting(ss, ws, num_rows, num_cols, len(all_countries))
+
+    # 맨 오른쪽 이동
+    all_worksheets = ss.worksheets()
+    others = [w for w in all_worksheets if w.id != ws.id]
+    ss.reorder_worksheets(others + [ws])
+    print(f"📌 '{ws.title}' 탭을 맨 오른쪽으로 이동 완료")
+
     return ws
 
 
