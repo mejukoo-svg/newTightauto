@@ -1,0 +1,42 @@
+name: Stripe Revenue → Google Sheets
+
+on:
+  # 매일 KST 오전 6시 (UTC 21시) 자동 실행
+  schedule:
+    - cron: "0 21 * * *"
+  # 수동 실행
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "실행 모드"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - daily
+          - weekly
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Setup service account
+        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > service_account.json
+
+      - name: Run sync
+        env:
+          STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
+          SPREADSHEET_URL_TW_ADSET: ${{ secrets.SPREADSHEET_URL_TW_ADSET }}
+          GCP_SERVICE_ACCOUNT_KEY: service_account.json
+        run: python 글로벌_매출.py ${{ github.event.inputs.mode || 'all' }}
