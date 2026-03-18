@@ -8,9 +8,9 @@
   3) all     - 위 두 가지 모두 실행
 
 [사용법]
-  python stripe_to_sheets.py daily
-  python stripe_to_sheets.py weekly
-  python stripe_to_sheets.py all
+  python 글로벌_매출.py daily
+  python 글로벌_매출.py weekly
+  python 글로벌_매출.py all
 
 환경변수:
   STRIPE_API_KEY          - Stripe Restricted API Key
@@ -674,7 +674,7 @@ def main():
         run_weekly()
     else:
         print(f"❌ 알 수 없는 모드: {mode}")
-        print("사용법: python stripe_to_sheets.py [daily|weekly|all]")
+        print("사용법: python 글로벌_매출.py [daily|weekly|all]")
         sys.exit(1)
 
 
