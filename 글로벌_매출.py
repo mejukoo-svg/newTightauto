@@ -34,7 +34,13 @@ from calendar import monthrange
 # ==================== CONFIG ====================
 
 STRIPE_API_KEY = os.environ["STRIPE_API_KEY"]
-SPREADSHEET_ID = os.environ["SPREADSHEET_URL_TW_ADSET"]
+
+_raw_sheet = os.environ["SPREADSHEET_URL_TW_ADSET"]
+# URL 전체든 ID만이든 자동 처리
+if "/d/" in _raw_sheet:
+    SPREADSHEET_ID = _raw_sheet.split("/d/")[1].split("/")[0]
+else:
+    SPREADSHEET_ID = _raw_sheet.strip()
 
 # Service account: 파일 경로 또는 JSON 문자열 모두 지원
 _sa_raw = os.environ.get("GCP_SERVICE_ACCOUNT_KEY", "service_account.json")
