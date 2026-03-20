@@ -27,7 +27,7 @@ jobs:
       - name: Run script
         env:
           GCP_SA_FILE: /tmp/gcp_sa.json
-        run: python 국내_채널별.py
+        run: python 국내_채널별
 
       - name: Cleanup
         if: always()
