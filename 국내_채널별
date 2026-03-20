@@ -1,34 +1,559 @@
-name: 채널별 추이차트 v6
+"""
+채널별 추이차트 v6 — GitHub Actions 대응
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+★ 전체: gid=2047387146 (E열=날짜, F열=매출, M열=지출) + 네이버/구글 지출 합산
+★ 메타: 비즈니스리뷰 "추이차트" 탭(gid=367316653) Row2 종합
+★ 밴스드: [Vanced] 퍼포먼스 "추이차트" 탭(gid=1052644005) Row2 종합
+★ 네이버/구글: "00. 네이버/구글 Daily" 탭 (지출+구매전환값)
+"""
 
-on:
-  # 매일 한국시간 오전 6시 (UTC 21:00 전날)
-  schedule:
-    - cron: '0 21 * * *'
-  # 수동 실행
-  workflow_dispatch:
+import time, os, re, json, tempfile
+import gspread
+from datetime import datetime, timedelta, date
+from collections import defaultdict
+from google.oauth2.service_account import Credentials
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
+# ============================================================
+# 설정
+# ============================================================
+URL_TOTAL   = "https://docs.google.com/spreadsheets/d/1uiMN2bBNOt4qU9H86JzxMs_D6PeaIWOtz3IMtJqu4aI/edit"
+GID_TOTAL   = 2047387146
 
-    steps:
-      - uses: actions/checkout@v4
+URL_NAV_GOO = "https://docs.google.com/spreadsheets/d/1tJ1iv6oi7y-tOmrsXY7pk-chYDBQV__j6gaRNhsGW-Q/edit"
+NAV_GOO_DAILY_TAB = "00. 네이버/구글 Daily"
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+URL_META    = "https://docs.google.com/spreadsheets/d/1PLMwesj4UYYkKPkHSza8loU_A2PvLEQL7qkOnINqrxs/edit"
+GID_META_TREND = 367316653
 
-      - name: Install dependencies
-        run: pip install gspread google-auth
+URL_VANCED  = "https://docs.google.com/spreadsheets/d/1RYXynsjUX2-7yV2z2gLB79sCFrnIH-5AVcLM6IIXA7U/edit"
+GID_VANCED_TREND = 1052644005
 
-      - name: Write GCP service account key
-        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp_sa.json
+URL_OUTPUT  = "https://docs.google.com/spreadsheets/d/1vDcc83jS2-Batg-ygpjiDSwmNXIU0svitGnHp3tAUQo/edit"
 
-      - name: Run script
-        env:
-          GCP_SA_FILE: /tmp/gcp_sa.json
-        run: python scripts/channel_trend_v6.py
+# ── GitHub Actions: 환경변수에서 서비스 계정 경로 읽기 ──
+SA_FILE = os.environ.get("GCP_SA_FILE", "/content/koo.json")
 
-      - name: Cleanup
-        if: always()
-        run: rm -f /tmp/gcp_sa.json
+START_DATE = "2026-03-01"
+END_DATE   = date.today().strftime("%Y-%m-%d")
+SHEET_NAME = "채널별_추이차트"
+WD = ['월','화','수','목','금','토','일']
+
+# ============================================================
+# 유틸
+# ============================================================
+def money(n):
+    try: return f"₩{int(round(float(n))):,}"
+    except: return "₩0"
+
+def cell_text(revenue, spend):
+    if spend == 0 and revenue == 0: return ""
+    roas = (revenue / spend * 100) if spend > 0 else 0
+    profit = revenue - spend
+    return f"{roas:.0f}\n{money(profit)}\n{money(revenue)}\n-{money(spend)}"
+
+def _num(x):
+    try:
+        v = str(x).replace(",","").replace("₩","").replace("%","").replace("\\","").replace("W","").replace("￦","").replace("+","").strip()
+        return float(v) if v and v not in ["-","#DIV/0!","","nan","None","NaN"] else 0.0
+    except: return 0.0
+
+def with_retry(fn, *a, max_retries=5, **kw):
+    for i in range(max_retries):
+        try: return fn(*a, **kw)
+        except Exception as e:
+            if "429" in str(e) or "Quota" in str(e): time.sleep(15+i*10)
+            elif i==max_retries-1: raise
+            else: time.sleep(3)
+
+def parse_date(raw):
+    raw = str(raw).strip()
+    if not raw or raw in ['', 'nan', 'None']: return None
+    raw = raw.split('\n')[0].strip()
+
+    m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})', raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: pass
+
+    m = re.match(r'^(\d{1,2})/(\d{1,2})\s+\(', raw)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        year = 2026 if month <= 3 else 2025
+        try: return date(year, month, day)
+        except: return None
+
+    m = re.match(r'^(\d{1,2})/(\d{1,2})(?:\s*$|\s*[\(\[])', raw)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        year = 2026 if month <= 3 else 2025
+        try: return date(year, month, day)
+        except: return None
+
+    m = re.match(r'^(\d{2})-(\d{1,2})-(\d{1,2})$', raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: return None
+
+    m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})$', raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: return None
+
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"]:
+        try: return datetime.strptime(raw[:19 if 'H' in fmt else 10], fmt).date()
+        except: pass
+
+    return None
+
+def fmt_req(sid,sr,er,sc,ec,fmt):
+    return {"repeatCell":{"range":{"sheetId":sid,"startRowIndex":sr,"endRowIndex":er,"startColumnIndex":sc,"endColumnIndex":ec},"cell":{"userEnteredFormat":fmt},"fields":"userEnteredFormat"}}
+
+def border_req(sid,sr,er,sc,ec):
+    bs={"style":"SOLID","width":1,"color":{"red":0.7,"green":0.7,"blue":0.7}}
+    return {"updateBorders":{"range":{"sheetId":sid,"startRowIndex":sr,"endRowIndex":er,"startColumnIndex":sc,"endColumnIndex":ec},"top":bs,"bottom":bs,"left":bs,"right":bs,"innerHorizontal":bs,"innerVertical":bs}}
+
+# ============================================================
+# 인증 — GitHub Actions / Colab 양쪽 대응
+# ============================================================
+def authenticate():
+    SCOPES = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+
+    # 1) 서비스 계정 JSON 파일 경로가 있으면 사용
+    if os.path.exists(SA_FILE):
+        creds = Credentials.from_service_account_file(SA_FILE, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        print("🔗 서비스 계정 인증 (파일)")
+        return gc
+
+    # 2) 환경변수에 JSON 문자열이 직접 들어있는 경우 (대체 방식)
+    sa_json = os.environ.get("GCP_SERVICE_ACCOUNT_KEY")
+    if sa_json:
+        info = json.loads(sa_json)
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        print("🔗 서비스 계정 인증 (환경변수)")
+        return gc
+
+    # 3) Colab 폴백
+    try:
+        from google.colab import auth
+        auth.authenticate_user()
+        from google.auth import default
+        creds, _ = default(scopes=SCOPES)
+        gc = gspread.authorize(creds)
+        print("🔗 Colab 인증 완료")
+        return gc
+    except:
+        print("❌ 인증 실패: SA_FILE 또는 GCP_SERVICE_ACCOUNT_KEY 환경변수를 확인하세요")
+        return None
+
+# ============================================================
+# 소스1: 전체 매출/지출
+# ============================================================
+def fetch_total_daily(gc):
+    print("\n" + "="*60)
+    print("📊 [소스1] 전체 매출/지출")
+    print("="*60)
+
+    ss = gc.open_by_url(URL_TOTAL)
+    ws = None
+    for s in ss.worksheets():
+        if s.id == GID_TOTAL: ws = s; break
+    if ws is None: print("  ⚠️ gid 시트 못 찾음"); return {}
+
+    print(f"  📖 시트: {ws.title}")
+    vals = with_retry(ws.get_all_values); time.sleep(1)
+    if not vals or len(vals) < 2: return {}
+
+    date_col = 4; rev_col = 5; spend_col = 12
+    start_d = datetime.strptime(START_DATE,"%Y-%m-%d").date()
+    end_d = datetime.strptime(END_DATE,"%Y-%m-%d").date()
+    daily = {}
+
+    for ri in range(1, len(vals)):
+        row = vals[ri]
+        if date_col >= len(row): continue
+        dt = parse_date(row[date_col])
+        if dt is None or dt < start_d or dt > end_d: continue
+        rev = _num(row[rev_col]) if rev_col < len(row) else 0
+        spend = _num(row[spend_col]) if spend_col < len(row) else 0
+        if dt not in daily: daily[dt] = {'revenue':0.0, 'spend':0.0}
+        daily[dt]['revenue'] += rev
+        daily[dt]['spend'] += spend
+
+    ts = sum(d['spend'] for d in daily.values())
+    tr = sum(d['revenue'] for d in daily.values())
+    for dt in sorted(daily):
+        rv, sp = daily[dt]['revenue'], daily[dt]['spend']
+        print(f"  {dt}  매출 ₩{rv:>14,.0f}  지출 ₩{sp:>14,.0f}  ROAS {rv/sp:.2f}" if sp > 0 else f"  {dt}  매출 ₩{rv:>14,.0f}")
+    if ts > 0: print(f"  합계   매출 ₩{tr:>14,.0f}  지출 ₩{ts:>14,.0f}  ROAS {tr/ts:.2f}")
+    return daily
+
+# ============================================================
+# 소스2: 네이버/구글
+# ============================================================
+def fetch_naver_google(gc):
+    print("\n" + "="*60)
+    print("📊 [소스2] 네이버/구글 Daily 탭")
+    print("="*60)
+
+    ss = gc.open_by_url(URL_NAV_GOO)
+    ws = None
+    for s in ss.worksheets():
+        if NAV_GOO_DAILY_TAB in s.title or s.title.strip() == NAV_GOO_DAILY_TAB:
+            ws = s; break
+    if ws is None:
+        for s in ss.worksheets():
+            if '네이버' in s.title and 'Daily' in s.title: ws = s; break
+    if ws is None: print(f"  ⚠️ 탭 못 찾음"); return {}
+
+    print(f"  📖 시트: {ws.title}")
+    vals = with_retry(ws.get_all_values); time.sleep(1)
+    if not vals or len(vals) < 3: return {}
+
+    gh = [str(v).strip() for v in vals[0]]
+    ch = [str(v).strip() for v in vals[1]]
+
+    groups = {}; cg = None
+    for ci, val in enumerate(gh):
+        if val and val not in ['', 'nan']: cg = val; groups[cg] = {'start': ci, 'end': len(ch)}
+    sg = sorted(groups.items(), key=lambda x: x[1]['start'])
+    for i, (gn, gi) in enumerate(sg):
+        if i + 1 < len(sg): gi['end'] = sg[i+1][1]['start']
+
+    nsc = nrc = gsc = grc = None
+    for gn, gi in groups.items():
+        for ci in range(gi['start'], min(gi['end'], len(ch))):
+            h = ch[ci]
+            if '네이버' in gn or '파워링크' in gn:
+                if h == '총 지출': nsc = ci
+                elif h == '총 구매전환값': nrc = ci
+            elif '구글' in gn or '검색' in gn:
+                if h == '총 지출': gsc = ci
+                elif h in ['구매전환값', '총 구매전환값']: grc = ci
+
+    print(f"  → 네이버: 지출=col{nsc}, 매출=col{nrc}")
+    print(f"  → 구글:   지출=col{gsc}, 매출=col{grc}")
+
+    start_d = datetime.strptime(START_DATE,"%Y-%m-%d").date()
+    end_d = datetime.strptime(END_DATE,"%Y-%m-%d").date()
+    result = {
+        'naver_ads': defaultdict(lambda:{'spend':0.0,'revenue':0.0}),
+        'google_ads': defaultdict(lambda:{'spend':0.0,'revenue':0.0}),
+    }
+
+    for ri in range(2, len(vals)):
+        row = vals[ri]
+        if not row or len(row) < 1: continue
+        dt = parse_date(row[0])
+        if dt is None or dt < start_d or dt > end_d: continue
+        if nsc is not None and nsc < len(row): result['naver_ads'][dt]['spend'] += _num(row[nsc])
+        if nrc is not None and nrc < len(row): result['naver_ads'][dt]['revenue'] += _num(row[nrc])
+        if gsc is not None and gsc < len(row): result['google_ads'][dt]['spend'] += _num(row[gsc])
+        if grc is not None and grc < len(row): result['google_ads'][dt]['revenue'] += _num(row[grc])
+
+    for cn, cd in result.items():
+        ts = sum(d['spend'] for d in cd.values()); tr = sum(d['revenue'] for d in cd.values())
+        if ts > 0:
+            print(f"  {cn}: 지출 ₩{ts:>10,.0f}  매출 ₩{tr:>10,.0f}  ROAS {tr/ts:.2f}")
+        else: print(f"  {cn}: 데이터 없음")
+    return dict(result)
+
+# ============================================================
+# 추이차트 Row2 종합 공통 파서
+# ============================================================
+def _fetch_trend_row2(gc, url, gid, label, line_config):
+    print(f"\n" + "="*60)
+    print(f"📊 [{label}]")
+    print("="*60)
+
+    ss = gc.open_by_url(url)
+    ws = None
+    for s in ss.worksheets():
+        if s.id == gid: ws = s; break
+    if ws is None:
+        for s in ss.worksheets():
+            if '추이차트' in s.title and '주간' not in s.title: ws = s; break
+    if ws is None: print("  ⚠️ 추이차트 탭 못 찾음"); return {}
+
+    print(f"  📖 시트: {ws.title}")
+    vals = with_retry(ws.get_all_values); time.sleep(1)
+    if not vals or len(vals) < 2: print("  ⚠️ 빈 시트"); return {}
+
+    headers = vals[0]
+    row2 = vals[1]
+
+    print(f"  → 전체 컬럼 수: {len(headers)}")
+    for ci in range(min(8, len(headers))):
+        h_repr = repr(headers[ci])
+        print(f"    col{ci}: {h_repr}")
+
+    date_start_col = None
+    for ci in range(len(headers)):
+        dt = parse_date(headers[ci])
+        if dt is not None:
+            date_start_col = ci
+            print(f"  → 날짜 시작: col{ci} = {repr(headers[ci])} → {dt}")
+            break
+
+    if date_start_col is None:
+        print("  ⚠️ 날짜 컬럼 못 찾음!")
+        print(f"  → 헤더 전체: {[repr(h) for h in headers[:15]]}")
+        return {}
+
+    first_cell = str(row2[date_start_col]) if date_start_col < len(row2) else ""
+    first_lines = first_cell.split('\n')
+    print(f"  → 파싱 모드: {line_config}")
+    print(f"  → 첫 셀 (col{date_start_col}) 라인수={len(first_lines)}:")
+    for li, l in enumerate(first_lines):
+        print(f"    line[{li}] = {repr(l)}")
+
+    start_d = datetime.strptime(START_DATE,"%Y-%m-%d").date()
+    end_d = datetime.strptime(END_DATE,"%Y-%m-%d").date()
+    daily = {}
+    parsed_count = 0
+    skip_count = 0
+
+    for ci in range(date_start_col, len(headers)):
+        dt = parse_date(headers[ci])
+        if dt is None:
+            skip_count += 1
+            continue
+        if dt < start_d or dt > end_d:
+            continue
+
+        cell = str(row2[ci]) if ci < len(row2) else ""
+        if not cell.strip():
+            continue
+
+        lines = [l.strip() for l in cell.split('\n')]
+
+        if line_config == 'meta':
+            raw_spend = _num(lines[2]) if len(lines) > 2 else 0
+            spend = abs(raw_spend)
+            profit = _num(lines[1]) if len(lines) > 1 else 0
+            revenue = spend + profit
+        elif line_config == 'vanced':
+            revenue = abs(_num(lines[2])) if len(lines) > 2 else 0
+            raw_spend = _num(lines[3]) if len(lines) > 3 else 0
+            spend = abs(raw_spend)
+
+            if spend == 0 and len(lines) <= 3 and len(lines) > 1:
+                profit = _num(lines[1])
+                spend = max(revenue - profit, 0) if revenue > 0 else 0
+        else:
+            continue
+
+        if parsed_count < 3:
+            print(f"  → {dt}: lines={[repr(l) for l in lines[:5]]} → spend={spend:.0f}, rev={revenue:.0f}")
+
+        if spend > 0 or revenue > 0:
+            daily[dt] = {'spend': spend, 'revenue': max(revenue, 0)}
+            parsed_count += 1
+
+    if skip_count > 0:
+        print(f"  → 날짜 파싱 실패 {skip_count}건 (7일평균 등 비날짜 컬럼)")
+
+    ts = sum(d['spend'] for d in daily.values())
+    tr = sum(d['revenue'] for d in daily.values())
+    for dt in sorted(daily):
+        sp, rv = daily[dt]['spend'], daily[dt]['revenue']
+        pf = rv - sp
+        if sp > 0:
+            print(f"  {dt}  지출 ₩{sp:>12,.0f}  순이익 ₩{pf:>12,.0f}  매출 ₩{rv:>12,.0f}  ROAS {rv/sp*100:.0f}%")
+        else:
+            print(f"  {dt}  매출 ₩{rv:>12,.0f}")
+    if ts > 0:
+        print(f"  합계   지출 ₩{ts:>12,.0f}  매출 ₩{tr:>12,.0f}  ROAS {tr/ts*100:.0f}%")
+    print(f"  → {len(daily)}일 데이터")
+    return daily
+
+# ============================================================
+# 소스3: 메타
+# ============================================================
+def fetch_meta(gc):
+    return _fetch_trend_row2(gc, URL_META, GID_META_TREND,
+                              "소스3 메타 (추이차트 Row2)", 'meta')
+
+# ============================================================
+# 소스4: 밴스드
+# ============================================================
+def fetch_vanced(gc):
+    return _fetch_trend_row2(gc, URL_VANCED, GID_VANCED_TREND,
+                              "소스4 밴스드 (추이차트 Row2)", 'vanced')
+
+# ============================================================
+# 시트 생성
+# ============================================================
+def write_sheet(gc, total_daily, naver_google, meta_data, vanced_data):
+    print("\n" + "="*60)
+    print(f"📝 '{SHEET_NAME}' 시트 생성")
+    print("="*60)
+
+    ss = gc.open_by_url(URL_OUTPUT)
+    start = datetime.strptime(START_DATE,"%Y-%m-%d").date()
+    end = datetime.strptime(END_DATE,"%Y-%m-%d").date()
+    dates = []; d = end
+    while d >= start: dates.append(d); d -= timedelta(days=1)
+    nd = len(dates)
+
+    sun_cols = []; dh = []
+    for i, dt in enumerate(dates):
+        wd = WD[dt.weekday()]; dh.append(f"{dt.month:02d}/{dt.day:02d}({wd})")
+        if dt.weekday() == 6: sun_cols.append(3+i)
+    r7 = dates[:7] if len(dates) >= 7 else dates
+    na = naver_google.get('naver_ads',{})
+    ga = naver_google.get('google_ads',{})
+
+    def total_spend(dt):
+        base = total_daily.get(dt, {}).get('spend', 0)
+        nav  = na.get(dt, {}).get('spend', 0)
+        goo  = ga.get(dt, {}).get('spend', 0)
+        return base + nav + goo
+
+    channels = [
+        {
+            'name': '전체',
+            'get_rev':   lambda dt: total_daily.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: total_spend(dt),
+        },
+        {
+            'name': '메타',
+            'get_rev':   lambda dt: meta_data.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: meta_data.get(dt, {}).get('spend', 0),
+        },
+        {
+            'name': '밴스드',
+            'get_rev':   lambda dt: vanced_data.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: vanced_data.get(dt, {}).get('spend', 0),
+        },
+        {
+            'name': '네이버',
+            'get_rev':   lambda dt: na.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: na.get(dt, {}).get('spend', 0),
+        },
+        {
+            'name': '구글',
+            'get_rev':   lambda dt: ga.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: ga.get(dt, {}).get('spend', 0),
+        },
+    ]
+
+    nr = 2 + len(channels) + 5; nc = 4 + nd
+    try:
+        ws = ss.worksheet(SHEET_NAME); ws.clear()
+        if ws.row_count < nr: ws.add_rows(nr - ws.row_count)
+        if ws.col_count < nc: ws.add_cols(nc - ws.col_count)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = ss.add_worksheet(SHEET_NAME, nr, nc)
+    sid = ws.id
+
+    header = ["채널", "", "라벨", "7일 평균"] + dh
+
+    all_rows = []
+    for ch in channels:
+        ar = sum(ch['get_rev'](dt) for dt in r7)
+        asp = sum(ch['get_spend'](dt) for dt in r7)
+        row = [ch['name'], "", ""]
+        row.append(cell_text(ar, asp))
+        for dt in dates:
+            row.append(cell_text(ch['get_rev'](dt), ch['get_spend'](dt)))
+        all_rows.append(row)
+
+    all_data = [header] + all_rows
+    tdr = len(all_data)
+    print(f"  → {tdr}행 × {len(header)}열")
+    with_retry(ws.update, values=all_data, range_name="A1", value_input_option="USER_ENTERED")
+    print("  ✅ 데이터 기록"); time.sleep(2)
+
+    print("  🎨 서식...")
+    fr = []
+    fr.append(fmt_req(sid,0,1,0,nc,{"backgroundColor":{"red":0.9,"green":0.9,"blue":0.9},"textFormat":{"bold":True,"fontSize":10},"horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE"}))
+    for ci in sun_cols:
+        if ci < nc: fr.append(fmt_req(sid,0,1,ci,ci+1,{"backgroundColor":{"red":1,"green":0.85,"blue":0.85},"textFormat":{"bold":True}}))
+    fr.append(fmt_req(sid,1,2,0,nc,{"textFormat":{"bold":True}}))
+    fr.append({"updateSheetProperties":{"properties":{"sheetId":sid,"gridProperties":{"frozenRowCount":1,"frozenColumnCount":1}},"fields":"gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
+    fr.append(fmt_req(sid,1,tdr,3,nc,{"wrapStrategy":"WRAP","verticalAlignment":"TOP"}))
+    fr.append(fmt_req(sid,1,tdr,0,1,{"textFormat":{"bold":True,"fontSize":10}}))
+    for ci,w in [(0,100),(1,40),(2,80)]:
+        fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":w},"fields":"pixelSize"}})
+    for ci in range(3,nc):
+        fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":100},"fields":"pixelSize"}})
+    fr.append(border_req(sid,0,tdr,0,nc))
+    with_retry(ss.batch_update, body={"requests":fr}); time.sleep(2)
+
+    BK={"foregroundColor":{"red":0,"green":0,"blue":0}}
+    GN={"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
+    RD={"foregroundColor":{"red":0.85,"green":0,"blue":0}}
+
+    label="ROAS\n순이익\n매출\n지출"; ln=label.split('\n'); idx=[0]; p=0
+    for l in ln[:-1]: p+=len(l)+1; idx.append(p)
+    with_retry(ss.batch_update, body={"requests":[{"updateCells":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":2,"startColumnIndex":2,"endColumnIndex":3},"rows":[{"values":[{"userEnteredValue":{"stringValue":label},"textFormatRuns":[{"startIndex":idx[0],"format":BK},{"startIndex":idx[1],"format":GN},{"startIndex":idx[2],"format":BK},{"startIndex":idx[3],"format":RD}]}]}],"fields":"userEnteredValue,textFormatRuns"}}]}); time.sleep(1)
+
+    print("  🎨 ROAS 조건부 서식...")
+    ve='VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))'
+    rf=lambda c:f'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,{c})'
+    rules=[
+        (f'{ve}=0',                       {"red":1,"green":0.6,"blue":0.6}),
+        (f'{ve}>=300',                     {"red":0.6,"green":1,"blue":1}),
+        (f'AND({ve}>=200,{ve}<300)',       {"red":0.7,"green":1,"blue":0.7}),
+        (f'AND({ve}>=100,{ve}<200)',       {"red":1,"green":1,"blue":0.6}),
+        (f'AND({ve}<100,{ve}>0)',          {"red":1,"green":0.8,"blue":0.8}),
+    ]
+    cr=[{"addConditionalFormatRule":{"rule":{"ranges":[{"sheetId":sid,"startRowIndex":1,"endRowIndex":tdr,"startColumnIndex":3,"endColumnIndex":nc}],"booleanRule":{"condition":{"type":"CUSTOM_FORMULA","values":[{"userEnteredValue":rf(c)}]},"format":{"backgroundColor":bg}}},"index":0}} for c,bg in rules]
+    with_retry(ss.batch_update, body={"requests":cr}); time.sleep(3)
+
+    print("  🎨 텍스트 색상...")
+    txr=[]
+    for ci in range(3,nc):
+        try: cv=with_retry(ws.col_values,ci+1)
+        except: continue
+        if not cv or len(cv)<2: continue
+        for ri in range(1,min(len(cv),tdr)):
+            val=cv[ri]
+            if not val or '\n' not in val: continue
+            lines=val.split('\n')
+            if len(lines)<3: continue
+            l1e=len(lines[0]); l2e=l1e+1+len(lines[1]); l3e=l2e+1+len(lines[2])
+            runs=[{"startIndex":0,"format":BK},{"startIndex":l1e+1,"format":GN},{"startIndex":l2e+1,"format":BK}]
+            if len(lines)>=4: runs.append({"startIndex":l3e+1,"format":RD})
+            txr.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri,"endRowIndex":ri+1,"startColumnIndex":ci,"endColumnIndex":ci+1},"rows":[{"values":[{"userEnteredValue":{"stringValue":val},"textFormatRuns":runs}]}],"fields":"userEnteredValue,textFormatRuns"}})
+            if len(txr)>=300:
+                try: with_retry(ss.batch_update,body={"requests":txr}); txr=[]; time.sleep(3)
+                except: txr=[]
+    if txr:
+        try: with_retry(ss.batch_update,body={"requests":txr}); time.sleep(2)
+        except: pass
+
+    print(f"\n  ✅ '{SHEET_NAME}' 완성!")
+
+# ============================================================
+# 메인
+# ============================================================
+def main():
+    print("="*60)
+    print("🚀 채널별 추이차트 v6")
+    print(f"   기간: {START_DATE} ~ {END_DATE}")
+    print(f"   환경: {'GitHub Actions' if os.environ.get('GITHUB_ACTIONS') else 'Local/Colab'}")
+    print("="*60)
+
+    gc = authenticate()
+    if gc is None: return
+
+    total_daily  = fetch_total_daily(gc)
+    naver_google = fetch_naver_google(gc)
+    meta_data    = fetch_meta(gc)
+    vanced_data  = fetch_vanced(gc)
+
+    write_sheet(gc, total_daily, naver_google, meta_data, vanced_data)
+
+    print("\n"+"="*60)
+    print("✅ 완료!")
+    print(f"   {URL_OUTPUT}")
+    print(f"   탭: {SHEET_NAME}")
+    print("="*60)
+
+if __name__ == "__main__": main()
