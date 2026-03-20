@@ -1,0 +1,34 @@
+name: 채널별 추이차트 v6
+
+on:
+  # 매일 한국시간 오전 6시 (UTC 21:00 전날)
+  schedule:
+    - cron: '0 21 * * *'
+  # 수동 실행
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install gspread google-auth
+
+      - name: Write GCP service account key
+        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp_sa.json
+
+      - name: Run script
+        env:
+          GCP_SA_FILE: /tmp/gcp_sa.json
+        run: python scripts/channel_trend_v6.py
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/gcp_sa.json
