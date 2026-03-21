@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""v3-ad 통합 코드 (★ FIX v14 - 매출(ROAS) 표시 변경 + 병렬처리)
+"""v3-ad 통합 코드 (★ FIX v15 - 조건부서식 재적용 + 요약표 수정)
 
 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존)
   - ★ FIX v14: 추이차트/증감액 첫 줄을 매출(ROAS) 형식으로 변경
+  - ★ FIX v15: 기존 탭 업데이트 시 조건부서식 재적용 + 요약표 영역 resize 후 클리어
 """
 
 print("="*60)
-print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v14 + 병렬처리]")
+print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v15 + 병렬처리]")
 print("="*60)
 
 # =========================================================
@@ -703,6 +704,106 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count):
     return fmt_requests
 
 
+# ★ FIX v15: 기존 날짜탭에 조건부 서식을 재적용하는 함수
+def reapply_date_tab_conditional_formatting(sh, ws, data_end, structure):
+    """기존 날짜탭의 조건부 서식을 삭제 후 현재 data_end 범위로 재적용"""
+    sid = ws.id
+    NUM_COLS = len(DATE_TAB_HEADERS) if structure == "new" else 25
+
+    # 1) 기존 조건부 서식 규칙 전부 삭제
+    try:
+        # 시트의 조건부 서식 규칙 목록 가져오기
+        sheet_metadata = None
+        resp = with_retry(sh.fetch_sheet_metadata, params={'fields': 'sheets.conditionalFormats,sheets.properties.sheetId'})
+        if resp:
+            for s in resp.get('sheets', []):
+                if s.get('properties', {}).get('sheetId') == sid:
+                    sheet_metadata = s
+                    break
+    except Exception:
+        sheet_metadata = None
+
+    if sheet_metadata:
+        cond_formats = sheet_metadata.get('conditionalFormats', [])
+        if cond_formats:
+            # 역순으로 삭제 (인덱스 유지를 위해)
+            del_requests = []
+            for i in range(len(cond_formats) - 1, -1, -1):
+                del_requests.append({
+                    "deleteConditionalFormatRule": {
+                        "sheetId": sid,
+                        "index": i
+                    }
+                })
+            try:
+                with_retry(sh.batch_update, body={"requests": del_requests})
+                print(f"    🧹 기존 조건부 서식 {len(cond_formats)}개 삭제")
+                time.sleep(1)
+            except Exception as e:
+                print(f"    ⚠️ 조건부 서식 삭제 오류: {e}")
+
+    # 2) 이익 열 (new: col 16, old: col 18) 조건부 서식 재적용
+    profit_col = get_col_index(structure, 16)
+    roas_col = get_col_index(structure, 17)
+    cvr_col = get_col_index(structure, 18)
+
+    fmt_all = []
+
+    # 이익 조건부 서식
+    profit_cond = [
+        ("NUMBER_GREATER","0",{"red":1,"green":0.949,"blue":0.8},None),
+        ("NUMBER_GREATER","50000",{"red":1,"green":0.898,"blue":0.6},None),
+        ("NUMBER_GREATER","100000",{"red":0.576,"green":0.769,"blue":0.49},None),
+        ("NUMBER_GREATER","200000",{"red":0,"green":1,"blue":0},None),
+        ("NUMBER_GREATER","300000",{"red":0,"green":1,"blue":1},None),
+        ("NUMBER_LESS","-10000",{"red":0.957,"green":0.8,"blue":0.8},None),
+        ("NUMBER_LESS","-50000",{"red":0.878,"green":0.4,"blue":0.4},{"red":0,"green":0,"blue":0}),
+    ]
+    for ctype, val, bg, fc in profit_cond:
+        rule_fmt = {"backgroundColor": bg}
+        if fc: rule_fmt["textFormat"] = {"foregroundColor": fc}
+        fmt_all.append({"addConditionalFormatRule":{"rule":{"ranges":[{
+            "sheetId":sid,"startRowIndex":1,"endRowIndex":data_end,
+            "startColumnIndex":profit_col,"endColumnIndex":profit_col+1
+        }],"booleanRule":{"condition":{"type":ctype,"values":[{"userEnteredValue":val}]},"format":rule_fmt}},"index":0}})
+
+    # 이익 그라데이션
+    fmt_all.append({"addConditionalFormatRule":{"rule":{"ranges":[{
+        "sheetId":sid,"startRowIndex":1,"endRowIndex":data_end,
+        "startColumnIndex":profit_col,"endColumnIndex":profit_col+1
+    }],"gradientRule":{"minpoint":{"color":{"red":0.902,"green":0.486,"blue":0.451},"type":"MIN"},
+        "midpoint":{"color":{"red":1,"green":1,"blue":1},"type":"NUMBER","value":"0"},
+        "maxpoint":{"color":{"red":0.341,"green":0.733,"blue":0.541},"type":"MAX"}}},"index":0}})
+
+    # ROAS 조건부 서식
+    roas_cond = [
+        ("NUMBER_LESS","100",{"red":0.878,"green":0.4,"blue":0.4}),
+        ("NUMBER_GREATER_THAN_EQ","100",{"red":1,"green":0.851,"blue":0.4}),
+        ("NUMBER_GREATER_THAN_EQ","200",{"red":0.576,"green":0.769,"blue":0.49}),
+        ("NUMBER_GREATER_THAN_EQ","300",{"red":0,"green":1,"blue":1}),
+    ]
+    for ctype, val, bg in roas_cond:
+        fmt_all.append({"addConditionalFormatRule":{"rule":{"ranges":[{
+            "sheetId":sid,"startRowIndex":1,"endRowIndex":data_end,
+            "startColumnIndex":roas_col,"endColumnIndex":roas_col+1
+        }],"booleanRule":{"condition":{"type":ctype,"values":[{"userEnteredValue":val}]},"format":{"backgroundColor":bg}}},"index":0}})
+
+    # CVR 그라데이션
+    fmt_all.append({"addConditionalFormatRule":{"rule":{"ranges":[{
+        "sheetId":sid,"startRowIndex":1,"endRowIndex":data_end,
+        "startColumnIndex":cvr_col,"endColumnIndex":cvr_col+1
+    }],"gradientRule":{"minpoint":{"color":{"red":1,"green":1,"blue":1},"type":"MIN"},
+        "maxpoint":{"color":{"red":0.341,"green":0.733,"blue":0.541},"type":"MAX"}}},"index":0}})
+
+    if fmt_all:
+        try:
+            with_retry(sh.batch_update, body={"requests": fmt_all})
+            print(f"    ✅ 조건부 서식 재적용 완료 (data_end={data_end}, 이익col={profit_col}, ROAScol={roas_col}, CVRcol={cvr_col})")
+            time.sleep(2)
+        except Exception as e:
+            print(f"    ⚠️ 조건부 서식 재적용 오류: {e}")
+
+
 # =============================================================================
 # 실행 시작
 # =============================================================================
@@ -960,6 +1061,11 @@ for dk in sorted(existing_refresh_tabs.keys()):
             append_row=data_end_idx+1
             with_retry(ws_ex.update,values=new_rows_to_add,range_name=f"A{append_row}",value_input_option="USER_ENTERED")
             print(f"    ✅ {len(new_rows_to_add)}개 신규 광고 세트 행 추가 (행 {append_row}부터)"); time.sleep(1); data_end_idx+=len(new_rows_to_add)
+
+        # ★ FIX v15: 조건부 서식 재적용 (현재 data_end_idx 기준)
+        print(f"    🎨 조건부 서식 재적용 (데이터 끝: 행 {data_end_idx})...")
+        reapply_date_tab_conditional_formatting(sh, ws_ex, data_end_idx, structure)
+
         print(f"    🔍 요약표 위치 재계산 중...")
         all_values=with_retry(ws_ex.get_all_values); time.sleep(0.5)
         structure=detect_tab_structure(all_values[0])
@@ -967,13 +1073,28 @@ for dk in sorted(existing_refresh_tabs.keys()):
         summary_start_row=last_data_row+1
         print(f"    📍 마지막 데이터: 행 {last_data_row}, 데이터 {len(data_rows_for_summary)}개 → 요약표 시작: 행 {summary_start_row}")
         total_sheet_rows=len(all_values); clear_end_row=max(total_sheet_rows+50,summary_start_row+100)
+
+        # ★ FIX v15: 시트 행 수 확보 후 클리어 (resize 추가 + 에러 로깅)
+        try:
+            current_row_count = ws_ex.row_count
+            if clear_end_row > current_row_count:
+                with_retry(ws_ex.resize, rows=clear_end_row, cols=ws_ex.col_count)
+                print(f"    📐 시트 resize: {current_row_count} → {clear_end_row} 행")
+                time.sleep(1)
+        except Exception as e:
+            print(f"    ⚠️ 시트 resize 오류: {e}")
+
         try:
             with_retry(sh.batch_update, body={"requests":[
                 {"unmergeCells":{"range":{"sheetId":ws_ex.id,"startRowIndex":summary_start_row-1,"endRowIndex":clear_end_row,"startColumnIndex":0,"endColumnIndex":30}}},
                 {"repeatCell":{"range":{"sheetId":ws_ex.id,"startRowIndex":summary_start_row-1,"endRowIndex":clear_end_row,"startColumnIndex":0,"endColumnIndex":30},"cell":{"userEnteredFormat":{},"userEnteredValue":{}},"fields":"userEnteredFormat,userEnteredValue"}}
             ]}); time.sleep(0.5)
-        except: pass
-        print(f"    🧹 행 {summary_start_row}~{clear_end_row} 서식+내용 클리어")
+            print(f"    🧹 행 {summary_start_row}~{clear_end_row} 서식+내용 클리어 완료")
+        except Exception as e:
+            print(f"    ⚠️ 요약표 영역 클리어 오류: {e}")
+            # 클리어 실패 시에도 요약표 쓰기는 시도 (덮어쓰기)
+            print(f"    ℹ️ 클리어 실패하였으나 요약표 덮어쓰기 시도...")
+
         summary_rows=generate_date_tab_summary(data_rows_for_summary,structure=structure)
         with_retry(ws_ex.update,values=summary_rows,range_name=f"A{summary_start_row}",value_input_option="USER_ENTERED"); time.sleep(1)
         try:
