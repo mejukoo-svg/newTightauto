@@ -279,13 +279,13 @@ def reorder_tabs(sh):
 def cell_text(profit, revenue, spend, cpm=0, cvr=0):
     if spend == 0: return ""
     roas = (revenue / spend * 100) if spend > 0 else 0
-    return f"{money(revenue)}({roas:.0f})\n{money(profit)}\n-{money(spend)}\n{'₩'+str(int(round(cpm)))+'' if cpm > 0 else '₩0'}\n{cvr:.1f}%"
+    return f"{money(revenue)}\n({roas:.0f})\n{money(profit)}\n-{money(spend)}\n{'₩'+str(int(round(cpm)))+'' if cpm > 0 else '₩0'}\n{cvr:.1f}%"
 
 # ★ FIX v14: revenue 파라미터 추가 + 매출(ROAS) 형식
 def cell_text_change(roas, chg, spend, cpm, cvr=0, revenue=0):
     if spend == 0: return ""
     cl = f"+{chg:.1f}%" if chg > 0 else f"{chg:.1f}%" if chg < 0 else "0.0%"
-    return f"{money(revenue)}({roas:.0f})\n{cl}\n-{money(spend)}\n{'₩'+str(int(round(cpm))) if cpm > 0 else '₩0'}\n{cvr:.1f}%"
+    return f"{money(revenue)}\n({roas:.0f})\n{cl}\n-{money(spend)}\n{'₩'+str(int(round(cpm))) if cpm > 0 else '₩0'}\n{cvr:.1f}%"
 
 def get_week_range(d):
     wd = d.weekday(); m = d - timedelta(days=wd); s = m + timedelta(days=6)
@@ -328,16 +328,16 @@ def create_number_format_request(sid, sr, er, sc, ec, ft="NUMBER", p="#,##0"):
 
 # ★ FIX v14: 범례 라벨 변경
 def apply_c2_label_formatting(sh, ws):
-    sid = ws.id; cv = "매출(ROAS)\n순이익\n지출\nCPM\n전환율"
+    sid = ws.id; cv = "매출\n(ROAS)\n순이익\n지출\nCPM\n전환율"
     lines = cv.split('\n'); indices = [0]; pos = 0
     for line in lines[:-1]: pos += len(line) + 1; indices.append(pos)
     bk = {"foregroundColor":{"red":0,"green":0,"blue":0}}; dg = {"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
     rd = {"foregroundColor":{"red":0.85,"green":0.0,"blue":0.0}}; bl = {"foregroundColor":{"red":0.0,"green":0.0,"blue":0.85}}
     req = {"updateCells":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":2,"startColumnIndex":2,"endColumnIndex":3},
         "rows":[{"values":[{"userEnteredValue":{"stringValue":cv},"textFormatRuns":[
-            {"startIndex":indices[0],"format":bk},{"startIndex":indices[1],"format":dg},
-            {"startIndex":indices[2],"format":rd},{"startIndex":indices[3],"format":bl},
-            {"startIndex":indices[4],"format":bk}]}]}],"fields":"userEnteredValue,textFormatRuns"}}
+            {"startIndex":indices[0],"format":bk},{"startIndex":indices[1],"format":bk},
+            {"startIndex":indices[2],"format":dg},{"startIndex":indices[3],"format":rd},
+            {"startIndex":indices[4],"format":bl},{"startIndex":indices[5],"format":bk}]}]}],"fields":"userEnteredValue,textFormatRuns"}}
     with_retry(sh.batch_update, body={"requests":[req]}); time.sleep(1)
 
 def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=False, sunday_col_indices=None, format_col_end=None):
@@ -390,15 +390,16 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
                 val = cv[ri-1] if ri-1 < len(cv) else ""
                 if not val or '\n' not in val: continue
                 lines = val.split('\n')
-                if len(lines) < 4: continue
-                l1e=len(lines[0]);l2e=l1e+1+len(lines[1]);l3e=l2e+1+len(lines[2]);l4s=l3e+1
-                if len(lines)>=5: l4e=l4s+len(lines[3]);l5s=l4e+1
+                if len(lines) < 5: continue
+                # ★ FIX v14: 6줄 구조 (매출 / (ROAS) / 순이익or증감 / 지출 / CPM / 전환율)
+                l1e=len(lines[0]);l2s=l1e+1;l2e=l2s+len(lines[1]);l3s=l2e+1;l3e=l3s+len(lines[2]);l4s=l3e+1;l4e=l4s+len(lines[3]);l5s=l4e+1
+                if len(lines)>=6: l5e=l5s+len(lines[4]);l6s=l5e+1
                 if is_change_tab:
-                    cc = gn if lines[1].startswith('+') else rd if lines[1].startswith('-') else bk
-                    tr=[{"startIndex":0,"format":bk},{"startIndex":l1e+1,"format":cc},{"startIndex":l2e+1,"format":rd},{"startIndex":l4s,"format":bl}]
+                    cc = gn if lines[2].startswith('+') else rd if lines[2].startswith('-') else bk
+                    tr=[{"startIndex":0,"format":bk},{"startIndex":l2s,"format":bk},{"startIndex":l3s,"format":cc},{"startIndex":l4s,"format":rd},{"startIndex":l5s,"format":bl}]
                 else:
-                    tr=[{"startIndex":0,"format":bk},{"startIndex":l1e+1,"format":dg3},{"startIndex":l2e+1,"format":rd},{"startIndex":l4s,"format":bl}]
-                if len(lines)>=5: tr.append({"startIndex":l5s,"format":bk})
+                    tr=[{"startIndex":0,"format":bk},{"startIndex":l2s,"format":bk},{"startIndex":l3s,"format":dg3},{"startIndex":l4s,"format":rd},{"startIndex":l5s,"format":bl}]
+                if len(lines)>=6: tr.append({"startIndex":l6s,"format":bk})
                 fr.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri-1,"endRowIndex":ri,"startColumnIndex":ci,"endColumnIndex":ci+1},"rows":[{"values":[{"userEnteredValue":{"stringValue":val},"textFormatRuns":tr}]}],"fields":"userEnteredValue,textFormatRuns"}})
                 if len(fr) >= 300:
                     try: with_retry(sh.batch_update, body={"requests":fr}); fr=[]; time.sleep(3)
