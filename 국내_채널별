@@ -4,7 +4,7 @@
 # ─────────────────────────────────────
 # Colab → GitHub Actions 변경점:
 #   - !pip install 제거 (workflow에서 처리)
-#   - google.colab 인증 → GCP 서비스 계정 JSON
+#   - google.colab 인증 → GCP 서비스 계정 파일 (GCP_SA_FILE)
 #   - 하드코딩 credentials → 환경변수
 #   - retry 래퍼 적용
 #   - 결제 이벤트명 "결제완료" + "payment_complete" 병행 조회
@@ -42,15 +42,8 @@ SPREADSHEET_URL = require_env("SPREADSHEET_URL_NAVER_SA")
 MASTER_TAB = "네이버SA_마스터탭"
 TREND_TAB  = "네이버SA_추이차트"
 
-# ── Google Sheets 인증 (서비스 계정) ──
-gcp_key_json = require_env("GCP_SERVICE_ACCOUNT_KEY")
-try:
-    gcp_creds = json.loads(gcp_key_json)
-except json.JSONDecodeError:
-    print("❌ GCP_SERVICE_ACCOUNT_KEY가 올바른 JSON이 아닙니다.")
-    sys.exit(1)
-
-gc = gspread.service_account_from_dict(gcp_creds)
+# ── Google Sheets 인증 (서비스 계정 파일) ──
+gc = gspread.service_account(filename=require_env("GCP_SA_FILE"))
 
 # ── 기간 설정 ──
 REFRESH_DAYS = 365 * 2
