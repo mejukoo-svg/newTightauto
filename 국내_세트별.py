@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 (★ v21 - 병렬처리 + 이벤트/변수명 OR 지원):
+# v3-ad 국내 세트별 (★ v24 - 통화 자동감지 + TWD 제거 + 병렬처리):
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출 (FULL_REFRESH 시 전체)
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑
@@ -13,7 +13,7 @@
 #   - 구 구조(25열) / 신 구조(23열) 자동 판별
 
 print("="*60)
-print("🚀 v3-ad v21 (병렬처리 + 이벤트/변수명 OR 지원)")
+print("🚀 v3-ad v24 국내 세트별 (통화 자동감지 + TWD 제거)")
 print("="*60)
 
 # =========================================================
@@ -83,12 +83,11 @@ def safe_print(*args, **kwargs):
 # USD → KRW, TWD → KRW 일별 환율 조회
 # =========================================================
 FALLBACK_USD_KRW = 1450
-FALLBACK_TWD_KRW = 45
 
 def fetch_daily_exchange_rates(start_date, end_date, currency="USD"):
     rates = {}
     pair = f"{currency}KRW=X"
-    fallback = FALLBACK_USD_KRW if currency == "USD" else FALLBACK_TWD_KRW
+    fallback = FALLBACK_USD_KRW
     try:
         import yfinance as yf
     except ImportError:
@@ -391,12 +390,13 @@ def reorder_tabs(sh):
             if tn in ANALYSIS_TABS_SET: analysis_tabs.append(ws)
             elif parse_date_tab(tn) is not None: date_tabs.append(ws)
             else: other_tabs.append(ws)
-        date_tabs.sort(key=lambda ws: parse_date_tab(ws.title))
+        # ★ v23: 날짜탭 최신→과거 순, 분석탭이 맨 왼쪽
+        date_tabs.sort(key=lambda ws: parse_date_tab(ws.title), reverse=True)
         analysis_tabs.sort(key=lambda ws: analysis_order_map.get(ws.title, 999))
-        final_order = other_tabs + date_tabs + analysis_tabs
-        print(f"  📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📊 분석: {len(analysis_tabs)}개")
-        if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (과거) → {date_tabs[-1].title} (최신)")
-        if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)}")
+        final_order = analysis_tabs + date_tabs + other_tabs
+        print(f"  📊 분석: {len(analysis_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📋 기타: {len(other_tabs)}개")
+        if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (최신) → {date_tabs[-1].title} (과거)")
+        if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)} (맨 왼쪽)")
         with_retry(sh.batch_update, body={"requests": [
             {"updateSheetProperties": {"properties": {"sheetId": ws.id, "index": idx}, "fields": "index"}}
             for idx, ws in enumerate(final_order)
@@ -585,6 +585,18 @@ def extract_action_value(al, types):
             except: return 0
     return 0
 
+# ★ v24: 계정 통화 자동감지
+def detect_account_currency(ad_account_id):
+    """Meta 광고 계정의 통화 설정을 API로 조회"""
+    url = f"{META_BASE_URL}/{ad_account_id}"
+    params = {'fields': 'currency,name'}
+    data = meta_api_get(url, params, token=get_token(ad_account_id))
+    if data:
+        currency = data.get('currency', 'USD')
+        name = data.get('name', ad_account_id)
+        return currency, name
+    return 'USD', ad_account_id
+
 def fetch_meta_insights_daily(ad_account_id, single_date):
     url = f"{META_BASE_URL}/{ad_account_id}/insights"
     fields = 'campaign_name,adset_name,adset_id,spend,cpm,reach,impressions,frequency,actions,cost_per_action_type,purchase_roas,unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click'
@@ -601,7 +613,7 @@ def fetch_meta_insights_daily(ad_account_id, single_date):
         else: break
     return all_results
 
-def parse_single_day_insights(rows, date_str, date_obj):
+def parse_single_day_insights(rows, date_str, date_obj, ad_account_id=""):
     purchase_types = ['purchase','omni_purchase','offsite_conversion.fb_pixel_purchase']; outbound_types = ['outbound_click']
     parsed = []
     for row in rows:
@@ -612,6 +624,7 @@ def parse_single_day_insights(rows, date_str, date_obj):
         uc=row.get('unique_outbound_clicks_ctr',[]); unique_ctr=extract_action_value(uc,outbound_types)
         cpu=row.get('cost_per_unique_outbound_click',[]); cost_per_click=extract_action_value(cpu,outbound_types)
         parsed.append({'campaign_name':row.get('campaign_name',''),'adset_name':row.get('adset_name',''),'adset_id':row.get('adset_id',''),
+            'ad_account_id':ad_account_id,
             'spend':spend,'cost_per_result':cost_per_result,'cpm':cpm,'reach':reach,'impressions':impressions,'unique_clicks':unique_clicks,
             'unique_ctr':unique_ctr,'cost_per_unique_click':cost_per_click,'frequency':frequency,'results':results,'date_obj':date_obj})
     return parsed
@@ -1068,7 +1081,7 @@ def _fetch_single_account(acc_id, target_str, date_key, target_date):
     """단일 계정 + 단일 날짜 조회 (내부 병렬용)"""
     rows = fetch_meta_insights_daily(acc_id, target_str)
     if rows:
-        parsed = parse_single_day_insights(rows, date_key, target_date)
+        parsed = parse_single_day_insights(rows, date_key, target_date, ad_account_id=acc_id)
         safe_print(f"    ✅ {date_key} {acc_id[-6:]}: {len(parsed)}건")
         return parsed
     else:
@@ -1117,7 +1130,16 @@ with ThreadPoolExecutor(max_workers=META_DATE_WORKERS) as date_pool:
         except Exception as e:
             safe_print(f"  ❌ 날짜 조회 오류: {e}")
 
-print(f"\n✅ Meta 수집 완료: {len(meta_date_data)}일, 총 {meta_success_count}건\n")
+print(f"\n✅ Meta 수집 완료: {len(meta_date_data)}일, 총 {meta_success_count}건")
+
+# ★ v24: adset_id → ad_account_id 매핑 구축
+ADSET_TO_ACCOUNT = {}
+for dk, rows in meta_date_data.items():
+    for mr in rows:
+        asid = mr.get('adset_id', '')
+        acc = mr.get('ad_account_id', '')
+        if asid and acc: ADSET_TO_ACCOUNT[asid] = acc
+print(f"  📦 adset→account 매핑: {len(ADSET_TO_ACCOUNT)}개\n")
 
 # =========================================================
 # ★ v21: 2.5단계 예산 - 병렬
@@ -1225,57 +1247,71 @@ print(f"\n  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개")
 print(f"  🆕 새로 생성할 탭: {len(new_refresh_dates)}개\n")
 
 # =========================================================
-# ★ v21: 4.5단계 환율 - 병렬
+# ★ v24: 4.5단계 - 계정 통화 자동감지 → 필요시 USD→KRW 환율 조회
 # =========================================================
-print("="*60); print(f"4.5단계: USD/TWD → KRW 일별 환율 조회 (병렬: {EXCHANGE_RATE_WORKERS}워커)"); print("="*60)
-rate_range_start = DATA_REFRESH_START - timedelta(days=7)
+print("="*60); print("4.5단계: 계정 통화 감지 + 환율 조회"); print("="*60)
+
+# ★ v24: 각 계정의 통화를 Meta API로 자동 감지
+ACCOUNT_CURRENCY = {}
+has_usd_account = False
+for acc_id in ALL_AD_ACCOUNTS:
+    currency, acc_name = detect_account_currency(acc_id)
+    ACCOUNT_CURRENCY[acc_id] = currency
+    if currency != 'KRW': has_usd_account = True
+    print(f"  💱 {acc_id[-6:]}: {currency} ({acc_name})")
+    time.sleep(0.5)
+
 usd_krw_rates = {}
-twd_krw_rates = {}
+if has_usd_account:
+    rate_range_start = DATA_REFRESH_START - timedelta(days=7)
+    usd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="USD")
+    if usd_krw_rates:
+        sample_rates = list(usd_krw_rates.items())[-3:]
+        for dk, rate in sample_rates: print(f"  USD {dk}: 1 USD = ₩{rate:,.2f}")
+    else: print(f"  ⚠️ USD 환율 조회 실패 → 폴백 ₩{FALLBACK_USD_KRW:,}")
+else:
+    print("  ✅ 모든 계정이 KRW → 환율 변환 불필요")
 
-def _fetch_usd_rates():
-    return fetch_daily_exchange_rates(rate_range_start, TODAY, currency="USD")
+def get_fx_for_account(acc_id, dk):
+    """계정 통화에 따른 환율 반환. KRW=1.0, USD=환율"""
+    cur = ACCOUNT_CURRENCY.get(acc_id, 'KRW')
+    if cur == 'KRW': return 1.0
+    return get_rate_for_date(usd_krw_rates, dk)
 
-def _fetch_twd_rates():
-    return fetch_daily_exchange_rates(rate_range_start, TODAY, currency="TWD")
+def get_budget_divisor(acc_id):
+    """KRW 계정은 센트변환 불필요(÷1), USD 계정은 센트→달러(÷100)"""
+    cur = ACCOUNT_CURRENCY.get(acc_id, 'KRW')
+    return 100 if cur != 'KRW' else 1
 
-with ThreadPoolExecutor(max_workers=EXCHANGE_RATE_WORKERS) as fx_pool:
-    usd_future = fx_pool.submit(_fetch_usd_rates)
-    twd_future = fx_pool.submit(_fetch_twd_rates)
-    usd_krw_rates = usd_future.result()
-    twd_krw_rates = twd_future.result()
-
-if usd_krw_rates:
-    sample_rates = list(usd_krw_rates.items())[-3:]
-    for dk, rate in sample_rates: print(f"  USD {dk}: 1 USD = ₩{rate:,.2f}")
-else: print(f"  ⚠️ USD 환율 조회 실패 → 폴백 ₩{FALLBACK_USD_KRW:,}")
-if twd_krw_rates:
-    sample_rates = list(twd_krw_rates.items())[-3:]
-    for dk, rate in sample_rates: print(f"  TWD {dk}: 1 TWD = ₩{rate:,.2f}")
-else: print(f"  ⚠️ TWD 환율 조회 실패 → 폴백 ₩{FALLBACK_TWD_KRW:,}")
 print()
 
 # 5단계: 병합
-print("="*60); print("5단계: Meta + Mixpanel 병합 (USD→KRW 환산)"); print("="*60)
+print("="*60); print("5단계: Meta + Mixpanel(KRW) 병합"); print("="*60)
 date_tab_rows = defaultdict(list); date_mp_by_adsetid = defaultdict(dict); new_date_names = []; product_count = defaultdict(int)
 debug_total_rows = 0; debug_matched_rows = 0; debug_matched_revenue = 0
 for dk in sorted(meta_date_data.keys(), key=lambda x: meta_date_data[x][0]['date_obj'] if meta_date_data[x] else datetime.min, reverse=True):
     rows = meta_date_data[dk]
     if not rows: continue
     dt = rows[0]['date_obj']; new_date_names.append(dk)
-    fx_usd = get_rate_for_date(usd_krw_rates, dk); fx_twd = get_rate_for_date(twd_krw_rates, dk, fallback=FALLBACK_TWD_KRW)
     for mr in rows:
         asid = mr['adset_id']
         if not asid: continue
         debug_total_rows += 1
-        sp = mr['spend'] * fx_usd; impr = mr['impressions']; reach = mr['reach']; uc = mr['unique_clicks']; results = mr['results']
-        cpm = mr['cpm'] * fx_usd; frequency = mr['frequency']; cost_per_result = mr['cost_per_result'] * fx_usd; cost_per_click = mr['cost_per_unique_click'] * fx_usd; unique_ctr = mr['unique_ctr']
+        # ★ v24: 계정 통화 자동감지 → KRW=1.0, USD=환율
+        acc_id = mr.get('ad_account_id', '')
+        fx = get_fx_for_account(acc_id, dk)
+        budget_div = get_budget_divisor(acc_id)
+        sp = mr['spend'] * fx; impr = mr['impressions']; reach = mr['reach']; uc = mr['unique_clicks']; results = mr['results']
+        cpm = mr['cpm'] * fx; frequency = mr['frequency']; cost_per_result = mr['cost_per_result'] * fx; cost_per_click = mr['cost_per_unique_click'] * fx; unique_ctr = mr['unique_ctr']
         mpc = mp_count_map.get((dk, asid), 0); mpv = mp_value_map.get((dk, asid), 0.0)
         if mpc > 0 or mpv > 0: debug_matched_rows += 1; debug_matched_revenue += mpv
-        rv = float(mpv) * fx_twd; date_mp_by_adsetid[dk][asid] = {'mpc': mpc, 'mpv': rv}
+        # ★ v24: Mixpanel 매출은 이미 KRW → 변환 없음
+        rv = float(mpv); date_mp_by_adsetid[dk][asid] = {'mpc': mpc, 'mpv': rv}
         pf = rv - sp; roas_c = (rv / sp * 100) if sp > 0 else 0; cvr_c = (mpc / uc * 100) if uc > 0 and mpc > 0 else 0
         cn = mr['campaign_name']; asn = mr['adset_name']
         budget_raw = adset_budget_map.get(asid, 0)
-        budget_val = round(budget_raw / 100 * fx_usd) if budget_raw and budget_raw > 0 else ""
+        # ★ v24: 예산 = daily_budget / divisor × 환율 (KRW면 그대로, USD면 /100×환율)
+        budget_val = round(budget_raw / budget_div * fx) if budget_raw and budget_raw > 0 else ""
         tab_row = [cn, asn, asid, sp, cost_per_result, 0, round(cpm, 0), reach, impr, uc, round(unique_ctr, 2), round(cost_per_click, 0), round(frequency, 2), results,
             mpc if mpc > 0 else "", round(rv) if rv > 0 else "", round(pf, 0) if sp > 0 else "", round(roas_c, 1) if sp > 0 and rv > 0 else "", round(cvr_c, 2) if uc > 0 and mpc > 0 else "", budget_val, "", "", ""]
         date_tab_rows[dk].append(tab_row); p = extract_product(asn); product_count[p] += 1
@@ -1362,10 +1398,13 @@ for dk in sorted(existing_refresh_tabs.keys()):
             print(f"    ✅ {updated_count}개 광고 세트 업데이트 완료")
         else: print(f"    ℹ️ 업데이트할 데이터 없음")
         budget_updates = []; actual_budget_col = get_col_index(structure, 19); budget_col_letter = get_col_letter(actual_budget_col)
-        fx_budget = get_rate_for_date(usd_krw_rates, dk)
+        # ★ v24: 계정 통화별 예산 변환 (KRW=그대로, USD=/100×환율)
         for asid, row_idx in adset_id_row_map.items():
             if asid in adset_budget_map and adset_budget_map[asid] > 0:
-                row_num = row_idx + 1; budget_krw = round(adset_budget_map[asid] / 100 * fx_budget)
+                acc = ADSET_TO_ACCOUNT.get(asid, '')
+                fx = get_fx_for_account(acc, dk)
+                div = get_budget_divisor(acc)
+                row_num = row_idx + 1; budget_krw = round(adset_budget_map[asid] / div * fx)
                 budget_updates.append({'range': f'{budget_col_letter}{row_num}', 'values': [[budget_krw]]})
         if budget_updates:
             for i in range(0, len(budget_updates), 100):
@@ -1483,10 +1522,8 @@ print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리"); print("="*60)
 reorder_tabs(sh)
 
 # 8.5: 전체 날짜탭 읽기 (병렬)
-mp_value_map_krw = {}
-for (d, ut), v in mp_value_map.items():
-    fx = get_rate_for_date(twd_krw_rates, d, fallback=FALLBACK_TWD_KRW); mp_value_map_krw[(d, ut)] = v * fx
-ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map_krw, mp_count_map=mp_count_map)
+# ★ v24: Mixpanel 매출은 KRW 그대로 전달
+ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map, mp_count_map=mp_count_map)
 
 # 진단
 failed_tabs = diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET)
