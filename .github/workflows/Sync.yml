@@ -1,34 +1,33 @@
 name: 채널별 추이차트 v6
-
 on:
   # 매일 한국시간 오전 6시 (UTC 21:00 전날)
   schedule:
     - cron: '0 21 * * *'
   # 수동 실행
   workflow_dispatch:
-
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
-        run: pip install gspread google-auth
-
+        run: pip install gspread gspread-formatting google-auth pandas numpy requests
       - name: Write GCP service account key
         run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp_sa.json
-
       - name: Run script
         env:
           GCP_SA_FILE: /tmp/gcp_sa.json
+          NAVER_API_KEY: ${{ secrets.NAVER_API_KEY }}
+          NAVER_SECRET_KEY: ${{ secrets.NAVER_SECRET_KEY }}
+          NAVER_CUSTOMER_ID: ${{ secrets.NAVER_CUSTOMER_ID }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SPREADSHEET_URL_NAVER_SA: ${{ secrets.SPREADSHEET_URL_NAVER_SA }}
         run: python 국내_채널별
-
       - name: Cleanup
         if: always()
         run: rm -f /tmp/gcp_sa.json
