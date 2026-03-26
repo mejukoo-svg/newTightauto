@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-[Vanced] 퍼포먼스 데이터 자동 업데이트 v3
+[Vanced] 퍼포먼스 데이터 자동 업데이트 v3 — Parallel Edition
 Meta Ads API (지출/노출/클릭) + Mixpanel (매출/결과수 - utm_term 매칭)
 → Google Sheets 전체 탭 자동 갱신
 
-★ Colab 호환 버전
-  - Colab 셀에서 os.environ 세팅 후 main() 호출
-  - 또는 Google Colab Secrets / userdata 활용
+★ 변경사항
+  - 결제완료 이벤트: '결제완료' + 'payment_complete' 둘 다 OR 조회
+  - amount 필드: 'amount' → '결제금액' → 'value' 순으로 OR 추출
+  - 모든 I/O를 병렬(ThreadPoolExecutor) 처리: API fetch 병렬 + 시트 업데이트 병렬
 """
 
 import os
@@ -17,6 +18,7 @@ import gspread
 import requests
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict, OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from google.oauth2.service_account import Credentials
 
 # =============================================================================
@@ -27,7 +29,6 @@ def load_env():
     try:
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
     except NameError:
-        # Colab 환경: __file__ 미정의 → .env 로드 스킵
         print("ℹ️  Colab 환경 감지 → .env 파일 로드 스킵 (os.environ 직접 설정 필요)")
         return
 
@@ -45,10 +46,9 @@ def load_env():
 load_env()
 
 # =============================================================================
-# 환경변수 읽기 (함수로 감싸서 lazy 로드)
+# 환경변수 읽기
 # =============================================================================
 def get_config():
-    """환경변수에서 설정값을 읽어 dict로 반환"""
     cfg = {}
     cfg['META_ACCESS_TOKEN']   = os.environ.get('META_TOKEN_VANCED', '')
     cfg['META_AD_ACCOUNT_ID']  = os.environ.get('META_AD_ACCOUNT_ID', 'act_25183853061243175')
@@ -58,7 +58,8 @@ def get_config():
     cfg['MIXPANEL_PROJECT_ID'] = os.environ.get('MIXPANEL_PROJECT_ID', '3390233')
     cfg['MIXPANEL_USERNAME']   = os.environ.get('MIXPANEL_USERNAME', '')
     cfg['MIXPANEL_SECRET']     = os.environ.get('MIXPANEL_SECRET', '')
-    cfg['MIXPANEL_EVENT_NAME'] = os.environ.get('MIXPANEL_EVENT_NAME', '결제완료')
+    # ★ 이벤트명 2개 OR
+    cfg['MIXPANEL_EVENT_NAMES'] = ['결제완료', 'payment_complete']
 
     cfg['SPREADSHEET_URL']     = os.environ.get('SPREADSHEET_URL', '')
     cfg['GCP_SA_KEY_JSON']     = os.environ.get('GCP_SERVICE_ACCOUNT_KEY', '')
@@ -66,7 +67,6 @@ def get_config():
     cfg['FROM_DATE'] = os.environ.get('FROM_DATE', '2025-11-09')
     cfg['TO_DATE']   = os.environ.get('TO_DATE', datetime.now().strftime('%Y-%m-%d'))
 
-    # ── 필수값 검증 ──
     missing = []
     if not cfg['META_ACCESS_TOKEN']:   missing.append('META_TOKEN_VANCED')
     if not cfg['GCP_SA_KEY_JSON']:     missing.append('GCP_SERVICE_ACCOUNT_KEY')
@@ -78,19 +78,12 @@ def get_config():
         print("\n❌ 필수 환경변수가 설정되지 않았습니다:")
         for m in missing:
             print(f"   - {m}")
-        print("\n💡 Colab에서는 아래처럼 셀에서 먼저 설정하세요:")
-        print("   import os")
-        print("   os.environ['META_TOKEN_VANCED'] = '...'")
-        print("   os.environ['GCP_SERVICE_ACCOUNT_KEY'] = '{...}'")
-        print("   os.environ['SPREADSHEET_URL'] = 'https://docs.google.com/...'")
-        print("   os.environ['MIXPANEL_USERNAME'] = '...'")
-        print("   os.environ['MIXPANEL_SECRET'] = '...'")
         raise ValueError(f"필수 환경변수 누락: {', '.join(missing)}")
 
     return cfg
 
 # =============================================================================
-# Google Sheets 인증 (서비스 계정) — lazy 초기화
+# Google Sheets 인증
 # =============================================================================
 SCOPES = [
     "https://spreadsheets.google.com/feeds",
@@ -98,13 +91,7 @@ SCOPES = [
 ]
 
 def get_gc(cfg):
-    """Google Sheets 클라이언트 생성"""
-    try:
-        sa_info = json.loads(cfg['GCP_SA_KEY_JSON'])
-    except json.JSONDecodeError as e:
-        print(f"\n❌ GCP_SERVICE_ACCOUNT_KEY JSON 파싱 실패: {e}")
-        print("   서비스 계정 키 JSON이 올바른지 확인하세요.")
-        raise
+    sa_info = json.loads(cfg['GCP_SA_KEY_JSON'])
     creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
     return gspread.authorize(creds)
 
@@ -182,7 +169,6 @@ def _fmt(color):
     return {"foregroundColor": color, "bold": True, "fontFamily": "Arial"}
 
 def apply_rich_text(sh, ws, data_2d, start_row_idx, start_col_idx, cell_type='trend'):
-    """ws: 이미 캐싱된 워크시트 객체를 직접 받음 (API 호출 절약)"""
     sheet_id = ws.id
     api_rows = []
     for row_data in data_2d:
@@ -237,18 +223,15 @@ def apply_rich_text(sh, ws, data_2d, start_row_idx, start_col_idx, cell_type='tr
             },
             "fields": "userEnteredValue,userEnteredFormat,textFormatRuns"
         }}]})
-        time.sleep(1)  # ★ 청크 간 sleep 추가
+        time.sleep(1)
     print(f"      → 리치텍스트 포맷 적용 ({len(api_rows)}행)")
 
 # =============================================================================
-# Part 1: Meta Ads API
+# Part 1: Meta Ads API — raw fetch (병렬 준비용)
 # =============================================================================
-def fetch_meta(cfg):
-    print("=" * 80)
-    print("🚀 [Vanced] 퍼포먼스 데이터 자동 업데이트 v3")
-    print("=" * 80)
-    print(f"\n📡 [1] Meta Ads API: adset 일간 데이터 ({cfg['FROM_DATE']} ~ {cfg['TO_DATE']})...")
-
+def fetch_meta_raw(cfg):
+    """Meta API에서 raw 데이터만 가져옴 (파싱은 별도)"""
+    print(f"\n📡 [Meta] adset 일간 데이터 fetch ({cfg['FROM_DATE']} ~ {cfg['TO_DATE']})...")
     meta_raw, next_url, page = [], None, 0
     while True:
         page += 1
@@ -275,20 +258,16 @@ def fetch_meta(cfg):
         data = resp.json()
         rows = data.get('data', [])
         meta_raw.extend(rows)
-        print(f"   페이지 {page}: +{len(rows)}건 (누적 {len(meta_raw)}건)")
+        print(f"   [Meta] 페이지 {page}: +{len(rows)}건 (누적 {len(meta_raw)}건)")
         next_url = data.get('paging', {}).get('next')
         if not next_url or not rows:
             break
         time.sleep(0.5)
     print(f"✅ Meta: {len(meta_raw)}건")
+    return meta_raw
 
-    if not meta_raw:
-        print("   ⚠️  Meta에서 받아온 데이터가 0건입니다!")
-        print("   확인사항:")
-        print(f"     - META_TOKEN_1 유효한지 (만료 여부)")
-        print(f"     - META_AD_ACCOUNT_ID: {cfg['META_AD_ACCOUNT_ID']}")
-        print(f"     - 기간: {cfg['FROM_DATE']} ~ {cfg['TO_DATE']}")
-
+def parse_meta(meta_raw):
+    """Meta raw → meta_data, all_adsets 파싱"""
     meta_data, all_adsets = {}, {}
     for row in meta_raw:
         dk = meta_date_to_key(row['date_start'])
@@ -327,31 +306,37 @@ def fetch_meta(cfg):
     return meta_data, all_adsets
 
 # =============================================================================
-# Part 2: Mixpanel
+# Part 2: Mixpanel — raw fetch (병렬 준비용)
 # =============================================================================
-def fetch_mixpanel(cfg, all_adsets):
-    print(f"\n📡 [2] Mixpanel API: 결제완료 이벤트 조회...")
+def fetch_mixpanel_raw(cfg):
+    """Mixpanel에서 raw 이벤트만 가져옴 (매칭은 별도)"""
+    print(f"\n📡 [Mixpanel] 결제 이벤트 조회 (이벤트: {cfg['MIXPANEL_EVENT_NAMES']})...")
     resp = requests.get(
         "https://data.mixpanel.com/api/2.0/export",
         params={
             'from_date': cfg['FROM_DATE'],
             'to_date': cfg['TO_DATE'],
-            'event': json.dumps([cfg['MIXPANEL_EVENT_NAME']]),
+            # ★ 이벤트명 2개 OR 조회
+            'event': json.dumps(cfg['MIXPANEL_EVENT_NAMES']),
             'project_id': cfg['MIXPANEL_PROJECT_ID'],
         },
         auth=(cfg['MIXPANEL_USERNAME'], cfg['MIXPANEL_SECRET']),
         timeout=300,
     )
+    if resp.status_code != 200:
+        print(f"❌ Mixpanel 오류: {resp.status_code} - {resp.text[:300]}")
+        return []
+    lines = [l for l in resp.text.split('\n') if l.strip()]
+    print(f"✅ Mixpanel: {len(lines)}건 수신")
+    return lines
 
+def parse_and_match_mixpanel(lines, all_adsets):
+    """Mixpanel raw lines → 파싱 + 중복제거 + adset 매칭"""
     mp_matched = defaultdict(lambda: {'count': 0, 'revenue': 0.0})
     total_events, matched_events, unmatched_events = 0, 0, 0
 
-    if resp.status_code != 200:
-        print(f"❌ Mixpanel 오류: {resp.status_code} - {resp.text[:300]}")
+    if not lines:
         return mp_matched, 0, 0, 0
-
-    lines = [l for l in resp.text.split('\n') if l.strip()]
-    print(f"✅ Mixpanel: {len(lines)}건 수신")
 
     seen, events_parsed = set(), []
     for line in lines:
@@ -364,19 +349,20 @@ def fetch_mixpanel(cfg, all_adsets):
             dt_kst = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)
             dk = f"{dt_kst.month}/{dt_kst.day}"
             utm_term = str(props.get('utm_term', '') or '').strip()
-            raw_amount = props.get('amount')
-            raw_value = props.get('value')
+
+            # ★ amount 필드: 'amount' → '결제금액' → 'value' 순서로 OR 추출
             amount = 0.0
-            if raw_amount is not None and str(raw_amount).strip() not in ['', 'None', 'nan', 'null']:
-                try:
-                    amount = float(raw_amount)
-                except (ValueError, TypeError):
-                    pass
-            if amount <= 0 and raw_value is not None and str(raw_value).strip() not in ['', 'None', 'nan', 'null']:
-                try:
-                    amount = float(raw_value)
-                except (ValueError, TypeError):
-                    pass
+            for field_name in ('amount', '결제금액', 'value'):
+                raw = props.get(field_name)
+                if raw is not None and str(raw).strip() not in ('', 'None', 'nan', 'null'):
+                    try:
+                        val = float(raw)
+                        if val > 0:
+                            amount = val
+                            break
+                    except (ValueError, TypeError):
+                        pass
+
             events_parsed.append({
                 'dk': dk,
                 'ts': ts,
@@ -435,7 +421,6 @@ def build_master(meta_data, mp_matched):
     all_dates = sorted(set(r['date'] for r in master_rows), key=date_key_to_dt, reverse=True)
     print(f"   {len(master_rows)}행, {len(all_dates)}일")
 
-    # 검증
     print(f"\n   📊 최근 5일 ROAS 검증:")
     for date in all_dates[:5]:
         rows = [r for r in master_rows if r['date'] == date]
@@ -491,21 +476,12 @@ def calc_derived(master_rows, all_dates):
     return daily_total, daily_product, adset_daily
 
 # =============================================================================
-# Part 5: Google Sheets 업데이트
+# Part 5: Google Sheets 업데이트 — 개별 탭 함수 (병렬 실행용)
 # =============================================================================
-def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, daily_product, adset_daily):
-    print(f"\n📝 [5] Google Sheets 업데이트...")
-    sh = gc.open_by_url(cfg['SPREADSHEET_URL'])
-    dc = all_dates
 
-    # ★ 워크시트 객체 한 번에 캐싱 (fetch_sheet_metadata 호출 최소화)
-    print(f"   워크시트 목록 캐싱...")
-    all_ws = {ws.title: ws for ws in sh.worksheets()}
-    print(f"   ✅ {len(all_ws)}개 탭 캐싱 완료: {list(all_ws.keys())}")
-
-    # --- 5a. 마스터탭 ---
-    print(f"\n   [1/7] 마스터탭...")
-    ws = all_ws['마스터탭']
+def _update_master_tab(sh, ws, master_rows):
+    """[1/7] 마스터탭"""
+    print(f"   ⏳ [1/7] 마스터탭 시작...")
     ms = []
     for r in master_rows:
         dt = date_key_to_dt(r['date'])
@@ -521,28 +497,28 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
     ws.batch_clear([f'A2:U{ws.row_count}'])
     if ms:
         ws.update(range_name='A2', values=ms)
-    print(f"   ✅ 마스터탭: {len(ms)}행")
-    time.sleep(3)
+    print(f"   ✅ [1/7] 마스터탭: {len(ms)}행")
+    return len(ms)
 
-    # --- 광고세트 순서 ---
-    ws_t = all_ws['추이차트']
-    existing = ws_t.get_all_values()
-    tao = []
-    for row in existing[1:]:
-        if row[0] == '종합':
-            tao.append(('종합', None, None))
-        elif len(row) > 2 and row[2]:
-            tao.append((row[0], row[1], row[2]))
-    eids = {t[2] for t in tao if t[2]}
-    for aid, info in all_adsets.items():
-        if aid not in eids:
-            tao.append((info['campaign_name'], info['adset_name'], aid))
-    if not any(t[0] == '종합' for t in tao):
-        tao.insert(0, ('종합', None, None))
-    time.sleep(3)
 
-    # --- 5b. 추이차트 ---
-    print(f"\n   [2/7] 추이차트...")
+def _update_budget_tab(ws, dc, daily_total, daily_product):
+    """[4/7] 예산"""
+    print(f"   ⏳ [4/7] 예산 시작...")
+    bd = [[''] + dc]
+    bd.append(['전체 쓴돈'] + [round(daily_total.get(d, {}).get('spend', 0)) for d in dc])
+    bd.append(['전체 번돈'] + [round(daily_total.get(d, {}).get('revenue', 0)) for d in dc])
+    bd.append(['전체 순이익'] + [round(daily_total.get(d, {}).get('profit', 0)) for d in dc])
+    bd.append(['총예산'] + [round(daily_total.get(d, {}).get('spend', 0)) for d in dc])
+    for p in PRODUCTS:
+        bd.append([f'{p} 예산'] + [round(daily_product.get((d, p), {}).get('spend', 0)) for d in dc])
+    ws.clear()
+    ws.update(range_name='A1', values=bd)
+    print(f"   ✅ [4/7] 예산: {len(bd)}행")
+
+
+def _update_trend_tab(sh, ws, tao, dc, daily_total, adset_daily):
+    """[2/7] 추이차트"""
+    print(f"   ⏳ [2/7] 추이차트 시작...")
     td = [['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dc]
     for cn, an, aid in tao:
         if cn == '종합':
@@ -564,16 +540,16 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
                 ad = adset_daily.get(aid, {}).get(date)
                 row.append(trend_cell(ad['spend'], ad['revenue_mp'], ad['profit'], ad['roas_calc'] * 100) if ad else '')
         td.append(row)
-    ws_t.clear()
-    ws_t.update(range_name='A1', values=td)
-    print(f"   ✅ {len(td) - 1}행 × {len(dc) + 4}열")
-    time.sleep(3)
-    apply_rich_text(sh, ws_t, [row[3:] for row in td[1:]], 1, 3, 'trend')
-    time.sleep(5)
+    ws.clear()
+    ws.update(range_name='A1', values=td)
+    print(f"   ✅ [2/7] 추이차트: {len(td) - 1}행 × {len(dc) + 4}열")
+    time.sleep(2)
+    apply_rich_text(sh, ws, [row[3:] for row in td[1:]], 1, 3, 'trend')
 
-    # --- 5c. 증감액 ---
-    print(f"\n   [3/7] 증감액...")
-    ws_c = all_ws['증감액']
+
+def _update_change_tab(sh, ws, tao, dc, daily_total, adset_daily):
+    """[3/7] 증감액"""
+    print(f"   ⏳ [3/7] 증감액 시작...")
     cd = [['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dc]
     for cn, an, aid in tao:
         if cn == '종합':
@@ -605,31 +581,16 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
                 else:
                     row.append('')
         cd.append(row)
-    ws_c.clear()
-    ws_c.update(range_name='A1', values=cd)
-    print(f"   ✅ {len(cd) - 1}행")
-    time.sleep(3)
-    apply_rich_text(sh, ws_c, [row[3:] for row in cd[1:]], 1, 3, 'change')
-    time.sleep(5)
+    ws.clear()
+    ws.update(range_name='A1', values=cd)
+    print(f"   ✅ [3/7] 증감액: {len(cd) - 1}행")
+    time.sleep(2)
+    apply_rich_text(sh, ws, [row[3:] for row in cd[1:]], 1, 3, 'change')
 
-    # --- 5d. 예산 ---
-    print(f"\n   [4/7] 예산...")
-    ws_b = all_ws['예산']
-    bd = [[''] + dc]
-    bd.append(['전체 쓴돈'] + [round(daily_total.get(d, {}).get('spend', 0)) for d in dc])
-    bd.append(['전체 번돈'] + [round(daily_total.get(d, {}).get('revenue', 0)) for d in dc])
-    bd.append(['전체 순이익'] + [round(daily_total.get(d, {}).get('profit', 0)) for d in dc])
-    bd.append(['총예산'] + [round(daily_total.get(d, {}).get('spend', 0)) for d in dc])
-    for p in PRODUCTS:
-        bd.append([f'{p} 예산'] + [round(daily_product.get((d, p), {}).get('spend', 0)) for d in dc])
-    ws_b.clear()
-    ws_b.update(range_name='A1', values=bd)
-    print(f"   ✅ {len(bd)}행")
-    time.sleep(3)
 
-    # --- 5e. 추이차트(주간) ---
-    print(f"\n   [5/7] 추이차트(주간)...")
-    ws_wt = all_ws['추이차트(주간)']
+def _update_weekly_trend_tab(sh, ws, tao, all_dates, daily_total, master_rows):
+    """[5/7] 추이차트(주간)"""
+    print(f"   ⏳ [5/7] 추이차트(주간) 시작...")
     wp = OrderedDict()
     for date in all_dates:
         dt = date_key_to_dt(date)
@@ -671,15 +632,26 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
                 s_, r_ = w['spend'], w['revenue']
                 row.append(trend_cell(s_, r_, r_ - s_, r_ / s_ * 100 if s_ > 0 else 0) if s_ > 0 or r_ > 0 else '')
         wtd.append(row)
-    ws_wt.clear()
-    ws_wt.update(range_name='A1', values=wtd)
-    print(f"   ✅ {len(wtd) - 1}행")
-    time.sleep(3)
-    apply_rich_text(sh, ws_wt, [row[3:] for row in wtd[1:]], 1, 3, 'trend')
-    time.sleep(10)  # ★ 주간종합 진입 전 넉넉한 대기
+    ws.clear()
+    ws.update(range_name='A1', values=wtd)
+    print(f"   ✅ [5/7] 추이차트(주간): {len(wtd) - 1}행")
+    time.sleep(2)
+    apply_rich_text(sh, ws, [row[3:] for row in wtd[1:]], 1, 3, 'trend')
 
-    # --- 5f. 주간종합 + _2 + _3 ---
-    print(f"\n   [6/7] 주간종합 + _2 + _3...")
+
+def _update_weekly_summary_tabs(sh, ws1, ws2, ws3, all_dates, daily_total, master_rows):
+    """[6-7/7] 주간종합 + _2 + _3 (내부에서 병렬로 _2, _3 처리)"""
+    print(f"   ⏳ [6-7/7] 주간종합 + _2 + _3 시작...")
+
+    # ── 공통 파생 데이터 계산 ──
+    wp = OrderedDict()
+    for date in all_dates:
+        dt = date_key_to_dt(date)
+        s = dt - timedelta(days=dt.weekday())
+        e = s + timedelta(days=6)
+        wp.setdefault(f"{s.month}/{s.day}~{e.month}/{e.day}", []).append(date)
+    wks = list(wp.keys())
+
     wprod = defaultdict(lambda: defaultdict(lambda: {'spend': 0, 'revenue': 0, 'pm': 0}))
     mprod = defaultdict(lambda: defaultdict(lambda: {'spend': 0, 'revenue': 0, 'pm': 0}))
     for r in master_rows:
@@ -730,6 +702,20 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
             'cvr': pmp / uc * 100 if uc > 0 else 0,
         }
 
+    daily_product = {}
+    for date in all_dates:
+        for p in PRODUCTS:
+            rows = [r for r in master_rows if r['date'] == date and r['product'] == p]
+            if not rows:
+                daily_product[(date, p)] = {'spend': 0, 'revenue': 0, 'profit': 0, 'roas': 0}
+                continue
+            sp = sum(r['spend'] for r in rows)
+            rv = sum(r['revenue_mp'] for r in rows)
+            daily_product[(date, p)] = {
+                'spend': sp, 'revenue': rv, 'profit': rv - sp,
+                'roas': rv / sp * 100 if sp > 0 else 0,
+            }
+
     def bwb(pk, pd, prd):
         b = [
             [pk] + [''] * 10,
@@ -759,6 +745,7 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
         b.append([''] * 11)
         return b
 
+    # ── 주간종합 데이터 준비 ──
     wsd = []
     for mk in mps.keys():
         wsd.extend(bwb(mk, mt[mk], {p: mprod[mk].get(p, {'spend': 0, 'revenue': 0, 'pm': 0}) for p in PRODUCTS}))
@@ -766,13 +753,7 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
             if any(d in set(mps.get(mk, [])) for d in wp.get(wk, [])):
                 wsd.extend(bwb(wk, wtf[wk], {p: wprod[wk].get(p, {'spend': 0, 'revenue': 0, 'pm': 0}) for p in PRODUCTS}))
 
-    ws_weekly1 = all_ws['주간종합']
-    ws_weekly1.clear()
-    ws_weekly1.update(range_name='A1', values=wsd)
-    print(f"   ✅ 주간종합: {len(wsd)}행")
-    time.sleep(5)
-
-    ws2 = all_ws['주간종합_2']
+    # ── 주간종합_2 데이터 준비 ──
     w2 = [
         ['📊 기간별 전체 요약', '', '', '', '', '', ''],
         ['기간', '유형', '지출금액', '매출', '이익', 'ROAS', 'CVR'],
@@ -798,14 +779,8 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
                     d = wprod[wk].get(p, {'spend': 0, 'revenue': 0})
                     row.append(fmtp(d['revenue'] / d['spend'] * 100 if d['spend'] > 0 else 0))
                 w2.append(row)
-    ws2.clear()
-    ws2.update(range_name='A1', values=w2)
-    print(f"   ✅ 주간종합_2: {len(w2)}행")
-    time.sleep(5)
 
-    # --- 5g. 주간종합_3 ---
-    print(f"\n   [7/7] 주간종합_3...")
-    ws3 = all_ws['주간종합_3']
+    # ── 주간종합_3 데이터 준비 ──
     w3 = [
         ['📊 일별 전체 요약', '', '', '', '', '', '', ''],
         ['날짜', '요일', '지출금액', '매출', '이익', 'ROAS', 'CVR', ''],
@@ -835,41 +810,160 @@ def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, dail
         for p in PRODUCTS:
             row.append(fmtp(daily_product.get((date, p), {}).get('spend', 0) / tsp * 100 if tsp > 0 else 0))
         w3.append(row)
-    ws3.clear()
-    ws3.update(range_name='A1', values=w3)
-    print(f"   ✅ {len(w3)}행")
 
-    return len(ms), len(all_adsets)
+    # ── 3개 탭 병렬 쓰기 (병렬의 병렬) ──
+    def _write_ws1():
+        ws1.clear()
+        ws1.update(range_name='A1', values=wsd)
+        print(f"   ✅ [6/7] 주간종합: {len(wsd)}행")
+
+    def _write_ws2():
+        ws2.clear()
+        ws2.update(range_name='A1', values=w2)
+        print(f"   ✅ [6/7] 주간종합_2: {len(w2)}행")
+
+    def _write_ws3():
+        ws3.clear()
+        ws3.update(range_name='A1', values=w3)
+        print(f"   ✅ [7/7] 주간종합_3: {len(w3)}행")
+
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix='weekly') as ex:
+        futs = [ex.submit(_write_ws1), ex.submit(_write_ws2), ex.submit(_write_ws3)]
+        for f in as_completed(futs):
+            f.result()  # 예외 전파
+
+
+# =============================================================================
+# Part 5: Google Sheets 업데이트 — 메인 오케스트레이터
+# =============================================================================
+def update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, daily_product, adset_daily):
+    print(f"\n📝 [5] Google Sheets 업데이트 (병렬 모드)...")
+    sh = gc.open_by_url(cfg['SPREADSHEET_URL'])
+    dc = all_dates
+
+    # ★ 워크시트 캐싱
+    print(f"   워크시트 목록 캐싱...")
+    all_ws = {ws.title: ws for ws in sh.worksheets()}
+    print(f"   ✅ {len(all_ws)}개 탭 캐싱 완료: {list(all_ws.keys())}")
+
+    # ── 광고세트 순서 (추이차트 기존값 기반) ──
+    ws_t = all_ws['추이차트']
+    existing = ws_t.get_all_values()
+    tao = []
+    for row in existing[1:]:
+        if row[0] == '종합':
+            tao.append(('종합', None, None))
+        elif len(row) > 2 and row[2]:
+            tao.append((row[0], row[1], row[2]))
+    eids = {t[2] for t in tao if t[2]}
+    for aid, info in all_adsets.items():
+        if aid not in eids:
+            tao.append((info['campaign_name'], info['adset_name'], aid))
+    if not any(t[0] == '종합' for t in tao):
+        tao.insert(0, ('종합', None, None))
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 병렬 그룹 A: 독립 탭 (마스터탭, 예산) — 다른 탭과 의존성 없음
+    # 병렬 그룹 B: tao 의존 탭 (추이차트, 증감액, 추이차트(주간))
+    # 병렬 그룹 C: 주간종합 3종 (내부에서 다시 3개 병렬)
+    # → A + B + C 모두 동시 실행 = 병렬의 병렬
+    # ══════════════════════════════════════════════════════════════════════
+    with ThreadPoolExecutor(max_workers=6, thread_name_prefix='sheets') as executor:
+        futures = {}
+
+        # 그룹 A: 독립
+        futures['마스터탭'] = executor.submit(
+            _update_master_tab, sh, all_ws['마스터탭'], master_rows
+        )
+        futures['예산'] = executor.submit(
+            _update_budget_tab, all_ws['예산'], dc, daily_total, daily_product
+        )
+
+        # 그룹 B: tao 의존
+        futures['추이차트'] = executor.submit(
+            _update_trend_tab, sh, all_ws['추이차트'], tao, dc, daily_total, adset_daily
+        )
+        futures['증감액'] = executor.submit(
+            _update_change_tab, sh, all_ws['증감액'], tao, dc, daily_total, adset_daily
+        )
+        futures['추이차트(주간)'] = executor.submit(
+            _update_weekly_trend_tab, sh, all_ws['추이차트(주간)'], tao, all_dates, daily_total, master_rows
+        )
+
+        # 그룹 C: 주간종합 3종 (내부에서 3탭 병렬)
+        futures['주간종합'] = executor.submit(
+            _update_weekly_summary_tabs, sh,
+            all_ws['주간종합'], all_ws['주간종합_2'], all_ws['주간종합_3'],
+            all_dates, daily_total, master_rows,
+        )
+
+        # 모든 완료 대기 + 에러 리포트
+        for name, fut in futures.items():
+            try:
+                fut.result()
+            except Exception as e:
+                print(f"   ❌ {name} 실패: {e}")
+                raise
+
+    print(f"\n   ✅ 전체 시트 병렬 업데이트 완료")
+    return len(master_rows), len(all_adsets)
 
 # =============================================================================
 # Main
 # =============================================================================
 def main():
-    # ── 설정 로드 & 검증 ──
     cfg = get_config()
     print(f"\n✅ 환경변수 로드 완료")
     print(f"   Meta 계정: {cfg['META_AD_ACCOUNT_ID']}")
     print(f"   기간: {cfg['FROM_DATE']} ~ {cfg['TO_DATE']}")
+    print(f"   Mixpanel 이벤트: {cfg['MIXPANEL_EVENT_NAMES']}")
 
-    # ── Google Sheets 인증 ──
     gc = get_gc(cfg)
     print(f"   Google Sheets 인증 완료")
 
-    # ── 데이터 수집 & 처리 ──
-    meta_data, all_adsets = fetch_meta(cfg)
-    if not meta_data:
+    # ══════════════════════════════════════════════════════════════════════
+    # Phase 1: Meta + Mixpanel 병렬 fetch
+    # ══════════════════════════════════════════════════════════════════════
+    print(f"\n{'=' * 80}")
+    print(f"🚀 Phase 1: API 데이터 병렬 수집")
+    print(f"{'=' * 80}")
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='api') as executor:
+        fut_meta = executor.submit(fetch_meta_raw, cfg)
+        fut_mp   = executor.submit(fetch_mixpanel_raw, cfg)
+        meta_raw = fut_meta.result()
+        mp_lines = fut_mp.result()
+
+    if not meta_raw:
         print("\n⚠️  Meta 데이터가 비어있어 시트 업데이트를 건너뜁니다.")
         return
 
-    mp_matched, total_events, matched_events, _ = fetch_mixpanel(cfg, all_adsets)
+    # ══════════════════════════════════════════════════════════════════════
+    # Phase 2: 파싱 + 매칭 + 파생 (순차 — CPU bound, 빠름)
+    # ══════════════════════════════════════════════════════════════════════
+    print(f"\n{'=' * 80}")
+    print(f"🔧 Phase 2: 데이터 파싱 & 조합")
+    print(f"{'=' * 80}")
+
+    meta_data, all_adsets = parse_meta(meta_raw)
+    mp_matched, total_events, matched_events, _ = parse_and_match_mixpanel(mp_lines, all_adsets)
     master_rows, all_dates = build_master(meta_data, mp_matched)
     daily_total, daily_product, adset_daily = calc_derived(master_rows, all_dates)
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Phase 3: Google Sheets 병렬 업데이트
+    # ══════════════════════════════════════════════════════════════════════
+    print(f"\n{'=' * 80}")
+    print(f"📝 Phase 3: Google Sheets 병렬 업데이트")
+    print(f"{'=' * 80}")
+
     n_rows, n_adsets = update_sheets(cfg, gc, master_rows, all_dates, all_adsets, daily_total, daily_product, adset_daily)
 
     print(f"\n{'=' * 80}")
     print(f"✅ 전체 업데이트 완료!")
     print(f"   Meta: {cfg['META_AD_ACCOUNT_ID']} | 광고세트: {n_adsets}개")
     print(f"   Mixpanel: {total_events}건 | 매칭 {matched_events}건 ({matched_events / max(total_events, 1) * 100:.1f}%)")
+    print(f"   Mixpanel 이벤트: {cfg['MIXPANEL_EVENT_NAMES']}")
     print(f"   기간: {cfg['FROM_DATE']} ~ {cfg['TO_DATE']} ({len(all_dates)}일)")
     print(f"{'=' * 80}")
 
