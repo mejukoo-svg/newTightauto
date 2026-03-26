@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 — ★★★ 병렬 처리 최적화 버전 ★★★
+# v3-ad 통합 코드 — ★★★ 병렬의 병렬 최적화 버전 ★★★
 # 변경 사항:
-#   1) Meta API: 날짜×계정 전체를 ThreadPoolExecutor로 동시 호출
-#   2) Mixpanel: Meta와 동시에 concurrent.futures로 병렬 실행
-#   3) 기존 탭 읽기: 병렬 읽기 (ThreadPoolExecutor)
-#   4) 날짜 탭 쓰기: 병렬 쓰기 (세마포어로 rate-limit 제어)
-#   5) 분석 탭 데이터 생성: 병렬 준비 후 순차 쓰기
-#   6) 분석 탭 서식: 가능한 한 배치 처리
+#   1) Mixpanel 이벤트: "결제완료" + "payment_complete" OR 처리
+#   2) 매출 필드: "amount" + "결제금액" OR 처리
+#   3) Meta API: 날짜×계정 전체를 ThreadPoolExecutor로 동시 호출
+#   4) Mixpanel: Meta와 동시에 concurrent.futures로 병렬 실행
+#   5) 기존 탭 읽기: 병렬 읽기 (ThreadPoolExecutor)
+#   6) 날짜 탭 쓰기: ★병렬 쓰기★ (세마포어로 rate-limit 제어)
+#   7) 분석 탭 데이터 생성: 병렬 준비 + ★병렬 쓰기★
+#   8) 분석 탭 서식: ★병렬 서식 적용★
 
 print("=" * 60)
-print("🚀 v3-ad 통합 자동화 (★ 병렬 최적화 버전)")
+print("🚀 v3-ad 통합 자동화 (★ 병렬의 병렬 최적화 버전)")
 print("   Meta/Mixpanel 동시 수집 + 탭 병렬 읽기/쓰기")
+print("   날짜탭 병렬 쓰기 + 분석탭 병렬 쓰기 + 서식 병렬 적용")
 print("=" * 60)
 
 # =========================================================
@@ -54,6 +57,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 SHEETS_SEMAPHORE = threading.Semaphore(2)   # Sheets API 동시 2개
 META_SEMAPHORE = threading.Semaphore(6)     # Meta API 동시 6개
 DATA_LOCK = threading.Lock()                # 공유 dict 쓰기 보호
+WRITE_SEMAPHORE = threading.Semaphore(2)    # Sheets 쓰기 동시 2개
+FORMAT_SEMAPHORE = threading.Semaphore(2)   # Sheets 서식 동시 2개
 
 # =========================================================
 # Meta Ads API 설정
@@ -71,12 +76,12 @@ META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
 # =========================================================
-# Mixpanel 설정
+# Mixpanel 설정 — ★ 이벤트명 OR 처리 ★
 # =========================================================
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
-MIXPANEL_EVENT_NAME = "결제완료"
+MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]  # ★ 둘 다 수집
 
 # =========================================================
 # 기본 설정
@@ -101,7 +106,9 @@ DATE_TAB_HEADERS = [
 
 print(f"📅 현재 날짜: {TODAY.strftime('%Y-%m-%d')} (KST)")
 print(f"📅 Meta/Mixpanel 수집: 최근 {REFRESH_DAYS}일만")
-print(f"📅 ★ 병렬 처리: Meta(날짜×계정 동시) + Mixpanel 동시 + 탭 읽기/쓰기 병렬")
+print(f"📅 ★ 병렬의 병렬: Meta(날짜×계정 동시) + Mixpanel 동시 + 탭 읽기/쓰기 병렬")
+print(f"📅 ★ Mixpanel 이벤트: {MIXPANEL_EVENT_NAMES}")
+print(f"📅 ★ 매출 필드: amount OR 결제금액")
 print()
 
 PRODUCT_KEYWORDS = ["재물", "솔로", "재회", "29금궁합", "자녀", "29금", "1%", "별해"]
@@ -142,6 +149,16 @@ def with_retry(fn, *args, max_retries=8, **kwargs):
 def with_retry_sem(fn, *args, max_retries=8, **kwargs):
     """Sheets API 호출을 세마포어로 감싸는 with_retry"""
     with SHEETS_SEMAPHORE:
+        return with_retry(fn, *args, max_retries=max_retries, **kwargs)
+
+def with_write_sem(fn, *args, max_retries=8, **kwargs):
+    """Sheets 쓰기를 WRITE_SEMAPHORE로 감싸는 with_retry"""
+    with WRITE_SEMAPHORE:
+        return with_retry(fn, *args, max_retries=max_retries, **kwargs)
+
+def with_format_sem(fn, *args, max_retries=8, **kwargs):
+    """Sheets 서식을 FORMAT_SEMAPHORE로 감싸는 with_retry"""
+    with FORMAT_SEMAPHORE:
         return with_retry(fn, *args, max_retries=max_retries, **kwargs)
 
 def clean_id(val):
@@ -260,7 +277,7 @@ def match_summary_product(campaign_name, product_keyword):
 
 
 # =========================================================
-# 서식 함수들 (apply_c2_label_formatting / apply_trend_chart_formatting)
+# 서식 함수들
 # =========================================================
 def apply_c2_label_formatting(sh, ws):
     sid = ws.id; cv = "ROAS\n순이익\n지출금액\nCPM\nCVR"
@@ -323,9 +340,24 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
         rd = {"foregroundColor":{"red":0.85,"green":0.0,"blue":0.0}}
         gn = {"foregroundColor":{"red":0.0,"green":0.7,"blue":0.0}}
         bl = {"foregroundColor":{"red":0.0,"green":0.0,"blue":0.85}}
+
+        # ★ 컬럼별 병렬 읽기 후 배치 서식 ★
+        col_values_cache = {}
+        def _read_col(ci):
+            try:
+                vals = with_retry_sem(ws.col_values, ci+1)
+                return (ci, vals)
+            except:
+                return (ci, None)
+
+        with ThreadPoolExecutor(max_workers=4) as col_executor:
+            col_futures = [col_executor.submit(_read_col, ci) for ci in range(tcs, tce)]
+            for cf in as_completed(col_futures):
+                ci, vals = cf.result()
+                if vals: col_values_cache[ci] = vals
+
         for ci in range(tcs, tce):
-            try: cv = with_retry(ws.col_values, ci+1)
-            except: continue
+            cv = col_values_cache.get(ci)
             if not cv or len(cv) < 2: continue
             for ri in range(2, min(len(cv)+1, rows_count+3)):
                 val = cv[ri-1] if ri-1 < len(cv) else ""
@@ -449,13 +481,15 @@ def parse_single_day_insights(rows, date_str, date_obj):
 
 
 # =========================================================
-# Mixpanel 함수
+# Mixpanel 함수 — ★ 이벤트명 OR + 매출 필드 OR ★
 # =========================================================
 def fetch_mixpanel_data(from_date, to_date):
     url = "https://data.mixpanel.com/api/2.0/export"
     params = {'from_date': from_date, 'to_date': to_date,
-              'event': json.dumps([MIXPANEL_EVENT_NAME]), 'project_id': MIXPANEL_PROJECT_ID}
+              'event': json.dumps(MIXPANEL_EVENT_NAMES),  # ★ 둘 다 수집
+              'project_id': MIXPANEL_PROJECT_ID}
     print(f"  📡 Mixpanel: {from_date} ~ {to_date}")
+    print(f"  📡 이벤트: {MIXPANEL_EVENT_NAMES}")
     try:
         resp = req_lib.get(url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300)
         if resp.status_code != 200:
@@ -464,9 +498,12 @@ def fetch_mixpanel_data(from_date, to_date):
         print(f"  📊 이벤트: {len(lines)}건")
         data = []
         stat_amount_only = stat_value_only = stat_both = stat_neither = 0
+        event_name_counts = defaultdict(int)
         for line in lines:
             try:
                 ev = json.loads(line); props = ev.get('properties', {})
+                event_name = ev.get('event', '')
+                event_name_counts[event_name] += 1
                 ts = props.get('time', 0)
                 if ts:
                     dt_kst = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)
@@ -476,7 +513,13 @@ def fetch_mixpanel_data(from_date, to_date):
                 for k in ['utm_content','UTM_Content','UTM Content']:
                     if k in props and props[k]: ut = str(props[k]).strip(); break
                 if ut: ut = clean_id(ut)
-                raw_amount = props.get('amount'); raw_value = props.get('value')
+
+                # ★★★ amount OR 결제금액 ★★★
+                raw_amount = props.get('amount')
+                if raw_amount is None:
+                    raw_amount = props.get('결제금액')
+                raw_value = props.get('value')
+
                 amount_val = 0.0
                 if raw_amount is not None:
                     try: amount_val = float(raw_amount)
@@ -496,7 +539,8 @@ def fetch_mixpanel_data(from_date, to_date):
                     'revenue': revenue, '서비스': props.get('서비스', '')})
             except: pass
         print(f"  ✅ 파싱: {len(data)}건")
-        print(f"  📊 매출 출처: amount만={stat_amount_only}, value만={stat_value_only}, 둘다={stat_both}, 없음={stat_neither}")
+        print(f"  📊 이벤트별: {dict(event_name_counts)}")
+        print(f"  📊 매출 출처: amount/결제금액={stat_amount_only}, value만={stat_value_only}, 둘다={stat_both}, 없음={stat_neither}")
         return data
     except Exception as e:
         print(f"  ❌ Mixpanel 오류: {e}"); return []
@@ -618,7 +662,7 @@ def format_date_tab_summary(sh, ws, data_row_count, summary_row_count):
 
 
 # =============================================================================
-# ★★★ 실행 시작 — 병렬 처리 버전 ★★★
+# ★★★ 실행 시작 — 병렬의 병렬 처리 버전 ★★★
 # =============================================================================
 
 # =========================================================
@@ -631,7 +675,7 @@ ALL_AD_ACCOUNTS = ["act_707835224206178", "act_1270614404675034", "act_180814138
 print(f"📋 광고 계정: {len(ALL_AD_ACCOUNTS)}개\n")
 
 # =========================================================
-# ★★★ 2단계: 기존 탭 읽기 + 3단계 Meta + 4단계 Mixpanel — 모두 병렬 ★★★
+# ★★★ 2~4단계: 기존 탭 읽기 + Meta + Mixpanel — 모두 병렬 ★★★
 # =========================================================
 print("="*60)
 print("2~4단계: 기존 탭 읽기 + Meta + Mixpanel ★ 동시 병렬 실행 ★")
@@ -657,7 +701,6 @@ existing_sheets = sh.worksheets()
 
 # --- (A) 기존 탭 병렬 읽기 함수 ---
 def _read_existing_tab(ws_ex):
-    """기존 날짜 탭 하나를 읽어서 결과를 반환 (스레드 안전)"""
     tn = ws_ex.title
     dk = normalize_date_key(tn)
     dt_obj = parse_date_tab(tn)
@@ -712,7 +755,6 @@ def _read_existing_tab(ws_ex):
 
 # --- (B) Meta: 날짜×계정 단위 병렬 호출 ---
 def _fetch_meta_one(acc_id, target_date):
-    """Meta API: 1 계정 × 1 날짜"""
     target_str = target_date.strftime('%Y-%m-%d')
     date_key = f"{target_date.year % 100:02d}/{target_date.month:02d}/{target_date.day:02d}"
     with META_SEMAPHORE:
@@ -733,9 +775,8 @@ def _fetch_mixpanel():
 # =========================================================
 _t_start = time.time()
 
-# 제출할 작업 목록
 tabs_to_read = [ws_ex for ws_ex in existing_sheets if parse_date_tab(ws_ex.title) is not None]
-meta_jobs = []  # (acc_id, target_date)
+meta_jobs = []
 for day_offset in range(REFRESH_DAYS):
     td = TODAY - timedelta(days=day_offset)
     for acc_id in ALL_AD_ACCOUNTS:
@@ -744,28 +785,23 @@ for day_offset in range(REFRESH_DAYS):
 print(f"\n  📋 병렬 작업 제출:")
 print(f"    - 기존 탭 읽기: {len(tabs_to_read)}개")
 print(f"    - Meta API 호출: {len(meta_jobs)}개 (날짜{REFRESH_DAYS} × 계정{len(ALL_AD_ACCOUNTS)})")
-print(f"    - Mixpanel: 1개")
+print(f"    - Mixpanel: 1개 (이벤트: {MIXPANEL_EVENT_NAMES})")
 
-# 큰 풀 하나로 전부 실행
 all_futures = {}
-with ThreadPoolExecutor(max_workers=10) as executor:
-    # (A) 기존 탭 읽기
+with ThreadPoolExecutor(max_workers=12) as executor:
     for ws_ex in tabs_to_read:
         f = executor.submit(_read_existing_tab, ws_ex)
         all_futures[f] = ('tab', ws_ex.title)
 
-    # (B) Meta
     for acc_id, td in meta_jobs:
         f = executor.submit(_fetch_meta_one, acc_id, td)
         all_futures[f] = ('meta', f"{acc_id}/{td.strftime('%m-%d')}")
 
-    # (C) Mixpanel
     f_mp = executor.submit(_fetch_mixpanel)
     all_futures[f_mp] = ('mixpanel', 'all')
 
-    # 결과 수집
     tab_results = []
-    meta_results = []  # (date_key, target_date, acc_id, parsed)
+    meta_results = []
     mp_raw = []
 
     for future in as_completed(all_futures):
@@ -788,8 +824,7 @@ print(f"\n  ⏱️ 병렬 수집 완료: {_elapsed:.1f}초")
 read_count = 0
 for res in tab_results:
     if res is None: continue
-    if res.get('skipped'):
-        continue
+    if res.get('skipped'): continue
     if res.get('empty') or res.get('error'):
         if res.get('error'): print(f"  ⚠️ {res['tab_name']} 읽기 오류: {res['error']}")
         continue
@@ -812,14 +847,13 @@ for res in tab_results:
 
 print(f"✅ 기존 탭: {read_count}개 읽기 완료")
 
-# --- Meta 결과 통합 (날짜별로 그룹핑) ---
+# --- Meta 결과 통합 ---
 meta_date_data = defaultdict(list)
 meta_success_count = 0
 for (date_key, target_date, acc_id, parsed) in meta_results:
     if parsed:
         meta_date_data[date_key].extend(parsed)
         meta_success_count += len(parsed)
-        # date_objects도 세팅
         date_objects[date_key] = target_date
 
 print(f"✅ Meta: {len(meta_date_data)}일, 총 {meta_success_count}건")
@@ -895,7 +929,7 @@ print()
 
 
 # =========================================================
-# 5.5: 주간 집계 + 정렬 (CPU 작업 — 빠름)
+# 5.5: 주간 집계 + 정렬
 # =========================================================
 print("5.5~6: 주간 집계 + 정렬")
 
@@ -965,17 +999,14 @@ print("⏳ 3초 대기..."); time.sleep(3)
 
 
 # =========================================================
-# ★★★ 8~17: 날짜 탭 + 분석 탭 — 데이터 병렬 준비 후 순차 쓰기 ★★★
+# ★★★ 8~17: 데이터 병렬 준비 + 병렬 쓰기 ★★★
 # =========================================================
-# 전략: 모든 탭의 데이터를 먼저 메모리에서 병렬 생성 → 순차적으로 Sheets에 쓰기
-# (Sheets API는 rate limit 때문에 쓰기는 순차가 안전)
 print("\n" + "="*60)
-print("8~17: ★ 데이터 병렬 준비 → 순차 쓰기 ★")
+print("8~17: ★ 데이터 병렬 준비 → ★병렬 쓰기★")
 print("="*60)
 
 # --- (A) 날짜 탭 데이터 병렬 준비 ---
 def _prepare_date_tab(dk):
-    """날짜 탭 데이터 + 요약표를 메모리에서 생성"""
     rows = date_tab_rows.get(dk, [])
     if not rows: return None
     rows.sort(key=lambda r: _to_num(r[18]) if len(r) > 18 else 0, reverse=True)
@@ -984,7 +1015,7 @@ def _prepare_date_tab(dk):
     return {'dk': dk, 'rows': rows, 'summary_rows': summary_rows, 'all_data': all_data}
 
 
-# --- (B) 추이차트 데이터 준비 ---
+# --- (B) 추이차트 ---
 def _prepare_trend_daily():
     dhw = []; sci = []
     for i, n in enumerate(chart_dn):
@@ -1036,7 +1067,7 @@ def _prepare_trend_daily():
     return {'hdr': hdr_t, 'summary_row': sr, 'rows': rt, 'sci': sci}
 
 
-# --- (C) 추이차트(주간) 데이터 준비 ---
+# --- (C) 추이차트(주간) ---
 def _prepare_trend_weekly():
     wdl = [week_display_names[wk] for wk in chart_wk]
     hdr_w = ['캠페인 이름','광고 이름','광고 ID','전체 평균'] + wdl
@@ -1085,7 +1116,7 @@ def _prepare_trend_weekly():
     return {'hdr': hdr_w, 'summary_row': srw, 'rows': rtw}
 
 
-# --- (D) 증감액 데이터 준비 ---
+# --- (D) 증감액 ---
 def _prepare_change():
     hdr_c = ['캠페인 이름','광고 이름','광고 ID','7일 평균'] + chart_dn
     src = ["종합","",""]
@@ -1148,7 +1179,7 @@ def _prepare_change():
     return {'hdr': hdr_c, 'summary_row': src, 'rows': rtc}
 
 
-# --- (E) 예산 데이터 준비 ---
+# --- (E) 예산 ---
 def _prepare_budget():
     br = [[""] + chart_dn]
     br.append(["전체 쓴돈"] + [sum(budget_by_date[d][p]['spend'] for p in product_order) for d in chart_dn])
@@ -1167,7 +1198,7 @@ def _prepare_budget():
     return br
 
 
-# --- (F) 마스터탭 데이터 준비 ---
+# --- (F) 마스터탭 ---
 def _prepare_master():
     master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
     for item in master_raw_data:
@@ -1176,7 +1207,7 @@ def _prepare_master():
     return [master_headers] + [i['row_data'] for i in master_raw_data]
 
 
-# --- (G) 주간종합 1/2/3 데이터 준비 ---
+# --- (G) 주간종합 1/2/3 ---
 products = ["솔로","재물","재회","29금궁합","자녀","29금","1%","별해"]
 month_groups = defaultdict(list)
 for t in date_names:
@@ -1211,7 +1242,6 @@ for mk in month_names_list:
 
 
 def _prepare_weekly_summary_1():
-    """주간종합 데이터 준비"""
     def ccb_data(pn, d, pd_map, im=False):
         rv = (d['revenue']/d['spend']) if d['spend']>0 else 0
         nc = len(products)+2
@@ -1248,7 +1278,6 @@ def _prepare_weekly_summary_1():
 
 
 def _prepare_weekly_summary_2():
-    """주간종합_2 데이터 준비"""
     stl = []
     for mk in month_names_list:
         d = msd[mk]; roas = (d['revenue']/d['spend']) if d['spend']>0 else 0
@@ -1263,7 +1292,6 @@ def _prepare_weekly_summary_2():
 
 
 def _prepare_weekly_summary_3():
-    """주간종합_3 데이터 준비"""
     dsr = []
     for t in reversed(date_names):
         do=date_objects[t]; d=daily_data[t]; roas=(d['revenue']/d['spend']) if d['spend']>0 else 0
@@ -1278,10 +1306,8 @@ def _prepare_weekly_summary_3():
 print("\n🔄 모든 탭 데이터 병렬 준비 중...")
 _t_prep = time.time()
 
-with ThreadPoolExecutor(max_workers=8) as executor:
-    # 날짜 탭들
+with ThreadPoolExecutor(max_workers=10) as executor:
     date_tab_futures = {executor.submit(_prepare_date_tab, dk): dk for dk in new_date_names}
-    # 분석 탭들
     f_trend_daily = executor.submit(_prepare_trend_daily)
     f_trend_weekly = executor.submit(_prepare_trend_weekly)
     f_change = executor.submit(_prepare_change)
@@ -1291,7 +1317,6 @@ with ThreadPoolExecutor(max_workers=8) as executor:
     f_ws2 = executor.submit(_prepare_weekly_summary_2)
     f_ws3 = executor.submit(_prepare_weekly_summary_3)
 
-    # 결과 수집
     prepared_date_tabs = {}
     for future in as_completed(date_tab_futures):
         dk = date_tab_futures[future]
@@ -1311,255 +1336,335 @@ print(f"  ⏱️ 데이터 준비 완료: {time.time()-_t_prep:.1f}초\n")
 
 
 # =========================================================
-# ★★★ 순차 쓰기 (Sheets API rate limit 존중) ★★★
+# ★★★ 워크시트 일괄 생성 (순차 — 빠름) ★★★
 # =========================================================
+print("📝 워크시트 일괄 생성...")
+_t_create = time.time()
 
-# --- 8: 날짜 탭 쓰기 ---
-print(f"📝 8: 날짜 탭 {len(prepared_date_tabs)}개 쓰기")
+ws_registry = {}  # name → worksheet object
+
+# 날짜 탭 생성
 for dk in new_date_names:
     prep = prepared_date_tabs.get(dk)
     if not prep: continue
+    total_rows = len(prep['rows']) + len(prep['summary_rows']) + 5
+    NUM_COLS = len(DATE_TAB_HEADERS)
+    ws_d = with_retry(sh.add_worksheet, title=dk, rows=total_rows, cols=NUM_COLS + 2); time.sleep(0.8)
+    ws_registry[dk] = ws_d
+
+# 분석 탭 생성
+ws_registry['마스터탭'] = with_retry(sh.add_worksheet, title="마스터탭", rows=max(2000, len(master_data)+100), cols=len(master_headers)+5); time.sleep(0.8)
+ws_registry['추이차트'] = with_retry(sh.add_worksheet, title="추이차트", rows=1000, cols=100); time.sleep(0.8)
+ws_registry['추이차트(주간)'] = with_retry(sh.add_worksheet, title="추이차트(주간)", rows=1000, cols=100); time.sleep(0.8)
+ws_registry['증감액'] = with_retry(sh.add_worksheet, title="증감액", rows=1000, cols=100); time.sleep(0.8)
+ws_registry['예산'] = with_retry(sh.add_worksheet, title="예산", rows=1000, cols=100); time.sleep(0.8)
+ws_registry['주간종합'] = with_retry(sh.add_worksheet, title="주간종합", rows=2000, cols=20); time.sleep(0.8)
+ws_registry['주간종합_2'] = with_retry(sh.add_worksheet, title="주간종합_2", rows=2000, cols=20); time.sleep(0.8)
+ws_registry['주간종합_3'] = with_retry(sh.add_worksheet, title="주간종합_3", rows=3000, cols=20); time.sleep(0.8)
+
+print(f"  ⏱️ 워크시트 생성: {time.time()-_t_create:.1f}초 ({len(ws_registry)}개)\n")
+
+
+# =========================================================
+# ★★★ 병렬 쓰기 함수 정의 ★★★
+# =========================================================
+
+def _write_date_tab(dk):
+    """날짜 탭 1개: 데이터 쓰기 + 서식"""
+    prep = prepared_date_tabs.get(dk)
+    if not prep: return f"{dk}: skip"
+    ws_d = ws_registry.get(dk)
+    if not ws_d: return f"{dk}: no ws"
     rows = prep['rows']; summary_rows = prep['summary_rows']; all_data = prep['all_data']
-    print(f"  📅 {dk} ({len(rows)}개 광고)")
-    try:
-        total_rows = len(rows) + len(summary_rows) + 5
-        NUM_COLS = len(DATE_TAB_HEADERS)
-        ws_d = with_retry(sh.add_worksheet, title=dk, rows=total_rows, cols=NUM_COLS + 2); time.sleep(1)
-        sid_d = ws_d.id; data_end = len(rows) + 1
+    sid_d = ws_d.id; data_end = len(rows) + 1
+    NUM_COLS = len(DATE_TAB_HEADERS)
+
+    with WRITE_SEMAPHORE:
         with_retry(ws_d.update, values=all_data, range_name="A1", value_input_option="USER_ENTERED")
+        time.sleep(1)
 
-        fmt_all = []
-        fmt_all.append(create_format_request(sid_d, 0, 1, 0, 5, {"textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_format_request(sid_d, 0, 1, 5, 16, {"backgroundColor": {"red":0.937,"green":0.937,"blue":0.937}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_format_request(sid_d, 0, 1, 16, 21, {"backgroundColor": {"red":0.6,"green":0.6,"blue":0.6}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_format_request(sid_d, 0, 1, 21, 22, {"backgroundColor": {"red":0.851,"green":0.824,"blue":0.914}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_format_request(sid_d, 0, 1, 22, 23, {"backgroundColor": {"red":0.706,"green":0.655,"blue":0.839}, "textFormat": {"bold": True, "foregroundColor": {"red":1,"green":1,"blue":1}}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_format_request(sid_d, 0, 1, 23, 24, {"backgroundColor": {"red":0.6,"green":0,"blue":1}, "textFormat": {"bold": True, "foregroundColor": {"red":1,"green":1,"blue":1}}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_format_request(sid_d, 0, 1, 24, 25, {"backgroundColor": {"red":1,"green":0.6,"blue":0}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 16, 17, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 17, 18, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 18, 19, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 19, 20, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 20, 21, "NUMBER", "#,##0.00"))
-        fmt_all.append(create_number_format_request(sid_d, 0, 1, 22, 23, "NUMBER", "0%"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 22, 23, "NUMBER", "0%"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 23, 24, "NUMBER", "0.0"))
-        col_widths = [(0,210),(1,207),(2,207),(3,96),(4,96)]
-        for ci, w in col_widths:
-            fmt_all.append({"updateDimensionProperties": {"range": {"sheetId": sid_d, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci+1}, "properties": {"pixelSize": w}, "fields": "pixelSize"}})
-        fmt_all.append({"setBasicFilter": {"filter": {"range": {"sheetId": sid_d, "startRowIndex": 0, "endRowIndex": data_end, "startColumnIndex": 0, "endColumnIndex": NUM_COLS}}}})
-        fmt_all.append({"updateSheetProperties": {"properties": {"sheetId": sid_d, "gridProperties": {"frozenRowCount": 1, "frozenColumnCount": 5}}, "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
+    fmt_all = []
+    fmt_all.append(create_format_request(sid_d, 0, 1, 0, 5, {"textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_format_request(sid_d, 0, 1, 5, 16, {"backgroundColor": {"red":0.937,"green":0.937,"blue":0.937}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_format_request(sid_d, 0, 1, 16, 21, {"backgroundColor": {"red":0.6,"green":0.6,"blue":0.6}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_format_request(sid_d, 0, 1, 21, 22, {"backgroundColor": {"red":0.851,"green":0.824,"blue":0.914}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_format_request(sid_d, 0, 1, 22, 23, {"backgroundColor": {"red":0.706,"green":0.655,"blue":0.839}, "textFormat": {"bold": True, "foregroundColor": {"red":1,"green":1,"blue":1}}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_format_request(sid_d, 0, 1, 23, 24, {"backgroundColor": {"red":0.6,"green":0,"blue":1}, "textFormat": {"bold": True, "foregroundColor": {"red":1,"green":1,"blue":1}}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_format_request(sid_d, 0, 1, 24, 25, {"backgroundColor": {"red":1,"green":0.6,"blue":0}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 16, 17, "NUMBER", "#,##0"))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 17, 18, "NUMBER", "#,##0"))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 18, 19, "NUMBER", "#,##0"))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 19, 20, "NUMBER", "#,##0"))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 20, 21, "NUMBER", "#,##0.00"))
+    fmt_all.append(create_number_format_request(sid_d, 0, 1, 22, 23, "NUMBER", "0%"))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 22, 23, "NUMBER", "0%"))
+    fmt_all.append(create_number_format_request(sid_d, 1, data_end, 23, 24, "NUMBER", "0.0"))
+    col_widths = [(0,210),(1,207),(2,207),(3,96),(4,96)]
+    for ci, w in col_widths:
+        fmt_all.append({"updateDimensionProperties": {"range": {"sheetId": sid_d, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci+1}, "properties": {"pixelSize": w}, "fields": "pixelSize"}})
+    fmt_all.append({"setBasicFilter": {"filter": {"range": {"sheetId": sid_d, "startRowIndex": 0, "endRowIndex": data_end, "startColumnIndex": 0, "endColumnIndex": NUM_COLS}}}})
+    fmt_all.append({"updateSheetProperties": {"properties": {"sheetId": sid_d, "gridProperties": {"frozenRowCount": 1, "frozenColumnCount": 5}}, "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
 
-        profit_cond = [
-            ("NUMBER_GREATER","0",{"red":1,"green":0.949,"blue":0.8},None),
-            ("NUMBER_GREATER","50000",{"red":1,"green":0.898,"blue":0.6},None),
-            ("NUMBER_GREATER","100000",{"red":0.576,"green":0.769,"blue":0.49},None),
-            ("NUMBER_GREATER","200000",{"red":0,"green":1,"blue":0},None),
-            ("NUMBER_GREATER","300000",{"red":0,"green":1,"blue":1},None),
-            ("NUMBER_LESS","-10000",{"red":0.957,"green":0.8,"blue":0.8},None),
-            ("NUMBER_LESS","-50000",{"red":0.878,"green":0.4,"blue":0.4},{"red":0,"green":0,"blue":0}),
-        ]
-        for ctype, val, bg, fc in profit_cond:
-            rule_fmt = {"backgroundColor": bg}
-            if fc: rule_fmt["textFormat"] = {"foregroundColor": fc}
-            fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 18, "endColumnIndex": 19}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": rule_fmt}}, "index": 0}})
-        fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 18, "endColumnIndex": 19}], "gradientRule": {"minpoint": {"color": {"red":0.902,"green":0.486,"blue":0.451}, "type": "MIN"}, "midpoint": {"color": {"red":1,"green":1,"blue":1}, "type": "NUMBER", "value": "0"}, "maxpoint": {"color": {"red":0.341,"green":0.733,"blue":0.541}, "type": "MAX"}}}, "index": 0}})
-        roas_cond = [("NUMBER_LESS","100",{"red":0.878,"green":0.4,"blue":0.4}),("NUMBER_GREATER_THAN_EQ","100",{"red":1,"green":0.851,"blue":0.4}),("NUMBER_GREATER_THAN_EQ","200",{"red":0.576,"green":0.769,"blue":0.49}),("NUMBER_GREATER_THAN_EQ","300",{"red":0,"green":1,"blue":1})]
-        for ctype, val, bg in roas_cond:
-            fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 19, "endColumnIndex": 20}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": {"backgroundColor": bg}}}, "index": 0}})
-        fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 20, "endColumnIndex": 21}], "gradientRule": {"minpoint": {"color": {"red":1,"green":1,"blue":1}, "type": "MIN"}, "maxpoint": {"color": {"red":0.341,"green":0.733,"blue":0.541}, "type": "MAX"}}}, "index": 0}})
+    profit_cond = [
+        ("NUMBER_GREATER","0",{"red":1,"green":0.949,"blue":0.8},None),
+        ("NUMBER_GREATER","50000",{"red":1,"green":0.898,"blue":0.6},None),
+        ("NUMBER_GREATER","100000",{"red":0.576,"green":0.769,"blue":0.49},None),
+        ("NUMBER_GREATER","200000",{"red":0,"green":1,"blue":0},None),
+        ("NUMBER_GREATER","300000",{"red":0,"green":1,"blue":1},None),
+        ("NUMBER_LESS","-10000",{"red":0.957,"green":0.8,"blue":0.8},None),
+        ("NUMBER_LESS","-50000",{"red":0.878,"green":0.4,"blue":0.4},{"red":0,"green":0,"blue":0}),
+    ]
+    for ctype, val, bg, fc in profit_cond:
+        rule_fmt = {"backgroundColor": bg}
+        if fc: rule_fmt["textFormat"] = {"foregroundColor": fc}
+        fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 18, "endColumnIndex": 19}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": rule_fmt}}, "index": 0}})
+    fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 18, "endColumnIndex": 19}], "gradientRule": {"minpoint": {"color": {"red":0.902,"green":0.486,"blue":0.451}, "type": "MIN"}, "midpoint": {"color": {"red":1,"green":1,"blue":1}, "type": "NUMBER", "value": "0"}, "maxpoint": {"color": {"red":0.341,"green":0.733,"blue":0.541}, "type": "MAX"}}}, "index": 0}})
+    roas_cond = [("NUMBER_LESS","100",{"red":0.878,"green":0.4,"blue":0.4}),("NUMBER_GREATER_THAN_EQ","100",{"red":1,"green":0.851,"blue":0.4}),("NUMBER_GREATER_THAN_EQ","200",{"red":0.576,"green":0.769,"blue":0.49}),("NUMBER_GREATER_THAN_EQ","300",{"red":0,"green":1,"blue":1})]
+    for ctype, val, bg in roas_cond:
+        fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 19, "endColumnIndex": 20}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": {"backgroundColor": bg}}}, "index": 0}})
+    fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 20, "endColumnIndex": 21}], "gradientRule": {"minpoint": {"color": {"red":1,"green":1,"blue":1}, "type": "MIN"}, "maxpoint": {"color": {"red":0.341,"green":0.733,"blue":0.541}, "type": "MAX"}}}, "index": 0}})
 
+    with FORMAT_SEMAPHORE:
         try:
             with_retry(sh.batch_update, body={"requests": fmt_all}); time.sleep(2)
-        except Exception as e: print(f"    ⚠️ 서식 오류: {e}")
+        except Exception as e: print(f"    ⚠️ {dk} 서식 오류: {e}")
         try:
             fmt_reqs = format_date_tab_summary(sh, ws_d, len(rows), len(summary_rows))
             if fmt_reqs:
                 for i in range(0, len(fmt_reqs), 50):
                     with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+50]}); time.sleep(1)
-        except Exception as e: print(f"    ⚠️ 요약표 서식 오류: {e}")
-        time.sleep(1)
-    except Exception as e:
-        print(f"  ⚠️ {dk} 생성 오류: {e}")
+        except Exception as e: print(f"    ⚠️ {dk} 요약표 서식 오류: {e}")
 
-print(f"✅ {len(new_date_names)}개 날짜 탭 완료"); time.sleep(2)
+    return f"{dk}: ✅ ({len(rows)}개 광고)"
 
 
-# --- 9: 마스터탭 ---
-print("\n📝 9: 마스터탭")
-ws_m = with_retry(sh.add_worksheet, title="마스터탭", rows=max(2000, len(master_data)+100), cols=len(master_headers)+5); time.sleep(2)
-for i in range(0, len(master_data), 5000):
-    with_retry(ws_m.update, values=master_data[i:i+5000], range_name=f"A{i+1}", value_input_option="USER_ENTERED"); time.sleep(2)
-try:
-    with_retry(ws_m.format, 'A1:T1', {'backgroundColor':{'red':0.9,'green':0.9,'blue':0.9},'textFormat':{'bold':True}})
-    with_retry(sh.batch_update, body={"requests":[{"updateSheetProperties":{"properties":{"sheetId":ws_m.id,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}]})
-except: pass
-print("✅ 마스터탭 완료"); time.sleep(2)
+def _write_master():
+    """마스터탭 쓰기"""
+    ws_m = ws_registry['마스터탭']
+    with WRITE_SEMAPHORE:
+        for i in range(0, len(master_data), 5000):
+            with_retry(ws_m.update, values=master_data[i:i+5000], range_name=f"A{i+1}", value_input_option="USER_ENTERED"); time.sleep(2)
+    with FORMAT_SEMAPHORE:
+        try:
+            with_retry(ws_m.format, 'A1:T1', {'backgroundColor':{'red':0.9,'green':0.9,'blue':0.9},'textFormat':{'bold':True}})
+            with_retry(sh.batch_update, body={"requests":[{"updateSheetProperties":{"properties":{"sheetId":ws_m.id,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}]})
+        except: pass
+    return "마스터탭: ✅"
 
 
-# --- 10: 추이차트 ---
-print("\n📝 10: 추이차트 (일간)")
-td = trend_daily_data
-ws_t = with_retry(sh.add_worksheet, title="추이차트", rows=1000, cols=100); time.sleep(2)
-with_retry(ws_t.update, values=[td['hdr']]+[td['summary_row']]+td['rows'], range_name="A1", value_input_option="USER_ENTERED")
-time.sleep(3)
-apply_trend_chart_formatting(sh, ws_t, td['hdr'], len(td['rows']), sunday_col_indices=td['sci'])
-apply_c2_label_formatting(sh, ws_t)
-print("✅ 추이차트 완료"); time.sleep(15)
+def _write_trend_daily():
+    """추이차트 쓰기 + 서식"""
+    td = trend_daily_data
+    ws_t = ws_registry['추이차트']
+    with WRITE_SEMAPHORE:
+        with_retry(ws_t.update, values=[td['hdr']]+[td['summary_row']]+td['rows'], range_name="A1", value_input_option="USER_ENTERED")
+        time.sleep(3)
+    with FORMAT_SEMAPHORE:
+        apply_trend_chart_formatting(sh, ws_t, td['hdr'], len(td['rows']), sunday_col_indices=td['sci'])
+        apply_c2_label_formatting(sh, ws_t)
+    return "추이차트: ✅"
 
 
-# --- 11: 추이차트(주간) ---
-print("\n📝 11: 추이차트(주간)")
-tw = trend_weekly_data
-ws_tw = with_retry(sh.add_worksheet, title="추이차트(주간)", rows=1000, cols=100); time.sleep(2)
-with_retry(ws_tw.update, values=[tw['hdr']]+[tw['summary_row']]+tw['rows'], range_name="A1", value_input_option="USER_ENTERED")
-time.sleep(3)
-wfce = 3+1+WEEKLY_TREND_REFRESH_WEEKS
-apply_trend_chart_formatting(sh, ws_tw, tw['hdr'], len(tw['rows']), format_col_end=wfce)
-apply_c2_label_formatting(sh, ws_tw)
-print("✅ 추이차트(주간) 완료"); time.sleep(15)
+def _write_trend_weekly():
+    """추이차트(주간) 쓰기 + 서식"""
+    tw = trend_weekly_data
+    ws_tw = ws_registry['추이차트(주간)']
+    with WRITE_SEMAPHORE:
+        with_retry(ws_tw.update, values=[tw['hdr']]+[tw['summary_row']]+tw['rows'], range_name="A1", value_input_option="USER_ENTERED")
+        time.sleep(3)
+    wfce = 3+1+WEEKLY_TREND_REFRESH_WEEKS
+    with FORMAT_SEMAPHORE:
+        apply_trend_chart_formatting(sh, ws_tw, tw['hdr'], len(tw['rows']), format_col_end=wfce)
+        apply_c2_label_formatting(sh, ws_tw)
+    return "추이차트(주간): ✅"
 
 
-# --- 12: 증감액 ---
-print("\n📝 12: 증감액")
-cd = change_data
-ws_c = with_retry(sh.add_worksheet, title="증감액", rows=1000, cols=100); time.sleep(2)
-with_retry(ws_c.update, values=[cd['hdr']]+[cd['summary_row']]+cd['rows'], range_name="A1", value_input_option="USER_ENTERED")
-time.sleep(3)
-apply_trend_chart_formatting(sh, ws_c, cd['hdr'], len(cd['rows']), is_change_tab=True)
-print("✅ 증감액 완료"); time.sleep(15)
+def _write_change():
+    """증감액 쓰기 + 서식"""
+    cd = change_data
+    ws_c = ws_registry['증감액']
+    with WRITE_SEMAPHORE:
+        with_retry(ws_c.update, values=[cd['hdr']]+[cd['summary_row']]+cd['rows'], range_name="A1", value_input_option="USER_ENTERED")
+        time.sleep(3)
+    with FORMAT_SEMAPHORE:
+        apply_trend_chart_formatting(sh, ws_c, cd['hdr'], len(cd['rows']), is_change_tab=True)
+    return "증감액: ✅"
 
 
-# --- 13: 예산 ---
-print("\n📝 13: 예산")
-bw = with_retry(sh.add_worksheet, title="예산", rows=1000, cols=100); time.sleep(2)
-with_retry(bw.update, values=budget_data, range_name="A1", value_input_option="RAW")
-print("✅ 예산 완료"); time.sleep(2)
+def _write_budget():
+    """예산 쓰기"""
+    bw = ws_registry['예산']
+    with WRITE_SEMAPHORE:
+        with_retry(bw.update, values=budget_data, range_name="A1", value_input_option="RAW")
+    return "예산: ✅"
 
 
-# --- 15: 주간종합 ---
-print("\n📝 15: 주간종합")
-ws_ws = with_retry(sh.add_worksheet, title="주간종합", rows=2000, cols=20); time.sleep(2)
-sid_ws = ws_ws.id; fr_ws = []; ar_ws = []; cr_ws = 0
+def _write_weekly_summary_1():
+    """주간종합 쓰기 + 서식"""
+    ws_ws = ws_registry['주간종합']
+    sid_ws = ws_ws.id; fr_ws = []; ar_ws = []; cr_ws = 0
 
-for block_data, im in ws1_blocks:
-    bs = cr_ws
-    nc = len(products)+2
-    hb = COLORS["dark_blue"] if im else COLORS["dark_gray"]; cb = COLORS["navy"] if im else COLORS["black"]
-    fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,0,nc,get_cell_format(hb,COLORS["white"],bold=True))); cr_ws+=1
-    fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,0,8,get_cell_format(cb,COLORS["white"],bold=True))); cr_ws+=1
-    fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,0,1,"NUMBER","#,##0"))
-    fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,3,5,"NUMBER","#,##0"))
-    fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,5,7,"PERCENT","0.00%")); cr_ws+=1
-    fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,1,len(products)+1,get_cell_format(cb,COLORS["white"],bold=True)))
-    fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"],bold=True))); cr_ws+=1
-    for row_idx in range(5):
-        fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,0,1,get_cell_format(bold=True)))
-        fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"])))
-        ft = "PERCENT" if row_idx in [0,4] else "NUMBER"; fp = "0.00%" if row_idx in [0,4] else "#,##0"
-        fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,1,len(products)+2,ft,fp)); cr_ws+=1
-    fr_ws.append(create_border_request(sid_ws,bs,cr_ws,0,len(products)+2))
-    cr_ws += 1  # empty row
-    ar_ws.extend(block_data)
+    for block_data, im in ws1_blocks:
+        bs = cr_ws
+        nc = len(products)+2
+        hb = COLORS["dark_blue"] if im else COLORS["dark_gray"]; cb = COLORS["navy"] if im else COLORS["black"]
+        fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,0,nc,get_cell_format(hb,COLORS["white"],bold=True))); cr_ws+=1
+        fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,0,8,get_cell_format(cb,COLORS["white"],bold=True))); cr_ws+=1
+        fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,0,1,"NUMBER","#,##0"))
+        fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,3,5,"NUMBER","#,##0"))
+        fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,5,7,"PERCENT","0.00%")); cr_ws+=1
+        fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,1,len(products)+1,get_cell_format(cb,COLORS["white"],bold=True)))
+        fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"],bold=True))); cr_ws+=1
+        for row_idx in range(5):
+            fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,0,1,get_cell_format(bold=True)))
+            fr_ws.append(create_format_request(sid_ws,cr_ws,cr_ws+1,len(products)+1,len(products)+2,get_cell_format(COLORS["light_yellow"])))
+            ft = "PERCENT" if row_idx in [0,4] else "NUMBER"; fp = "0.00%" if row_idx in [0,4] else "#,##0"
+            fr_ws.append(create_number_format_request(sid_ws,cr_ws,cr_ws+1,1,len(products)+2,ft,fp)); cr_ws+=1
+        fr_ws.append(create_border_request(sid_ws,bs,cr_ws,0,len(products)+2))
+        cr_ws += 1
+        ar_ws.extend(block_data)
 
-with_retry(ws_ws.update, values=ar_ws, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
-try:
-    for i in range(0,len(fr_ws),100): with_retry(sh.batch_update, body={"requests":fr_ws[i:i+100]}); time.sleep(1)
-except: pass
-try:
-    cw=[{"updateDimensionProperties":{"range":{"sheetId":sid_ws,"dimension":"COLUMNS","startIndex":0,"endIndex":1},"properties":{"pixelSize":150},"fields":"pixelSize"}}]
-    for ci in range(1,11): cw.append({"updateDimensionProperties":{"range":{"sheetId":sid_ws,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":100},"fields":"pixelSize"}})
-    with_retry(sh.batch_update, body={"requests":cw})
-except: pass
-print("✅ 주간종합 완료"); time.sleep(2)
+    with WRITE_SEMAPHORE:
+        with_retry(ws_ws.update, values=ar_ws, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
+    with FORMAT_SEMAPHORE:
+        try:
+            for i in range(0,len(fr_ws),100): with_retry(sh.batch_update, body={"requests":fr_ws[i:i+100]}); time.sleep(1)
+        except: pass
+        try:
+            cw=[{"updateDimensionProperties":{"range":{"sheetId":sid_ws,"dimension":"COLUMNS","startIndex":0,"endIndex":1},"properties":{"pixelSize":150},"fields":"pixelSize"}}]
+            for ci in range(1,11): cw.append({"updateDimensionProperties":{"range":{"sheetId":sid_ws,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":100},"fields":"pixelSize"}})
+            with_retry(sh.batch_update, body={"requests":cw})
+        except: pass
+    return "주간종합: ✅"
 
 
-# --- 16: 주간종합_2 ---
-print("\n📝 16: 주간종합_2")
-ws2 = with_retry(sh.add_worksheet, title="주간종합_2", rows=2000, cols=20); time.sleep(2)
-sid2=ws2.id; fr2=[]; ar2=[]; cr2=0; npc=len(products)+3
+def _write_weekly_summary_2():
+    """주간종합_2 쓰기 + 서식"""
+    ws2 = ws_registry['주간종합_2']
+    sid2=ws2.id; fr2=[]; ar2=[]; cr2=0; npc=len(products)+3
 
-ar2.append(["📊 기간별 전체 요약"]+[""]*6); fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(COLORS["navy"],COLORS["white"],bold=True))); cr2+=1
-ar2.append(["기간","유형","지출금액","매출","이익","ROAS","CVR"]); fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(COLORS["dark_blue"],COLORS["white"],bold=True))); cr2+=1
-t1s=cr2
-for rd in ws2_stl:
-    ar2.append([rd['period'],rd['type'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0])
-    bg=COLORS["light_blue"] if rd['im'] else COLORS["white"]
-    fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(bg)))
-    fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,5,"NUMBER","#,##0"))
-    fr2.append(create_number_format_request(sid2,cr2,cr2+1,5,7,"PERCENT","0.00%")); cr2+=1
-fr2.append(create_border_request(sid2,t1s-1,cr2,0,7)); ar2+=[[""]*(npc),[""]*(npc)]; cr2+=2
-
-for tt,tc,dk in [("📈 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 제품별 순이익",COLORS["dark_green"],"profit"),
-    ("💵 제품별 매출",COLORS["orange"],"revenue"),("💸 제품별 예산",COLORS["purple"],"spend"),("📊 제품별 예산 비중",COLORS["purple"],"ratio")]:
-    ar2.append([tt]+[""]*(npc-1)); fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(tc,COLORS["white"],bold=True))); cr2+=1
-    ar2.append(["기간","유형"]+products+["합계"]); fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(COLORS["dark_gray"],COLORS["white"],bold=True))); cr2+=1
-    tds=cr2
+    ar2.append(["📊 기간별 전체 요약"]+[""]*6); fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(COLORS["navy"],COLORS["white"],bold=True))); cr2+=1
+    ar2.append(["기간","유형","지출금액","매출","이익","ROAS","CVR"]); fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(COLORS["dark_blue"],COLORS["white"],bold=True))); cr2+=1
+    t1s=cr2
     for rd in ws2_stl:
-        pd_r = mps.get(rd.get('mk',''),defaultdict(lambda:{'spend':0,'revenue':0,'profit':0})) if rd['im'] else wps.get(rd.get('wk',''),defaultdict(lambda:{'spend':0,'revenue':0,'profit':0}))
-        r=[rd['period'],rd['type']]; tsp=sum(pd_r[p]['spend'] for p in products); trv=sum(pd_r[p]['revenue'] for p in products)
-        for p in products:
-            if dk=="roas": r.append((pd_r[p]['revenue']/pd_r[p]['spend']) if pd_r[p]['spend']>0 else 0)
-            elif dk=="ratio": r.append((pd_r[p]['spend']/tsp) if tsp>0 else 0)
-            else: r.append(pd_r[p][dk])
-        if dk=="roas": r.append((trv/tsp) if tsp>0 else 0)
-        elif dk=="ratio": r.append(1.0)
-        else: r.append(sum(pd_r[p][dk] for p in products))
-        ar2.append(r); bg=COLORS["light_blue"] if rd['im'] else COLORS["white"]
-        fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(bg)))
-        ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER"; fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
-        fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,npc,ft,fp)); cr2+=1
-    fr2.append(create_border_request(sid2,tds-1,cr2,0,npc)); ar2+=[[""]*(npc),[""]*(npc)]; cr2+=2
+        ar2.append([rd['period'],rd['type'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0])
+        bg=COLORS["light_blue"] if rd['im'] else COLORS["white"]
+        fr2.append(create_format_request(sid2,cr2,cr2+1,0,7,get_cell_format(bg)))
+        fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,5,"NUMBER","#,##0"))
+        fr2.append(create_number_format_request(sid2,cr2,cr2+1,5,7,"PERCENT","0.00%")); cr2+=1
+    fr2.append(create_border_request(sid2,t1s-1,cr2,0,7)); ar2+=[[""]*(npc),[""]*(npc)]; cr2+=2
 
-with_retry(ws2.update, values=ar2, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
-try:
-    for i in range(0,len(fr2),100): with_retry(sh.batch_update, body={"requests":fr2[i:i+100]}); time.sleep(1)
-except: pass
-print("✅ 주간종합_2 완료"); time.sleep(2)
+    for tt,tc,dk in [("📈 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 제품별 순이익",COLORS["dark_green"],"profit"),
+        ("💵 제품별 매출",COLORS["orange"],"revenue"),("💸 제품별 예산",COLORS["purple"],"spend"),("📊 제품별 예산 비중",COLORS["purple"],"ratio")]:
+        ar2.append([tt]+[""]*(npc-1)); fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(tc,COLORS["white"],bold=True))); cr2+=1
+        ar2.append(["기간","유형"]+products+["합계"]); fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(COLORS["dark_gray"],COLORS["white"],bold=True))); cr2+=1
+        tds=cr2
+        for rd in ws2_stl:
+            pd_r = mps.get(rd.get('mk',''),defaultdict(lambda:{'spend':0,'revenue':0,'profit':0})) if rd['im'] else wps.get(rd.get('wk',''),defaultdict(lambda:{'spend':0,'revenue':0,'profit':0}))
+            r=[rd['period'],rd['type']]; tsp=sum(pd_r[p]['spend'] for p in products); trv=sum(pd_r[p]['revenue'] for p in products)
+            for p in products:
+                if dk=="roas": r.append((pd_r[p]['revenue']/pd_r[p]['spend']) if pd_r[p]['spend']>0 else 0)
+                elif dk=="ratio": r.append((pd_r[p]['spend']/tsp) if tsp>0 else 0)
+                else: r.append(pd_r[p][dk])
+            if dk=="roas": r.append((trv/tsp) if tsp>0 else 0)
+            elif dk=="ratio": r.append(1.0)
+            else: r.append(sum(pd_r[p][dk] for p in products))
+            ar2.append(r); bg=COLORS["light_blue"] if rd['im'] else COLORS["white"]
+            fr2.append(create_format_request(sid2,cr2,cr2+1,0,npc,get_cell_format(bg)))
+            ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER"; fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
+            fr2.append(create_number_format_request(sid2,cr2,cr2+1,2,npc,ft,fp)); cr2+=1
+        fr2.append(create_border_request(sid2,tds-1,cr2,0,npc)); ar2+=[[""]*(npc),[""]*(npc)]; cr2+=2
+
+    with WRITE_SEMAPHORE:
+        with_retry(ws2.update, values=ar2, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
+    with FORMAT_SEMAPHORE:
+        try:
+            for i in range(0,len(fr2),100): with_retry(sh.batch_update, body={"requests":fr2[i:i+100]}); time.sleep(1)
+        except: pass
+    return "주간종합_2: ✅"
 
 
-# --- 17: 주간종합_3 ---
-print("\n📝 17: 주간종합_3 (일별)")
-ws3 = with_retry(sh.add_worksheet, title="주간종합_3", rows=3000, cols=20); time.sleep(2)
-sid3=ws3.id; fr3=[]; ar3=[]; cr3=0; ndc=len(products)+4
+def _write_weekly_summary_3():
+    """주간종합_3 쓰기 + 서식"""
+    ws3 = ws_registry['주간종합_3']
+    sid3=ws3.id; fr3=[]; ar3=[]; cr3=0; ndc=len(products)+4
 
-ar3.append(["📊 일별 전체 요약"]+[""]*7); fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["navy"],COLORS["white"],bold=True))); cr3+=1
-ar3.append(["날짜","요일","지출금액","매출","이익","ROAS","CVR",""]); fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["dark_blue"],COLORS["white"],bold=True))); cr3+=1
-t1s3=cr3
-for rd in ws3_dsr:
-    ar3.append([rd['period'],rd['weekday'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0,""])
-    bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["white"]
-    fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(bg)))
-    fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,5,"NUMBER","#,##0"))
-    fr3.append(create_number_format_request(sid3,cr3,cr3+1,5,7,"PERCENT","0.00%")); cr3+=1
-fr3.append(create_border_request(sid3,t1s3-1,cr3,0,8)); ar3+=[[""]*(ndc),[""]*(ndc)]; cr3+=2
-
-for tt,tc,dk in [("📈 일별 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 일별 제품별 순이익",COLORS["dark_green"],"profit"),
-    ("💵 일별 제품별 매출",COLORS["orange"],"revenue"),("💸 일별 제품별 예산",COLORS["purple"],"spend"),("📊 일별 제품별 예산 비중",COLORS["purple"],"ratio")]:
-    ar3.append([tt]+[""]*(ndc-1)); fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(tc,COLORS["white"],bold=True))); cr3+=1
-    ar3.append(["날짜","요일"]+products+["합계"]); fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(COLORS["dark_gray"],COLORS["white"],bold=True))); cr3+=1
-    tds=cr3
+    ar3.append(["📊 일별 전체 요약"]+[""]*7); fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["navy"],COLORS["white"],bold=True))); cr3+=1
+    ar3.append(["날짜","요일","지출금액","매출","이익","ROAS","CVR",""]); fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["dark_blue"],COLORS["white"],bold=True))); cr3+=1
+    t1s3=cr3
     for rd in ws3_dsr:
-        pd_r=daily_product_data[rd['tab_name']]; r=[rd['period'],rd['weekday']]
-        tsp=sum(pd_r[p]['spend'] for p in products); trv=sum(pd_r[p]['revenue'] for p in products)
-        for p in products:
-            if dk=="roas": r.append((pd_r[p]['revenue']/pd_r[p]['spend']) if pd_r[p]['spend']>0 else 0)
-            elif dk=="ratio": r.append((pd_r[p]['spend']/tsp) if tsp>0 else 0)
-            else: r.append(pd_r[p][dk])
-        if dk=="roas": r.append((trv/tsp) if tsp>0 else 0)
-        elif dk=="ratio": r.append(1.0)
-        else: r.append(sum(pd_r[p][dk] for p in products))
-        ar3.append(r); bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["white"]
-        fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(bg)))
-        ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER"; fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
-        fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,ndc,ft,fp)); cr3+=1
-    fr3.append(create_border_request(sid3,tds-1,cr3,0,ndc)); ar3+=[[""]*(ndc),[""]*(ndc)]; cr3+=2
+        ar3.append([rd['period'],rd['weekday'],rd['spend'],rd['revenue'],rd['profit'],rd['roas'],0,""])
+        bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["white"]
+        fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(bg)))
+        fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,5,"NUMBER","#,##0"))
+        fr3.append(create_number_format_request(sid3,cr3,cr3+1,5,7,"PERCENT","0.00%")); cr3+=1
+    fr3.append(create_border_request(sid3,t1s3-1,cr3,0,8)); ar3+=[[""]*(ndc),[""]*(ndc)]; cr3+=2
 
-with_retry(ws3.update, values=ar3, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
-try:
-    for i in range(0,len(fr3),100): with_retry(sh.batch_update, body={"requests":fr3[i:i+100]}); time.sleep(1)
-except: pass
-print("✅ 주간종합_3 완료"); time.sleep(2)
+    for tt,tc,dk in [("📈 일별 제품별 ROAS",COLORS["dark_green"],"roas"),("💰 일별 제품별 순이익",COLORS["dark_green"],"profit"),
+        ("💵 일별 제품별 매출",COLORS["orange"],"revenue"),("💸 일별 제품별 예산",COLORS["purple"],"spend"),("📊 일별 제품별 예산 비중",COLORS["purple"],"ratio")]:
+        ar3.append([tt]+[""]*(ndc-1)); fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(tc,COLORS["white"],bold=True))); cr3+=1
+        ar3.append(["날짜","요일"]+products+["합계"]); fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(COLORS["dark_gray"],COLORS["white"],bold=True))); cr3+=1
+        tds=cr3
+        for rd in ws3_dsr:
+            pd_r=daily_product_data[rd['tab_name']]; r=[rd['period'],rd['weekday']]
+            tsp=sum(pd_r[p]['spend'] for p in products); trv=sum(pd_r[p]['revenue'] for p in products)
+            for p in products:
+                if dk=="roas": r.append((pd_r[p]['revenue']/pd_r[p]['spend']) if pd_r[p]['spend']>0 else 0)
+                elif dk=="ratio": r.append((pd_r[p]['spend']/tsp) if tsp>0 else 0)
+                else: r.append(pd_r[p][dk])
+            if dk=="roas": r.append((trv/tsp) if tsp>0 else 0)
+            elif dk=="ratio": r.append(1.0)
+            else: r.append(sum(pd_r[p][dk] for p in products))
+            ar3.append(r); bg=COLORS["light_blue"] if rd['weekday'] in ['토','일'] else COLORS["white"]
+            fr3.append(create_format_request(sid3,cr3,cr3+1,0,ndc,get_cell_format(bg)))
+            ft="PERCENT" if dk in ["roas","ratio"] else "NUMBER"; fp="0.00%" if dk in ["roas","ratio"] else "#,##0"
+            fr3.append(create_number_format_request(sid3,cr3,cr3+1,2,ndc,ft,fp)); cr3+=1
+        fr3.append(create_border_request(sid3,tds-1,cr3,0,ndc)); ar3+=[[""]*(ndc),[""]*(ndc)]; cr3+=2
+
+    with WRITE_SEMAPHORE:
+        with_retry(ws3.update, values=ar3, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
+    with FORMAT_SEMAPHORE:
+        try:
+            for i in range(0,len(fr3),100): with_retry(sh.batch_update, body={"requests":fr3[i:i+100]}); time.sleep(1)
+        except: pass
+    return "주간종합_3: ✅"
+
+
+# =========================================================
+# ★★★ 병렬의 병렬: 모든 탭 동시 쓰기 ★★★
+# =========================================================
+print("\n🚀 ★★★ 병렬의 병렬: 모든 탭 동시 쓰기 시작 ★★★")
+_t_write = time.time()
+
+write_futures = {}
+with ThreadPoolExecutor(max_workers=6) as write_executor:
+    # 날짜 탭 병렬 쓰기
+    for dk in new_date_names:
+        f = write_executor.submit(_write_date_tab, dk)
+        write_futures[f] = f"날짜탭:{dk}"
+
+    # 분석 탭 병렬 쓰기
+    write_futures[write_executor.submit(_write_master)] = "마스터탭"
+    write_futures[write_executor.submit(_write_budget)] = "예산"
+    write_futures[write_executor.submit(_write_weekly_summary_1)] = "주간종합"
+    write_futures[write_executor.submit(_write_weekly_summary_2)] = "주간종합_2"
+    write_futures[write_executor.submit(_write_weekly_summary_3)] = "주간종합_3"
+
+    # 추이차트 그룹 (서식이 무거우므로 별도 그룹)
+    write_futures[write_executor.submit(_write_trend_daily)] = "추이차트"
+    write_futures[write_executor.submit(_write_trend_weekly)] = "추이차트(주간)"
+    write_futures[write_executor.submit(_write_change)] = "증감액"
+
+    for future in as_completed(write_futures):
+        label = write_futures[future]
+        try:
+            result = future.result()
+            print(f"  ✅ {result}")
+        except Exception as e:
+            print(f"  ⚠️ {label} 오류: {e}")
+
+_write_elapsed = time.time() - _t_write
+print(f"\n  ⏱️ 병렬 쓰기 완료: {_write_elapsed:.1f}초")
 
 
 # =========================================================
@@ -1600,13 +1705,14 @@ except Exception as e:
 # 완료
 # =========================================================
 print("\n" + "="*60)
-print("✅ 완료! (★ 병렬 최적화 버전)")
+print("✅ 완료! (★ 병렬의 병렬 최적화 버전)")
 print("="*60)
 print()
 print(f"📋 Meta: 최근 {REFRESH_DAYS}일 × {len(ALL_AD_ACCOUNTS)}계정 = {REFRESH_DAYS*len(ALL_AD_ACCOUNTS)}건 ★동시 호출★")
-print(f"📋 Mixpanel: Meta와 ★동시 수집★")
+print(f"📋 Mixpanel: Meta와 ★동시 수집★ (이벤트: {MIXPANEL_EVENT_NAMES})")
+print(f"📋 매출 필드: amount OR 결제금액 (OR fallback)")
 print(f"📋 기존 탭 읽기: ★병렬 읽기★")
-print(f"📋 데이터 준비: 날짜탭+분석탭 ★8개 동시 생성★")
-print(f"📋 Sheets 쓰기: rate-limit 존중 순차 쓰기")
+print(f"📋 데이터 준비: 날짜탭+분석탭 ★10개 동시 생성★")
+print(f"📋 Sheets 쓰기: ★★★ 병렬의 병렬 — 날짜탭+분석탭 동시 쓰기 ★★★")
 print(f"📋 탭 순서: [기타] → [날짜: 과거→최신] → [분석탭]")
 print(f"\n📊 {SPREADSHEET_URL}")
