@@ -63,7 +63,7 @@ import threading
 # Meta API: 날짜별 병렬 워커 수 (너무 많으면 rate limit)
 META_DATE_WORKERS = 3
 # Meta API: 계정별 병렬 워커 수 (날짜 안에서)
-META_ACCOUNT_WORKERS = 2
+META_ACCOUNT_WORKERS = 3
 # Mixpanel 청크 병렬 워커 수
 MIXPANEL_CHUNK_WORKERS = 3
 # Google Sheets 탭 읽기 병렬 워커 수
@@ -71,7 +71,7 @@ SHEETS_READ_WORKERS = 5
 # 환율 병렬 워커 수
 EXCHANGE_RATE_WORKERS = 2
 # 예산 조회 병렬 워커 수
-BUDGET_WORKERS = 2
+BUDGET_WORKERS = 3
 
 # 스레드 안전 print
 _print_lock = threading.Lock()
@@ -136,25 +136,26 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
     return fallback
 
 # =========================================================
-# Meta Ads API 설정
+# Meta Ads API 설정 (국내 세트별: 3계정)
 # =========================================================
-META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
-META_TOKEN_4 = os.environ.get("META_TOKEN_4", "")
-META_TOKEN_ACT_2677 = META_TOKEN_4 or os.environ.get("META_TOKEN_3", "")
+# 토큰 A: act_1270 + act_7078 공유
+META_TOKEN_A = os.environ.get("META_TOKEN_KR_A", os.environ.get("META_TOKEN_1", ""))
+# 토큰 B: act_1808 전용
+META_TOKEN_B = os.environ.get("META_TOKEN_KR_B", os.environ.get("META_TOKEN_2", ""))
 
 META_TOKENS = {
-    "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),
-    "act_2677707262628563": META_TOKEN_ACT_2677,
+    "act_1270614404675034": META_TOKEN_A,
+    "act_707835224206178": META_TOKEN_A,
+    "act_1808141386564262": META_TOKEN_B,
 }
+META_TOKEN_DEFAULT = META_TOKEN_A
 def get_token(acc_id): return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
-print("🔑 Meta 토큰 상태:")
-print(f"  TOKEN_1 (act_1054): {'✅ 설정됨' if META_TOKENS['act_1054081590008088'] else '❌ 비어있음'}")
-print(f"  TOKEN_4 (act_2677 우선): {'✅ 설정됨' if META_TOKEN_4 else '❌ 비어있음'}")
-print(f"  TOKEN_3 (act_2677 폴백): {'✅ 설정됨' if os.environ.get('META_TOKEN_3', '') else '❌ 비어있음'}")
-print(f"  act_2677 최종 토큰: {'✅ 설정됨' if META_TOKEN_ACT_2677 else '❌ 비어있음'}")
+print("🔑 Meta 토큰 상태 (국내 3계정):")
+print(f"  TOKEN_A (act_1270 + act_7078): {'✅ 설정됨' if META_TOKEN_A else '❌ 비어있음'}")
+print(f"  TOKEN_B (act_1808):            {'✅ 설정됨' if META_TOKEN_B else '❌ 비어있음'}")
 
 # =========================================================
 # ★ v21: Mixpanel 설정 - 이벤트명 OR 지원
@@ -1053,7 +1054,7 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
 # 실행 시작
 # =============================================================================
 print("\n"+"="*60); print("1단계: 광고 계정 설정"); print("="*60)
-ALL_AD_ACCOUNTS = ["act_1054081590008088","act_2677707262628563"]
+ALL_AD_ACCOUNTS = ["act_1270614404675034", "act_707835224206178", "act_1808141386564262"]
 print(f"📋 광고 계정 ({len(ALL_AD_ACCOUNTS)}개):")
 for acc in ALL_AD_ACCOUNTS: print(f"  - {acc}")
 print()
