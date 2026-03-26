@@ -117,12 +117,12 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
 # =========================================================
 META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
 
-# ★ v21: META_TOKEN_GlobalTT — act_2677 전용 글로벌 토큰
+# ★ v21: META_TOKEN_GlobalTT — act_2677 최우선 글로벌 토큰
 META_TOKEN_GLOBAL = os.environ.get("META_TOKEN_GlobalTT", "")
 
-# act_2677: TOKEN_4 우선 → TOKEN_3 폴백 → GlobalTT 최종
+# act_2677: GlobalTT 최우선 → TOKEN_4 → TOKEN_3 폴백
 META_TOKEN_4 = os.environ.get("META_TOKEN_4", "")
-META_TOKEN_ACT_2677 = META_TOKEN_4 or os.environ.get("META_TOKEN_3", "") or META_TOKEN_GLOBAL
+META_TOKEN_ACT_2677 = META_TOKEN_GLOBAL or META_TOKEN_4 or os.environ.get("META_TOKEN_3", "")
 
 META_TOKENS = {
     "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),
@@ -138,7 +138,7 @@ print(f"  TOKEN_1 (act_1054): {'✅ 설정됨' if META_TOKENS['act_1054081590008
 print(f"  GlobalTT (act_2677 글로벌): {'✅ 설정됨' if META_TOKEN_GLOBAL else '❌ 비어있음'}")
 print(f"  TOKEN_4 (act_2677 우선): {'✅ 설정됨' if META_TOKEN_4 else '❌ 비어있음'}")
 print(f"  TOKEN_3 (act_2677 폴백): {'✅ 설정됨' if os.environ.get('META_TOKEN_3', '') else '❌ 비어있음'}")
-print(f"  act_2677 최종 토큰: {'✅' if META_TOKEN_ACT_2677 else '❌'} {'(TOKEN_4)' if META_TOKEN_4 else '(TOKEN_3)' if os.environ.get('META_TOKEN_3','') else '(GlobalTT)' if META_TOKEN_GLOBAL else '(없음)'}")
+print(f"  act_2677 최종 토큰: {'✅' if META_TOKEN_ACT_2677 else '❌'} {'(GlobalTT)' if META_TOKEN_GLOBAL else '(TOKEN_4)' if META_TOKEN_4 else '(TOKEN_3)' if os.environ.get('META_TOKEN_3','') else '(없음)'}")
 
 # =========================================================
 # Mixpanel 설정
