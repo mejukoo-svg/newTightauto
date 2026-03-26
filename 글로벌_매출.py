@@ -5,7 +5,7 @@
 두 가지 모드:
   1) daily   - 국가별(대만/홍콩/일본) 일별 매출 → "매출" 시트
   2) weekly  - 월별 블록 + 주차별 달러/원화 매출 → "주간매출" 시트
-  3) all     - 위 두 가지 모두 실행
+  3) all     - 위 두 가지 모두 실행 (병렬)
 
 [사용법]
   python 글로벌_매출.py daily
@@ -30,19 +30,18 @@ from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta, timezone, date
 from collections import defaultdict
 from calendar import monthrange
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ==================== CONFIG ====================
 
 STRIPE_API_KEY = os.environ["STRIPE_API_KEY"]
 
 _raw_sheet = os.environ["SPREADSHEET_URL_TW_ADSET"]
-# URL 전체든 ID만이든 자동 처리
 if "/d/" in _raw_sheet:
     SPREADSHEET_ID = _raw_sheet.split("/d/")[1].split("/")[0]
 else:
     SPREADSHEET_ID = _raw_sheet.strip()
 
-# Service account: 파일 경로 또는 JSON 문자열 모두 지원
 _sa_raw = os.environ.get("GCP_SERVICE_ACCOUNT_KEY", "service_account.json")
 
 DAILY_SHEET_NAME = "매출"
@@ -50,11 +49,9 @@ WEEKLY_SHEET_NAME = "주간매출"
 
 DAYS_BACK = 45
 
-# 주간매출 데이터 시작 월
 START_YEAR = 2025
 START_MONTH = 12
 
-# 월별 목표 매출 (KRW) — 주간매출 시트에서 사용
 MONTHLY_TARGETS = {
     (2025, 12): 100_000_000,
     (2026, 1): 150_000_000,
@@ -63,7 +60,6 @@ MONTHLY_TARGETS = {
 }
 DEFAULT_TARGET = 500_000_000
 
-# 국가/통화 설정
 TARGET_COUNTRIES = {"TW": "대만", "HK": "홍콩", "JP": "일본"}
 CURRENCY_TO_COUNTRY = {"twd": "TW", "hkd": "HK", "jpy": "JP"}
 COUNTRY_ORDER = ["대만", "홍콩", "일본"]
@@ -73,14 +69,39 @@ WEEKLY_ALLOWED_CURRENCIES = {"twd", "hkd", "jpy"}
 
 CURRENCY_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100}
 
+# 결제 상태: 기존 "succeeded" + 신규 "payment_complete" 둘 다 허용
+VALID_STATUSES = {"succeeded", "payment_complete"}
+
 KST = timezone(timedelta(hours=9))
 DAY_NAMES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+
+MAX_WORKERS = 16
+
+
+# ==================== 헬퍼: amount / status OR 처리 ====================
+
+def get_charge_amount(charge):
+    """결제금액 필드: '결제금액' or 'amount' (변수명 전환 과도기 대응)"""
+    return charge.get("결제금액") or charge.get("amount") or 0
+
+
+def get_charge_status(charge):
+    """결제 상태 필드: 'payment_complete' or 기존 'status'"""
+    return charge.get("payment_complete") or charge.get("status") or ""
+
+
+def is_valid_charge(charge):
+    """유효한 결제인지 확인 (succeeded OR payment_complete)"""
+    status = get_charge_status(charge)
+    # payment_complete 필드가 True/truthy 이거나, status가 유효 값
+    if isinstance(status, bool):
+        return status
+    return str(status).lower() in VALID_STATUSES or status is True
 
 
 # ==================== Google Auth ====================
 
 def _resolve_service_account_path():
-    """환경변수가 JSON 문자열이면 임시 파일로 저장, 파일 경로면 그대로 반환"""
     raw = _sa_raw.strip()
     if raw.startswith("{"):
         tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
@@ -102,7 +123,6 @@ def get_gspread_client():
     except FileNotFoundError:
         pass
 
-    # Colab 환경 폴백
     try:
         from google.colab import auth
         auth.authenticate_user()
@@ -115,15 +135,17 @@ def get_gspread_client():
     raise RuntimeError("Google 인증 실패: GCP_SERVICE_ACCOUNT_KEY 환경변수를 확인하세요.")
 
 
-# ==================== 환율 ====================
+# ==================== 환율 (병렬 조회) ====================
 
 _rate_cache = {}
+_rate_lock = __import__("threading").Lock()
 
 
-def get_rate(date_str):
-    """날짜별 환율 조회 (캐싱, USD 기준)"""
-    if date_str in _rate_cache:
-        return _rate_cache[date_str]
+def _fetch_single_rate(date_str):
+    """단일 날짜 환율 조회"""
+    with _rate_lock:
+        if date_str in _rate_cache:
+            return date_str, _rate_cache[date_str]
 
     url = f"https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@{date_str}/v1/currencies/usd.json"
     try:
@@ -136,35 +158,54 @@ def get_rate(date_str):
                 "hkd": usd.get("hkd", 7.8),
                 "jpy": usd.get("jpy", 150),
             }
-            _rate_cache[date_str] = rates
-            return rates
+            with _rate_lock:
+                _rate_cache[date_str] = rates
+            return date_str, rates
     except Exception:
         pass
 
-    if _rate_cache:
-        last = list(_rate_cache.values())[-1]
-        _rate_cache[date_str] = last
-        return last
+    with _rate_lock:
+        if _rate_cache:
+            last = list(_rate_cache.values())[-1]
+            _rate_cache[date_str] = last
+            return date_str, last
 
     default = {"krw": 1480, "twd": 32, "hkd": 7.8, "jpy": 150}
-    _rate_cache[date_str] = default
-    return default
+    with _rate_lock:
+        _rate_cache[date_str] = default
+    return date_str, default
+
+
+def get_rate(date_str):
+    with _rate_lock:
+        if date_str in _rate_cache:
+            return _rate_cache[date_str]
+    _, rates = _fetch_single_rate(date_str)
+    return rates
 
 
 def prefetch_rates(start_date, end_date):
-    """날짜 범위 환율 일괄 조회"""
-    print(f"\n💱 환율 일괄 조회 중...")
+    """날짜 범위 환율 병렬 일괄 조회"""
+    print(f"\n💱 환율 병렬 조회 중...")
+    dates = []
     d = start_date
-    count = 0
     while d <= end_date:
-        get_rate(d.strftime("%Y-%m-%d"))
+        dates.append(d.strftime("%Y-%m-%d"))
         d += timedelta(days=1)
-        count += 1
-    print(f"✅ {count}일 환율 조회 완료")
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(_fetch_single_rate, ds): ds for ds in dates}
+        done = 0
+        for future in as_completed(futures):
+            future.result()
+            done += 1
+            if done % 20 == 0:
+                print(f"  💱 {done}/{len(dates)} 완료...")
+
+    print(f"✅ {len(dates)}일 환율 병렬 조회 완료")
 
 
 def convert_to_krw(amount, currency, rates):
-    """현지 통화 금액 → KRW 변환"""
     krw_rate = rates["krw"]
     if currency == "usd":
         return round(amount * krw_rate)
@@ -174,26 +215,23 @@ def convert_to_krw(amount, currency, rates):
     return round((amount / usd_to_local) * krw_rate)
 
 
-# ==================== Stripe 데이터 수집 ====================
+# ==================== Stripe 데이터 수집 (병렬) ====================
 
-def fetch_all_charges(start_date, end_date):
-    """Stripe에서 성공한 결제 내역 전체 수집"""
+def _fetch_charges_for_status(status, start_ts, end_ts):
+    """단일 상태에 대한 전체 페이지네이션 수집"""
     stripe.api_key = STRIPE_API_KEY
-    start_ts = int(start_date.timestamp())
-    end_ts = int(end_date.timestamp())
-
     all_charges = []
     has_more = True
     starting_after = None
-
-    print(f"📅 수집 범위: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
 
     while has_more:
         params = {
             "limit": 100,
             "created": {"gte": start_ts, "lte": end_ts},
-            "status": "succeeded",
         }
+        # Stripe 표준 상태만 API에서 필터 가능
+        if status in ("succeeded", "pending", "failed"):
+            params["status"] = status
         if starting_after:
             params["starting_after"] = starting_after
 
@@ -203,48 +241,85 @@ def fetch_all_charges(start_date, end_date):
         has_more = response.has_more
         if charges:
             starting_after = charges[-1].id
-        print(f"  💳 {len(all_charges)}건 수집중...")
 
-    print(f"✅ 총 {len(all_charges)}건 수집 완료")
     return all_charges
 
 
-# ==================== [모드 1] 일별 매출 (매출 탭) ====================
+def fetch_all_charges(start_date, end_date):
+    """Stripe에서 결제 내역 병렬 수집 (succeeded + payment_complete)"""
+    start_ts = int(start_date.timestamp())
+    end_ts = int(end_date.timestamp())
+
+    print(f"📅 수집 범위: {start_date.strftime('%Y-%m-%d')} ~ {end_date.strftime('%Y-%m-%d')}")
+
+    # succeeded / payment_complete 두 상태를 병렬 수집
+    statuses_to_fetch = list(VALID_STATUSES)
+    all_charges = []
+    seen_ids = set()
+
+    with ThreadPoolExecutor(max_workers=len(statuses_to_fetch)) as executor:
+        futures = {
+            executor.submit(_fetch_charges_for_status, s, start_ts, end_ts): s
+            for s in statuses_to_fetch
+        }
+        for future in as_completed(futures):
+            status = futures[future]
+            charges = future.result()
+            print(f"  💳 [{status}] {len(charges)}건 수집")
+            for ch in charges:
+                cid = ch.get("id")
+                if cid and cid not in seen_ids:
+                    seen_ids.add(cid)
+                    all_charges.append(ch)
+
+    # 추가: payment_complete 필드 기반 필터 (status가 아닌 별도 필드인 경우)
+    all_charges = [ch for ch in all_charges if is_valid_charge(ch)]
+
+    print(f"✅ 총 {len(all_charges)}건 수집 완료 (중복 제거)")
+    return all_charges
+
+
+# ==================== [모드 1] 일별 매출 ====================
+
+def _process_charge_daily(charge):
+    """단일 charge → (country_name, date_str, amount_krw) 또는 None"""
+    currency = (charge.get("currency") or "").lower()
+    if currency not in DAILY_ALLOWED_CURRENCIES:
+        return None
+
+    charge_dt = datetime.fromtimestamp(charge.created, tz=KST)
+    date_str = charge_dt.strftime("%Y-%m-%d")
+
+    country_code = None
+    bd = charge.get("billing_details")
+    if bd and bd.get("address") and bd["address"].get("country"):
+        country_code = bd["address"]["country"]
+    elif currency:
+        country_code = CURRENCY_TO_COUNTRY.get(currency)
+
+    if country_code not in TARGET_COUNTRIES:
+        return None
+
+    country_name = TARGET_COUNTRIES[country_code]
+    divisor = CURRENCY_DIVISOR.get(currency, 100)
+    raw_amount = get_charge_amount(charge)
+    amount = raw_amount / divisor
+    rates = get_rate(date_str)
+    amount_krw = convert_to_krw(amount, currency, rates)
+    return country_name, date_str, amount_krw
+
 
 def aggregate_revenue_daily_mode(charges, start_date, end_date):
-    """국가별/날짜별 매출 집계 (매출 탭용)"""
+    """국가별/날짜별 매출 병렬 집계"""
     revenue = defaultdict(lambda: defaultdict(float))
-    skipped_country = 0
-    skipped_currency = 0
-    skipped_currencies = defaultdict(int)
 
-    for charge in charges:
-        currency = (charge.get("currency") or "").lower()
-        if currency not in DAILY_ALLOWED_CURRENCIES:
-            skipped_currency += 1
-            skipped_currencies[currency.upper()] += 1
-            continue
-
-        charge_dt = datetime.fromtimestamp(charge.created, tz=KST)
-        date_str = charge_dt.strftime("%Y-%m-%d")
-
-        country_code = None
-        bd = charge.get("billing_details")
-        if bd and bd.get("address") and bd["address"].get("country"):
-            country_code = bd["address"]["country"]
-        elif currency:
-            country_code = CURRENCY_TO_COUNTRY.get(currency)
-
-        if country_code not in TARGET_COUNTRIES:
-            skipped_country += 1
-            continue
-
-        country_name = TARGET_COUNTRIES[country_code]
-        divisor = CURRENCY_DIVISOR.get(currency, 100)
-        amount = charge.amount / divisor
-        rates = get_rate(date_str)
-        amount_krw = convert_to_krw(amount, currency, rates)
-        revenue[country_name][date_str] += amount_krw
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(_process_charge_daily, ch) for ch in charges]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                country_name, date_str, amount_krw = result
+                revenue[country_name][date_str] += amount_krw
 
     all_dates = []
     d = start_date
@@ -254,17 +329,10 @@ def aggregate_revenue_daily_mode(charges, start_date, end_date):
     all_dates.sort(reverse=True)
 
     all_countries = [c for c in COUNTRY_ORDER if c in revenue]
-
-    if skipped_country:
-        print(f"  ⏭️ 대만/홍콩/일본 외 {skipped_country}건 제외")
-    if skipped_currency:
-        print(f"  ⏭️ 허용 통화 외 {skipped_currency}건 제외: {dict(skipped_currencies)}")
-
     return revenue, all_dates, all_countries
 
 
 def _cell_format_req(sheet_id, start_row, end_row, start_col, end_col, fmt, fields):
-    """batchUpdate용 repeatCell 요청 헬퍼"""
     return {
         "repeatCell": {
             "range": {
@@ -281,7 +349,6 @@ def _cell_format_req(sheet_id, start_row, end_row, start_col, end_col, fmt, fiel
 
 
 def write_daily_sheet(revenue, all_dates, all_countries):
-    """Google Sheets '매출' 탭에 일별 매출 기록"""
     gc = get_gspread_client()
     ss = gc.open_by_key(SPREADSHEET_ID)
 
@@ -298,7 +365,6 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         )
         print(f"📋 새 시트 생성: {DAILY_SHEET_NAME}")
 
-    # 데이터 구성
     rows = []
     header = ["국가"]
     for date_str in all_dates:
@@ -318,7 +384,8 @@ def write_daily_sheet(revenue, all_dates, all_countries):
 
     rate_row = ["USD/KRW"]
     for date_str in all_dates:
-        rates = _rate_cache.get(date_str, {})
+        with _rate_lock:
+            rates = _rate_cache.get(date_str, {})
         rate_row.append(round(rates.get("krw", 0), 2))
     rate_row.append("")
     rows.append(rate_row)
@@ -332,7 +399,6 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     total_row.append(grand_total)
     rows.append(total_row)
 
-    # 일괄 업데이트
     num_rows = len(rows)
     num_cols = len(rows[0])
     if ws.row_count < num_rows:
@@ -344,20 +410,16 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     ws.update(values=rows, range_name=cell_range, value_input_option="USER_ENTERED")
     print(f"📊 {len(all_countries)}개 국가 × {len(all_dates)}일 데이터 기록 완료")
 
-    # 서식
     _apply_daily_formatting(ss, ws, num_rows, num_cols, len(all_countries))
 
-    # 맨 오른쪽 이동
     all_worksheets = ss.worksheets()
     others = [w for w in all_worksheets if w.id != ws.id]
     ss.reorder_worksheets(others + [ws])
     print(f"📌 '{ws.title}' 탭을 맨 오른쪽으로 이동 완료")
-
     return ws
 
 
 def _apply_daily_formatting(ss, ws, num_rows, num_cols, num_countries):
-    """매출 탭 서식 (batch_update 1회)"""
     sid = ws.id
     data_last_row = 1 + num_countries
     rate_row_idx = data_last_row
@@ -365,21 +427,18 @@ def _apply_daily_formatting(ss, ws, num_rows, num_cols, num_countries):
 
     reqs = []
 
-    # 헤더
     reqs.append(_cell_format_req(sid, 0, 1, 0, num_cols, {
         "backgroundColor": {"red": 0.267, "green": 0.447, "blue": 0.769},
         "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
         "horizontalAlignment": "CENTER",
     }, "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"))
 
-    # 매출 데이터 숫자
     if num_countries > 0:
         reqs.append(_cell_format_req(sid, 1, data_last_row, 1, num_cols, {
             "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
             "horizontalAlignment": "RIGHT",
         }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
-    # 환율 행
     reqs.append(_cell_format_req(sid, rate_row_idx, rate_row_idx + 1, 0, num_cols, {
         "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95},
     }, "userEnteredFormat(backgroundColor)"))
@@ -388,7 +447,6 @@ def _apply_daily_formatting(ss, ws, num_rows, num_cols, num_countries):
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
-    # 종합 행
     reqs.append(_cell_format_req(sid, total_row_idx, total_row_idx + 1, 0, num_cols, {
         "textFormat": {"bold": True},
         "borders": {"top": {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}},
@@ -398,13 +456,11 @@ def _apply_daily_formatting(ss, ws, num_rows, num_cols, num_countries):
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
-    # A열 라벨
     reqs.append(_cell_format_req(sid, 1, num_rows, 0, 1, {
         "textFormat": {"bold": True},
         "horizontalAlignment": "CENTER",
     }, "userEnteredFormat(textFormat,horizontalAlignment)"))
 
-    # 고정 행/열
     reqs.append({
         "updateSheetProperties": {
             "properties": {
@@ -419,8 +475,8 @@ def _apply_daily_formatting(ss, ws, num_rows, num_cols, num_countries):
     print("🎨 서식 적용 완료 (batch_update 1회)")
 
 
-def run_daily():
-    """일별 매출 모드 실행"""
+def run_daily(charges=None):
+    """일별 매출 모드 (charges 전달 시 재수집 안 함)"""
     print("\n" + "=" * 50)
     print("💳 [daily] 국가별 일별 매출 → 매출 탭")
     print("=" * 50)
@@ -428,8 +484,9 @@ def run_daily():
     end_date = datetime.now(KST)
     start_date = (end_date - timedelta(days=DAYS_BACK)).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    prefetch_rates(start_date, end_date)
-    charges = fetch_all_charges(start_date, end_date)
+    if charges is None:
+        prefetch_rates(start_date, end_date)
+        charges = fetch_all_charges(start_date, end_date)
 
     if not charges:
         print("⚠️ 수집된 결제 내역이 없습니다.")
@@ -449,41 +506,46 @@ def run_daily():
     print("✅ daily 완료!")
 
 
-# ==================== [모드 2] 주간 매출 (주간매출 탭) ====================
+# ==================== [모드 2] 주간 매출 ====================
+
+def _process_charge_weekly(charge):
+    """단일 charge → (date_str, usd, krw) 또는 None"""
+    currency = (charge.get("currency") or "").lower()
+    if currency not in WEEKLY_ALLOWED_CURRENCIES:
+        return None
+
+    charge_dt = datetime.fromtimestamp(charge.created, tz=KST)
+    date_str = charge_dt.strftime("%Y-%m-%d")
+
+    divisor = CURRENCY_DIVISOR.get(currency, 100)
+    raw_amount = get_charge_amount(charge)
+    amount = raw_amount / divisor
+
+    rates = get_rate(date_str)
+    usd_to_local = rates.get(currency, 1)
+    amount_usd = amount / usd_to_local if usd_to_local else 0
+    amount_krw = amount_usd * rates.get("krw", 1480)
+
+    return date_str, amount_usd, amount_krw
+
 
 def aggregate_daily_for_weekly(charges):
-    """일별 USD/KRW 집계 (주간매출 탭용)"""
+    """일별 USD/KRW 병렬 집계"""
     daily = defaultdict(lambda: {"usd": 0.0, "krw": 0.0})
-    skipped = 0
 
-    for ch in charges:
-        currency = (ch.get("currency") or "").lower()
-        if currency not in WEEKLY_ALLOWED_CURRENCIES:
-            skipped += 1
-            continue
-
-        charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
-        date_str = charge_dt.strftime("%Y-%m-%d")
-
-        divisor = CURRENCY_DIVISOR.get(currency, 100)
-        amount = ch.amount / divisor
-
-        rates = get_rate(date_str)
-        usd_to_local = rates.get(currency, 1)
-        amount_usd = amount / usd_to_local if usd_to_local else 0
-        amount_krw = amount_usd * rates.get("krw", 1480)
-
-        daily[date_str]["usd"] += amount_usd
-        daily[date_str]["krw"] += amount_krw
-
-    if skipped:
-        print(f"  ⏭️ 허용 외 통화 {skipped}건 제외 (USD, IDR 등)")
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(_process_charge_weekly, ch) for ch in charges]
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                date_str, amount_usd, amount_krw = result
+                daily[date_str]["usd"] += amount_usd
+                daily[date_str]["krw"] += amount_krw
 
     return daily
 
 
 def get_weeks_for_month(year, month):
-    """해당 월에 속하는 주차 리스트: [(월요일, 일요일), ...]"""
     first_day = date(year, month, 1)
     last_day = date(year, month, monthrange(year, month)[1])
     mon = first_day - timedelta(days=first_day.weekday())
@@ -496,7 +558,6 @@ def get_weeks_for_month(year, month):
 
 
 def build_weekly_sheet_data(daily, start_year, start_month):
-    """주간매출 시트용 2D 배열 생성"""
     rows = []
     now = datetime.now(KST)
     current_year, current_month = now.year, now.month
@@ -560,7 +621,6 @@ def build_weekly_sheet_data(daily, start_year, start_month):
 
 
 def write_weekly_sheet(rows):
-    """Google Sheets '주간매출' 탭에 기록"""
     gc = get_gspread_client()
     ss = gc.open_by_key(SPREADSHEET_ID)
 
@@ -592,17 +652,14 @@ def write_weekly_sheet(rows):
 
     _apply_weekly_formatting(ws, rows, num_cols)
 
-    # 맨 오른쪽 이동
     all_worksheets = ss.worksheets()
     others = [w for w in all_worksheets if w.id != ws.id]
     ss.reorder_worksheets(others + [ws])
     print(f"📌 '{ws.title}' 탭을 맨 오른쪽으로 이동 완료")
-
     return ws
 
 
 def _apply_weekly_formatting(ws, rows, num_cols):
-    """주간매출 탭 서식"""
     for i, row in enumerate(rows):
         row_num = i + 1
         a_val = str(row[0]) if row[0] else ""
@@ -636,8 +693,8 @@ def _apply_weekly_formatting(ws, rows, num_cols):
     print("🎨 서식 적용 완료")
 
 
-def run_weekly():
-    """주간 매출 모드 실행"""
+def run_weekly(charges=None):
+    """주간 매출 모드 (charges 전달 시 재수집 안 함)"""
     print("\n" + "=" * 50)
     print("💳 [weekly] 주간 매출 통계 → 주간매출 탭")
     print("=" * 50)
@@ -645,8 +702,9 @@ def run_weekly():
     start_date = datetime(START_YEAR, START_MONTH, 1, tzinfo=KST)
     end_date = datetime.now(KST)
 
-    prefetch_rates(start_date, end_date)
-    charges = fetch_all_charges(start_date, end_date)
+    if charges is None:
+        prefetch_rates(start_date, end_date)
+        charges = fetch_all_charges(start_date, end_date)
 
     if not charges:
         print("⚠️ 수집된 결제 내역이 없습니다.")
@@ -667,7 +725,7 @@ def run_weekly():
     print("✅ weekly 완료!")
 
 
-# ==================== 메인 ====================
+# ==================== 메인 (all 모드 병렬) ====================
 
 def main():
     if len(sys.argv) < 2:
@@ -680,9 +738,33 @@ def main():
     elif mode == "weekly":
         run_weekly()
     elif mode == "all":
-        run_daily()
-        # 환율 캐시는 유지되므로 두 번째 실행은 더 빠름
-        run_weekly()
+        # ── 공통 데이터 1회 수집 ──
+        end_date = datetime.now(KST)
+        start_date_daily = (end_date - timedelta(days=DAYS_BACK)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        start_date_weekly = datetime(START_YEAR, START_MONTH, 1, tzinfo=KST)
+        earliest = min(start_date_daily, start_date_weekly)
+
+        # 환율 + Stripe 수집을 병렬로
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            rate_future = executor.submit(prefetch_rates, earliest, end_date)
+            charge_future = executor.submit(fetch_all_charges, earliest, end_date)
+            rate_future.result()
+            charges = charge_future.result()
+
+        if not charges:
+            print("⚠️ 수집된 결제 내역이 없습니다.")
+            return
+
+        # ── daily / weekly 시트 쓰기를 병렬로 ──
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            daily_future = executor.submit(run_daily, charges)
+            weekly_future = executor.submit(run_weekly, charges)
+            daily_future.result()
+            weekly_future.result()
+
+        print("\n🎉 all 모드 병렬 완료!")
     else:
         print(f"❌ 알 수 없는 모드: {mode}")
         print("사용법: python 글로벌_매출.py [daily|weekly|all]")
