@@ -984,18 +984,36 @@ print("="*60)
 print("7: 분석 시트 + 최근 7일 탭 삭제")
 print("="*60)
 analysis_sheets = ["마스터탭", "추이차트", "증감액", "추이차트(주간)", "주간종합", "주간종합_2", "주간종합_3", "예산", "_temp", "_temp_holder"]
-for sn in analysis_sheets + new_date_names:
+all_to_delete = analysis_sheets + new_date_names
+
+# 1차 삭제 (with_retry 적용)
+for sn in all_to_delete:
     try:
         old = sh.worksheet(sn)
         if len(sh.worksheets()) <= 1:
             with_retry(sh.add_worksheet, title="_tmp", rows=1, cols=1); time.sleep(1)
-        sh.del_worksheet(old)
+        with_retry(sh.del_worksheet, old)
         print(f"  ✅ '{sn}' 삭제"); time.sleep(1.5)
     except gspread.exceptions.WorksheetNotFound: pass
     except Exception as e:
-        print(f"  ⚠️ '{sn}' 삭제 실패: {e}"); time.sleep(2)
+        print(f"  ⚠️ '{sn}' 1차 삭제 실패: {e}"); time.sleep(5)
 
-print("⏳ 3초 대기..."); time.sleep(3)
+# 2차 검증 — 삭제 안 된 탭 재시도
+print("  🔄 삭제 검증 중...")
+time.sleep(5)
+for sn in all_to_delete:
+    try:
+        old = sh.worksheet(sn)
+        print(f"  🔁 '{sn}' 아직 존재 — 재삭제 시도")
+        time.sleep(3)
+        with_retry(sh.del_worksheet, old)
+        print(f"  ✅ '{sn}' 재삭제 완료"); time.sleep(2)
+    except gspread.exceptions.WorksheetNotFound:
+        pass
+    except Exception as e:
+        print(f"  ⚠️ '{sn}' 재삭제 실패: {e}"); time.sleep(5)
+
+print("⏳ 5초 대기..."); time.sleep(5)
 
 
 # =========================================================
@@ -1343,24 +1361,48 @@ _t_create = time.time()
 
 ws_registry = {}  # name → worksheet object
 
+def safe_add_worksheet(title, rows, cols):
+    """이미 존재하면 삭제 후 재생성"""
+    for attempt in range(3):
+        try:
+            ws = with_retry(sh.add_worksheet, title=title, rows=rows, cols=cols)
+            time.sleep(0.8)
+            return ws
+        except APIError as e:
+            if "already exists" in str(e):
+                print(f"  🔁 '{title}' 이미 존재 — 삭제 후 재생성")
+                try:
+                    old = sh.worksheet(title)
+                    with_retry(sh.del_worksheet, old)
+                    time.sleep(2)
+                except: time.sleep(3)
+            elif "429" in str(e) or "Quota" in str(e):
+                wait = 20 + attempt * 15
+                print(f"  ⏳ 워크시트 생성 rate limit, {wait}초 대기")
+                time.sleep(wait)
+            else:
+                raise
+    # 최종 시도
+    return with_retry(sh.add_worksheet, title=title, rows=rows, cols=cols)
+
 # 날짜 탭 생성
 for dk in new_date_names:
     prep = prepared_date_tabs.get(dk)
     if not prep: continue
     total_rows = len(prep['rows']) + len(prep['summary_rows']) + 5
     NUM_COLS = len(DATE_TAB_HEADERS)
-    ws_d = with_retry(sh.add_worksheet, title=dk, rows=total_rows, cols=NUM_COLS + 2); time.sleep(0.8)
+    ws_d = safe_add_worksheet(dk, total_rows, NUM_COLS + 2)
     ws_registry[dk] = ws_d
 
 # 분석 탭 생성
-ws_registry['마스터탭'] = with_retry(sh.add_worksheet, title="마스터탭", rows=max(2000, len(master_data)+100), cols=len(master_headers)+5); time.sleep(0.8)
-ws_registry['추이차트'] = with_retry(sh.add_worksheet, title="추이차트", rows=1000, cols=100); time.sleep(0.8)
-ws_registry['추이차트(주간)'] = with_retry(sh.add_worksheet, title="추이차트(주간)", rows=1000, cols=100); time.sleep(0.8)
-ws_registry['증감액'] = with_retry(sh.add_worksheet, title="증감액", rows=1000, cols=100); time.sleep(0.8)
-ws_registry['예산'] = with_retry(sh.add_worksheet, title="예산", rows=1000, cols=100); time.sleep(0.8)
-ws_registry['주간종합'] = with_retry(sh.add_worksheet, title="주간종합", rows=2000, cols=20); time.sleep(0.8)
-ws_registry['주간종합_2'] = with_retry(sh.add_worksheet, title="주간종합_2", rows=2000, cols=20); time.sleep(0.8)
-ws_registry['주간종합_3'] = with_retry(sh.add_worksheet, title="주간종합_3", rows=3000, cols=20); time.sleep(0.8)
+ws_registry['마스터탭'] = safe_add_worksheet("마스터탭", max(2000, len(master_data)+100), len(master_headers)+5)
+ws_registry['추이차트'] = safe_add_worksheet("추이차트", 1000, 100)
+ws_registry['추이차트(주간)'] = safe_add_worksheet("추이차트(주간)", 1000, 100)
+ws_registry['증감액'] = safe_add_worksheet("증감액", 1000, 100)
+ws_registry['예산'] = safe_add_worksheet("예산", 1000, 100)
+ws_registry['주간종합'] = safe_add_worksheet("주간종합", 2000, 20)
+ws_registry['주간종합_2'] = safe_add_worksheet("주간종합_2", 2000, 20)
+ws_registry['주간종합_3'] = safe_add_worksheet("주간종합_3", 3000, 20)
 
 print(f"  ⏱️ 워크시트 생성: {time.time()-_t_create:.1f}초 ({len(ws_registry)}개)\n")
 
