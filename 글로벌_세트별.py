@@ -9,11 +9,12 @@
 #   - 탭 순서: [기타] + [날짜탭 과거→최신] + [분석탭]
 #   - 구 구조(25열) / 신 구조(23열) 자동 판별
 #   - Mixpanel 전체 날짜탭 기간으로 조회, profit/ROAS/CVR 직접 계산
-#   - ★ FIX v19: 날짜탭 누락 진단 로그 + parse_date_tab strip 개선 + find_last_data_row 완화
+#   - ★ FIX v21: Mixpanel 이벤트명/필드명 OR 처리 (결제완료↔payment_complete, amount↔결제금액)
+#   - ★ FIX v21: 제품 매핑 진단 로그 추가
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v20 - FULL_REFRESH]")
+print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v21 - EVENT_OR]")
 print("="*60)
 
 # =========================================================
@@ -116,9 +117,12 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
 # =========================================================
 META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
 
-# ★ META_TOKEN_4 추가: act_2677707262628563 전용 (TOKEN_4 우선, TOKEN_3 폴백)
+# ★ v21: META_TOKEN_GlobalTT — act_2677 전용 글로벌 토큰
+META_TOKEN_GLOBAL = os.environ.get("META_TOKEN_GlobalTT", "")
+
+# act_2677: TOKEN_4 우선 → TOKEN_3 폴백 → GlobalTT 최종
 META_TOKEN_4 = os.environ.get("META_TOKEN_4", "")
-META_TOKEN_ACT_2677 = META_TOKEN_4 or os.environ.get("META_TOKEN_3", "")
+META_TOKEN_ACT_2677 = META_TOKEN_4 or os.environ.get("META_TOKEN_3", "") or META_TOKEN_GLOBAL
 
 META_TOKENS = {
     "act_1054081590008088": os.environ.get("META_TOKEN_1", ""),
@@ -131,9 +135,10 @@ META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 # 토큰 상태 로그
 print("🔑 Meta 토큰 상태:")
 print(f"  TOKEN_1 (act_1054): {'✅ 설정됨' if META_TOKENS['act_1054081590008088'] else '❌ 비어있음'}")
+print(f"  GlobalTT (act_2677 글로벌): {'✅ 설정됨' if META_TOKEN_GLOBAL else '❌ 비어있음'}")
 print(f"  TOKEN_4 (act_2677 우선): {'✅ 설정됨' if META_TOKEN_4 else '❌ 비어있음'}")
 print(f"  TOKEN_3 (act_2677 폴백): {'✅ 설정됨' if os.environ.get('META_TOKEN_3', '') else '❌ 비어있음'}")
-print(f"  act_2677 최종 토큰: {'✅ 설정됨' if META_TOKEN_ACT_2677 else '❌ 비어있음'}")
+print(f"  act_2677 최종 토큰: {'✅' if META_TOKEN_ACT_2677 else '❌'} {'(TOKEN_4)' if META_TOKEN_4 else '(TOKEN_3)' if os.environ.get('META_TOKEN_3','') else '(GlobalTT)' if META_TOKEN_GLOBAL else '(없음)'}")
 
 # =========================================================
 # Mixpanel 설정
@@ -141,7 +146,9 @@ print(f"  act_2677 최종 토큰: {'✅ 설정됨' if META_TOKEN_ACT_2677 else '
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
-MIXPANEL_EVENT_NAME = "결제완료"
+
+# ★ FIX v21: 이벤트명 OR 처리 — 기존 "결제완료" + 신규 "payment_complete" 둘 다 수집
+MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
 # =========================================================
 # 기본 설정
@@ -152,9 +159,6 @@ CURRENT_YEAR = TODAY.year
 CURRENT_MONTH = TODAY.month
 
 # ★ v20: FULL_REFRESH 모드
-# True  → 1월1일부터 전체 기간 Meta+Mixpanel 호출 (최초 실행, ~30분)
-# False → 최근 7일만 갱신 (일상 운영, ~5분)
-# GitHub Actions: 환경변수 FULL_REFRESH=true/false 로 제어
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2026, 1, 1)
 
@@ -192,6 +196,7 @@ OLD_DATE_TAB_HEADERS = [
 print(f"📅 현재 날짜: {TODAY.strftime('%Y-%m-%d')}")
 print(f"🔄 API 갱신 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘 (최근 {REFRESH_DAYS}일)")
 print(f"📊 분석탭: 스프레드시트의 모든 날짜탭 데이터 사용")
+print(f"📡 Mixpanel 이벤트: {MIXPANEL_EVENT_NAMES} (OR 수집)")
 print()
 
 PRODUCT_KEYWORDS = ["starsun", "money", "solo"]
@@ -410,12 +415,9 @@ def get_week_monday(d): return d - timedelta(days=d.weekday())
 # ★ FIX v19: parse_date_tab - strip 강화 + 실패 로그 + 연도 추론 개선
 # =========================================================
 def parse_date_tab(tab_name):
-    """날짜탭 이름 파싱. 지원 형식: YY/MM/DD, M/D
-    ★ v19: strip 강화, 파싱 실패 시 로그, 2자리 연도 추론 개선"""
     if not tab_name or '/' not in tab_name:
         return None
     try:
-        # ★ 공백, 작은따옴표(Google Sheets 텍스트 강제), 유니코드 공백 제거
         clean_name = tab_name.strip().strip("'").strip('\u200b\ufeff\xa0').strip()
         parts = clean_name.split('/')
         parts = [p.strip() for p in parts]
@@ -425,7 +427,6 @@ def parse_date_tab(tab_name):
             return datetime(2000 + y, m, d)
         elif len(parts) == 2:
             m, d = int(parts[0]), int(parts[1])
-            # ★ 개선: 현재 날짜 기준으로 연도 추론 (하드코딩 제거)
             now = datetime.now()
             candidate = datetime(now.year, m, d)
             if candidate > now + timedelta(days=7):
@@ -644,44 +645,86 @@ def fetch_adset_budgets(ad_account_id):
         if fallback_count > 0: print(f"    📌 ASC/캠페인 예산 폴백: {fallback_count}개 세트 (캠페인 {len(unique_campaigns)}개 조회)")
     return adset_results
 
+
+# =========================================================
+# ★ FIX v21: Mixpanel 수집 — 이벤트명/필드명 OR 처리
+# =========================================================
 def fetch_mixpanel_data(from_date, to_date):
+    """Mixpanel 결제 이벤트 수집.
+    ★ v21: 이벤트명 '결제완료' OR 'payment_complete' 둘 다 수집
+    ★ v21: 매출 필드 '결제금액' OR 'amount' (OR 'value') 우선순위 처리
+    """
     url = "https://data.mixpanel.com/api/2.0/export"
-    params = {'from_date':from_date,'to_date':to_date,'event':json.dumps([MIXPANEL_EVENT_NAME]),'project_id':MIXPANEL_PROJECT_ID}
-    print(f"  📡 Mixpanel: {from_date} ~ {to_date}")
+    # ★ v21: 두 이벤트명 모두 요청
+    params = {'from_date':from_date,'to_date':to_date,'event':json.dumps(MIXPANEL_EVENT_NAMES),'project_id':MIXPANEL_PROJECT_ID}
+    print(f"  📡 Mixpanel: {from_date} ~ {to_date} (이벤트: {MIXPANEL_EVENT_NAMES})")
     try:
         resp = req_lib.get(url,params=params,auth=(MIXPANEL_USERNAME,MIXPANEL_SECRET),timeout=300)
         if resp.status_code != 200: print(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:300]}"); return []
         lines = [l for l in resp.text.split('\n') if l.strip()]; print(f"  📊 이벤트: {len(lines)}건")
-        data = []; stat_amount_only=0;stat_value_only=0;stat_both=0;stat_neither=0
+        data = []
+        # ★ v21: 통계 확장 — 필드별 히트 카운트
+        stat_amount_only=0; stat_value_only=0; stat_both=0; stat_neither=0
+        stat_결제금액_only=0; stat_event_counts=defaultdict(int)
         for line in lines:
             try:
-                ev=json.loads(line);props=ev.get('properties',{});ts=props.get('time',0)
+                ev=json.loads(line); props=ev.get('properties',{}); ts=props.get('time',0)
+                event_name = ev.get('event', '')
+                stat_event_counts[event_name] += 1
+
                 if ts: dt_kst=datetime.fromtimestamp(ts,tz=timezone.utc)+timedelta(hours=9); ds=f"{dt_kst.year%100:02d}/{dt_kst.month:02d}/{dt_kst.day:02d}"
                 else: ds=None
                 ut=None
                 for k in ['utm_term','UTM_Term','UTM Term']:
                     if k in props and props[k]: ut=str(props[k]).strip(); break
                 if ut: ut=clean_id(ut)
-                raw_amount=props.get('amount');raw_value=props.get('value')
-                amount_val=0.0
+
+                # ★ v21: 매출 필드 우선순위 — 결제금액 > amount > value
+                raw_결제금액 = props.get('결제금액')
+                raw_amount = props.get('amount')
+                raw_value = props.get('value')
+
+                결제금액_val = 0.0
+                if raw_결제금액 is not None:
+                    try: 결제금액_val = float(raw_결제금액)
+                    except: 결제금액_val = 0.0
+
+                amount_val = 0.0
                 if raw_amount is not None:
-                    try: amount_val=float(raw_amount)
-                    except: amount_val=0.0
-                value_val=0.0
+                    try: amount_val = float(raw_amount)
+                    except: amount_val = 0.0
+
+                value_val = 0.0
                 if raw_value is not None:
-                    try: value_val=float(raw_value)
-                    except: value_val=0.0
-                if amount_val > 0: revenue=amount_val
-                elif value_val > 0: revenue=value_val
-                else: revenue=0.0
-                has_amount=amount_val>0;has_value=value_val>0
-                if has_amount and has_value: stat_both+=1
-                elif has_amount: stat_amount_only+=1
-                elif has_value: stat_value_only+=1
-                else: stat_neither+=1
-                data.append({'distinct_id':props.get('distinct_id'),'time':ts,'date':ds,'utm_term':ut or '','amount':amount_val,'value_raw':value_val,'revenue':revenue,'서비스':props.get('서비스','')})
+                    try: value_val = float(raw_value)
+                    except: value_val = 0.0
+
+                # ★ v21: OR 우선순위로 revenue 결정
+                if 결제금액_val > 0:
+                    revenue = 결제금액_val
+                elif amount_val > 0:
+                    revenue = amount_val
+                elif value_val > 0:
+                    revenue = value_val
+                else:
+                    revenue = 0.0
+
+                # 통계
+                has_결제금액 = 결제금액_val > 0
+                has_amount = amount_val > 0
+                has_value = value_val > 0
+                if has_결제금액 and not has_amount and not has_value: stat_결제금액_only += 1
+                elif has_amount and has_value: stat_both += 1
+                elif has_amount: stat_amount_only += 1
+                elif has_value: stat_value_only += 1
+                elif has_결제금액: pass  # 이미 카운트됨
+                else: stat_neither += 1
+
+                data.append({'distinct_id':props.get('distinct_id'),'time':ts,'date':ds,'utm_term':ut or '','amount':amount_val,'결제금액':결제금액_val,'value_raw':value_val,'revenue':revenue,'서비스':props.get('서비스','')})
             except: pass
-        print(f"  ✅ 파싱: {len(data)}건"); print(f"  📊 매출 출처: amount={stat_amount_only}, value={stat_value_only}, 둘다={stat_both}, 없음={stat_neither}")
+        print(f"  ✅ 파싱: {len(data)}건")
+        print(f"  📊 매출 출처: 결제금액={stat_결제금액_only}, amount={stat_amount_only}, value={stat_value_only}, 둘다={stat_both}, 없음={stat_neither}")
+        print(f"  📊 이벤트별: {dict(stat_event_counts)}")
         return data
     except Exception as e: print(f"  ❌ Mixpanel 오류: {e}"); return []
 
@@ -690,11 +733,9 @@ def fetch_mixpanel_data(from_date, to_date):
 # ★ FIX v19: find_last_data_row - consecutive_empty 기준 완화
 # =========================================================
 def find_last_data_row(all_values, structure):
-    """데이터 영역의 마지막 행 찾기.
-    ★ v19: 연속 빈 행 기준 2→3으로 완화 (중간 빈 행 1개 허용)"""
     actual_asid_col = get_col_index(structure, 2)
     last_data_sheet_row = 1; data_rows = []; consecutive_empty = 0
-    EMPTY_THRESHOLD = 3  # ★ 기존 2 → 3
+    EMPTY_THRESHOLD = 3
     for idx, row in enumerate(all_values[1:], start=2):
         if not row:
             consecutive_empty += 1
@@ -716,7 +757,7 @@ def find_last_data_row(all_values, structure):
 
 
 # =========================================================
-# ★ FIX v19: read_all_date_tabs - 상세 진단 로그 추가
+# ★ FIX v19: read_all_date_tabs
 # =========================================================
 def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=None):
     print("\n"+"="*60); print("★ 8.5단계: 전체 날짜탭 읽기"); print("="*60)
@@ -727,7 +768,6 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
 
     analysis_set = set(analysis_tab_names); all_ws = sh.worksheets(); date_tabs_found = []
 
-    # ★ v19: 전체 탭 스캔 + 진단 로그
     print(f"\n  📋 전체 워크시트: {len(all_ws)}개")
     skipped_analysis = []; skipped_no_slash = []; skipped_parse_fail = []
 
@@ -737,14 +777,13 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
             skipped_analysis.append(tn); continue
         dt_obj = parse_date_tab(tn)
         if dt_obj is None:
-            if '/' in tn: skipped_parse_fail.append(tn)  # ★ 슬래시 있지만 파싱 실패!
+            if '/' in tn: skipped_parse_fail.append(tn)
             else: skipped_no_slash.append(tn)
             continue
         date_tabs_found.append((dt_obj, ws_ex, tn))
 
     date_tabs_found.sort(key=lambda x: x[0])
 
-    # ★ v19: 진단 리포트
     print(f"  ✅ 날짜탭 파싱 성공: {len(date_tabs_found)}개")
     print(f"  ⏭️ 분석탭 스킵: {len(skipped_analysis)}개 → {skipped_analysis}")
     print(f"  ⏭️ 비날짜탭 스킵: {len(skipped_no_slash)}개 → {skipped_no_slash}")
@@ -790,7 +829,6 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
         except Exception as e:
             print(f"오류: {e}"); error_tabs.append((dk, str(e)))
 
-    # ★ v19: 최종 진단 리포트
     print(f"\n  {'='*50}")
     print(f"  📊 날짜탭 읽기 최종 리포트")
     print(f"  {'='*50}")
@@ -804,7 +842,6 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
         print(f"  ❌ 오류 탭: {len(error_tabs)}개")
         for dk, err in error_tabs: print(f"     {dk}: {err}")
 
-    # ★ v19: adset 데이터 없는 날짜 체크
     dates_with_adset_data = set()
     for asid, d in all_ad_sets.items():
         for dk2 in d['dates']: dates_with_adset_data.add(dk2)
@@ -816,11 +853,7 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
     return all_ad_sets, all_budget_by_date, all_master_raw_data, all_date_objects, all_date_names
 
 
-# =========================================================
-# ★ v19: 진단 함수 추가 - 추이차트 커버리지 확인
-# =========================================================
 def diagnose_chart_coverage(sh, date_names, ad_sets, analysis_tabs_set):
-    """추이차트에 포함될 날짜 vs 전체 워크시트 비교 진단"""
     print("\n" + "=" * 60)
     print("★ 진단: 추이차트 커버리지 확인")
     print("=" * 60)
@@ -990,15 +1023,15 @@ if adset_budget_map:
     for asid, budget in sample: print(f"  예시: {asid} → ₩{budget:,}")
 print()
 
-# 3단계: Mixpanel ★ v20: 청크 분할 지원
+# 3단계: Mixpanel ★ v21: 이벤트명 OR 처리 적용
 print("="*60); print(f"3단계: Mixpanel 수집 ({REFRESH_DAYS}일)"); print("="*60)
 YESTERDAY=TODAY-timedelta(days=1)
 mp_to_today=TODAY.strftime('%Y-%m-%d')
 total_days=(TODAY-DATA_REFRESH_START).days+1
 print(f"  📅 Mixpanel 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ {mp_to_today} ({total_days}일)")
+print(f"  📡 수집 이벤트: {MIXPANEL_EVENT_NAMES}")
 mp_raw=[]
 
-# ★ v20: 14일 초과 시 7일 단위 청크 분할 (Mixpanel 타임아웃 방지)
 if REFRESH_DAYS > 14:
     CHUNK_SIZE = 7
     chunk_start = DATA_REFRESH_START
@@ -1074,6 +1107,9 @@ print()
 print("="*60); print("5단계: Meta + Mixpanel 병합 (USD→KRW 환산)"); print("="*60)
 date_tab_rows=defaultdict(list);date_mp_by_adsetid=defaultdict(dict);new_date_names=[];product_count=defaultdict(int)
 debug_total_rows=0;debug_matched_rows=0;debug_matched_revenue=0
+# ★ v21: 제품 매핑 진단용 — '기타'로 빠진 광고세트 이름 샘플 수집
+debug_기타_adset_names = set()
+
 for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_obj'] if meta_date_data[x] else datetime.min,reverse=True):
     rows=meta_date_data[dk]
     if not rows: continue
@@ -1095,10 +1131,22 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
         tab_row=[cn,asn,asid,sp,cost_per_result,0,round(cpm,0),reach,impr,uc,round(unique_ctr,2),round(cost_per_click,0),round(frequency,2),results,
             mpc if mpc>0 else "",round(rv) if rv>0 else "",round(pf,0) if sp>0 else "",round(roas_c,1) if sp>0 and rv>0 else "",round(cvr_c,2) if uc>0 and mpc>0 else "",budget_val,"","",""]
         date_tab_rows[dk].append(tab_row); p=extract_product(asn); product_count[p]+=1
+        # ★ v21: '기타' 진단
+        if p == "기타":
+            debug_기타_adset_names.add(asn)
+
 print(f"✅ 날짜탭 구성 완료: {len(new_date_names)}개")
 print(f"📦 제품별: {dict(product_count)}")
 print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)" if debug_total_rows>0 else "")
-print(f"   매칭 매출: ₩{int(debug_matched_revenue):,}\n")
+print(f"   매칭 매출: ₩{int(debug_matched_revenue):,}")
+
+# ★ v21: '기타' 제품 진단 로그
+if debug_기타_adset_names:
+    print(f"\n  ⚠️ '기타'로 분류된 광고 세트 이름 ({len(debug_기타_adset_names)}개 고유값):")
+    for name in sorted(debug_기타_adset_names):
+        print(f"     → '{name}'")
+    print(f"  💡 PRODUCT_KEYWORDS={PRODUCT_KEYWORDS} 에 해당 키워드를 추가하면 제품 분류 가능")
+print()
 
 # 6단계: 분석탭 삭제
 print("="*60); print("6단계: 분석탭만 삭제"); print("="*60)
@@ -1342,13 +1390,11 @@ for asid,d in ad_sets.items():
                 vv=d['dates'][dn].get('cvr',0)
                 if vv>0:wvs+=vv;wvc+=1
         if ws_v>0 or wr_v>0: adset_weekly[asid]['weeks'][wk]={'profit':wp,'revenue':wr_v,'spend':ws_v,'cpm':(wcs/wcc) if wcc>0 else 0,'cvr':(wvs/wvc) if wvc>0 else 0}
-# ★ v20: 다중 기준 정렬 — 최신 날짜 지출 > 전날 지출 > 그 전날 지출 순
 sorted_list=[]
 for asid,d in ad_sets.items():
     sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d})
 
 def _multi_spend_key(item):
-    """최신 날짜부터 차례로 지출금액 튜플 생성 (내림차순용)"""
     return tuple(item['data']['dates'].get(d,{}).get('spend',0) for d in chart_dn)
 
 sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk=list(reversed(week_keys))
