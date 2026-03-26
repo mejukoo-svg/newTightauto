@@ -69,7 +69,7 @@ META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
-MIXPANEL_EVENT_NAME = "결제완료"
+MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
 # =========================================================
 # 기본 설정
@@ -516,7 +516,7 @@ def fetch_adset_budgets(ad_account_id):
 
 def fetch_mixpanel_data(from_date, to_date):
     url = "https://data.mixpanel.com/api/2.0/export"
-    params = {'from_date':from_date,'to_date':to_date,'event':json.dumps([MIXPANEL_EVENT_NAME]),'project_id':MIXPANEL_PROJECT_ID}
+    params = {'from_date':from_date,'to_date':to_date,'event':json.dumps(MIXPANEL_EVENT_NAMES),'project_id':MIXPANEL_PROJECT_ID}
     print(f"  📡 Mixpanel: {from_date} ~ {to_date}")
     try:
         resp = req_lib.get(url,params=params,auth=(MIXPANEL_USERNAME,MIXPANEL_SECRET),timeout=300)
@@ -532,7 +532,8 @@ def fetch_mixpanel_data(from_date, to_date):
                 for k in ['utm_term','UTM_Term','UTM Term']:
                     if k in props and props[k]: ut=str(props[k]).strip(); break
                 if ut: ut=clean_id(ut)
-                raw_amount=props.get('amount');raw_value=props.get('value')
+                raw_amount=props.get('결제금액') if '결제금액' in props else props.get('amount')
+                raw_value=props.get('value')
                 amount_val=0.0
                 if raw_amount is not None:
                     try: amount_val=float(raw_amount)
@@ -575,7 +576,7 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
     all_budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend':0.0,'revenue':0.0}))
     all_master_raw_data = []; all_date_objects = {}; all_date_names = []
     master_headers_local = ["Date"] + DATE_TAB_HEADERS
-    analysis_set = set(analysis_tab_names); all_ws = sh.worksheets(); date_tabs_found = []
+    analysis_set = set(analysis_tab_names); all_ws = with_retry(sh.worksheets); date_tabs_found = []
     for ws_ex in all_ws:
         tn = ws_ex.title
         if tn in analysis_set: continue
