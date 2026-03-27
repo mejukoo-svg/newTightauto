@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 (★ v22 - JPY/HKD 환율 지원 추가):
+# v3-ad 통합 코드 (★ v23 - 탭순서 개선 + 나라별 요약 + JPY/HKD 환율):
+#   - ★ v23: "매출", "주간매출" 탭을 가장 오른쪽(맨 끝)에 배치
+#   - ★ v23: 날짜탭 하단 요약표에 나라별 ROAS, 순이익, 매출 테이블 추가
+#   - ★ v22: 광고 세트 이름 기준 통화 판별 (TWD/JPY/HKD/KRW) + 통화별 환율 적용
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
-#   - Mixpanel: utm_term = adset_id 기준으로 매핑 (utm_content X)
+#   - Mixpanel: utm_term = adset_id 기준으로 매핑
 #   - 기존 날짜탭: Meta 데이터 + 매출/ROAS/순이익/CVR 모두 업데이트
 #   - 없는 날짜탭만 새로 생성
 #   - 마스터탭/추이차트 등 분석탭: 전체 날짜탭 데이터 읽어서 재구성
-#   - 탭 순서: [기타] + [날짜탭 과거→최신] + [분석탭]
+#   - 탭 순서: [기타] + [날짜탭 과거→최신] + [분석탭] + [매출/주간매출]
 #   - 구 구조(25열) / 신 구조(23열) 자동 판별
 #   - Mixpanel 전체 날짜탭 기간으로 조회, profit/ROAS/CVR 직접 계산
-#   - ★ FIX v21: Mixpanel 이벤트명/필드명 OR 처리 (결제완료↔payment_complete, amount↔결제금액)
-#   - ★ FIX v21: 제품 매핑 진단 로그 추가
-#   - ★ v22: 광고 세트 이름 기준 통화 판별 (TWD/JPY/HKD/KRW) + 통화별 환율 적용
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad v22 (광고세트 기준, 통화별 환율: TWD/JPY/HKD/KRW)")
+print("🚀 v3-ad v23 (나라별 요약 + 매출탭 최우측 + 통화별 환율)")
 print("="*60)
 
 # =========================================================
@@ -117,14 +117,14 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
     return fallback
 
 # =========================================================
-# ★ v22: 통화 판별 함수 — 광고 세트 이름 기준
+# ★ v22: 통화 판별 / ★ v23: 나라 매핑
 # =========================================================
+CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국"}
+
 def detect_currency(adset_name):
-    """광고 세트 이름에서 국가/통화 추론.
-    -tw, -hk, -jp, -kr 등의 접미사를 파트 분리 후 매칭.
-    """
+    """광고 세트 이름에서 국가/통화 추론."""
     if not adset_name:
-        return "TWD"  # 글로벌 기본값
+        return "TWD"
     name_lower = str(adset_name).lower()
     parts = re.split(r'[-_\s]', name_lower)
     if "jp" in parts or "japan" in parts:
@@ -135,18 +135,17 @@ def detect_currency(adset_name):
         return "KRW"
     elif "tw" in parts or "taiwan" in parts:
         return "TWD"
-    return "TWD"  # 글로벌 기본값 (대만이 주력)
-
+    return "TWD"
 
 def get_revenue_fx(currency, dk):
-    """통화별 KRW 환율 반환. 전역 환율 dict 참조."""
+    """통화별 KRW 환율 반환."""
     if currency == "KRW":
         return 1.0
     elif currency == "JPY":
         return get_rate_for_date(jpy_krw_rates, dk, fallback=FALLBACK_JPY_KRW)
     elif currency == "HKD":
         return get_rate_for_date(hkd_krw_rates, dk, fallback=FALLBACK_HKD_KRW)
-    else:  # TWD (기본)
+    else:
         return get_rate_for_date(twd_krw_rates, dk, fallback=FALLBACK_TWD_KRW)
 
 
@@ -154,11 +153,7 @@ def get_revenue_fx(currency, dk):
 # Meta Ads API 설정
 # =========================================================
 META_TOKEN_DEFAULT = os.environ.get("META_TOKEN_1", "")
-
-# ★ v21: META_TOKEN_GlobalTT — act_2677 최우선 글로벌 토큰
 META_TOKEN_GLOBAL = os.environ.get("META_TOKEN_GlobalTT", "")
-
-# act_2677: GlobalTT 최우선 → TOKEN_4 → TOKEN_3 폴백
 META_TOKEN_4 = os.environ.get("META_TOKEN_4", "")
 META_TOKEN_ACT_2677 = META_TOKEN_GLOBAL or META_TOKEN_4 or os.environ.get("META_TOKEN_3", "")
 
@@ -170,7 +165,6 @@ def get_token(acc_id): return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
-# 토큰 상태 로그
 print("🔑 Meta 토큰 상태:")
 print(f"  TOKEN_1 (act_1054): {'✅ 설정됨' if META_TOKENS['act_1054081590008088'] else '❌ 비어있음'}")
 print(f"  GlobalTT (act_2677 글로벌): {'✅ 설정됨' if META_TOKEN_GLOBAL else '❌ 비어있음'}")
@@ -184,8 +178,6 @@ print(f"  act_2677 최종 토큰: {'✅' if META_TOKEN_ACT_2677 else '❌'} {'(G
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
-
-# ★ FIX v21: 이벤트명 OR 처리 — 기존 "결제완료" + 신규 "payment_complete" 둘 다 수집
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
 # =========================================================
@@ -196,7 +188,6 @@ TODAY = datetime.now(KST).replace(tzinfo=None)
 CURRENT_YEAR = TODAY.year
 CURRENT_MONTH = TODAY.month
 
-# ★ v20: FULL_REFRESH 모드
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2026, 1, 1)
 
@@ -261,6 +252,7 @@ COLORS = {
     "light_red": {"red":1.0,"green":0.85,"blue":0.85}, "dark_blue": {"red":0.2,"green":0.3,"blue":0.5},
     "navy": {"red":0.15,"green":0.2,"blue":0.35}, "dark_green": {"red":0.2,"green":0.5,"blue":0.3},
     "orange": {"red":0.9,"green":0.5,"blue":0.2}, "purple": {"red":0.5,"green":0.3,"blue":0.6},
+    "teal": {"red":0.0,"green":0.5,"blue":0.5},
 }
 
 SUMMARY_PRODUCTS = []
@@ -269,7 +261,11 @@ FINAL_ANALYSIS_ORDER = [
     "추이차트", "추이차트(주간)", "증감액", "예산",
     "주간종합", "주간종합_2", "주간종합_3", "마스터탭"
 ]
-ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
+
+# ★ v23: 가장 오른쪽에 배치할 탭
+RIGHTMOST_TABS_ORDER = ["매출", "주간매출"]
+
+ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | set(RIGHTMOST_TABS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
 
 
 def detect_tab_structure(header_row):
@@ -405,28 +401,46 @@ def clear_summary_conditional_formats(sh, ws, summary_start_row_0indexed):
             print(f"    🗑️ 조건부 서식 {len(delete_indices)}개 삭제 (요약 영역)"); time.sleep(0.5)
     except Exception as e: print(f"    ⚠️ 조건부 서식 삭제 오류 (무시): {e}")
 
+
+# =========================================================
+# ★ v23: reorder_tabs — 매출/주간매출을 가장 오른쪽에
+# =========================================================
 def reorder_tabs(sh):
     try:
         all_ws = sh.worksheets()
-        analysis_tabs, date_tabs, other_tabs = [], [], []
+        analysis_tabs, date_tabs, other_tabs, rightmost_tabs = [], [], [], []
         analysis_order_map = {name: i for i, name in enumerate(FINAL_ANALYSIS_ORDER)}
+        rightmost_order_map = {name: i for i, name in enumerate(RIGHTMOST_TABS_ORDER)}
+
         for ws in all_ws:
             tn = ws.title
-            if tn in ANALYSIS_TABS_SET: analysis_tabs.append(ws)
-            elif parse_date_tab(tn) is not None: date_tabs.append(ws)
-            else: other_tabs.append(ws)
+            if tn in rightmost_order_map:
+                rightmost_tabs.append(ws)
+            elif tn in ANALYSIS_TABS_SET:
+                analysis_tabs.append(ws)
+            elif parse_date_tab(tn) is not None:
+                date_tabs.append(ws)
+            else:
+                other_tabs.append(ws)
+
         date_tabs.sort(key=lambda ws: parse_date_tab(ws.title))
         analysis_tabs.sort(key=lambda ws: analysis_order_map.get(ws.title, 999))
-        final_order = other_tabs + date_tabs + analysis_tabs
-        print(f"  📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📊 분석: {len(analysis_tabs)}개")
+        rightmost_tabs.sort(key=lambda ws: rightmost_order_map.get(ws.title, 999))
+
+        final_order = other_tabs + date_tabs + analysis_tabs + rightmost_tabs
+
+        print(f"  📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📊 분석: {len(analysis_tabs)}개 | 📈 매출탭: {len(rightmost_tabs)}개")
         if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (과거) → {date_tabs[-1].title} (최신)")
         if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)}")
+        if rightmost_tabs: print(f"  📈 최우측: {' → '.join(ws.title for ws in rightmost_tabs)}")
+
         with_retry(sh.batch_update, body={"requests": [
             {"updateSheetProperties": {"properties": {"sheetId": ws.id, "index": idx}, "fields": "index"}}
             for idx, ws in enumerate(final_order)
         ]})
         print("  ✅ 탭 순서 정리 완료"); time.sleep(2)
     except Exception as e: print(f"  ⚠️ 탭 순서 정리 오류: {e}")
+
 
 def cell_text(profit, revenue, spend, cpm=0, cvr=0):
     if spend == 0: return ""
@@ -450,9 +464,6 @@ def get_month_range_display(f, l): return f"'{f.month}.{f.day}~{l.month}.{l.day}
 def get_week_monday(d): return d - timedelta(days=d.weekday())
 
 
-# =========================================================
-# ★ FIX v19: parse_date_tab - strip 강화 + 실패 로그 + 연도 추론 개선
-# =========================================================
 def parse_date_tab(tab_name):
     if not tab_name or '/' not in tab_name:
         return None
@@ -460,7 +471,6 @@ def parse_date_tab(tab_name):
         clean_name = tab_name.strip().strip("'").strip('\u200b\ufeff\xa0').strip()
         parts = clean_name.split('/')
         parts = [p.strip() for p in parts]
-
         if len(parts) == 3:
             y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
             return datetime(2000 + y, m, d)
@@ -472,13 +482,8 @@ def parse_date_tab(tab_name):
                 candidate = datetime(now.year - 1, m, d)
             return candidate
         else:
-            print(f"  ⚠️ parse_date_tab: '{tab_name}' → {len(parts)}파트 (지원: 2 또는 3)")
             return None
-    except ValueError as e:
-        print(f"  ⚠️ parse_date_tab 실패: '{tab_name}' → {e}")
-        return None
-    except Exception as e:
-        print(f"  ⚠️ parse_date_tab 예외: '{tab_name}' → {e}")
+    except:
         return None
 
 
@@ -685,16 +690,8 @@ def fetch_adset_budgets(ad_account_id):
     return adset_results
 
 
-# =========================================================
-# ★ FIX v21: Mixpanel 수집 — 이벤트명/필드명 OR 처리
-# =========================================================
 def fetch_mixpanel_data(from_date, to_date):
-    """Mixpanel 결제 이벤트 수집.
-    ★ v21: 이벤트명 '결제완료' OR 'payment_complete' 둘 다 수집
-    ★ v21: 매출 필드 '결제금액' OR 'amount' (OR 'value') 우선순위 처리
-    """
     url = "https://data.mixpanel.com/api/2.0/export"
-    # ★ v21: 두 이벤트명 모두 요청
     params = {'from_date':from_date,'to_date':to_date,'event':json.dumps(MIXPANEL_EVENT_NAMES),'project_id':MIXPANEL_PROJECT_ID}
     print(f"  📡 Mixpanel: {from_date} ~ {to_date} (이벤트: {MIXPANEL_EVENT_NAMES})")
     try:
@@ -702,7 +699,6 @@ def fetch_mixpanel_data(from_date, to_date):
         if resp.status_code != 200: print(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:300]}"); return []
         lines = [l for l in resp.text.split('\n') if l.strip()]; print(f"  📊 이벤트: {len(lines)}건")
         data = []
-        # ★ v21: 통계 확장 — 필드별 히트 카운트
         stat_amount_only=0; stat_value_only=0; stat_both=0; stat_neither=0
         stat_결제금액_only=0; stat_event_counts=defaultdict(int)
         for line in lines:
@@ -710,55 +706,36 @@ def fetch_mixpanel_data(from_date, to_date):
                 ev=json.loads(line); props=ev.get('properties',{}); ts=props.get('time',0)
                 event_name = ev.get('event', '')
                 stat_event_counts[event_name] += 1
-
                 if ts: dt_kst=datetime.fromtimestamp(ts,tz=timezone.utc)+timedelta(hours=9); ds=f"{dt_kst.year%100:02d}/{dt_kst.month:02d}/{dt_kst.day:02d}"
                 else: ds=None
                 ut=None
                 for k in ['utm_term','UTM_Term','UTM Term']:
                     if k in props and props[k]: ut=str(props[k]).strip(); break
                 if ut: ut=clean_id(ut)
-
-                # ★ v21: 매출 필드 우선순위 — 결제금액 > amount > value
-                raw_결제금액 = props.get('결제금액')
-                raw_amount = props.get('amount')
-                raw_value = props.get('value')
-
+                raw_결제금액 = props.get('결제금액'); raw_amount = props.get('amount'); raw_value = props.get('value')
                 결제금액_val = 0.0
                 if raw_결제금액 is not None:
                     try: 결제금액_val = float(raw_결제금액)
                     except: 결제금액_val = 0.0
-
                 amount_val = 0.0
                 if raw_amount is not None:
                     try: amount_val = float(raw_amount)
                     except: amount_val = 0.0
-
                 value_val = 0.0
                 if raw_value is not None:
                     try: value_val = float(raw_value)
                     except: value_val = 0.0
-
-                # ★ v21: OR 우선순위로 revenue 결정
-                if 결제금액_val > 0:
-                    revenue = 결제금액_val
-                elif amount_val > 0:
-                    revenue = amount_val
-                elif value_val > 0:
-                    revenue = value_val
-                else:
-                    revenue = 0.0
-
-                # 통계
-                has_결제금액 = 결제금액_val > 0
-                has_amount = amount_val > 0
-                has_value = value_val > 0
+                if 결제금액_val > 0: revenue = 결제금액_val
+                elif amount_val > 0: revenue = amount_val
+                elif value_val > 0: revenue = value_val
+                else: revenue = 0.0
+                has_결제금액 = 결제금액_val > 0; has_amount = amount_val > 0; has_value = value_val > 0
                 if has_결제금액 and not has_amount and not has_value: stat_결제금액_only += 1
                 elif has_amount and has_value: stat_both += 1
                 elif has_amount: stat_amount_only += 1
                 elif has_value: stat_value_only += 1
-                elif has_결제금액: pass  # 이미 카운트됨
+                elif has_결제금액: pass
                 else: stat_neither += 1
-
                 data.append({'distinct_id':props.get('distinct_id'),'time':ts,'date':ds,'utm_term':ut or '','amount':amount_val,'결제금액':결제금액_val,'value_raw':value_val,'revenue':revenue,'서비스':props.get('서비스','')})
             except: pass
         print(f"  ✅ 파싱: {len(data)}건")
@@ -768,9 +745,6 @@ def fetch_mixpanel_data(from_date, to_date):
     except Exception as e: print(f"  ❌ Mixpanel 오류: {e}"); return []
 
 
-# =========================================================
-# ★ FIX v19: find_last_data_row - consecutive_empty 기준 완화
-# =========================================================
 def find_last_data_row(all_values, structure):
     actual_asid_col = get_col_index(structure, 2)
     last_data_sheet_row = 1; data_rows = []; consecutive_empty = 0
@@ -795,57 +769,31 @@ def find_last_data_row(all_values, structure):
     return last_data_sheet_row, data_rows
 
 
-# =========================================================
-# ★ FIX v19: read_all_date_tabs
-# =========================================================
 def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=None):
     print("\n"+"="*60); print("★ 8.5단계: 전체 날짜탭 읽기"); print("="*60)
     all_ad_sets = defaultdict(lambda: {'campaign_name':'','adset_name':'','adset_id':'','dates':{}})
     all_budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend':0.0,'revenue':0.0}))
     all_master_raw_data = []; all_date_objects = {}; all_date_names = []
     master_headers_local = ["Date"] + DATE_TAB_HEADERS
-
     analysis_set = set(analysis_tab_names); all_ws = sh.worksheets(); date_tabs_found = []
-
-    print(f"\n  📋 전체 워크시트: {len(all_ws)}개")
-    skipped_analysis = []; skipped_no_slash = []; skipped_parse_fail = []
-
     for ws_ex in all_ws:
         tn = ws_ex.title
-        if tn in analysis_set:
-            skipped_analysis.append(tn); continue
+        if tn in analysis_set: continue
         dt_obj = parse_date_tab(tn)
-        if dt_obj is None:
-            if '/' in tn: skipped_parse_fail.append(tn)
-            else: skipped_no_slash.append(tn)
-            continue
+        if dt_obj is None: continue
         date_tabs_found.append((dt_obj, ws_ex, tn))
-
     date_tabs_found.sort(key=lambda x: x[0])
-
-    print(f"  ✅ 날짜탭 파싱 성공: {len(date_tabs_found)}개")
-    print(f"  ⏭️ 분석탭 스킵: {len(skipped_analysis)}개 → {skipped_analysis}")
-    print(f"  ⏭️ 비날짜탭 스킵: {len(skipped_no_slash)}개 → {skipped_no_slash}")
-    if skipped_parse_fail:
-        print(f"  ❌ 슬래시 있지만 파싱 실패: {len(skipped_parse_fail)}개 → {skipped_parse_fail}")
-        for t in skipped_parse_fail:
-            print(f"     '{t}' ← repr: {repr(t)}")
-        print(f"     ⚠️ 이 탭들이 추이차트 누락 원인일 수 있습니다!")
-    if date_tabs_found:
-        print(f"  📅 범위: {date_tabs_found[0][2]} ~ {date_tabs_found[-1][2]}")
-
+    print(f"  ✅ 날짜탭: {len(date_tabs_found)}개")
+    if date_tabs_found: print(f"  📅 범위: {date_tabs_found[0][2]} ~ {date_tabs_found[-1][2]}")
     _mp_val = mp_value_map or {}; _mp_cnt = mp_count_map or {}
-    empty_tabs = []; error_tabs = []; zero_data_tabs = []
-
     for dt_obj, ws_ex, tn in date_tabs_found:
         dk = f"{dt_obj.year%100:02d}/{dt_obj.month:02d}/{dt_obj.day:02d}"
         all_date_objects[dk]=dt_obj; all_date_names.append(dk)
         try:
-            print(f"  📖 {dk} 읽기...", end=" ", flush=True)
+            print(f"  📖 {dk}...", end=" ", flush=True)
             all_values = with_retry(ws_ex.get_all_values); time.sleep(0.3)
-            if not all_values or len(all_values) < 2:
-                print("빈 탭"); empty_tabs.append(dk); continue
-            structure = detect_tab_structure(all_values[0]); print(f"[{'구' if structure=='old' else '신'} 구조] ", end="", flush=True)
+            if not all_values or len(all_values) < 2: print("빈 탭"); continue
+            structure = detect_tab_structure(all_values[0])
             _, scan_rows = find_last_data_row(all_values, structure); row_count = 0
             for row in scan_rows:
                 norm_row = normalize_row_to_new(row, structure)
@@ -864,81 +812,33 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
                 while len(mrd)<len(master_headers_local): mrd.append("")
                 all_master_raw_data.append({'date':dk,'date_obj':dt_obj,'spend':spend,'row_data':mrd[:len(master_headers_local)]}); row_count+=1
             print(f"{row_count}행")
-            if row_count == 0: zero_data_tabs.append(dk)
-        except Exception as e:
-            print(f"오류: {e}"); error_tabs.append((dk, str(e)))
-
-    print(f"\n  {'='*50}")
-    print(f"  📊 날짜탭 읽기 최종 리포트")
-    print(f"  {'='*50}")
-    print(f"  ✅ 전체 날짜탭: {len(date_tabs_found)}개")
-    print(f"  ✅ date_names 등록: {len(all_date_names)}개")
-    print(f"  ✅ 광고 세트: {len(all_ad_sets)}개")
-    print(f"  ✅ 마스터행: {len(all_master_raw_data)}개")
-    if empty_tabs: print(f"  ⚠️ 빈 탭 (데이터 <2행): {len(empty_tabs)}개 → {empty_tabs}")
-    if zero_data_tabs: print(f"  ⚠️ 0행 탭 (헤더만): {len(zero_data_tabs)}개 → {zero_data_tabs}")
-    if error_tabs:
-        print(f"  ❌ 오류 탭: {len(error_tabs)}개")
-        for dk, err in error_tabs: print(f"     {dk}: {err}")
-
-    dates_with_adset_data = set()
-    for asid, d in all_ad_sets.items():
-        for dk2 in d['dates']: dates_with_adset_data.add(dk2)
-    orphan_dates = [dk for dk in all_date_names if dk not in dates_with_adset_data]
-    if orphan_dates:
-        print(f"  ⚠️ date_names에 있지만 adset 데이터 없음: {len(orphan_dates)}개 → {orphan_dates}")
-        print(f"     → 추이차트에 칼럼은 있지만 값이 빈 상태")
-
+        except Exception as e: print(f"오류: {e}")
+    print(f"  ✅ 광고 세트: {len(all_ad_sets)}개 | 마스터행: {len(all_master_raw_data)}개")
     return all_ad_sets, all_budget_by_date, all_master_raw_data, all_date_objects, all_date_names
 
 
 def diagnose_chart_coverage(sh, date_names, ad_sets, analysis_tabs_set):
-    print("\n" + "=" * 60)
-    print("★ 진단: 추이차트 커버리지 확인")
-    print("=" * 60)
-
-    all_ws = sh.worksheets()
-    all_tab_names = [ws.title for ws in all_ws]
-    slash_tabs = [t for t in all_tab_names if '/' in t]
+    all_ws = sh.worksheets(); slash_tabs = [ws.title for ws in all_ws if '/' in ws.title]
     parsed_tabs = []; failed_tabs = []
-
     for t in slash_tabs:
         dt = parse_date_tab(t)
         if dt:
-            dk = f"{dt.year%100:02d}/{dt.month:02d}/{dt.day:02d}"
-            parsed_tabs.append((t, dk, dt))
-        else:
-            failed_tabs.append(t)
-
-    date_names_set = set(date_names)
-    in_chart = [(t, dk) for t, dk, dt in parsed_tabs if dk in date_names_set]
-    not_in_chart = [(t, dk) for t, dk, dt in parsed_tabs if dk not in date_names_set]
-
-    print(f"  📋 슬래시 포함 탭: {len(slash_tabs)}개")
-    print(f"  ✅ 파싱 성공: {len(parsed_tabs)}개")
-    print(f"  ✅ 추이차트 포함: {len(in_chart)}개")
-
-    if not_in_chart:
-        print(f"  ❌ 파싱됐지만 추이차트 누락: {len(not_in_chart)}개")
-        for tab_name, dk in not_in_chart: print(f"     '{tab_name}' → dk='{dk}'")
-
-    if failed_tabs:
-        print(f"  ❌ 파싱 실패 (날짜 인식 불가): {len(failed_tabs)}개")
-        for t in failed_tabs: print(f"     '{t}' ← repr: {repr(t)}")
-
-    if date_names:
-        print(f"\n  📊 추이차트 날짜 범위:")
-        print(f"     가장 오래된: {date_names[0]}")
-        print(f"     가장 최근:  {date_names[-1]}")
-        print(f"     총 일수:    {len(date_names)}일")
-
+            dk = f"{dt.year%100:02d}/{dt.month:02d}/{dt.day:02d}"; parsed_tabs.append((t, dk, dt))
+        else: failed_tabs.append(t)
+    if failed_tabs: print(f"  ⚠️ 파싱 실패 탭: {failed_tabs}")
     return failed_tabs
 
 
+# =========================================================
+# ★ v23: generate_date_tab_summary — 나라별 ROAS/순이익/매출 추가
+# =========================================================
 def generate_date_tab_summary(rows, structure="new"):
     total_spend=0.0;total_meta_purchase=0.0;total_mp_purchase=0.0;total_revenue=0.0;total_profit=0.0;total_unique_clicks=0.0
     spend_by_account={"본계정":0.0,"부계정":0.0,"3rd계정":0.0}
     prod_spend=defaultdict(float);prod_revenue=defaultdict(float);prod_profit=defaultdict(float)
+    # ★ v23: 나라별 집계
+    country_spend=defaultdict(float);country_revenue=defaultdict(float);country_profit=defaultdict(float)
+
     for row in rows:
         nr=normalize_row_to_new(row,structure);cn=str(nr[0]);asn=str(nr[1]);adset_id=str(nr[2]);spend=_to_num(nr[3]);meta_p=_to_num(nr[13]);mp_p=_to_num(nr[14]);rev=_to_num(nr[15]);prof=_to_num(nr[16]);uc=_to_num(nr[9])
         if not cn or cn in ["전체","합계","Total"]: continue
@@ -948,12 +848,24 @@ def generate_date_tab_summary(rows, structure="new"):
         elif adset_id.startswith("6"): spend_by_account["3rd계정"]+=spend
         p = extract_product(asn)
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
+        # ★ v23: 나라별
+        currency = detect_currency(asn)
+        country = CURRENCY_TO_COUNTRY.get(currency, "기타")
+        country_spend[country]+=spend;country_revenue[country]+=rev;country_profit[country]+=prof
+
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
     sp = sorted([p for p in prod_spend if p in PRODUCT_KEYWORDS and (prod_spend[p] > 0 or prod_revenue[p] > 0)],
                 key=lambda p: prod_spend[p], reverse=True)
     num_products = len(sp); NC = 25
     sum_col_idx = 9 + num_products
+
+    # ★ v23: 나라 목록 (지출 기준 내림차순)
+    countries = sorted([c for c in country_spend if country_spend[c] > 0 or country_revenue[c] > 0],
+                       key=lambda c: country_spend[c], reverse=True)
+    num_countries = len(countries)
+    country_sum_col = 9 + num_countries
+
     summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC); summary_data.append([""]*NC)
     r_title=[""]*NC; r_title[14]="전체"; summary_data.append(r_title)
     r_hdr=[""]*NC; r_hdr[11]="본계정";r_hdr[12]="부계정";r_hdr[13]="3rd 계정"
@@ -963,38 +875,69 @@ def generate_date_tab_summary(rows, structure="new"):
     r_val[14]=round(total_spend);r_val[15]=round(total_meta_purchase);r_val[16]=round(total_mp_purchase)
     r_val[17]=round(total_revenue);r_val[18]=round(total_profit);r_val[19]=round(total_roas,1);r_val[20]=total_cvr/100 if total_cvr else 0
     summary_data.append(r_val)
-    if num_products == 0: return summary_data, 0
-    total_prod_spend=sum(prod_spend[p] for p in sp); total_prod_revenue=sum(prod_revenue[p] for p in sp); total_prod_profit=sum(prod_profit[p] for p in sp)
-    tables=[("제품별 ROAS","roas"),("제품별 순이익","profit"),("제품별 매출","revenue"),("제품별 순이익율","profit_margin"),("제품별 예산","spend"),("제품별 예산 비중","spend_ratio")]
-    for table_title, data_type in tables:
-        summary_data.append([""]*NC); r_tt=[""]*NC; r_tt[12]=table_title; summary_data.append(r_tt)
-        r_ph=[""]*NC
-        for i,p in enumerate(sp): r_ph[9+i]=p
-        r_ph[sum_col_idx]="합"; summary_data.append(r_ph)
-        r_pv=[""]*NC
-        for i,p in enumerate(sp):
-            ps=prod_spend[p];pr=prod_revenue[p];pp=prod_profit[p]
-            if data_type=="roas": r_pv[9+i]=pr/ps if ps>0 else 0
-            elif data_type=="profit": r_pv[9+i]=round(pp)
-            elif data_type=="revenue": r_pv[9+i]=round(pr)
-            elif data_type=="profit_margin": r_pv[9+i]=pp/pr if pr>0 else 0
-            elif data_type=="spend": r_pv[9+i]=round(ps)
-            elif data_type=="spend_ratio": r_pv[9+i]=ps/total_prod_spend if total_prod_spend>0 else 0
-        if data_type=="roas": r_pv[sum_col_idx]=total_prod_revenue/total_prod_spend if total_prod_spend>0 else 0
-        elif data_type=="profit": r_pv[sum_col_idx]=round(total_prod_profit)
-        elif data_type=="revenue": r_pv[sum_col_idx]=round(total_prod_revenue)
-        elif data_type=="profit_margin": r_pv[sum_col_idx]=total_prod_profit/total_prod_revenue if total_prod_revenue>0 else 0
-        elif data_type=="spend": r_pv[sum_col_idx]=round(total_prod_spend)
-        elif data_type=="spend_ratio": r_pv[sum_col_idx]=""
-        summary_data.append(r_pv)
-    return summary_data, num_products
 
-def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, num_products=0):
+    # --- 제품별 테이블 ---
+    if num_products > 0:
+        total_prod_spend=sum(prod_spend[p] for p in sp); total_prod_revenue=sum(prod_revenue[p] for p in sp); total_prod_profit=sum(prod_profit[p] for p in sp)
+        tables=[("제품별 ROAS","roas"),("제품별 순이익","profit"),("제품별 매출","revenue"),("제품별 순이익율","profit_margin"),("제품별 예산","spend"),("제품별 예산 비중","spend_ratio")]
+        for table_title, data_type in tables:
+            summary_data.append([""]*NC); r_tt=[""]*NC; r_tt[12]=table_title; summary_data.append(r_tt)
+            r_ph=[""]*NC
+            for i,p in enumerate(sp): r_ph[9+i]=p
+            r_ph[sum_col_idx]="합"; summary_data.append(r_ph)
+            r_pv=[""]*NC
+            for i,p in enumerate(sp):
+                ps=prod_spend[p];pr=prod_revenue[p];pp=prod_profit[p]
+                if data_type=="roas": r_pv[9+i]=pr/ps if ps>0 else 0
+                elif data_type=="profit": r_pv[9+i]=round(pp)
+                elif data_type=="revenue": r_pv[9+i]=round(pr)
+                elif data_type=="profit_margin": r_pv[9+i]=pp/pr if pr>0 else 0
+                elif data_type=="spend": r_pv[9+i]=round(ps)
+                elif data_type=="spend_ratio": r_pv[9+i]=ps/total_prod_spend if total_prod_spend>0 else 0
+            if data_type=="roas": r_pv[sum_col_idx]=total_prod_revenue/total_prod_spend if total_prod_spend>0 else 0
+            elif data_type=="profit": r_pv[sum_col_idx]=round(total_prod_profit)
+            elif data_type=="revenue": r_pv[sum_col_idx]=round(total_prod_revenue)
+            elif data_type=="profit_margin": r_pv[sum_col_idx]=total_prod_profit/total_prod_revenue if total_prod_revenue>0 else 0
+            elif data_type=="spend": r_pv[sum_col_idx]=round(total_prod_spend)
+            elif data_type=="spend_ratio": r_pv[sum_col_idx]=""
+            summary_data.append(r_pv)
+
+    # ★ v23: --- 나라별 테이블 ---
+    if num_countries > 0:
+        total_c_spend=sum(country_spend[c] for c in countries)
+        total_c_revenue=sum(country_revenue[c] for c in countries)
+        total_c_profit=sum(country_profit[c] for c in countries)
+        country_tables=[("🌏 나라별 ROAS","roas"),("🌏 나라별 순이익","profit"),("🌏 나라별 매출","revenue")]
+        for table_title, data_type in country_tables:
+            summary_data.append([""]*NC)
+            r_tt=[""]*NC; r_tt[12]=table_title; summary_data.append(r_tt)
+            r_ch=[""]*NC
+            for i,c in enumerate(countries): r_ch[9+i]=c
+            r_ch[country_sum_col]="합"; summary_data.append(r_ch)
+            r_cv=[""]*NC
+            for i,c in enumerate(countries):
+                cs=country_spend[c];cr_v=country_revenue[c];cp=country_profit[c]
+                if data_type=="roas": r_cv[9+i]=cr_v/cs if cs>0 else 0
+                elif data_type=="profit": r_cv[9+i]=round(cp)
+                elif data_type=="revenue": r_cv[9+i]=round(cr_v)
+            if data_type=="roas": r_cv[country_sum_col]=total_c_revenue/total_c_spend if total_c_spend>0 else 0
+            elif data_type=="profit": r_cv[country_sum_col]=round(total_c_profit)
+            elif data_type=="revenue": r_cv[country_sum_col]=round(total_c_revenue)
+            summary_data.append(r_cv)
+
+    return summary_data, num_products, countries
+
+
+# =========================================================
+# ★ v23: format_date_tab_summary — 나라별 테이블 서식 추가
+# =========================================================
+def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, num_products=0, countries=None):
     sid=ws.id; base=summary_start_sheet_row-1
     C_PINK={"red":0.957,"green":0.8,"blue":0.8}; C_ORANGE={"red":0.988,"green":0.898,"blue":0.804}
     C_LGREEN={"red":0.851,"green":0.918,"blue":0.827}; C_GRAY={"red":0.69,"green":0.7,"blue":0.698}
     C_DGRAY={"red":0.6,"green":0.6,"blue":0.6}; C_BLACK={"red":0,"green":0,"blue":0}
     C_WHITE={"red":1,"green":1,"blue":1}; C_LYELLOW={"red":1,"green":1,"blue":0.8}
+    C_TEAL={"red":0.0,"green":0.5,"blue":0.5}
     fmt_requests=[]; r=base+3
     fmt_requests.append(create_format_request(sid,r,r+1,14,21,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
     fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":14,"endColumnIndex":21},"mergeType":"MERGE_ALL"}})
@@ -1009,20 +952,46 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
     fmt_requests.append(create_number_format_request(sid,r,r+1,19,20,"NUMBER","#,##0.0"))
     fmt_requests.append(create_number_format_request(sid,r,r+1,20,21,"NUMBER","0.00%"))
     fmt_requests.append(create_border_request(sid,base+4,base+6,11,21))
-    if num_products == 0: return fmt_requests
-    sum_col = 9 + num_products; prod_end_col = 9 + num_products + 1
-    table_formats=[("ROAS","0.00%"),("순이익","[$₩-412]#,##0"),("매출","#,##0"),("순이익율","0.00%"),("예산","[$₩-412]#,##0"),("예산비중","0.00%")]
-    prod_hdr_fmt={**hdr_fmt_base,"backgroundColor":C_GRAY}; offset=base+6
-    for t_idx,(tname,nfmt) in enumerate(table_formats):
-        t_start=offset+t_idx*4
-        fmt_requests.append(create_format_request(sid,t_start+1,t_start+2,12,prod_end_col,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
-        fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":t_start+1,"endRowIndex":t_start+2,"startColumnIndex":12,"endColumnIndex":prod_end_col},"mergeType":"MERGE_ALL"}})
-        fmt_requests.append(create_format_request(sid,t_start+2,t_start+3,9,prod_end_col,prod_hdr_fmt))
-        fmt_requests.append(create_number_format_request(sid,t_start+3,t_start+4,9,prod_end_col,"NUMBER",nfmt))
-        if t_idx in [1,2,4]:
-            fmt_requests.append(create_format_request(sid,t_start+3,t_start+4,sum_col,sum_col+1,{"backgroundColor":C_LYELLOW,"textFormat":{"bold":True}}))
-            fmt_requests.append(create_number_format_request(sid,t_start+3,t_start+4,sum_col,sum_col+1,"NUMBER","[$₩-412]#,##0"))
-        fmt_requests.append(create_border_request(sid,t_start+2,t_start+4,9,prod_end_col))
+
+    # --- 제품별 서식 ---
+    if num_products > 0:
+        sum_col = 9 + num_products; prod_end_col = 9 + num_products + 1
+        table_formats=[("ROAS","0.00%"),("순이익","[$₩-412]#,##0"),("매출","#,##0"),("순이익율","0.00%"),("예산","[$₩-412]#,##0"),("예산비중","0.00%")]
+        prod_hdr_fmt={**hdr_fmt_base,"backgroundColor":C_GRAY}; offset=base+6
+        for t_idx,(tname,nfmt) in enumerate(table_formats):
+            t_start=offset+t_idx*4
+            fmt_requests.append(create_format_request(sid,t_start+1,t_start+2,12,prod_end_col,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
+            fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":t_start+1,"endRowIndex":t_start+2,"startColumnIndex":12,"endColumnIndex":prod_end_col},"mergeType":"MERGE_ALL"}})
+            fmt_requests.append(create_format_request(sid,t_start+2,t_start+3,9,prod_end_col,prod_hdr_fmt))
+            fmt_requests.append(create_number_format_request(sid,t_start+3,t_start+4,9,prod_end_col,"NUMBER",nfmt))
+            if t_idx in [1,2,4]:
+                fmt_requests.append(create_format_request(sid,t_start+3,t_start+4,sum_col,sum_col+1,{"backgroundColor":C_LYELLOW,"textFormat":{"bold":True}}))
+                fmt_requests.append(create_number_format_request(sid,t_start+3,t_start+4,sum_col,sum_col+1,"NUMBER","[$₩-412]#,##0"))
+            fmt_requests.append(create_border_request(sid,t_start+2,t_start+4,9,prod_end_col))
+
+    # ★ v23: --- 나라별 서식 ---
+    if countries and len(countries) > 0:
+        num_c = len(countries)
+        c_sum_col = 9 + num_c; c_end_col = 9 + num_c + 1
+        # 나라별 테이블 시작 오프셋 계산
+        if num_products > 0:
+            c_offset = base + 6 + num_products * 0 + 6 * 4  # 제품 6테이블 × 4행 후
+        else:
+            c_offset = base + 6  # 제품 없으면 바로
+
+        country_table_formats = [("ROAS", "0.00%"), ("순이익", "[$₩-412]#,##0"), ("매출", "#,##0")]
+        country_hdr_fmt = {**hdr_fmt_base, "backgroundColor": C_TEAL}
+        for t_idx, (tname, nfmt) in enumerate(country_table_formats):
+            t_start = c_offset + t_idx * 4
+            fmt_requests.append(create_format_request(sid, t_start+1, t_start+2, 12, c_end_col, {"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
+            fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":t_start+1,"endRowIndex":t_start+2,"startColumnIndex":12,"endColumnIndex":c_end_col},"mergeType":"MERGE_ALL"}})
+            fmt_requests.append(create_format_request(sid, t_start+2, t_start+3, 9, c_end_col, country_hdr_fmt))
+            fmt_requests.append(create_number_format_request(sid, t_start+3, t_start+4, 9, c_end_col, "NUMBER", nfmt))
+            if t_idx in [1, 2]:  # 순이익, 매출
+                fmt_requests.append(create_format_request(sid, t_start+3, t_start+4, c_sum_col, c_sum_col+1, {"backgroundColor":C_LYELLOW,"textFormat":{"bold":True}}))
+                fmt_requests.append(create_number_format_request(sid, t_start+3, t_start+4, c_sum_col, c_sum_col+1, "NUMBER", "[$₩-412]#,##0"))
+            fmt_requests.append(create_border_request(sid, t_start+2, t_start+4, 9, c_end_col))
+
     return fmt_requests
 
 
@@ -1056,53 +1025,35 @@ adset_budget_map = {}
 for acc_id in ALL_AD_ACCOUNTS:
     print(f"  📡 계정 {acc_id}..."); budgets = fetch_adset_budgets(acc_id); adset_budget_map.update(budgets)
     print(f"  ✅ {len(budgets)}개 활성 세트 예산 조회"); time.sleep(2)
-print(f"\n✅ 전체 예산 조회 완료: {len(adset_budget_map)}개 세트")
-if adset_budget_map:
-    sample = list(adset_budget_map.items())[:3]
-    for asid, budget in sample: print(f"  예시: {asid} → ₩{budget:,}")
-print()
+print(f"\n✅ 전체 예산 조회 완료: {len(adset_budget_map)}개 세트\n")
 
-# 3단계: Mixpanel ★ v21: 이벤트명 OR 처리 적용
+# 3단계: Mixpanel
 print("="*60); print(f"3단계: Mixpanel 수집 ({REFRESH_DAYS}일)"); print("="*60)
 YESTERDAY=TODAY-timedelta(days=1)
 mp_to_today=TODAY.strftime('%Y-%m-%d')
 total_days=(TODAY-DATA_REFRESH_START).days+1
 print(f"  📅 Mixpanel 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ {mp_to_today} ({total_days}일)")
-print(f"  📡 수집 이벤트: {MIXPANEL_EVENT_NAMES}")
 mp_raw=[]
-
 if REFRESH_DAYS > 14:
-    CHUNK_SIZE = 7
-    chunk_start = DATA_REFRESH_START
-    chunk_num = 0
+    CHUNK_SIZE = 7; chunk_start = DATA_REFRESH_START; chunk_num = 0
     while chunk_start <= YESTERDAY:
-        chunk_end = min(chunk_start + timedelta(days=CHUNK_SIZE - 1), YESTERDAY)
-        chunk_num += 1
+        chunk_end = min(chunk_start + timedelta(days=CHUNK_SIZE - 1), YESTERDAY); chunk_num += 1
         print(f"\n  📦 청크 {chunk_num}: {chunk_start.strftime('%Y-%m-%d')} ~ {chunk_end.strftime('%Y-%m-%d')}")
         chunk_data = fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'))
-        mp_raw.extend(chunk_data)
-        print(f"  ✅ {len(chunk_data)}건 (누적: {len(mp_raw)}건)")
-        chunk_start = chunk_end + timedelta(days=1)
-        time.sleep(3)
+        mp_raw.extend(chunk_data); chunk_start = chunk_end + timedelta(days=1); time.sleep(3)
 else:
-    mp_from=DATA_REFRESH_START.strftime('%Y-%m-%d')
-    mp_to_yesterday=YESTERDAY.strftime('%Y-%m-%d')
+    mp_from=DATA_REFRESH_START.strftime('%Y-%m-%d'); mp_to_yesterday=YESTERDAY.strftime('%Y-%m-%d')
     if DATA_REFRESH_START <= YESTERDAY:
-        chunk_data=fetch_mixpanel_data(mp_from, mp_to_yesterday); mp_raw.extend(chunk_data)
-        print(f"  ✅ 어제까지: {len(chunk_data)}건"); time.sleep(2)
-
+        chunk_data=fetch_mixpanel_data(mp_from, mp_to_yesterday); mp_raw.extend(chunk_data); time.sleep(2)
 print(f"\n  ── 오늘({mp_to_today}) 별도 호출 ──")
 today_data=fetch_mixpanel_data(mp_to_today,mp_to_today)
 if today_data: mp_raw.extend(today_data); print(f"  ✅ 오늘: {len(today_data)}건 (누적: {len(mp_raw)}건)")
-else: print(f"  ⚠️ 오늘 데이터 없음")
 print(f"\n  ✅ Mixpanel 수집 완료: 총 {len(mp_raw)}건")
-df=pd.DataFrame(mp_raw); print(f"  원본: {len(df)}건")
-mp_value_map={};mp_count_map={}
+df=pd.DataFrame(mp_raw); mp_value_map={};mp_count_map={}
 if len(df)>0:
-    df=df[df['utm_term'].notna()&(df['utm_term']!='')&(df['utm_term']!='None')]; print(f"  utm_term 있는 것: {len(df)}건")
-    df=df.sort_values('revenue',ascending=False); bf=len(df)
-    df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first'); print(f"  중복 제거: {bf} → {len(df_d)}건")
-    total_revenue=df_d['revenue'].sum(); print(f"  📊 매출 합계: ₩{int(total_revenue):,}")
+    df=df[df['utm_term'].notna()&(df['utm_term']!='')&(df['utm_term']!='None')]
+    df=df.sort_values('revenue',ascending=False); df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first')
+    print(f"  utm_term 필터 후 중복제거: {len(df_d)}건 | 매출합: ₩{int(df_d['revenue'].sum()):,}")
     for (d,ut),v in df_d.groupby(['date','utm_term'])['revenue'].sum().items():
         if d and ut: mp_value_map[(d,str(ut))]=v
     for (d,ut),c in df_d.groupby(['date','utm_term']).size().items():
@@ -1115,59 +1066,34 @@ print("="*60); print(f"4단계: 최근 {REFRESH_DAYS}일 기존 날짜탭 파악
 refresh_date_keys=set()
 for day_offset in range(REFRESH_DAYS):
     td=TODAY-timedelta(days=day_offset); dk=f"{td.year%100:02d}/{td.month:02d}/{td.day:02d}"; refresh_date_keys.add(dk)
-print(f"  🔄 갱신 대상 날짜: {sorted(refresh_date_keys)}")
 existing_sheets=sh.worksheets(); existing_refresh_tabs={}; new_refresh_dates=set(refresh_date_keys)
 for ws_ex in existing_sheets:
     tn=ws_ex.title; dt_obj=parse_date_tab(tn)
     if dt_obj is None: continue
     tab_dk=f"{dt_obj.year%100:02d}/{dt_obj.month:02d}/{dt_obj.day:02d}"
-    if tab_dk in refresh_date_keys:
-        existing_refresh_tabs[tab_dk]=ws_ex; new_refresh_dates.discard(tab_dk); print(f"  📝 기존 탭 발견: {tn}")
-    else: print(f"  ✅ 보존: {tn}")
-print(f"\n  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개")
-print(f"  🆕 새로 생성할 탭: {len(new_refresh_dates)}개\n")
+    if tab_dk in refresh_date_keys: existing_refresh_tabs[tab_dk]=ws_ex; new_refresh_dates.discard(tab_dk)
+print(f"  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새로 생성: {len(new_refresh_dates)}개\n")
 
-# =========================================================
-# ★ v22: 4.5단계 — USD/TWD/JPY/HKD → KRW 일별 환율 조회
-# =========================================================
+# 4.5단계: 환율 (USD/TWD/JPY/HKD)
 print("="*60); print("4.5단계: USD/TWD/JPY/HKD → KRW 일별 환율 조회"); print("="*60)
 rate_range_start = DATA_REFRESH_START - timedelta(days=7)
 usd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="USD")
 twd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="TWD")
 jpy_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="JPY")
 hkd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="HKD")
-
-if usd_krw_rates:
-    sample_rates = list(usd_krw_rates.items())[-3:]
-    for dk, rate in sample_rates: print(f"  USD {dk}: 1 USD = ₩{rate:,.2f}")
-else: print(f"  ⚠️ USD 환율 조회 실패 → 폴백 ₩{FALLBACK_USD_KRW:,}")
-if twd_krw_rates:
-    sample_rates = list(twd_krw_rates.items())[-3:]
-    for dk, rate in sample_rates: print(f"  TWD {dk}: 1 TWD = ₩{rate:,.2f}")
-else: print(f"  ⚠️ TWD 환율 조회 실패 → 폴백 ₩{FALLBACK_TWD_KRW:,}")
-if jpy_krw_rates:
-    sample_rates = list(jpy_krw_rates.items())[-3:]
-    for dk, rate in sample_rates: print(f"  JPY {dk}: 1 JPY = ₩{rate:,.2f}")
-else: print(f"  ⚠️ JPY 환율 조회 실패 → 폴백 ₩{FALLBACK_JPY_KRW:,}")
-if hkd_krw_rates:
-    sample_rates = list(hkd_krw_rates.items())[-3:]
-    for dk, rate in sample_rates: print(f"  HKD {dk}: 1 HKD = ₩{rate:,.2f}")
-else: print(f"  ⚠️ HKD 환율 조회 실패 → 폴백 ₩{FALLBACK_HKD_KRW:,}")
+for curr, rates, fb in [("USD",usd_krw_rates,FALLBACK_USD_KRW),("TWD",twd_krw_rates,FALLBACK_TWD_KRW),("JPY",jpy_krw_rates,FALLBACK_JPY_KRW),("HKD",hkd_krw_rates,FALLBACK_HKD_KRW)]:
+    if rates:
+        sample = list(rates.items())[-2:]
+        for dk, rate in sample: print(f"  {curr} {dk}: ₩{rate:,.2f}")
+    else: print(f"  ⚠️ {curr} 환율 조회 실패 → 폴백 ₩{fb:,}")
 print()
 
-# =========================================================
-# ★ v22: 5단계 — Meta + Mixpanel 병합 (통화별 환율 적용)
-# =========================================================
+# 5단계: Meta + Mixpanel 병합 (통화별 환율)
 print("="*60); print("5단계: Meta + Mixpanel 병합 (통화별 환율 적용)"); print("="*60)
 date_tab_rows=defaultdict(list);date_mp_by_adsetid=defaultdict(dict);new_date_names=[];product_count=defaultdict(int)
 debug_total_rows=0;debug_matched_rows=0;debug_matched_revenue=0
-# ★ v21: 제품 매핑 진단용 — '기타'로 빠진 광고세트 이름 샘플 수집
 debug_기타_adset_names = set()
-# ★ v22: 통화별 매출 진단
-debug_currency_revenue = defaultdict(float)
-debug_currency_count = defaultdict(int)
-
-# ★ v22: adset_id → adset_name 매핑 (mp_value_map_krw 변환용)
+debug_currency_revenue = defaultdict(float); debug_currency_count = defaultdict(int)
 adset_id_to_name = {}
 
 for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_obj'] if meta_date_data[x] else datetime.min,reverse=True):
@@ -1179,25 +1105,15 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
         asid=mr['adset_id']
         if not asid: continue
         debug_total_rows+=1
-
-        # ★ v22: adset_id → adset_name 매핑 구축
         adset_id_to_name[asid] = mr['adset_name']
-
         sp=mr['spend']*fx_usd;impr=mr['impressions'];reach=mr['reach'];uc=mr['unique_clicks'];results=mr['results']
         cpm=mr['cpm']*fx_usd;frequency=mr['frequency'];cost_per_result=mr['cost_per_result']*fx_usd;cost_per_click=mr['cost_per_unique_click']*fx_usd;unique_ctr=mr['unique_ctr']
         mpc=mp_count_map.get((dk,asid),0);mpv=mp_value_map.get((dk,asid),0.0)
         if mpc>0 or mpv>0: debug_matched_rows+=1;debug_matched_revenue+=mpv
-
-        # ★ v22: 광고 세트 이름 기준 통화 판별 → 통화별 환율 적용
         currency = detect_currency(mr['adset_name'])
         fx_revenue = get_revenue_fx(currency, dk)
         rv = float(mpv) * fx_revenue
-
-        # ★ v22: 통화별 진단
-        if mpv > 0:
-            debug_currency_revenue[currency] += rv
-            debug_currency_count[currency] += 1
-
+        if mpv > 0: debug_currency_revenue[currency] += rv; debug_currency_count[currency] += 1
         date_mp_by_adsetid[dk][asid]={'mpc':mpc,'mpv':rv}
         pf=rv-sp;roas_c=(rv/sp*100) if sp>0 else 0;cvr_c=(mpc/uc*100) if uc>0 and mpc>0 else 0
         cn=mr['campaign_name'];asn=mr['adset_name']
@@ -1206,27 +1122,17 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
         tab_row=[cn,asn,asid,sp,cost_per_result,0,round(cpm,0),reach,impr,uc,round(unique_ctr,2),round(cost_per_click,0),round(frequency,2),results,
             mpc if mpc>0 else "",round(rv) if rv>0 else "",round(pf,0) if sp>0 else "",round(roas_c,1) if sp>0 and rv>0 else "",round(cvr_c,2) if uc>0 and mpc>0 else "",budget_val,"","",""]
         date_tab_rows[dk].append(tab_row); p=extract_product(asn); product_count[p]+=1
-        # ★ v21: '기타' 진단
-        if p == "기타":
-            debug_기타_adset_names.add(asn)
+        if p == "기타": debug_기타_adset_names.add(asn)
 
 print(f"✅ 날짜탭 구성 완료: {len(new_date_names)}개")
 print(f"📦 제품별: {dict(product_count)}")
-print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)" if debug_total_rows>0 else "")
-print(f"   매칭 매출: ₩{int(debug_matched_revenue):,}")
-
-# ★ v22: 통화별 매출 진단 로그
+if debug_total_rows>0: print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)")
 if debug_currency_revenue:
     print(f"\n💱 통화별 KRW 환산 매출:")
-    for curr in sorted(debug_currency_revenue.keys()):
-        print(f"  {curr}: ₩{int(debug_currency_revenue[curr]):,} ({debug_currency_count[curr]}건)")
-
-# ★ v21: '기타' 제품 진단 로그
+    for curr in sorted(debug_currency_revenue.keys()): print(f"  {curr} ({CURRENCY_TO_COUNTRY.get(curr,'?')}): ₩{int(debug_currency_revenue[curr]):,} ({debug_currency_count[curr]}건)")
 if debug_기타_adset_names:
-    print(f"\n  ⚠️ '기타'로 분류된 광고 세트 이름 ({len(debug_기타_adset_names)}개 고유값):")
-    for name in sorted(debug_기타_adset_names):
-        print(f"     → '{name}'")
-    print(f"  💡 PRODUCT_KEYWORDS={PRODUCT_KEYWORDS} 에 해당 키워드를 추가하면 제품 분류 가능")
+    print(f"\n  ⚠️ '기타' 광고 세트: {len(debug_기타_adset_names)}개")
+    for name in sorted(debug_기타_adset_names)[:10]: print(f"     → '{name}'")
 print()
 
 # 6단계: 분석탭 삭제
@@ -1249,17 +1155,16 @@ for dk in sorted(existing_refresh_tabs.keys()):
     print(f"\n  📝 {dk} (기존 탭) 업데이트 중...")
     try:
         ws_ex = refresh_ws(sh, ws_ex); all_values=with_retry(ws_ex.get_all_values); time.sleep(0.5)
-        if not all_values or len(all_values)<2: print(f"    ⚠️ 빈 탭, 건너뜀"); continue
-        structure=detect_tab_structure(all_values[0]); print(f"    구조 감지: {'구 구조(25열)' if structure=='old' else '신 구조(23열)'}")
-        sid_ex=ws_ex.id
+        if not all_values or len(all_values)<2: print(f"    ⚠️ 빈 탭"); continue
+        structure=detect_tab_structure(all_values[0]); sid_ex=ws_ex.id
         total_rows_for_clear = max(len(all_values)+50, 200); fmt_clear_start_col = get_col_index(structure, 3)
         try:
             with_retry(sh.batch_update, body={"requests": [
                 {"unmergeCells":{"range":{"sheetId":sid_ex,"startRowIndex":1,"endRowIndex":total_rows_for_clear,"startColumnIndex":0,"endColumnIndex":30}}},
                 {"repeatCell":{"range":{"sheetId":sid_ex,"startRowIndex":1,"endRowIndex":total_rows_for_clear,"startColumnIndex":fmt_clear_start_col,"endColumnIndex":30},"cell":{"userEnteredFormat":{}},"fields":"userEnteredFormat.numberFormat"}}
-            ]}); print(f"    🔓 병합 해제 + numberFormat 초기화"); time.sleep(1)
-        except Exception as e: print(f"    ⚠️ 서식 초기화: {e}")
-        actual_asid_col=get_col_index(structure,2); actual_memo_col=get_col_index(structure,22)
+            ]}); time.sleep(1)
+        except: pass
+        actual_asid_col=get_col_index(structure,2)
         adset_id_row_map={};last_data_sheet_row=1
         for i,row in enumerate(all_values[1:],start=2):
             if not row: continue
@@ -1268,7 +1173,7 @@ for dk in sorted(existing_refresh_tabs.keys()):
             if not cn and not asid: continue
             if asid: adset_id_row_map[asid]=i-1
             last_data_sheet_row=i
-        data_end_idx=last_data_sheet_row; print(f"    기존 광고 세트: {len(adset_id_row_map)}개, 마지막 데이터 행: {data_end_idx}")
+        data_end_idx=last_data_sheet_row
         batch_updates=[];updated_count=0;new_row_by_asid={}
         for tab_row in new_rows_for_date:
             asid_check=str(tab_row[2]).strip() if len(tab_row)>2 else ""
@@ -1304,8 +1209,7 @@ for dk in sorted(existing_refresh_tabs.keys()):
         if batch_updates:
             for i in range(0,len(batch_updates),100):
                 with_retry(ws_ex.batch_update, batch_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
-            print(f"    ✅ {updated_count}개 광고 세트 업데이트 완료")
-        else: print(f"    ℹ️ 업데이트할 데이터 없음")
+            print(f"    ✅ {updated_count}개 업데이트")
         budget_updates = []; actual_budget_col = get_col_index(structure, 19); budget_col_letter = get_col_letter(actual_budget_col)
         fx_budget = get_rate_for_date(usd_krw_rates, dk)
         for asid, row_idx in adset_id_row_map.items():
@@ -1315,7 +1219,6 @@ for dk in sorted(existing_refresh_tabs.keys()):
         if budget_updates:
             for i in range(0, len(budget_updates), 100):
                 with_retry(ws_ex.batch_update, budget_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
-            print(f"    💰 기존 예산 업데이트: {len(budget_updates)}개 세트")
         existing_asids=set(adset_id_row_map.keys());new_rows_to_add=[]
         for tab_row in new_rows_for_date:
             asid_check=str(tab_row[2]).strip() if len(tab_row)>2 else ""
@@ -1330,23 +1233,23 @@ for dk in sorted(existing_refresh_tabs.keys()):
             new_rows_to_add.sort(key=lambda r:_to_num(r[actual_profit_col]) if len(r)>actual_profit_col else 0,reverse=True)
             append_row=data_end_idx+1
             with_retry(ws_ex.update,values=new_rows_to_add,range_name=f"A{append_row}",value_input_option="USER_ENTERED")
-            print(f"    ✅ {len(new_rows_to_add)}개 신규 광고 세트 행 추가"); time.sleep(1); data_end_idx+=len(new_rows_to_add)
-        print(f"    🔍 요약표 위치 재계산 중...")
+            print(f"    ✅ {len(new_rows_to_add)}개 신규 행 추가"); time.sleep(1); data_end_idx+=len(new_rows_to_add)
+        # 요약표 재생성
         all_values=with_retry(ws_ex.get_all_values); time.sleep(0.5); structure=detect_tab_structure(all_values[0])
         last_data_row, data_rows_for_summary = find_last_data_row(all_values, structure)
-        summary_start_row=last_data_row+1; print(f"    📍 마지막 데이터: 행 {last_data_row} → 요약표 시작: 행 {summary_start_row}")
+        summary_start_row=last_data_row+1
         NUM_COLS_FILTER = len(DATE_TAB_HEADERS) if structure == "new" else len(OLD_DATE_TAB_HEADERS)
         try:
             try: with_retry(sh.batch_update, body={"requests": [{"clearBasicFilter": {"sheetId": ws_ex.id}}]})
             except: pass
             with_retry(sh.batch_update, body={"requests": [{"setBasicFilter": {"filter": {"range": {"sheetId": ws_ex.id, "startRowIndex": 0, "endRowIndex": last_data_row, "startColumnIndex": 0, "endColumnIndex": NUM_COLS_FILTER}}}}]})
-            print(f"    🔽 필터 설정: 행 1~{last_data_row}"); time.sleep(0.5)
-        except Exception as e: print(f"    ⚠️ 필터 설정 오류: {e}")
-        summary_rows, num_products=generate_date_tab_summary(data_rows_for_summary,structure=structure)
+            time.sleep(0.5)
+        except: pass
+        summary_rows, num_products, countries=generate_date_tab_summary(data_rows_for_summary,structure=structure)
         needed_rows = summary_start_row + len(summary_rows) + 10; total_sheet_rows=len(all_values)
         if needed_rows > total_sheet_rows:
-            try: with_retry(ws_ex.resize, rows=needed_rows); print(f"    📐 시트 확장: {total_sheet_rows}행 → {needed_rows}행"); time.sleep(0.5)
-            except Exception as e: print(f"    ⚠️ 시트 확장 오류: {e}")
+            try: with_retry(ws_ex.resize, rows=needed_rows); time.sleep(0.5)
+            except: pass
         clear_end_row=max(total_sheet_rows+50,needed_rows)
         try:
             ws_ex = refresh_ws(sh, ws_ex); clear_summary_conditional_formats(sh, ws_ex, summary_start_row-1)
@@ -1356,14 +1259,13 @@ for dk in sorted(existing_refresh_tabs.keys()):
                 {"updateBorders":{"range":{"sheetId":ws_ex.id,"startRowIndex":summary_start_row-1,"endRowIndex":clear_end_row,"startColumnIndex":0,"endColumnIndex":30},"top":{"style":"NONE"},"bottom":{"style":"NONE"},"left":{"style":"NONE"},"right":{"style":"NONE"},"innerHorizontal":{"style":"NONE"},"innerVertical":{"style":"NONE"}}}
             ]}); time.sleep(0.5)
         except: pass
-        print(f"    🧹 행 {summary_start_row}~{clear_end_row} 완전 초기화")
         with_retry(ws_ex.update,values=summary_rows,range_name=f"A{summary_start_row}",value_input_option="USER_ENTERED"); time.sleep(1)
         try:
-            fmt_reqs=format_date_tab_summary(sh,ws_ex,summary_start_row,len(summary_rows),num_products=num_products)
+            fmt_reqs=format_date_tab_summary(sh,ws_ex,summary_start_row,len(summary_rows),num_products=num_products,countries=countries)
             if fmt_reqs:
                 for i in range(0,len(fmt_reqs),50): with_retry(sh.batch_update,body={"requests":fmt_reqs[i:i+50]}); time.sleep(1)
         except Exception as e: print(f"    ⚠️ 요약표 서식 오류: {e}")
-        print(f"    ✅ 요약표 재생성 완료 (행 {summary_start_row}부터, 활성 상품 {num_products}개)")
+        print(f"    ✅ 요약표 완료 (상품 {num_products}개, 나라 {len(countries)}개)")
     except Exception as e: print(f"    ⚠️ {dk} 업데이트 오류: {e}")
 print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 탭 업데이트 완료")
 
@@ -1373,8 +1275,8 @@ for dk in sorted(new_refresh_dates):
     rows=date_tab_rows.get(dk,[])
     if not rows: continue
     rows.sort(key=lambda r:_to_num(r[16]) if len(r)>16 else 0,reverse=True)
-    print(f"  📅 {dk} ({len(rows)}개 광고 세트) - 새로 생성")
-    summary_rows, num_products=generate_date_tab_summary(rows,structure="new")
+    print(f"  📅 {dk} ({len(rows)}개 광고 세트)")
+    summary_rows, num_products, countries=generate_date_tab_summary(rows,structure="new")
     try:
         total_rows=len(rows)+len(summary_rows)+5;NUM_COLS=len(DATE_TAB_HEADERS)
         ws_d=safe_add_worksheet(sh,dk,rows=total_rows,cols=NUM_COLS+2); time.sleep(1)
@@ -1415,7 +1317,7 @@ for dk in sorted(new_refresh_dates):
         except Exception as e: print(f"    ⚠️ 서식 오류: {e}")
         try:
             summary_start_for_new=len(rows)+2
-            fmt_reqs=format_date_tab_summary(sh,ws_d,summary_start_for_new,len(summary_rows),num_products=num_products)
+            fmt_reqs=format_date_tab_summary(sh,ws_d,summary_start_for_new,len(summary_rows),num_products=num_products,countries=countries)
             if fmt_reqs:
                 for i in range(0,len(fmt_reqs),50): with_retry(sh.batch_update,body={"requests":fmt_reqs[i:i+50]}); time.sleep(1)
         except Exception as e: print(f"    ⚠️ 요약표 서식 오류: {e}")
@@ -1427,25 +1329,17 @@ print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 업데이트 + 새 {len(new
 print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리"); print("="*60)
 reorder_tabs(sh)
 
-# =========================================================
-# ★ v22: 8.5단계 — mp_value_map_krw 변환 (통화별 환율 적용)
-# =========================================================
+# 8.5: 전체 날짜탭 읽기
 mp_value_map_krw = {}
 for (d, ut), v in mp_value_map.items():
     adset_name = adset_id_to_name.get(ut, '')
     currency = detect_currency(adset_name)
     fx = get_revenue_fx(currency, d)
     mp_value_map_krw[(d, ut)] = v * fx
-
 ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map_krw, mp_count_map=mp_count_map)
+diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET)
 
-# ★ v19: 추이차트 커버리지 진단
-failed_tabs = diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET)
-if failed_tabs:
-    print(f"\n  🔧 파싱 실패 탭 {len(failed_tabs)}개를 수동 확인하세요:")
-    print(f"     탭 이름에 공백, 특수문자, 또는 다른 형식이 있을 수 있습니다")
-
-print("\n⏳ 8.5→9단계 전환: Rate Limit 쿨다운 60초 대기..."); time.sleep(60)
+print("\n⏳ 8.5→9단계 전환: 60초 대기..."); time.sleep(60)
 master_headers = ["Date"] + DATE_TAB_HEADERS; latest_date = date_names[-1] if date_names else ""
 all_products_in_budget = set()
 for dk in date_names:
@@ -1480,10 +1374,8 @@ for asid,d in ad_sets.items():
 sorted_list=[]
 for asid,d in ad_sets.items():
     sorted_list.append({'campaign_name':d['campaign_name'],'adset_name':d['adset_name'],'adset_id':d['adset_id'],'data':d})
-
 def _multi_spend_key(item):
     return tuple(item['data']['dates'].get(d,{}).get('spend',0) for d in chart_dn)
-
 sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk=list(reversed(week_keys))
 
 # 9: 마스터탭
@@ -1502,7 +1394,7 @@ except: pass
 print(f"✅ 마스터탭 완료 ({len(master_raw_data)}행)"); time.sleep(2)
 
 # 10: 추이차트
-print("\n10단계: 추이차트 (전체 날짜탭)")
+print("\n10단계: 추이차트")
 ws_t=safe_add_worksheet(sh,"추이차트",rows=1000,cols=len(chart_dn)+10); time.sleep(3)
 dhw=[];sci=[]
 for i,n in enumerate(chart_dn): do=date_objects[n];wd=WEEKDAY_NAMES[do.weekday()];dhw.append(f"{n}({wd})"); (sci.append(4+i) if do.weekday()==6 else None)
@@ -1543,10 +1435,10 @@ for it in sorted_list:
         else:r.append('')
     rt.append(r)
 with_retry(ws_t.update,values=[hdr_t]+[sr]+rt,range_name="A1",value_input_option="USER_ENTERED")
-print(f"✅ 추이차트 데이터 완료 (전체 {len(chart_dn)}일)"); time.sleep(3)
+print(f"✅ 추이차트 완료"); time.sleep(3)
 ws_t = refresh_ws(sh, ws_t); apply_trend_chart_formatting(sh,ws_t,hdr_t,len(rt),sunday_col_indices=sci)
 try: ws_t = refresh_ws(sh, ws_t); apply_c2_label_formatting(sh,ws_t)
-except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
+except: pass
 print("⏳ 30초 대기..."); time.sleep(30)
 
 # 11: 추이차트(주간)
@@ -1581,7 +1473,7 @@ print("✅ 추이차트(주간) 완료"); time.sleep(3)
 wfce=3+1+WEEKLY_TREND_REFRESH_WEEKS; ws_tw = refresh_ws(sh, ws_tw)
 apply_trend_chart_formatting(sh,ws_tw,hdr_w,len(rtw),format_col_end=wfce)
 try: ws_tw = refresh_ws(sh, ws_tw); apply_c2_label_formatting(sh,ws_tw)
-except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
+except: pass
 print("⏳ 30초 대기..."); time.sleep(30)
 
 # 12: 증감액
@@ -1804,14 +1696,10 @@ reorder_tabs(sh)
 
 print("\n"+"="*60); print("✅ 완료!"); print("="*60)
 print()
-print(f"🔄 Meta 갱신: 최근 {REFRESH_DAYS}일 ({DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘)")
-print(f"🔄 Mixpanel 갱신: 최근 {REFRESH_DAYS}일 ({DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘)")
-print(f"  ℹ️ 이전 날짜탭은 스프레드시트 기존 데이터 유지")
-print(f"📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개")
-print(f"🆕 새로 생성한 탭: {len(new_refresh_dates)}개")
-print(f"📊 분석탭: 전체 {len(date_names)}일치 기반")
-print(f"   → 마스터탭: {len(master_raw_data)}행")
-print(f"   → 추이차트: {len(date_names)}개 날짜 (전체)")
-print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
-print(f"💱 환율: USD/TWD/JPY/HKD → KRW (광고 세트 이름 기준 통화 판별)")
+print(f"🔄 Meta/Mixpanel 갱신: 최근 {REFRESH_DAYS}일")
+print(f"📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새 탭: {len(new_refresh_dates)}개")
+print(f"📊 분석탭: 전체 {len(date_names)}일 | 마스터: {len(master_raw_data)}행 | 주간: {len(week_keys)}주")
+print(f"💱 환율: USD/TWD/JPY/HKD → KRW")
+print(f"🌏 나라별 요약: 날짜탭 하단 테이블에 포함")
+print(f"📋 탭 순서: [기타] → [날짜] → [분석] → [매출/주간매출]")
 print(f"\n📊 {SPREADSHEET_URL}")
