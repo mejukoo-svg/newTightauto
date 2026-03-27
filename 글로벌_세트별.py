@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 (★ v23 - 탭순서 개선 + 나라별 요약 + JPY/HKD 환율):
-#   - ★ v23: "매출", "주간매출" 탭을 가장 오른쪽(맨 끝)에 배치
+# v3-ad 통합 코드 (★ v24 - 탭순서: 분석탭→최신날짜→과거날짜→기타):
+#   - ★ v24: 분석/매출탭이 맨 왼쪽, 날짜탭은 최신→과거 순, 기타가 맨 오른쪽
+#   - ★ v24: 분석탭 생성 즉시 index=0 으로 이동
 #   - ★ v23: 날짜탭 하단 요약표에 나라별 ROAS, 순이익, 매출 테이블 추가
 #   - ★ v22: 광고 세트 이름 기준 통화 판별 (TWD/JPY/HKD/KRW) + 통화별 환율 적용
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출
@@ -9,13 +10,13 @@
 #   - 기존 날짜탭: Meta 데이터 + 매출/ROAS/순이익/CVR 모두 업데이트
 #   - 없는 날짜탭만 새로 생성
 #   - 마스터탭/추이차트 등 분석탭: 전체 날짜탭 데이터 읽어서 재구성
-#   - 탭 순서: [기타] + [날짜탭 과거→최신] + [분석탭] + [매출/주간매출]
+#   - 탭 순서: [매출/주간매출] + [분석탭] + [날짜탭 최신→과거] + [기타]
 #   - 구 구조(25열) / 신 구조(23열) 자동 판별
 #   - Mixpanel 전체 날짜탭 기간으로 조회, profit/ROAS/CVR 직접 계산
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad v23 (나라별 요약 + 매출탭 최우측 + 통화별 환율)")
+print("🚀 v3-ad v24 (탭순서: 분석→최신날짜→과거→기타)")
 print("="*60)
 
 # =========================================================
@@ -257,15 +258,15 @@ COLORS = {
 
 SUMMARY_PRODUCTS = []
 
+# ★ v24: 분석탭 순서 (맨 왼쪽에 배치)
+LEFTMOST_TABS_ORDER = ["매출", "주간매출"]
+
 FINAL_ANALYSIS_ORDER = [
     "추이차트", "추이차트(주간)", "증감액", "예산",
     "주간종합", "주간종합_2", "주간종합_3", "마스터탭"
 ]
 
-# ★ v23: 가장 오른쪽에 배치할 탭
-RIGHTMOST_TABS_ORDER = ["매출", "주간매출"]
-
-ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | set(RIGHTMOST_TABS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
+ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | set(LEFTMOST_TABS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
 
 
 def detect_tab_structure(header_row):
@@ -403,36 +404,58 @@ def clear_summary_conditional_formats(sh, ws, summary_start_row_0indexed):
 
 
 # =========================================================
-# ★ v23: reorder_tabs — 매출/주간매출을 가장 오른쪽에
+# ★ v24: move_to_front — 워크시트를 index=0 (맨 왼쪽)으로 이동
+# =========================================================
+def move_to_front(sh, ws, target_index=0):
+    """워크시트를 지정된 인덱스(기본 0, 맨 왼쪽)로 이동."""
+    try:
+        with_retry(sh.batch_update, body={"requests": [
+            {"updateSheetProperties": {
+                "properties": {"sheetId": ws.id, "index": target_index},
+                "fields": "index"
+            }}
+        ]})
+        time.sleep(1)
+    except Exception as e:
+        print(f"  ⚠️ 탭 이동 오류: {e}")
+
+
+# =========================================================
+# ★ v24: reorder_tabs — 분석/매출탭 맨 왼쪽 + 날짜탭 최신→과거 + 기타 맨 오른쪽
 # =========================================================
 def reorder_tabs(sh):
+    """
+    탭 순서: [매출/주간매출] + [분석탭] + [날짜탭 최신→과거] + [기타]
+    """
     try:
         all_ws = sh.worksheets()
-        analysis_tabs, date_tabs, other_tabs, rightmost_tabs = [], [], [], []
+        leftmost_tabs, analysis_tabs, date_tabs, other_tabs = [], [], [], []
         analysis_order_map = {name: i for i, name in enumerate(FINAL_ANALYSIS_ORDER)}
-        rightmost_order_map = {name: i for i, name in enumerate(RIGHTMOST_TABS_ORDER)}
+        leftmost_order_map = {name: i for i, name in enumerate(LEFTMOST_TABS_ORDER)}
 
         for ws in all_ws:
             tn = ws.title
-            if tn in rightmost_order_map:
-                rightmost_tabs.append(ws)
-            elif tn in ANALYSIS_TABS_SET:
+            if tn in leftmost_order_map:
+                leftmost_tabs.append(ws)
+            elif tn in analysis_order_map or tn in ANALYSIS_TABS_SET:
                 analysis_tabs.append(ws)
             elif parse_date_tab(tn) is not None:
                 date_tabs.append(ws)
             else:
                 other_tabs.append(ws)
 
-        date_tabs.sort(key=lambda ws: parse_date_tab(ws.title))
+        # ★ v24: 날짜탭은 최신→과거 (reverse=True)
+        date_tabs.sort(key=lambda ws: parse_date_tab(ws.title), reverse=True)
         analysis_tabs.sort(key=lambda ws: analysis_order_map.get(ws.title, 999))
-        rightmost_tabs.sort(key=lambda ws: rightmost_order_map.get(ws.title, 999))
+        leftmost_tabs.sort(key=lambda ws: leftmost_order_map.get(ws.title, 999))
 
-        final_order = other_tabs + date_tabs + analysis_tabs + rightmost_tabs
+        # ★ v24: [매출/주간매출] + [분석탭] + [최신날짜→과거날짜] + [기타]
+        final_order = leftmost_tabs + analysis_tabs + date_tabs + other_tabs
 
-        print(f"  📋 기타: {len(other_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📊 분석: {len(analysis_tabs)}개 | 📈 매출탭: {len(rightmost_tabs)}개")
-        if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (과거) → {date_tabs[-1].title} (최신)")
+        print(f"  📈 매출탭: {len(leftmost_tabs)}개 | 📊 분석: {len(analysis_tabs)}개 | 📅 날짜: {len(date_tabs)}개 | 📋 기타: {len(other_tabs)}개")
+        if leftmost_tabs: print(f"  📈 최좌측: {' → '.join(ws.title for ws in leftmost_tabs)}")
         if analysis_tabs: print(f"  📊 분석탭: {' → '.join(ws.title for ws in analysis_tabs)}")
-        if rightmost_tabs: print(f"  📈 최우측: {' → '.join(ws.title for ws in rightmost_tabs)}")
+        if date_tabs: print(f"  📅 날짜탭: {date_tabs[0].title} (최신) → {date_tabs[-1].title} (과거)")
 
         with_retry(sh.batch_update, body={"requests": [
             {"updateSheetProperties": {"properties": {"sheetId": ws.id, "index": idx}, "fields": "index"}}
@@ -1325,8 +1348,8 @@ for dk in sorted(new_refresh_dates):
     except Exception as e: print(f"  ⚠️ {dk} 생성 오류: {e}")
 print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 업데이트 + 새 {len(new_refresh_dates)}개 생성 완료"); time.sleep(3)
 
-# 7.5: 탭 순서
-print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리"); print("="*60)
+# ★ v24: 7.5단계 — 날짜탭 생성 직후 바로 탭 순서 정리
+print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리 (최신→과거)"); print("="*60)
 reorder_tabs(sh)
 
 # 8.5: 전체 날짜탭 읽기
@@ -1378,9 +1401,14 @@ def _multi_spend_key(item):
     return tuple(item['data']['dates'].get(d,{}).get('spend',0) for d in chart_dn)
 sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk=list(reversed(week_keys))
 
+# =========================================================
+# ★ v24: 분석탭 생성 — 생성 즉시 맨 왼쪽(index=0)으로 이동
+# =========================================================
+
 # 9: 마스터탭
 print("\n9단계: 마스터탭 생성")
 ws_m=safe_add_worksheet(sh,"마스터탭",rows=max(2000,len(master_raw_data)+100),cols=len(master_headers)+5); time.sleep(3)
+move_to_front(sh, ws_m)  # ★ v24: 즉시 맨 왼쪽
 master_raw_data.sort(key=lambda x:(x['date_obj'],-x['spend']),reverse=True)
 for item in master_raw_data:
     while len(item['row_data'])<len(master_headers): item['row_data'].append("")
@@ -1396,6 +1424,7 @@ print(f"✅ 마스터탭 완료 ({len(master_raw_data)}행)"); time.sleep(2)
 # 10: 추이차트
 print("\n10단계: 추이차트")
 ws_t=safe_add_worksheet(sh,"추이차트",rows=1000,cols=len(chart_dn)+10); time.sleep(3)
+move_to_front(sh, ws_t)  # ★ v24: 즉시 맨 왼쪽
 dhw=[];sci=[]
 for i,n in enumerate(chart_dn): do=date_objects[n];wd=WEEKDAY_NAMES[do.weekday()];dhw.append(f"{n}({wd})"); (sci.append(4+i) if do.weekday()==6 else None)
 hdr_t=['캠페인 이름','광고 세트 이름','광고 세트 ID','7일 평균']+dhw
@@ -1444,6 +1473,7 @@ print("⏳ 30초 대기..."); time.sleep(30)
 # 11: 추이차트(주간)
 print("\n11단계: 추이차트(주간)")
 ws_tw=safe_add_worksheet(sh,"추이차트(주간)",rows=1000,cols=len(chart_wk)+10); time.sleep(3)
+move_to_front(sh, ws_tw)  # ★ v24: 즉시 맨 왼쪽
 wdl=[week_display_names[wk] for wk in chart_wk]; hdr_w=['캠페인 이름','광고 세트 이름','광고 세트 ID','전체 평균']+wdl
 srw=["종합","",""];tap,tar,tas=0,0,0;tacs,tacc=0,0;tavs,tavc=0,0
 for wk in chart_wk:
@@ -1479,6 +1509,7 @@ print("⏳ 30초 대기..."); time.sleep(30)
 # 12: 증감액
 print("\n12단계: 증감액")
 ws_c=safe_add_worksheet(sh,"증감액",rows=1000,cols=len(chart_dn)+10); time.sleep(3)
+move_to_front(sh, ws_c)  # ★ v24: 즉시 맨 왼쪽
 hdr_c=['캠페인 이름','광고 세트 이름','광고 세트 ID','7일 평균']+chart_dn
 src=["종합","",""];t7r,t7s=0,0;t7cs,t7cc=0,0;t7vs,t7vc=0,0
 for d in chart_sd:
@@ -1537,6 +1568,7 @@ ws_c = refresh_ws(sh, ws_c); apply_trend_chart_formatting(sh,ws_c,hdr_c,len(rtc)
 # 13: 예산
 print("\n13단계: 예산")
 bw=safe_add_worksheet(sh,"예산",rows=1000,cols=len(chart_dn)+10); time.sleep(3)
+move_to_front(sh, bw)  # ★ v24: 즉시 맨 왼쪽
 br=[[""] + chart_dn]
 br.append(["전체 쓴돈"]+[sum(budget_by_date[d][p]['spend'] for p in product_order) for d in chart_dn])
 br.append(["전체 번돈"]+[sum(budget_by_date[d][p]['revenue'] for p in product_order) for d in chart_dn])
@@ -1584,6 +1616,7 @@ print(f"📦 감지된 상품: {products}")
 
 print("\n15단계: 주간종합")
 ws_ws=safe_add_worksheet(sh,"주간종합",rows=2000,cols=20); time.sleep(3)
+move_to_front(sh, ws_ws)  # ★ v24: 즉시 맨 왼쪽
 sid_ws=ws_ws.id;fr_ws=[];ar_ws=[];cr_ws=0
 def ccb(pn,d,pd,sid,cr,fr,im=False):
     block=[];bs=cr;rv=(d['revenue']/d['spend']) if d['spend']>0 else 0;hb=COLORS["dark_blue"] if im else COLORS["dark_gray"];cb=COLORS["navy"] if im else COLORS["black"];nc=len(products)+2
@@ -1622,6 +1655,7 @@ print("✅ 주간종합 완료"); time.sleep(3)
 
 print("\n16단계: 주간종합_2")
 ws2=safe_add_worksheet(sh,"주간종합_2",rows=2000,cols=20); time.sleep(3)
+move_to_front(sh, ws2)  # ★ v24: 즉시 맨 왼쪽
 sid2=ws2.id;fr2=[];ar2=[];cr2=0;npc=len(products)+3;stl=[]
 for mk in month_names_list:
     yr=int(mk.split('년')[0]);mn=int(mk.split('년')[1].replace('월','').strip());d=msd[mk];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0
@@ -1659,6 +1693,7 @@ print("✅ 주간종합_2 완료"); time.sleep(3)
 
 print("\n17단계: 주간종합_3 (일별)")
 ws3=safe_add_worksheet(sh,"주간종합_3",rows=3000,cols=20); time.sleep(3)
+move_to_front(sh, ws3)  # ★ v24: 즉시 맨 왼쪽
 sid3=ws3.id;fr3=[];ar3=[];cr3=0;ndc=len(products)+4;dsr=[]
 for t in reversed(date_names): do=date_objects[t];d=daily_data[t];roas=(d['revenue']/d['spend']) if d['spend']>0 else 0;wd=WEEKDAY_NAMES[do.weekday()];dsr.append({'period':f"'{do.month}.{do.day}({wd})",'weekday':wd,'spend':d['spend'],'revenue':d['revenue'],'profit':d['profit'],'roas':roas,'tab_name':t})
 ar3.append(["📊 일별 전체 요약"]+[""]*7);fr3.append(create_format_request(sid3,cr3,cr3+1,0,8,get_cell_format(COLORS["navy"],COLORS["white"],bold=True)));cr3+=1
@@ -1690,8 +1725,8 @@ try:
 except: pass
 print("✅ 주간종합_3 완료"); time.sleep(3)
 
-# 18: 최종 탭 순서 정리
-print("\n"+"="*60); print("18단계: 최종 탭 순서 정리"); print("="*60)
+# ★ v24: 18단계 — 최종 탭 순서 정리 (분석→최신날짜→과거→기타)
+print("\n"+"="*60); print("18단계: 최종 탭 순서 정리 (분석→최신날짜→과거→기타)"); print("="*60)
 reorder_tabs(sh)
 
 print("\n"+"="*60); print("✅ 완료!"); print("="*60)
@@ -1701,5 +1736,5 @@ print(f"📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새
 print(f"📊 분석탭: 전체 {len(date_names)}일 | 마스터: {len(master_raw_data)}행 | 주간: {len(week_keys)}주")
 print(f"💱 환율: USD/TWD/JPY/HKD → KRW")
 print(f"🌏 나라별 요약: 날짜탭 하단 테이블에 포함")
-print(f"📋 탭 순서: [기타] → [날짜] → [분석] → [매출/주간매출]")
+print(f"📋 탭 순서: [매출/주간매출] → [분석탭] → [최신날짜→과거] → [기타]")
 print(f"\n📊 {SPREADSHEET_URL}")
