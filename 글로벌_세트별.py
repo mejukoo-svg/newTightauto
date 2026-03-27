@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 (★ 7일 갱신 버전 - 광고 세트 기준, 메모 보존):
+# v3-ad 통합 코드 (★ v22 - JPY/HKD 환율 지원 추가):
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑 (utm_content X)
@@ -11,10 +11,11 @@
 #   - Mixpanel 전체 날짜탭 기간으로 조회, profit/ROAS/CVR 직접 계산
 #   - ★ FIX v21: Mixpanel 이벤트명/필드명 OR 처리 (결제완료↔payment_complete, amount↔결제금액)
 #   - ★ FIX v21: 제품 매핑 진단 로그 추가
+#   - ★ v22: 광고 세트 이름 기준 통화 판별 (TWD/JPY/HKD/KRW) + 통화별 환율 적용
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad 7일갱신 (광고세트 기준, utm_term 매핑, 메모보존) [FIX v21 - EVENT_OR]")
+print("🚀 v3-ad v22 (광고세트 기준, 통화별 환율: TWD/JPY/HKD/KRW)")
 print("="*60)
 
 # =========================================================
@@ -57,15 +58,18 @@ from gspread.exceptions import APIError
 from decimal import Decimal
 
 # =========================================================
-# ★ FIX v12: USD → KRW, TWD → KRW 일별 환율 조회
+# ★ v22: USD/TWD/JPY/HKD → KRW 일별 환율 조회
 # =========================================================
 FALLBACK_USD_KRW = 1450
 FALLBACK_TWD_KRW = 45
+FALLBACK_JPY_KRW = 10
+FALLBACK_HKD_KRW = 185
 
 def fetch_daily_exchange_rates(start_date, end_date, currency="USD"):
     rates = {}
     pair = f"{currency}KRW=X"
-    fallback = FALLBACK_USD_KRW if currency == "USD" else FALLBACK_TWD_KRW
+    fallback_map = {"USD": FALLBACK_USD_KRW, "TWD": FALLBACK_TWD_KRW, "JPY": FALLBACK_JPY_KRW, "HKD": FALLBACK_HKD_KRW}
+    fallback = fallback_map.get(currency, FALLBACK_USD_KRW)
     try:
         import yfinance as yf
     except ImportError:
@@ -111,6 +115,40 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
         if prev: return rates[prev[-1]]
         return rates[sorted_keys[0]]
     return fallback
+
+# =========================================================
+# ★ v22: 통화 판별 함수 — 광고 세트 이름 기준
+# =========================================================
+def detect_currency(adset_name):
+    """광고 세트 이름에서 국가/통화 추론.
+    -tw, -hk, -jp, -kr 등의 접미사를 파트 분리 후 매칭.
+    """
+    if not adset_name:
+        return "TWD"  # 글로벌 기본값
+    name_lower = str(adset_name).lower()
+    parts = re.split(r'[-_\s]', name_lower)
+    if "jp" in parts or "japan" in parts:
+        return "JPY"
+    elif "hk" in parts or "hongkong" in parts or "hong kong" in name_lower:
+        return "HKD"
+    elif "kr" in parts or "korea" in parts:
+        return "KRW"
+    elif "tw" in parts or "taiwan" in parts:
+        return "TWD"
+    return "TWD"  # 글로벌 기본값 (대만이 주력)
+
+
+def get_revenue_fx(currency, dk):
+    """통화별 KRW 환율 반환. 전역 환율 dict 참조."""
+    if currency == "KRW":
+        return 1.0
+    elif currency == "JPY":
+        return get_rate_for_date(jpy_krw_rates, dk, fallback=FALLBACK_JPY_KRW)
+    elif currency == "HKD":
+        return get_rate_for_date(hkd_krw_rates, dk, fallback=FALLBACK_HKD_KRW)
+    else:  # TWD (기본)
+        return get_rate_for_date(twd_krw_rates, dk, fallback=FALLBACK_TWD_KRW)
+
 
 # =========================================================
 # Meta Ads API 설정
@@ -197,6 +235,7 @@ print(f"📅 현재 날짜: {TODAY.strftime('%Y-%m-%d')}")
 print(f"🔄 API 갱신 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘 (최근 {REFRESH_DAYS}일)")
 print(f"📊 분석탭: 스프레드시트의 모든 날짜탭 데이터 사용")
 print(f"📡 Mixpanel 이벤트: {MIXPANEL_EVENT_NAMES} (OR 수집)")
+print(f"💱 환율 지원: USD, TWD, JPY, HKD → KRW (광고 세트 이름 기준 통화 판별)")
 print()
 
 PRODUCT_KEYWORDS = ["starsun", "money", "solo"]
@@ -1088,11 +1127,16 @@ for ws_ex in existing_sheets:
 print(f"\n  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개")
 print(f"  🆕 새로 생성할 탭: {len(new_refresh_dates)}개\n")
 
-# 4.5단계: 환율
-print("="*60); print("4.5단계: USD/TWD → KRW 일별 환율 조회"); print("="*60)
+# =========================================================
+# ★ v22: 4.5단계 — USD/TWD/JPY/HKD → KRW 일별 환율 조회
+# =========================================================
+print("="*60); print("4.5단계: USD/TWD/JPY/HKD → KRW 일별 환율 조회"); print("="*60)
 rate_range_start = DATA_REFRESH_START - timedelta(days=7)
 usd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="USD")
 twd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="TWD")
+jpy_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="JPY")
+hkd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="HKD")
+
 if usd_krw_rates:
     sample_rates = list(usd_krw_rates.items())[-3:]
     for dk, rate in sample_rates: print(f"  USD {dk}: 1 USD = ₩{rate:,.2f}")
@@ -1101,29 +1145,60 @@ if twd_krw_rates:
     sample_rates = list(twd_krw_rates.items())[-3:]
     for dk, rate in sample_rates: print(f"  TWD {dk}: 1 TWD = ₩{rate:,.2f}")
 else: print(f"  ⚠️ TWD 환율 조회 실패 → 폴백 ₩{FALLBACK_TWD_KRW:,}")
+if jpy_krw_rates:
+    sample_rates = list(jpy_krw_rates.items())[-3:]
+    for dk, rate in sample_rates: print(f"  JPY {dk}: 1 JPY = ₩{rate:,.2f}")
+else: print(f"  ⚠️ JPY 환율 조회 실패 → 폴백 ₩{FALLBACK_JPY_KRW:,}")
+if hkd_krw_rates:
+    sample_rates = list(hkd_krw_rates.items())[-3:]
+    for dk, rate in sample_rates: print(f"  HKD {dk}: 1 HKD = ₩{rate:,.2f}")
+else: print(f"  ⚠️ HKD 환율 조회 실패 → 폴백 ₩{FALLBACK_HKD_KRW:,}")
 print()
 
-# 5단계: 병합
-print("="*60); print("5단계: Meta + Mixpanel 병합 (USD→KRW 환산)"); print("="*60)
+# =========================================================
+# ★ v22: 5단계 — Meta + Mixpanel 병합 (통화별 환율 적용)
+# =========================================================
+print("="*60); print("5단계: Meta + Mixpanel 병합 (통화별 환율 적용)"); print("="*60)
 date_tab_rows=defaultdict(list);date_mp_by_adsetid=defaultdict(dict);new_date_names=[];product_count=defaultdict(int)
 debug_total_rows=0;debug_matched_rows=0;debug_matched_revenue=0
 # ★ v21: 제품 매핑 진단용 — '기타'로 빠진 광고세트 이름 샘플 수집
 debug_기타_adset_names = set()
+# ★ v22: 통화별 매출 진단
+debug_currency_revenue = defaultdict(float)
+debug_currency_count = defaultdict(int)
+
+# ★ v22: adset_id → adset_name 매핑 (mp_value_map_krw 변환용)
+adset_id_to_name = {}
 
 for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_obj'] if meta_date_data[x] else datetime.min,reverse=True):
     rows=meta_date_data[dk]
     if not rows: continue
     dt=rows[0]['date_obj']; new_date_names.append(dk)
-    fx_usd = get_rate_for_date(usd_krw_rates, dk); fx_twd = get_rate_for_date(twd_krw_rates, dk, fallback=FALLBACK_TWD_KRW)
+    fx_usd = get_rate_for_date(usd_krw_rates, dk)
     for mr in rows:
         asid=mr['adset_id']
         if not asid: continue
         debug_total_rows+=1
+
+        # ★ v22: adset_id → adset_name 매핑 구축
+        adset_id_to_name[asid] = mr['adset_name']
+
         sp=mr['spend']*fx_usd;impr=mr['impressions'];reach=mr['reach'];uc=mr['unique_clicks'];results=mr['results']
         cpm=mr['cpm']*fx_usd;frequency=mr['frequency'];cost_per_result=mr['cost_per_result']*fx_usd;cost_per_click=mr['cost_per_unique_click']*fx_usd;unique_ctr=mr['unique_ctr']
         mpc=mp_count_map.get((dk,asid),0);mpv=mp_value_map.get((dk,asid),0.0)
         if mpc>0 or mpv>0: debug_matched_rows+=1;debug_matched_revenue+=mpv
-        rv=float(mpv)*fx_twd; date_mp_by_adsetid[dk][asid]={'mpc':mpc,'mpv':rv}
+
+        # ★ v22: 광고 세트 이름 기준 통화 판별 → 통화별 환율 적용
+        currency = detect_currency(mr['adset_name'])
+        fx_revenue = get_revenue_fx(currency, dk)
+        rv = float(mpv) * fx_revenue
+
+        # ★ v22: 통화별 진단
+        if mpv > 0:
+            debug_currency_revenue[currency] += rv
+            debug_currency_count[currency] += 1
+
+        date_mp_by_adsetid[dk][asid]={'mpc':mpc,'mpv':rv}
         pf=rv-sp;roas_c=(rv/sp*100) if sp>0 else 0;cvr_c=(mpc/uc*100) if uc>0 and mpc>0 else 0
         cn=mr['campaign_name'];asn=mr['adset_name']
         budget_raw = adset_budget_map.get(asid, 0)
@@ -1139,6 +1214,12 @@ print(f"✅ 날짜탭 구성 완료: {len(new_date_names)}개")
 print(f"📦 제품별: {dict(product_count)}")
 print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)" if debug_total_rows>0 else "")
 print(f"   매칭 매출: ₩{int(debug_matched_revenue):,}")
+
+# ★ v22: 통화별 매출 진단 로그
+if debug_currency_revenue:
+    print(f"\n💱 통화별 KRW 환산 매출:")
+    for curr in sorted(debug_currency_revenue.keys()):
+        print(f"  {curr}: ₩{int(debug_currency_revenue[curr]):,} ({debug_currency_count[curr]}건)")
 
 # ★ v21: '기타' 제품 진단 로그
 if debug_기타_adset_names:
@@ -1346,10 +1427,16 @@ print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 업데이트 + 새 {len(new
 print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리"); print("="*60)
 reorder_tabs(sh)
 
-# 8.5: 전체 날짜탭 읽기
+# =========================================================
+# ★ v22: 8.5단계 — mp_value_map_krw 변환 (통화별 환율 적용)
+# =========================================================
 mp_value_map_krw = {}
 for (d, ut), v in mp_value_map.items():
-    fx = get_rate_for_date(twd_krw_rates, d, fallback=FALLBACK_TWD_KRW); mp_value_map_krw[(d, ut)] = v * fx
+    adset_name = adset_id_to_name.get(ut, '')
+    currency = detect_currency(adset_name)
+    fx = get_revenue_fx(currency, d)
+    mp_value_map_krw[(d, ut)] = v * fx
+
 ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map_krw, mp_count_map=mp_count_map)
 
 # ★ v19: 추이차트 커버리지 진단
@@ -1726,4 +1813,5 @@ print(f"📊 분석탭: 전체 {len(date_names)}일치 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행")
 print(f"   → 추이차트: {len(date_names)}개 날짜 (전체)")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
+print(f"💱 환율: USD/TWD/JPY/HKD → KRW (광고 세트 이름 기준 통화 판별)")
 print(f"\n📊 {SPREADSHEET_URL}")
