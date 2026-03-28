@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# v3-ad 국내 세트별 (★ v25 - 한글 제품키워드 + 분석탭 즉시이동 + 500에러수정):
+# v3-ad 국내 세트별 (★ v26 - 캠페인명 폴백 제품감지):
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출 (FULL_REFRESH 시 전체)
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑
@@ -14,9 +14,10 @@
 #   - ★ v25: 한글 제품 키워드 (집착/결혼/커리어/0.01/별해/솔로/재물/재회/29금궁합/자녀/29금)
 #   - ★ v25: 분석탭 생성 즉시 맨 왼쪽으로 이동 (move_ws_to_front)
 #   - ★ v25: diagnose_chart_coverage에 cached_ws 전달 → 500 에러 해결
+#   - ★ v26: extract_product가 adset_name에서 못 찾으면 campaign_name에서 재탐색
 
 print("="*60)
-print("🚀 v3-ad v25 국내 세트별 (한글키워드 + 즉시이동 + 500fix)")
+print("🚀 v3-ad v26 국내 세트별 (캠페인명 폴백 제품감지)")
 print("="*60)
 
 # =========================================================
@@ -293,25 +294,26 @@ def clean_id(val):
     return numeric_only if numeric_only else s
 
 
-# ★ v25: 한글 제품 감지 함수 — 긴 키워드 우선 체크
-def extract_product(adset_name):
-    """광고 세트 이름에서 제품명 추출. 긴 키워드 우선 매칭."""
-    if not adset_name: return "기타"
-    name = str(adset_name)
-    name_lower = name.lower()
+# ★ v26: 캠페인명 폴백 제품감지 — adset_name에서 못 찾으면 campaign_name에서 재탐색
+def extract_product(adset_name, campaign_name=""):
+    """광고 세트 이름 → 캠페인 이름 순서로 제품명 추출. 긴 키워드 우선 매칭."""
+    for source in [adset_name, campaign_name]:
+        if not source: continue
+        name = str(source)
+        name_lower = name.lower()
 
-    # 긴 키워드 우선 (29금궁합 before 29금)
-    if "29금궁합" in name or "속궁합" in name: return "29금궁합"
-    if "집착" in name: return "집착"
-    if "결혼" in name: return "결혼"
-    if "커리어" in name or "career" in name_lower: return "커리어"
-    if "0.01" in name or "1%" in name or "1%25" in name: return "0.01"
-    if "별해" in name or "starsun" in name_lower: return "별해"
-    if "솔로" in name or "solo" in name_lower: return "솔로"
-    if "재물" in name or "money" in name_lower: return "재물"
-    if "재회" in name: return "재회"
-    if "자녀" in name: return "자녀"
-    if "29금" in name: return "29금"
+        # 긴 키워드 우선 (29금궁합 before 29금)
+        if "29금궁합" in name or "속궁합" in name: return "29금궁합"
+        if "집착" in name: return "집착"
+        if "결혼" in name: return "결혼"
+        if "커리어" in name or "career" in name_lower: return "커리어"
+        if "0.01" in name or "1%" in name or "1%25" in name: return "0.01"
+        if "별해" in name or "starsun" in name_lower: return "별해"
+        if "솔로" in name or "solo" in name_lower: return "솔로"
+        if "재물" in name or "money" in name_lower: return "재물"
+        if "재회" in name: return "재회"
+        if "자녀" in name: return "자녀"
+        if "29금" in name: return "29금"
 
     return "기타"
 
@@ -795,7 +797,8 @@ def _read_single_date_tab(sh, ws_ex, tn, dt_obj, dk, _mp_val, _mp_cnt):
                     'campaign_name': cn, 'adset_name': asn, 'adset_id': asid,
                     'date_data': {'profit': profit, 'revenue': revenue, 'spend': spend, 'cpm': cpm, 'cvr': cvr, 'unique_clicks': unique_clicks, 'mpc': mpc}
                 }
-            p = extract_product(asn)
+            # ★ v26: campaign_name 폴백
+            p = extract_product(asn, cn)
             tab_budget_by_product[p]['spend'] += spend
             tab_budget_by_product[p]['revenue'] += revenue
             mrd = [dk] + list(norm_row)
@@ -968,7 +971,8 @@ def generate_date_tab_summary(rows, structure="new"):
         if adset_id.startswith("12023"): spend_by_account["본계정"]+=spend
         elif adset_id.startswith("12024"): spend_by_account["부계정"]+=spend
         elif adset_id.startswith("6"): spend_by_account["3rd계정"]+=spend
-        p = extract_product(asn)
+        # ★ v26: campaign_name 폴백
+        p = extract_product(asn, cn)
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
@@ -1258,7 +1262,10 @@ for dk in sorted(meta_date_data.keys(), key=lambda x: meta_date_data[x][0]['date
         budget_val = round(budget_raw / budget_div * fx) if budget_raw and budget_raw > 0 else ""
         tab_row = [cn, asn, asid, sp, cost_per_result, 0, round(cpm, 0), reach, impr, uc, round(unique_ctr, 2), round(cost_per_click, 0), round(frequency, 2), results,
             mpc if mpc > 0 else "", round(rv) if rv > 0 else "", round(pf, 0) if sp > 0 else "", round(roas_c, 1) if sp > 0 and rv > 0 else "", round(cvr_c, 2) if uc > 0 and mpc > 0 else "", budget_val, "", "", ""]
-        date_tab_rows[dk].append(tab_row); p = extract_product(asn); product_count[p] += 1
+        date_tab_rows[dk].append(tab_row)
+        # ★ v26: campaign_name 폴백
+        p = extract_product(asn, cn)
+        product_count[p] += 1
 print(f"✅ 날짜탭 구성 완료: {len(new_date_names)}개")
 print(f"📦 제품별: {dict(product_count)}")
 print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)" if debug_total_rows > 0 else "")
@@ -1712,7 +1719,9 @@ for t in date_names:
     for it in sorted_list:
         if t in it['data']['dates']:
             dt = it['data']['dates'][t]; daily_data[t]['spend'] += dt['spend']; daily_data[t]['revenue'] += dt['revenue']; daily_data[t]['profit'] += dt['profit']
-            p = extract_product(it['adset_name']); daily_product_data[t][p]['spend'] += dt['spend']; daily_product_data[t][p]['revenue'] += dt['revenue']; daily_product_data[t][p]['profit'] += dt['profit']
+            # ★ v26: campaign_name 폴백
+            p = extract_product(it['adset_name'], it['campaign_name'])
+            daily_product_data[t][p]['spend'] += dt['spend']; daily_product_data[t][p]['revenue'] += dt['revenue']; daily_product_data[t][p]['profit'] += dt['profit']
 wsd = {}; wps = {}
 for wk in week_keys:
     wsd[wk] = {'spend': 0, 'revenue': 0, 'profit': 0}; wps[wk] = defaultdict(lambda: {'spend': 0, 'revenue': 0, 'profit': 0})
