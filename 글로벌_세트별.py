@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 (★ v26 - 나라 판별 강화 + 계정 기반 기본 통화 + JPY/TWD 환산 수정):
-#   - ★ v26: _detect_currency_from_name 강화 — 서브스트링 + 한글("일본","대만","홍콩") 매칭
-#   - ★ v26: 국내 계정(act_1054) adset_id는 기본 KRW, 글로벌(act_2677)은 기본 TWD
-#   - ★ v26: detect_currency에 adset_id 파라미터 추가 → 계정 기반 기본 통화 결정
+# v3-ad 통합 코드 (★ v26 - 나라 판별 강화: 캠페인/세트 이름 기반 서브스트링+한글 매칭):
+#   - ★ v26: _detect_currency_from_name 강화 — 서브스트링 + 한글("일본","대만","홍콩","국내") 매칭
+#   - ★ v26: 캠페인 이름에서도 나라 판별 (세트 이름에 없으면 캠페인 이름 검사)
 #   - ★ v25: detect_currency()에 campaign_name 파라미터 추가 → 세트명에 없으면 캠페인명도 검사
 #   - ★ v25: adset_id_to_campaign 맵 추가 → mp_value_map_krw 변환 시 campaign_name 참조
 #   - ★ v25: generate_date_tab_summary에 campaign_name 전달 → 나라별 집계 정확도 향상
@@ -22,7 +21,7 @@
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad v26 (나라판별 강화: 서브스트링+한글+계정 기반 폴백)")
+print("🚀 v3-ad v26 (나라판별 강화: 캠페인/세트 이름 서브스트링+한글 매칭)")
 print("="*60)
 
 # =========================================================
@@ -124,12 +123,9 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
     return fallback
 
 # =========================================================
-# ★ v26: 통화 판별 — 서브스트링+한글+계정 기반 폴백
+# ★ v26: 통화 판별 — 캠페인/세트 이름 기반 (서브스트링+한글)
 # =========================================================
 CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국"}
-
-# ★ v26: 국내 계정 adset_id 접두사 패턴 (act_1054081590008088)
-DOMESTIC_ADSET_PREFIXES = ("12023",)
 
 def _detect_currency_from_name(name):
     """★ v26: 단일 이름에서 통화 감지 — 파트매칭 + 서브스트링 + 한글."""
@@ -138,7 +134,7 @@ def _detect_currency_from_name(name):
     name_str = str(name)
     name_lower = name_str.lower()
     parts = re.split(r'[-_\s]', name_lower)
-    # 1) 정확한 파트 매칭 (기존)
+    # 1) 정확한 파트 매칭
     if "jp" in parts or "japan" in parts:
         return "JPY"
     if "hk" in parts or "hongkong" in parts:
@@ -167,8 +163,8 @@ def _detect_currency_from_name(name):
         return "KRW"
     return None
 
-def detect_currency(adset_name, campaign_name=None, adset_id=None):
-    """★ v26: 세트명 → 캠페인명 → adset_id(계정) 순서로 통화 추론."""
+def detect_currency(adset_name, campaign_name=None):
+    """★ v26: 세트명 → 캠페인명 순서로 통화 추론. 둘 다 없으면 TWD."""
     # 1) 광고 세트 이름에서 먼저 검사
     result = _detect_currency_from_name(adset_name)
     if result:
@@ -178,12 +174,7 @@ def detect_currency(adset_name, campaign_name=None, adset_id=None):
         result = _detect_currency_from_name(campaign_name)
         if result:
             return result
-    # 3) ★ v26: adset_id로 계정 추론 → 국내 계정이면 KRW
-    if adset_id:
-        aid = str(adset_id).strip()
-        if any(aid.startswith(p) for p in DOMESTIC_ADSET_PREFIXES):
-            return "KRW"
-    # 4) 글로벌 계정 기본값
+    # 3) 기본값
     return "TWD"
 
 def get_revenue_fx(currency, dk):
@@ -275,7 +266,7 @@ print(f"📅 현재 날짜: {TODAY.strftime('%Y-%m-%d')}")
 print(f"🔄 API 갱신 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘 (최근 {REFRESH_DAYS}일)")
 print(f"📊 분석탭: 스프레드시트의 모든 날짜탭 데이터 사용")
 print(f"📡 Mixpanel 이벤트: {MIXPANEL_EVENT_NAMES} (OR 수집)")
-print(f"💱 환율 지원: USD, TWD, JPY, HKD → KRW (★v26: 서브스트링+한글+계정 기반 통화 판별)")
+print(f"💱 환율 지원: USD, TWD, JPY, HKD → KRW (★v26: 캠페인/세트 이름 기반 통화 판별)")
 print()
 
 PRODUCT_KEYWORDS = ["starsun", "money", "solo"]
@@ -920,7 +911,7 @@ def generate_date_tab_summary(rows, structure="new"):
         p = extract_product(asn)
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
         # ★ v26: 캠페인 이름 + 광고 세트 이름 + adset_id로 나라 판별
-        currency = detect_currency(asn, campaign_name=cn, adset_id=adset_id)
+        currency = detect_currency(asn, campaign_name=cn)
         country = CURRENCY_TO_COUNTRY.get(currency, "기타")
         country_spend[country]+=spend;country_revenue[country]+=rev;country_profit[country]+=prof
 
@@ -1188,7 +1179,7 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
         mpc=mp_count_map.get((dk,asid),0);mpv=mp_value_map.get((dk,asid),0.0)
         if mpc>0 or mpv>0: debug_matched_rows+=1;debug_matched_revenue+=mpv
         # ★ v26: campaign_name + adset_id도 전달하여 통화 판별
-        currency = detect_currency(mr['adset_name'], campaign_name=mr['campaign_name'], adset_id=asid)
+        currency = detect_currency(mr['adset_name'], campaign_name=mr['campaign_name'])
         fx_revenue = get_revenue_fx(currency, dk)
         rv = float(mpv) * fx_revenue
         if mpv > 0: debug_currency_revenue[currency] += rv; debug_currency_count[currency] += 1
@@ -1208,9 +1199,9 @@ if debug_total_rows>0: print(f"🔍 매칭: {debug_matched_rows}/{debug_total_ro
 if debug_currency_revenue:
     print(f"\n💱 통화별 KRW 환산 매출:")
     for curr in sorted(debug_currency_revenue.keys()): print(f"  {curr} ({CURRENCY_TO_COUNTRY.get(curr,'?')}): ₩{int(debug_currency_revenue[curr]):,} ({debug_currency_count[curr]}건)")
-# ★ v26: 통화 판별 디버그 — 캠페인명/계정 기반 판별 건수 표시
+# ★ v26: 통화 판별 디버그 — 캠페인명 기반 판별 건수 표시
 debug_detected_by_campaign = 0
-debug_detected_by_account = 0
+debug_undetected = 0
 debug_currency_final = defaultdict(int)
 for asid in adset_id_to_name:
     asn = adset_id_to_name[asid]
@@ -1220,18 +1211,16 @@ for asid in adset_id_to_name:
     if from_campaign:
         debug_detected_by_campaign += 1
     elif not from_adset and not from_campaign:
-        # 계정 ID 기반 폴백으로 감지
-        if any(str(asid).startswith(p) for p in DOMESTIC_ADSET_PREFIXES):
-            debug_detected_by_account += 1
-    final_currency = detect_currency(asn, campaign_name=cn, adset_id=asid)
+        debug_undetected += 1
+    final_currency = detect_currency(asn, campaign_name=cn)
     debug_currency_final[final_currency] += 1
 print(f"\n  ★ v26 통화 판별 결과:")
 for curr in sorted(debug_currency_final.keys()):
     print(f"    {curr} ({CURRENCY_TO_COUNTRY.get(curr,'?')}): {debug_currency_final[curr]}개 세트")
 if debug_detected_by_campaign > 0:
     print(f"    → 캠페인 이름으로 감지: {debug_detected_by_campaign}개 (세트명에는 나라 없었음)")
-if debug_detected_by_account > 0:
-    print(f"    → 계정 ID 기반 폴백(KRW): {debug_detected_by_account}개 (이름에 나라 표시 없음)")
+if debug_undetected > 0:
+    print(f"    ⚠️ 이름에서 나라 미감지 → TWD 기본값: {debug_undetected}개")
 if debug_기타_adset_names:
     print(f"\n  ⚠️ '기타' 광고 세트: {len(debug_기타_adset_names)}개")
     for name in sorted(debug_기타_adset_names)[:10]: print(f"     → '{name}'")
@@ -1436,7 +1425,7 @@ mp_value_map_krw = {}
 for (d, ut), v in mp_value_map.items():
     adset_name = adset_id_to_name.get(ut, '')
     campaign_name = adset_id_to_campaign.get(ut, '')  # ★ v25
-    currency = detect_currency(adset_name, campaign_name=campaign_name, adset_id=ut)  # ★ v26
+    currency = detect_currency(adset_name, campaign_name=campaign_name)  # ★ v26
     fx = get_revenue_fx(currency, d)
     mp_value_map_krw[(d, ut)] = v * fx
 ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map_krw, mp_count_map=mp_count_map)
@@ -1814,7 +1803,7 @@ print()
 print(f"🔄 Meta/Mixpanel 갱신: 최근 {REFRESH_DAYS}일")
 print(f"📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새 탭: {len(new_refresh_dates)}개")
 print(f"📊 분석탭: 전체 {len(date_names)}일 | 마스터: {len(master_raw_data)}행 | 주간: {len(week_keys)}주")
-print(f"💱 환율: USD/TWD/JPY/HKD → KRW (★v26: 서브스트링+한글+계정 기반 통화 판별)")
-print(f"🌏 나라별 요약: 날짜탭 하단 테이블에 포함 (★v26: 일본·홍콩·대만·한국 모두 감지)")
+print(f"💱 환율: USD/TWD/JPY/HKD → KRW (★v26: 캠페인/세트 이름 서브스트링+한글 매칭)")
+print(f"🌏 나라별 요약: 날짜탭 하단 테이블에 포함 (★v26: 일본·홍콩·대만·한국 이름 기반 감지)")
 print(f"📋 탭 순서: [매출/주간매출] → [분석탭] → [최신날짜→과거] → [기타]")
 print(f"\n📊 {SPREADSHEET_URL}")
