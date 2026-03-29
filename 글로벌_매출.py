@@ -1,3 +1,4 @@
+name: Meta Ads Report
 #   - 기존 날짜탭: Meta 데이터 + 매출/ROAS/순이익/CVR 모두 업데이트
 #   - 없는 날짜탭만 새로 생성
 #   - 마스터탭/추이차트 등 분석탭: 전체 날짜탭 데이터 읽어서 재구성
@@ -11,15 +12,164 @@
 "주간종합", "주간종합_2", "주간종합_3", "마스터탭"
 ]
 
+on:
+  schedule:
+    - cron: '0 15 * * *'   # KST 00:00
+    - cron: '0 0 * * *'    # KST 09:00
+    - cron: '0 12 * * *'    # KST 18:00
+  workflow_dispatch:
+    inputs:
+      script:
+        description: '실행할 스크립트 선택'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - global_adset
+          - global_revenue
+          - domestic_adset
+          - domestic_creative
+          - vanced_adset
 # ★ 맨 오른쪽에 배치할 탭 (순서대로)
 RIGHTMOST_TABS = ["주간매출", "매출"]
 
+jobs:
+  global_adset:
+    name: 글로벌_세트별
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'global_adset'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 글로벌_세트별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GlobalTT }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_TW_ADSET }}
 ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
 
+  global_revenue:
+    name: 글로벌_매출
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'global_revenue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 글로벌_매출.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GlobalTT }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_GLOBAL_REVENUE }}
 
+  domestic_adset:
+    name: 국내_세트별
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'domestic_adset'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 국내_세트별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_KR_ADSET }}
 @@ -363,21 +367,26 @@ def clear_summary_conditional_formats(sh, ws, summary_start_row_0indexed):
 except Exception as e: print(f"    ⚠️ 조건부 서식 삭제 오류 (무시): {e}")
 
+  domestic_creative:
+    name: 국내_소재별
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'domestic_creative'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python 국내_소재별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_KR_CREATIVE }}
+
+  vanced_adset:
+    name: vanced_세트별
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'vanced_adset'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python vanced_세트별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_VANCED }}
 def reorder_tabs(sh):
     """탭 순서 정리: [기타] + [날짜탭 과거→최신] + [분석탭] + [주간매출, 매출]"""
 try:
