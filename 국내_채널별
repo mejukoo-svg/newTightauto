@@ -46,7 +46,6 @@ MASTER_TAB = "네이버SA_마스터탭"
 TREND_TAB  = "네이버SA_추이차트"
 
 # ── 채널별 추이차트 소스 시트 URL ──
-# (GitHub Secrets 또는 하드코딩 — 민감정보 아님)
 URL_TOTAL   = os.environ.get("URL_TOTAL",   "https://docs.google.com/spreadsheets/d/1uiMN2bBNOt4qU9H86JzxMs_D6PeaIWOtz3IMtJqu4aI/edit")
 GID_TOTAL   = int(os.environ.get("GID_TOTAL", "2047387146"))
 
@@ -124,17 +123,24 @@ def retry_batch_update(sp, body, retries=4, base_delay=2):
     return retry_api(sp.batch_update, body=body, retries=retries, base_delay=base_delay)
 
 def with_retry(fn, *a, max_retries=5, **kw):
-    """채널별 추이차트용 retry 래퍼"""
+    """채널별 추이차트용 retry 래퍼 — ★ 수정: 마지막 retry 실패 시 반드시 raise"""
+    last_err = None
     for i in range(max_retries):
         try:
             return fn(*a, **kw)
         except Exception as e:
+            last_err = e
             if "429" in str(e) or "Quota" in str(e):
-                time.sleep(15 + i * 10)
+                wait = 15 + i * 10
+                print(f"    ⏳ Quota/429, {wait}초 대기 ({i+1}/{max_retries})...")
+                time.sleep(wait)
             elif i == max_retries - 1:
                 raise
             else:
                 time.sleep(3)
+    # ★ 핵심 수정: 429로 모든 retry 소진 시에도 raise
+    if last_err is not None:
+        raise last_err
 
 def safe_float(v):
     try:
@@ -166,42 +172,61 @@ def money(n):
     try: return f"₩{int(round(float(n))):,}"
     except: return "₩0"
 
+def _infer_year(month):
+    """
+    ★ Colab 버전과 동일한 연도 추론 로직
+    현재 날짜 기준으로 적절한 연도를 추론합니다.
+    예: 현재 2026년 3월이면, month <= 3 → 2026, month > 3 → 2025
+    """
+    today = date.today()
+    # 현재 월 이하의 월은 올해, 이후 월은 작년
+    if month <= today.month:
+        return today.year
+    else:
+        return today.year - 1
+
 def parse_date(raw):
-    """시트 날짜 형식 파서 (멀티라인 헤더 대응)"""
+    """시트 날짜 형식 파서 (멀티라인 헤더 대응) — ★ 연도 추론 수정"""
     raw = str(raw).strip()
     if not raw or raw in ['', 'nan', 'None']:
         return None
     raw = raw.split('\n')[0].strip()
 
+    # 1) 'YY/M/D(요일)': '26/03/18(수)'
     m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})', raw)
     if m:
         try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except: pass
 
+    # 2) 'MM/DD (요일)': '03/01 (일)' — ★ _infer_year 사용
     m = re.match(r'^(\d{1,2})/(\d{1,2})\s+\(', raw)
     if m:
         month, day = int(m.group(1)), int(m.group(2))
-        year = date.today().year
+        year = _infer_year(month)
         try: return date(year, month, day)
         except: return None
 
+    # 3) 'M/D': '3/18', '03/01' — ★ _infer_year 사용
     m = re.match(r'^(\d{1,2})/(\d{1,2})(?:\s*$|\s*[\(\[])', raw)
     if m:
         month, day = int(m.group(1)), int(m.group(2))
-        year = date.today().year
+        year = _infer_year(month)
         try: return date(year, month, day)
         except: return None
 
+    # 4) 'YY-MM-DD': '26-03-10'
     m = re.match(r'^(\d{2})-(\d{1,2})-(\d{1,2})$', raw)
     if m:
         try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except: return None
 
+    # 5) 'YY/MM/DD': '26/03/12'
     m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})$', raw)
     if m:
         try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except: return None
 
+    # 6) 'YYYY-MM-DD' etc
     for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"]:
         try: return datetime.strptime(raw[:19 if 'H' in fmt else 10], fmt).date()
         except: pass
@@ -902,7 +927,8 @@ def fetch_total_daily():
 
     print(f"  📖 시트: {ws.title}")
     vals = with_retry(ws.get_all_values); time.sleep(1)
-    if not vals or len(vals) < 2: return {}
+    if not vals or len(vals) < 2:
+        print("  ⚠️ 데이터 없음"); return {}
 
     date_col = 4; rev_col = 5; spend_col = 12
     start_d = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
@@ -919,6 +945,14 @@ def fetch_total_daily():
         if dt not in daily: daily[dt] = {'revenue':0.0, 'spend':0.0}
         daily[dt]['revenue'] += rev
         daily[dt]['spend']   += spend
+
+    # ★ Colab 버전과 동일하게 일별 상세 로그 추가
+    for dt in sorted(daily):
+        rv, sp = daily[dt]['revenue'], daily[dt]['spend']
+        if sp > 0:
+            print(f"  {dt}  매출 ₩{rv:>14,.0f}  지출 ₩{sp:>14,.0f}  ROAS {rv/sp:.2f}")
+        else:
+            print(f"  {dt}  매출 ₩{rv:>14,.0f}")
 
     ts = sum(d['spend'] for d in daily.values())
     tr = sum(d['revenue'] for d in daily.values())
@@ -947,7 +981,8 @@ def fetch_naver_google():
 
     print(f"  📖 시트: {ws.title}")
     vals = with_retry(ws.get_all_values); time.sleep(1)
-    if not vals or len(vals) < 3: return {}
+    if not vals or len(vals) < 3:
+        print("  ⚠️ 데이터 없음"); return {}
 
     gh = [str(v).strip() for v in vals[0]]
     ch = [str(v).strip() for v in vals[1]]
@@ -1001,6 +1036,13 @@ def fetch_naver_google():
 
 # ── 추이차트 Row2 종합 공통 파서 ──
 def _fetch_trend_row2(url, gid, label, line_config):
+    """
+    line_config:
+      'meta'   → line[0]=구매수, line[1]=순이익, line[2]=지출(음수)
+                  매출 = abs(지출) + 순이익
+      'vanced' → line[0]=구매수, line[1]=순이익, line[2]=매출, line[3]=지출
+                  ★ 지출은 양수/음수 모두 가능 → abs() 처리
+    """
     print(f"\n" + "="*60)
     print(f"📊 [{label}]")
     print("="*60)
@@ -1037,12 +1079,13 @@ def _fetch_trend_row2(url, gid, label, line_config):
 
     if date_start_col is None:
         print("  ⚠️ 날짜 컬럼 못 찾음!")
+        print(f"  → 헤더 전체: {[repr(h) for h in headers[:15]]}")
         return {}
 
     first_cell = str(row2[date_start_col]) if date_start_col < len(row2) else ""
     first_lines = first_cell.split('\n')
     print(f"  → 파싱 모드: {line_config}")
-    print(f"  → 첫 셀 라인수={len(first_lines)}:")
+    print(f"  → 첫 셀 (col{date_start_col}) 라인수={len(first_lines)}:")
     for li, l in enumerate(first_lines):
         print(f"    line[{li}] = {repr(l)}")
 
@@ -1085,10 +1128,18 @@ def _fetch_trend_row2(url, gid, label, line_config):
             parsed_count += 1
 
     if skip_count > 0:
-        print(f"  → 날짜 파싱 실패 {skip_count}건")
+        print(f"  → 날짜 파싱 실패 {skip_count}건 (7일평균 등 비날짜 컬럼)")
 
+    # ★ Colab 버전과 동일하게 일별 상세 로그 추가
     ts = sum(d['spend'] for d in daily.values())
     tr = sum(d['revenue'] for d in daily.values())
+    for dt in sorted(daily):
+        sp, rv = daily[dt]['spend'], daily[dt]['revenue']
+        pf = rv - sp
+        if sp > 0:
+            print(f"  {dt}  지출 ₩{sp:>12,.0f}  순이익 ₩{pf:>12,.0f}  매출 ₩{rv:>12,.0f}  ROAS {rv/sp*100:.0f}%")
+        else:
+            print(f"  {dt}  매출 ₩{rv:>12,.0f}")
     if ts > 0:
         print(f"  합계   지출 ₩{ts:>12,.0f}  매출 ₩{tr:>12,.0f}  ROAS {tr/ts*100:.0f}%")
     print(f"  → {len(daily)}일 데이터")
@@ -1111,6 +1162,13 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
     print("\n" + "="*60)
     print(f"📝 '{CH_SHEET_NAME}' 시트 생성")
     print("="*60)
+
+    # ★ 데이터 수집 결과 요약 로그
+    print(f"  전체:   {len(total_daily)}일")
+    print(f"  메타:   {len(meta_data)}일")
+    print(f"  밴스드: {len(vanced_data)}일")
+    print(f"  네이버: {len(naver_google.get('naver_ads', {}))}일")
+    print(f"  구글:   {len(naver_google.get('google_ads', {}))}일")
 
     ss = gc.open_by_url(URL_CH_OUTPUT)
     start = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
@@ -1182,6 +1240,10 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
         for dt in dates:
             row.append(ch_cell_text(ch['get_rev'](dt), ch['get_spend'](dt)))
         all_rows.append(row)
+
+        # ★ 채널별 비어있지 않은 셀 수 로그
+        non_empty = sum(1 for c in row[3:] if c != "")
+        print(f"  {ch['name']}: 비어있지않은 셀 {non_empty}개 / 7일합 매출={ar:,.0f} 지출={asp:,.0f}")
 
     all_data = [header] + all_rows
     tdr = len(all_data)
@@ -1303,6 +1365,10 @@ def main():
         print(f"\n📊 네이버SA — 비용 ₩{tc:,.0f} / 매출(직접전환) ₩{tr:,.0f}")
         if tc > 0: print(f"  ROAS: {tr/tc*100:.1f}%")
 
+    # ★ Part 1 → Part 2 사이 쿨다운 (API 쿼터 회복)
+    print("\n⏳ Part 2 시작 전 15초 대기 (API 쿼터 회복)...")
+    time.sleep(15)
+
     # ══════════════════════════════════════
     # Part 2: 채널별 추이차트
     # ══════════════════════════════════════
@@ -1311,8 +1377,11 @@ def main():
     print("▶" * 30)
 
     total_daily  = fetch_total_daily()
+    time.sleep(3)  # ★ 소스 간 쿨다운
     naver_google = fetch_naver_google()
+    time.sleep(3)
     meta_data    = fetch_meta()
+    time.sleep(3)
     vanced_data  = fetch_vanced()
 
     write_channel_trend(total_daily, naver_google, meta_data, vanced_data)
