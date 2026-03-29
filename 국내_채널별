@@ -48,7 +48,7 @@ MIXPANEL_SECRET     = require_env("MIXPANEL_SECRET")
 # ── 네이버SA 전용 시트 ──
 SPREADSHEET_URL = require_env("SPREADSHEET_URL_NAVER_SA")
 MASTER_TAB = "네이버SA_마스터탭"
-TREND_TAB  = "네이버SA_추이차트"
+TREND_TAB  = "네이버SA_주간추이"
 
 # ── 채널별 추이차트 소스 시트 URL ──
 URL_TOTAL   = os.environ.get("URL_TOTAL",   "https://docs.google.com/spreadsheets/d/1uiMN2bBNOt4qU9H86JzxMs_D6PeaIWOtz3IMtJqu4aI/edit")
@@ -731,89 +731,149 @@ def write_master(sp, df):
     print("  ✅ 마스터탭 서식 완료")
 
 def write_trend(sp, df):
+    """
+    ★ 주별 추이차트 (월~일 = 1주)
+    헤더: 03/24~03/30  형식
+    셀:   ROAS / 순이익 / 지출 / 매출 / 전환율
+    """
     try: ws = sp.worksheet(TREND_TAB); ws.clear()
     except gspread.WorksheetNotFound:
         ws = sp.add_worksheet(title=TREND_TAB, rows=5000, cols=200)
     sid = ws.id
-    dates = sorted(df['Date'].unique(), reverse=True)
-    wd = {0:'월',1:'화',2:'수',3:'목',4:'금',5:'토',6:'일'}
 
-    def dh(d):
-        dt=datetime.strptime(d,'%Y-%m-%d'); return f"{dt.strftime('%y/%m/%d')}({wd[dt.weekday()]})"
+    # ── 날짜 → 주차 매핑 (월요일 기준 isocalendar) ──
+    dates = sorted(df['Date'].unique())
+    if not dates:
+        print("⚠️ 추이차트: 데이터 없음"); return
+
+    def date_to_week_monday(d_str):
+        """날짜 문자열 → 해당 주의 월요일 date 객체"""
+        dt = datetime.strptime(d_str, '%Y-%m-%d').date()
+        return dt - timedelta(days=dt.weekday())  # 월=0 → 자기 자신, 화=1 → -1일, ...
+
+    # 모든 날짜가 속하는 주차(월요일)를 구함
+    week_mondays = sorted(set(date_to_week_monday(d) for d in dates), reverse=True)
+    print(f"  📅 주차 수: {len(week_mondays)}개 ({week_mondays[-1]} ~ {week_mondays[0]})")
+
+    # 주차별 일요일 계산 (헤더용)
+    def week_header(mon):
+        sun = mon + timedelta(days=6)
+        return f"{mon.month:02d}/{mon.day:02d}~{sun.month:02d}/{sun.day:02d}"
 
     def ct(cost, rev, clk, conv):
-        if cost==0 and clk==0 and rev==0: return ""
-        if cost>0: roas=int(round(rev/cost*100))
-        elif rev>0: roas="∞"
-        else: roas=0
-        pf = rev-cost
-        cvr = round(conv/clk*100,1) if clk>0 else 0
-        pf_s = f"₩{pf:,.0f}" if pf>=0 else f"-₩{abs(pf):,.0f}"
+        if cost == 0 and clk == 0 and rev == 0: return ""
+        if cost > 0: roas = int(round(rev / cost * 100))
+        elif rev > 0: roas = "∞"
+        else: roas = 0
+        pf = rev - cost
+        cvr = round(conv / clk * 100, 1) if clk > 0 else 0
+        pf_s = f"₩{pf:,.0f}" if pf >= 0 else f"-₩{abs(pf):,.0f}"
         rev_s = f"₩{rev:,.0f}"
         return f"{roas}\n{pf_s}\n-₩{cost:,.0f}\n{rev_s}\n{cvr}%"
 
     C2_LABEL = "ROAS\n순이익\n지출\n매출\n전환율"
-    sun_cols = []
-    date_hdrs = []
-    for i,d in enumerate(dates):
-        date_hdrs.append(dh(d))
-        if datetime.strptime(d,'%Y-%m-%d').weekday()==6: sun_cols.append(4+i)
 
-    header = ['캠페인','광고그룹','키워드','7일 평균'] + date_hdrs
+    # ── 일별 데이터 → 주별 집계 ──
     daily = df.groupby('Date').agg({
-        '총비용(VAT포함,원)':'sum','매출':'sum','클릭수':'sum','결과(믹스패널)':'sum'
+        '총비용(VAT포함,원)': 'sum', '매출': 'sum', '클릭수': 'sum', '결과(믹스패널)': 'sum'
     }).to_dict('index')
 
-    r7 = dates[:7]
-    t = lambda k: sum(daily.get(d,{}).get(k,0) for d in r7)
-    total_row = ['종합','',C2_LABEL, ct(t('총비용(VAT포함,원)'),t('매출'),t('클릭수'),t('결과(믹스패널)'))]
-    for d in dates:
-        dd=daily.get(d,{})
-        total_row.append(ct(dd.get('총비용(VAT포함,원)',0),dd.get('매출',0),dd.get('클릭수',0),dd.get('결과(믹스패널)',0)))
+    def agg_week(mon, daily_data):
+        """해당 주(월~일)의 일별 데이터 합산"""
+        cost = rev = clk = conv = 0
+        for i in range(7):
+            d_str = (mon + timedelta(days=i)).strftime('%Y-%m-%d')
+            dd = daily_data.get(d_str, {})
+            cost += dd.get('총비용(VAT포함,원)', 0)
+            rev  += dd.get('매출', 0)
+            clk  += dd.get('클릭수', 0)
+            conv += dd.get('결과(믹스패널)', 0)
+        return cost, rev, clk, conv
 
-    kw_grp = df.groupby(['캠페인','광고그룹','키워드'])
-    kw_d = {}
-    for (c,a,k),grp in kw_grp:
-        kw_d[(c,a,k)]={r['Date']:{'cost':r['총비용(VAT포함,원)'],'rev':r['매출'],'clk':r['클릭수'],'conv':r['결과(믹스패널)']} for _,r in grp.iterrows()}
+    # 헤더
+    week_hdrs = [week_header(m) for m in week_mondays]
+    header = ['캠페인', '광고그룹', '키워드', '최근4주\n평균'] + week_hdrs
 
-    kw_s = sorted(kw_d.items(), key=lambda x:sum(x[1].get(d,{}).get('cost',0) for d in r7), reverse=True)
+    # 종합 Row (Row 2)
+    r4 = week_mondays[:4]  # 최근 4주
+    t_cost = t_rev = t_clk = t_conv = 0
+    for m in r4:
+        c, r, k, v = agg_week(m, daily)
+        t_cost += c; t_rev += r; t_clk += k; t_conv += v
+    total_row = ['종합', '', C2_LABEL, ct(t_cost, t_rev, t_clk, t_conv)]
+    for m in week_mondays:
+        c, r, k, v = agg_week(m, daily)
+        total_row.append(ct(c, r, k, v))
+
+    # ── 키워드별 주간 데이터 ──
+    kw_grp = df.groupby(['캠페인', '광고그룹', '키워드'])
+    kw_daily = {}
+    for (camp, ag, kw), grp in kw_grp:
+        kw_daily[(camp, ag, kw)] = {
+            r['Date']: {
+                'cost': r['총비용(VAT포함,원)'], 'rev': r['매출'],
+                'clk': r['클릭수'], 'conv': r['결과(믹스패널)']
+            } for _, r in grp.iterrows()
+        }
+
+    def agg_week_kw(mon, kw_d):
+        """키워드별 주간 합산"""
+        cost = rev = clk = conv = 0
+        for i in range(7):
+            d_str = (mon + timedelta(days=i)).strftime('%Y-%m-%d')
+            dd = kw_d.get(d_str, {})
+            cost += dd.get('cost', 0)
+            rev  += dd.get('rev', 0)
+            clk  += dd.get('clk', 0)
+            conv += dd.get('conv', 0)
+        return cost, rev, clk, conv
+
+    # 최근 4주 비용 기준 정렬
+    kw_sorted = sorted(kw_daily.items(),
+        key=lambda x: sum(agg_week_kw(m, x[1])[0] for m in r4), reverse=True)
+
     all_rows = [header, total_row]
-    for (c,a,k),dm in kw_s:
-        row=[c,a,k]
-        c7=sum(dm.get(d,{}).get('cost',0) for d in r7)
-        r7v=sum(dm.get(d,{}).get('rev',0) for d in r7)
-        k7=sum(dm.get(d,{}).get('clk',0) for d in r7)
-        v7=sum(dm.get(d,{}).get('conv',0) for d in r7)
-        row.append(ct(c7,r7v,k7,v7) if c7>0 or k7>0 or r7v>0 else '')
-        for d in dates:
-            dd=dm.get(d)
-            row.append(ct(dd['cost'],dd['rev'],dd['clk'],dd['conv']) if dd and (dd['cost']>0 or dd['clk']>0 or dd['rev']>0) else '')
+    for (camp, ag, kw), dm in kw_sorted:
+        row = [camp, ag, kw]
+        # 최근 4주 평균
+        c4 = r4v = k4 = v4 = 0
+        for m in r4:
+            c, r, k, v = agg_week_kw(m, dm)
+            c4 += c; r4v += r; k4 += k; v4 += v
+        row.append(ct(c4, r4v, k4, v4) if c4 > 0 or k4 > 0 or r4v > 0 else '')
+        # 각 주차
+        for m in week_mondays:
+            c, r, k, v = agg_week_kw(m, dm)
+            row.append(ct(c, r, k, v) if c > 0 or k > 0 or r > 0 else '')
         all_rows.append(row)
 
     retry_api(ws.update, range_name='A1', values=all_rows)
-    rc=len(all_rows); nc=len(header)
-    print(f"✅ 추이차트: {rc-1}행 × {nc}열")
+    rc = len(all_rows); nc = len(header)
+    print(f"✅ 추이차트(주별): {rc-1}행 × {nc}열 ({len(week_mondays)}주)")
 
+    # ── 서식 ──
     print("  🎨 서식...")
     fr = []
+    # 헤더 배경
     fr.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":0,"endRowIndex":1,"startColumnIndex":0,"endColumnIndex":nc},
         "cell":{"userEnteredFormat":{"backgroundColor":{"red":0.9,"green":0.9,"blue":0.9},"textFormat":{"bold":True,"fontFamily":"Arial"}}},"fields":"userEnteredFormat"}})
+    # Row2(종합) 볼드
     fr.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":2,"startColumnIndex":0,"endColumnIndex":nc},
         "cell":{"userEnteredFormat":{"textFormat":{"bold":True,"fontFamily":"Arial"}}},"fields":"userEnteredFormat.textFormat"}})
-    for ci in sun_cols:
-        if ci<nc:
-            fr.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":0,"endRowIndex":1,"startColumnIndex":ci,"endColumnIndex":ci+1},
-                "cell":{"userEnteredFormat":{"backgroundColor":{"red":1.0,"green":0.85,"blue":0.85},"textFormat":{"bold":True}}},"fields":"userEnteredFormat"}})
+    # 행고정
     fr.append({"updateSheetProperties":{"properties":{"sheetId":sid,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}})
+    # 셀 줄바꿈
     fr.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":rc,"startColumnIndex":3,"endColumnIndex":nc},
         "cell":{"userEnteredFormat":{"wrapStrategy":"WRAP","verticalAlignment":"TOP","textFormat":{"fontFamily":"Arial","fontSize":9}}},"fields":"userEnteredFormat"}})
+    # 컬럼 너비
     fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":0,"endIndex":1},"properties":{"pixelSize":180},"fields":"pixelSize"}})
     fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":1,"endIndex":2},"properties":{"pixelSize":200},"fields":"pixelSize"}})
     fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":2,"endIndex":3},"properties":{"pixelSize":120},"fields":"pixelSize"}})
     for ci in range(3, min(nc, 200)):
-        fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":95},"fields":"pixelSize"}})
+        fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":110},"fields":"pixelSize"}})
     fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"ROWS","startIndex":1,"endIndex":rc},"properties":{"pixelSize":85},"fields":"pixelSize"}})
 
+    # ROAS 조건부 서식
     roas_rules = [
         ('=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))=0)',
          {'red':1.0,'green':0.6,'blue':0.6}),
@@ -826,7 +886,7 @@ def write_trend(sp, df):
         ('=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>0)',
          {'red':1.0,'green':0.8,'blue':0.8}),
     ]
-    for formula,clr in roas_rules:
+    for formula, clr in roas_rules:
         fr.append({'addConditionalFormatRule':{'rule':{'ranges':[{'sheetId':sid,'startRowIndex':1,'endRowIndex':rc,'startColumnIndex':3,'endColumnIndex':nc}],
             'booleanRule':{'condition':{'type':'CUSTOM_FORMULA','values':[{'userEnteredValue':formula}]},'format':{'backgroundColor':clr}}},'index':0}})
 
@@ -837,14 +897,15 @@ def write_trend(sp, df):
     except Exception as e:
         print(f"  ⚠️ 기본서식 실패 (계속 진행): {e}")
 
+    # C2 라벨 색상
     try:
         lines = C2_LABEL.split('\n')
-        idx=[0]; p=0
-        for l in lines[:-1]: p+=len(l)+1; idx.append(p)
-        bk={"foregroundColor":{"red":0,"green":0,"blue":0}}
-        dg={"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
-        rd={"foregroundColor":{"red":0.85,"green":0,"blue":0}}
-        bl={"foregroundColor":{"red":0,"green":0,"blue":0.85}}
+        idx = [0]; p = 0
+        for l in lines[:-1]: p += len(l) + 1; idx.append(p)
+        bk = {"foregroundColor":{"red":0,"green":0,"blue":0}}
+        dg = {"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
+        rd = {"foregroundColor":{"red":0.85,"green":0,"blue":0}}
+        bl = {"foregroundColor":{"red":0,"green":0,"blue":0.85}}
         retry_batch_update(sp, body={"requests":[{"updateCells":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":2,"startColumnIndex":2,"endColumnIndex":3},
             "rows":[{"values":[{"userEnteredValue":{"stringValue":C2_LABEL},"textFormatRuns":[
                 {"startIndex":idx[0],"format":bk},{"startIndex":idx[1],"format":dg},
@@ -855,37 +916,38 @@ def write_trend(sp, df):
     except Exception as e:
         print(f"  ⚠️ C2: {e}")
 
+    # 셀 텍스트 색상 (ROAS=검정, 순이익=녹색, 지출=빨강, 매출=파랑, 전환율=검정)
     print("  🎨 셀 텍스트 색상...")
     try:
-        bk={"foregroundColor":{"red":0,"green":0,"blue":0}}
-        dg={"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
-        rd={"foregroundColor":{"red":0.85,"green":0,"blue":0}}
-        bl={"foregroundColor":{"red":0,"green":0,"blue":0.85}}
-        creq=[]
-        mx = min(nc, 25)
+        bk = {"foregroundColor":{"red":0,"green":0,"blue":0}}
+        dg = {"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
+        rd = {"foregroundColor":{"red":0.85,"green":0,"blue":0}}
+        bl = {"foregroundColor":{"red":0,"green":0,"blue":0.85}}
+        creq = []
+        mx = min(nc, 60)  # 주별이라 컬럼 수 적으므로 더 넓게 커버
         for ci in range(3, mx):
-            try: cv=ws.col_values(ci+1)
+            try: cv = ws.col_values(ci + 1)
             except: continue
-            for ri in range(1, min(len(cv),rc)):
-                v=cv[ri] if ri<len(cv) else ""
+            for ri in range(1, min(len(cv), rc)):
+                v = cv[ri] if ri < len(cv) else ""
                 if not v or '\n' not in v: continue
-                ls=v.split('\n')
-                if len(ls)<4: continue
-                l1=len(ls[0]); l2=l1+1+len(ls[1]); l3=l2+1+len(ls[2]); l4s=l3+1
-                runs=[{"startIndex":0,"format":bk},{"startIndex":l1+1,"format":dg},
-                      {"startIndex":l2+1,"format":rd},{"startIndex":l4s,"format":bl}]
-                if len(ls)>=5:
-                    l4e=l4s+len(ls[3]); runs.append({"startIndex":l4e+1,"format":bk})
+                ls = v.split('\n')
+                if len(ls) < 4: continue
+                l1 = len(ls[0]); l2 = l1 + 1 + len(ls[1]); l3 = l2 + 1 + len(ls[2]); l4s = l3 + 1
+                runs = [{"startIndex":0,"format":bk},{"startIndex":l1+1,"format":dg},
+                        {"startIndex":l2+1,"format":rd},{"startIndex":l4s,"format":bl}]
+                if len(ls) >= 5:
+                    l4e = l4s + len(ls[3]); runs.append({"startIndex":l4e+1,"format":bk})
                 creq.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri,"endRowIndex":ri+1,"startColumnIndex":ci,"endColumnIndex":ci+1},
                     "rows":[{"values":[{"userEnteredValue":{"stringValue":v},"textFormatRuns":runs}]}],"fields":"userEnteredValue,textFormatRuns"}})
-                if len(creq)>=300:
+                if len(creq) >= 300:
                     try:
                         retry_batch_update(sp, body={"requests":creq})
-                        creq=[]
+                        creq = []
                         time.sleep(3)
                     except Exception as e:
                         print(f"    ⚠️ 배치 색상 일부 실패 (계속 진행): {e}")
-                        creq=[]
+                        creq = []
         if creq:
             try:
                 retry_batch_update(sp, body={"requests":creq})
@@ -895,7 +957,7 @@ def write_trend(sp, df):
         print("  ✅ 텍스트 색상 완료")
     except Exception as e:
         print(f"  ⚠️ 텍스트 색상: {e}")
-    print("  ✅ 추이차트 서식 완료")
+    print("  ✅ 추이차트(주별) 서식 완료")
 
 
 # ══════════════════════════════════════════════════════════════
