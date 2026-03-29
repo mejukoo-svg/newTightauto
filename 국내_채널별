@@ -10,6 +10,11 @@
 ########################################
 
 import os, sys, time, math, hashlib, hmac, base64, json, bisect, re
+
+# ★ GitHub Actions 출력 버퍼링 해제 — 즉시 로그 표시
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 import requests, pandas as pd, numpy as np
 from datetime import datetime, timedelta, timezone, date
 from collections import defaultdict
@@ -1317,57 +1322,64 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
 # ★ 메인
 # ══════════════════════════════════════════════════════════════
 def main():
+    # ★ SKIP_PART1 환경변수: "true" 설정 시 Part 1(네이버SA) 스킵 → Part 2만 실행
+    skip_part1 = os.environ.get("SKIP_PART1", "false").lower() in ("true", "1", "yes")
+
     print("=" * 60)
     print("🚀 통합 리포트: 네이버SA + 채널별 추이차트")
     print(f"   네이버SA 기간:     {START_DATE_STR} ~ {END_DATE_STR}")
     print(f"   채널별 추이 기간:  {CH_START_DATE} ~ {CH_END_DATE}")
     print(f"   세션 윈도우: {SESSION_WINDOW_SEC//60}분")
     print(f"   결제 이벤트: {PAYMENT_EVENTS}")
+    print(f"   SKIP_PART1: {skip_part1}")
     print(f"   환경: GitHub Actions")
     print("=" * 60)
 
     # ══════════════════════════════════════
     # Part 1: 네이버 검색광고 + 믹스패널
     # ══════════════════════════════════════
-    print("\n" + "▶" * 30)
-    print("  Part 1: 네이버 검색광고 + 믹스패널 세션 리포트")
-    print("▶" * 30)
-
-    sp_naver = gc.open_by_url(SPREADSHEET_URL)
-
-    # 1) 네이버 데이터 수집
-    df_naver, date_range = collect_naver()
-    if df_naver.empty:
-        print("⚠️ 네이버 데이터 없음 — Part 1 스킵")
+    if skip_part1:
+        print("\n⏭️  SKIP_PART1=true → Part 1 스킵!")
     else:
-        # 2) 랜딩 이벤트명 자동 탐지 → 세션 수집
-        detected = detect_landing_events(date_range[1])
-        if detected:
-            global LANDING_EVENTS
-            LANDING_EVENTS = detected
-            print(f"  → 탐지된 이벤트로 변경: {LANDING_EVENTS}")
-        sa_sessions = collect_sa_landings(date_range[0], date_range[1])
+        print("\n" + "▶" * 30)
+        print("  Part 1: 네이버 검색광고 + 믹스패널 세션 리포트")
+        print("▶" * 30)
 
-        # 3) 결제완료 수집 + 세션 매칭
-        rev = get_mixpanel(date_range[0], date_range[1], sa_sessions=sa_sessions)
+        sp_naver = gc.open_by_url(SPREADSHEET_URL)
 
-        # 4) 병합
-        df = merge(df_naver, rev)
-        print(f"\n📊 최종: {len(df)}행 ({df['Date'].min()}~{df['Date'].max()})")
+        # 1) 네이버 데이터 수집
+        df_naver, date_range = collect_naver()
+        if df_naver.empty:
+            print("⚠️ 네이버 데이터 없음 — Part 1 스킵")
+        else:
+            # 2) 랜딩 이벤트명 자동 탐지 → 세션 수집
+            detected = detect_landing_events(date_range[1])
+            if detected:
+                global LANDING_EVENTS
+                LANDING_EVENTS = detected
+                print(f"  → 탐지된 이벤트로 변경: {LANDING_EVENTS}")
+            sa_sessions = collect_sa_landings(date_range[0], date_range[1])
 
-        # 5) 시트 쓰기
-        print("\n📝 네이버SA 시트 쓰기...")
-        write_master(sp_naver, df)
-        write_trend(sp_naver, df)
+            # 3) 결제완료 수집 + 세션 매칭
+            rev = get_mixpanel(date_range[0], date_range[1], sa_sessions=sa_sessions)
 
-        tc = safe_float(df['총비용(VAT포함,원)'].sum())
-        tr = safe_float(df['매출'].sum())
-        print(f"\n📊 네이버SA — 비용 ₩{tc:,.0f} / 매출(직접전환) ₩{tr:,.0f}")
-        if tc > 0: print(f"  ROAS: {tr/tc*100:.1f}%")
+            # 4) 병합
+            df = merge(df_naver, rev)
+            print(f"\n📊 최종: {len(df)}행 ({df['Date'].min()}~{df['Date'].max()})")
 
-    # ★ Part 1 → Part 2 사이 쿨다운 (API 쿼터 회복)
-    print("\n⏳ Part 2 시작 전 15초 대기 (API 쿼터 회복)...")
-    time.sleep(15)
+            # 5) 시트 쓰기
+            print("\n📝 네이버SA 시트 쓰기...")
+            write_master(sp_naver, df)
+            write_trend(sp_naver, df)
+
+            tc = safe_float(df['총비용(VAT포함,원)'].sum())
+            tr = safe_float(df['매출'].sum())
+            print(f"\n📊 네이버SA — 비용 ₩{tc:,.0f} / 매출(직접전환) ₩{tr:,.0f}")
+            if tc > 0: print(f"  ROAS: {tr/tc*100:.1f}%")
+
+        # Part 1 → Part 2 사이 쿨다운
+        print("\n⏳ Part 2 시작 전 15초 대기 (API 쿼터 회복)...")
+        time.sleep(15)
 
     # ══════════════════════════════════════
     # Part 2: 채널별 추이차트
@@ -1377,7 +1389,7 @@ def main():
     print("▶" * 30)
 
     total_daily  = fetch_total_daily()
-    time.sleep(3)  # ★ 소스 간 쿨다운
+    time.sleep(3)
     naver_google = fetch_naver_google()
     time.sleep(3)
     meta_data    = fetch_meta()
@@ -1391,7 +1403,8 @@ def main():
     # ══════════════════════════════════════
     print("\n" + "=" * 60)
     print("🎉 전체 완료!")
-    print(f"   네이버SA → {SPREADSHEET_URL}")
+    if not skip_part1:
+        print(f"   네이버SA → {SPREADSHEET_URL}")
     print(f"   채널별   → {URL_CH_OUTPUT} (탭: {CH_SHEET_NAME})")
     print("=" * 60)
 
