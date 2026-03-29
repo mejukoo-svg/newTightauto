@@ -1163,11 +1163,12 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
 
     nr = 2 + len(channels) + 5; nc = 4 + nd
     try:
-        ws = ss.worksheet(CH_SHEET_NAME); ws.clear()
-        if ws.row_count < nr: ws.add_rows(nr - ws.row_count)
-        if ws.col_count < nc: ws.add_cols(nc - ws.col_count)
+        ws = ss.worksheet(CH_SHEET_NAME)
+        with_retry(ws.clear)
+        if ws.row_count < nr: with_retry(ws.add_rows, nr - ws.row_count)
+        if ws.col_count < nc: with_retry(ws.add_cols, nc - ws.col_count)
     except gspread.exceptions.WorksheetNotFound:
-        ws = ss.add_worksheet(CH_SHEET_NAME, nr, nc)
+        ws = with_retry(ss.add_worksheet, CH_SHEET_NAME, nr, nc)
     sid = ws.id
 
     header = ["채널", "", "라벨", "7일 평균"] + dh
