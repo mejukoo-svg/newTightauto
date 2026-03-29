@@ -15,11 +15,9 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: pip install gspread gspread-formatting google-auth pandas numpy requests
-      - name: Write GCP service account key
-        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > /tmp/gcp_sa.json
       - name: Run script
         env:
-          GCP_SA_FILE: /tmp/gcp_sa.json
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
           NAVER_API_KEY: ${{ secrets.NAVER_API_KEY }}
           NAVER_SECRET_KEY: ${{ secrets.NAVER_SECRET_KEY }}
           NAVER_CUSTOMER_ID: ${{ secrets.NAVER_CUSTOMER_ID }}
@@ -28,6 +26,3 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           SPREADSHEET_URL_NAVER_SA: ${{ secrets.SPREADSHEET_URL_NAVER_SA }}
         run: python 국내_채널별
-      - name: Cleanup
-        if: always()
-        run: rm -f /tmp/gcp_sa.json
