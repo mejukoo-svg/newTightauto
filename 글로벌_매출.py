@@ -7,7 +7,7 @@ GitHub Actions / Colab 자동 분기
 ============================================================
 """
 
-import os, json, stripe, gspread, requests
+import os, json, time, stripe, gspread, requests
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
@@ -32,6 +32,21 @@ ALLOWED_CURRENCIES = {"twd", "hkd", "jpy", "usd"}
 CURRENCY_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100}
 
 KST = timezone(timedelta(hours=9))
+
+# ==================== 재시도 로직 ====================
+
+def retry_on_quota(fn, label="", max_retries=5, base_wait=30):
+    """429 Quota 초과 시 exponential backoff 재시도"""
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429 and attempt < max_retries - 1:
+                wait = base_wait * (attempt + 1)
+                print(f"  ⏳ [{label}] 할당량 초과, {wait}초 대기 후 재시도 ({attempt+1}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
 
 # ==================== 인증 ====================
 
@@ -148,7 +163,8 @@ def write_to_sheet(revenue, all_dates, all_countries, daily_rates):
     all_worksheets = ss.worksheets()
 
     try:
-        ws = ss.worksheet(SHEET_NAME); ws.clear()
+        ws = ss.worksheet(SHEET_NAME)
+        retry_on_quota(lambda: ws.clear(), label="시트 초기화")
         print(f"📋 기존 시트 초기화: {SHEET_NAME}")
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(title=SHEET_NAME, rows=100, cols=len(all_dates)+3, index=len(all_worksheets))
@@ -176,7 +192,12 @@ def write_to_sheet(revenue, all_dates, all_countries, daily_rates):
     nr = len(rows); nc = len(rows[0])
     if ws.row_count < nr: ws.resize(rows=nr)
     if ws.col_count < nc: ws.resize(cols=nc)
-    ws.update(values=rows, range_name=f"A1:{gspread.utils.rowcol_to_a1(nr,nc)}", value_input_option="USER_ENTERED")
+
+    range_name = f"A1:{gspread.utils.rowcol_to_a1(nr,nc)}"
+    retry_on_quota(
+        lambda: ws.update(values=rows, range_name=range_name, value_input_option="USER_ENTERED"),
+        label="데이터 기록"
+    )
     print(f"📊 {len(all_countries)}국가 × {len(all_dates)}일 기록")
 
     # 서식
@@ -191,13 +212,19 @@ def write_to_sheet(revenue, all_dates, all_countries, daily_rates):
         _cell_fmt(sid,1,nr,0,1,{"textFormat":{"bold":True},"horizontalAlignment":"CENTER"},"userEnteredFormat(textFormat,horizontalAlignment)"),
         {"updateSheetProperties":{"properties":{"sheetId":sid,"gridProperties":{"frozenRowCount":1,"frozenColumnCount":1}},"fields":"gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}}
     ]
-    ss.batch_update({"requests": reqs})
+    retry_on_quota(
+        lambda: ss.batch_update({"requests": reqs}),
+        label="서식 적용"
+    )
     print("🎨 서식 완료")
 
     # 맨 오른쪽 이동
     all_ws = ss.worksheets()
     others = [w for w in all_ws if w.id != ws.id]
-    ss.reorder_worksheets(others + [ws])
+    retry_on_quota(
+        lambda: ss.reorder_worksheets(others + [ws]),
+        label="탭 순서 이동"
+    )
     print(f"📌 '{SHEET_NAME}' 맨 오른쪽 이동")
     return ws
 
