@@ -110,15 +110,17 @@ def fetch_all_charges(start_date, end_date):
 def aggregate_revenue(charges, start_date, end_date, daily_rates):
     revenue = defaultdict(lambda: defaultdict(float))
     for charge in charges:
-        currency = (charge.get("currency") or "").lower()
+        currency = (getattr(charge, "currency", "") or "").lower()
         if currency not in ALLOWED_CURRENCIES: continue
         charge_dt = datetime.fromtimestamp(charge.created, tz=KST)
         date_str = charge_dt.strftime("%Y-%m-%d")
         country_code = None
-        bd = charge.get("billing_details")
-        if bd and bd.get("address") and bd["address"].get("country"):
-            country_code = bd["address"]["country"]
-        elif currency:
+        bd = getattr(charge, "billing_details", None)
+        if bd:
+            addr = getattr(bd, "address", None)
+            if addr:
+                country_code = getattr(addr, "country", None)
+        if not country_code and currency:
             country_code = CURRENCY_TO_COUNTRY.get(currency)
         if country_code not in TARGET_COUNTRIES: continue
         country_name = TARGET_COUNTRIES[country_code]
