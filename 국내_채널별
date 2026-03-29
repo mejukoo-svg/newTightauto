@@ -1,23 +1,23 @@
 ########################################
 # 네이버 검색광고 + 믹스패널 매출 → 구글시트 자동화
-# GitHub Actions용 스크립트  (v4-session)
+# + 채널별 추이차트 (전체/메타/밴스드/네이버/구글)
 # ─────────────────────────────────────
-# Colab → GitHub Actions 변경점:
-#   - !pip install 제거 (workflow에서 처리)
-#   - google.colab 인증 → GCP 서비스 계정 파일 (GCP_SA_FILE)
-#   - 하드코딩 credentials → 환경변수
-#   - retry 래퍼 적용
-#   - 결제 이벤트명 "결제완료" + "payment_complete" 병행 조회
+# GitHub Actions용 통합 스크립트
+# ─────────────────────────────────────
+# 원본:
+#   Part 1: naver_sa_v4_session.py
+#   Part 2: 채널별 추이차트 v6 (Colab → GitHub Actions 변환)
 ########################################
 
-import os, sys, time, math, hashlib, hmac, base64, json, bisect
+import os, sys, time, math, hashlib, hmac, base64, json, bisect, re
 import requests, pandas as pd, numpy as np
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 import gspread
+
 
 # ══════════════════════════════════════════════════════════════
 # 환경변수 로딩
@@ -29,42 +29,76 @@ def require_env(name):
         sys.exit(1)
     return val
 
+# ── 네이버 SA API ──
 NAVER_API_KEY     = require_env("NAVER_API_KEY")
 NAVER_SECRET_KEY  = require_env("NAVER_SECRET_KEY")
 NAVER_CUSTOMER_ID = require_env("NAVER_CUSTOMER_ID")
 NAVER_BASE_URL    = "https://api.searchad.naver.com"
 
+# ── 믹스패널 ──
 MIXPANEL_PROJECT_ID = require_env("MIXPANEL_PROJECT_ID")
 MIXPANEL_USERNAME   = require_env("MIXPANEL_USERNAME")
 MIXPANEL_SECRET     = require_env("MIXPANEL_SECRET")
 
+# ── 네이버SA 전용 시트 ──
 SPREADSHEET_URL = require_env("SPREADSHEET_URL_NAVER_SA")
 MASTER_TAB = "네이버SA_마스터탭"
 TREND_TAB  = "네이버SA_추이차트"
 
-# ── Google Sheets 인증 (서비스 계정 파일) ──
-gc = gspread.service_account(filename=require_env("GCP_SA_FILE"))
+# ── 채널별 추이차트 소스 시트 URL ──
+# (GitHub Secrets 또는 하드코딩 — 민감정보 아님)
+URL_TOTAL   = os.environ.get("URL_TOTAL",   "https://docs.google.com/spreadsheets/d/1uiMN2bBNOt4qU9H86JzxMs_D6PeaIWOtz3IMtJqu4aI/edit")
+GID_TOTAL   = int(os.environ.get("GID_TOTAL", "2047387146"))
+
+URL_NAV_GOO = os.environ.get("URL_NAV_GOO", "https://docs.google.com/spreadsheets/d/1tJ1iv6oi7y-tOmrsXY7pk-chYDBQV__j6gaRNhsGW-Q/edit")
+NAV_GOO_DAILY_TAB = "00. 네이버/구글 Daily"
+
+URL_META    = os.environ.get("URL_META",    "https://docs.google.com/spreadsheets/d/1PLMwesj4UYYkKPkHSza8loU_A2PvLEQL7qkOnINqrxs/edit")
+GID_META_TREND = int(os.environ.get("GID_META_TREND", "367316653"))
+
+URL_VANCED  = os.environ.get("URL_VANCED",  "https://docs.google.com/spreadsheets/d/1RYXynsjUX2-7yV2z2gLB79sCFrnIH-5AVcLM6IIXA7U/edit")
+GID_VANCED_TREND = int(os.environ.get("GID_VANCED_TREND", "1052644005"))
+
+URL_CH_OUTPUT = os.environ.get("URL_CH_OUTPUT", "https://docs.google.com/spreadsheets/d/1vDcc83jS2-Batg-ygpjiDSwmNXIU0svitGnHp3tAUQo/edit")
+CH_SHEET_NAME = "채널별_추이차트"
+
+# ── Google Sheets 인증 (서비스 계정 — JSON 문자열 → 임시 파일) ──
+import tempfile
+_gcp_json = require_env("GCP_SERVICE_ACCOUNT_KEY")
+_gcp_tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+_gcp_tmp.write(_gcp_json)
+_gcp_tmp.close()
+gc = gspread.service_account(filename=_gcp_tmp.name)
 
 # ── 기간 설정 ──
 REFRESH_DAYS = 365 * 2
-END_DATE   = datetime.now().strftime("%Y-%m-%d")
-START_DATE = (datetime.now() - timedelta(days=REFRESH_DAYS)).strftime("%Y-%m-%d")
-print(f"📅 조회 기간: {START_DATE} ~ {END_DATE}")
+END_DATE_STR   = datetime.now().strftime("%Y-%m-%d")
+START_DATE_STR = (datetime.now() - timedelta(days=REFRESH_DAYS)).strftime("%Y-%m-%d")
+print(f"📅 조회 기간: {START_DATE_STR} ~ {END_DATE_STR}")
+
+# ── 채널별 추이차트 기간 (최근 N일) ──
+CH_DAYS = int(os.environ.get("CH_TREND_DAYS", "60"))
+CH_END_DATE   = date.today().strftime("%Y-%m-%d")
+CH_START_DATE = (date.today() - timedelta(days=CH_DAYS)).strftime("%Y-%m-%d")
+print(f"📅 채널별 추이차트 기간: {CH_START_DATE} ~ {CH_END_DATE}")
 
 # ── 병렬 처리 설정 ──
 WORKERS    = 15
 MP_WORKERS = 5
 
-# ── ★ 세션 어트리뷰션 설정 ──
+# ── 세션 어트리뷰션 설정 ──
 SESSION_WINDOW_SEC = 1800
 LANDING_EVENTS = ["$mp_web_page_view", "페이지뷰", "Page View"]
 
-# ── ★ 믹스패널 결제 이벤트명 ──
+# ── 믹스패널 결제 이벤트명 ──
 PAYMENT_EVENTS = ["결제완료", "payment_complete"]
+
+# ── 요일 ──
+WD = ['월','화','수','목','금','토','일']
 
 
 # ══════════════════════════════════════════════════════════════
-# ★ Google Sheets API retry 래퍼 (503/429 대응)
+# 공통 유틸
 # ══════════════════════════════════════════════════════════════
 def retry_api(func, *args, retries=4, base_delay=2, **kwargs):
     for attempt in range(retries):
@@ -89,15 +123,28 @@ def retry_api(func, *args, retries=4, base_delay=2, **kwargs):
 def retry_batch_update(sp, body, retries=4, base_delay=2):
     return retry_api(sp.batch_update, body=body, retries=retries, base_delay=base_delay)
 
+def with_retry(fn, *a, max_retries=5, **kw):
+    """채널별 추이차트용 retry 래퍼"""
+    for i in range(max_retries):
+        try:
+            return fn(*a, **kw)
+        except Exception as e:
+            if "429" in str(e) or "Quota" in str(e):
+                time.sleep(15 + i * 10)
+            elif i == max_retries - 1:
+                raise
+            else:
+                time.sleep(3)
 
-# ── 유틸 ──
 def safe_float(v):
     try:
         f = float(v)
         return 0 if (math.isnan(f) or math.isinf(f)) else f
-    except: return 0
+    except:
+        return 0
 
-def safe_int(v): return int(safe_float(v))
+def safe_int(v):
+    return int(safe_float(v))
 
 def clean_for_json(val):
     if val is None: return ''
@@ -106,6 +153,65 @@ def clean_for_json(val):
         v = float(val)
         return '' if (math.isnan(v) or math.isinf(v)) else v
     return val
+
+def _num(x):
+    """채널별 추이차트용 숫자 파싱"""
+    try:
+        v = str(x).replace(",","").replace("₩","").replace("%","").replace("\\","").replace("W","").replace("￦","").replace("+","").strip()
+        return float(v) if v and v not in ["-","#DIV/0!","","nan","None","NaN"] else 0.0
+    except:
+        return 0.0
+
+def money(n):
+    try: return f"₩{int(round(float(n))):,}"
+    except: return "₩0"
+
+def parse_date(raw):
+    """시트 날짜 형식 파서 (멀티라인 헤더 대응)"""
+    raw = str(raw).strip()
+    if not raw or raw in ['', 'nan', 'None']:
+        return None
+    raw = raw.split('\n')[0].strip()
+
+    m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})', raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: pass
+
+    m = re.match(r'^(\d{1,2})/(\d{1,2})\s+\(', raw)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        year = date.today().year
+        try: return date(year, month, day)
+        except: return None
+
+    m = re.match(r'^(\d{1,2})/(\d{1,2})(?:\s*$|\s*[\(\[])', raw)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        year = date.today().year
+        try: return date(year, month, day)
+        except: return None
+
+    m = re.match(r'^(\d{2})-(\d{1,2})-(\d{1,2})$', raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: return None
+
+    m = re.match(r'^(\d{2})/(\d{1,2})/(\d{1,2})$', raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: return None
+
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y/%m/%d"]:
+        try: return datetime.strptime(raw[:19 if 'H' in fmt else 10], fmt).date()
+        except: pass
+
+    return None
+
+
+# ══════════════════════════════════════════════════════════════
+#  Part 1: 네이버 검색광고 + 믹스패널 (세션 기반)
+# ══════════════════════════════════════════════════════════════
 
 MASTER_HEADERS = [
     'Date','캠페인','광고그룹','키워드',
@@ -173,19 +279,19 @@ def collect_naver():
     print(f"✅ 키워드 {len(kws)}개")
 
     print(f"\n🔍 실제 데이터 범위 감지...")
-    ids = list(kw_map.keys()); earliest, latest, found = END_DATE, START_DATE, False
+    ids = list(kw_map.keys()); earliest, latest, found = END_DATE_STR, START_DATE_STR, False
     for sid in ids[:5]:
-        for s in get_stat(sid, START_DATE, END_DATE):
+        for s in get_stat(sid, START_DATE_STR, END_DATE_STR):
             if safe_float(s.get('salesAmt',0))>0 or safe_int(s.get('impCnt',0))>0:
                 d = s.get('dateStart','')
                 if d: found=True; earliest=min(earliest,d); latest=max(latest,d)
         time.sleep(0.1)
     if found:
         a_start = (datetime.strptime(earliest,'%Y-%m-%d')-timedelta(days=3)).strftime('%Y-%m-%d')
-        a_end = END_DATE
+        a_end = END_DATE_STR
         print(f"  ✅ {earliest} ~ {latest} → 조회: {a_start} ~ {a_end}")
     else:
-        a_start, a_end = START_DATE, END_DATE
+        a_start, a_end = START_DATE_STR, END_DATE_STR
         print(f"  ⚠️ 미발견, 전체 범위 사용")
 
     days = (datetime.strptime(a_end,'%Y-%m-%d')-datetime.strptime(a_start,'%Y-%m-%d')).days
@@ -233,10 +339,7 @@ def collect_naver():
     return df, (a_start, a_end)
 
 
-# ══════════════════════════════════════════════════════════════
-# ★★★ 세션 기반 어트리뷰션 ★★★
-# ══════════════════════════════════════════════════════════════
-
+# ── 믹스패널 공통 ──
 MP_EXPORT_URL = "https://data.mixpanel.com/api/2.0/export"
 KST = timezone(timedelta(hours=9))
 
@@ -272,10 +375,8 @@ LANDING_CANDIDATES = [
 def detect_landing_events(sample_date):
     print(f"\n🔎 랜딩 이벤트명 자동 탐지 ({sample_date})...")
     hdrs = mp_auth_header()
-
     s_dt = datetime.strptime(sample_date, '%Y-%m-%d')
     sample_from = (s_dt - timedelta(days=2)).strftime('%Y-%m-%d')
-
     found = {}
 
     def probe_event(event_name):
@@ -324,11 +425,7 @@ def detect_landing_events(sample_date):
             print(f"    '{name}' → NSA {cnt}건")
         return [name for name, _ in sorted_found]
     else:
-        print(f"\n  ⚠️ 후보 {len(LANDING_CANDIDATES)}개 중 NSA UTM이 붙은 이벤트 없음.")
-        print("     가능한 원인:")
-        print("     1) 페이지뷰 이벤트에 ch/ct 또는 utm 프로퍼티가 전달되지 않음")
-        print("     2) 이벤트명이 후보 목록에 없음 (믹스패널에서 확인 필요)")
-        print("     → 랜딩 데이터 없이 기존 방식으로 진행합니다.")
+        print(f"\n  ⚠️ NSA UTM이 붙은 이벤트 없음 → 랜딩 데이터 없이 진행")
         return []
 
 
@@ -394,10 +491,7 @@ def collect_sa_landings(from_d, to_d):
     print(f"  ✅ SA 랜딩 {total_landings:,}건, 유니크 유저 {unique_users:,}명")
 
     if total_landings == 0:
-        print(f"\n  ⚠️ 랜딩 이벤트 0건! LANDING_EVENTS를 확인하세요.")
-        print(f"     현재 설정: {LANDING_EVENTS}")
-        print(f"     → 믹스패널 이벤트 목록에서 실제 페이지뷰 이벤트명을 확인 후 수정 필요")
-        print(f"     → 랜딩 데이터 없이 기존 방식(전체 귀속)으로 진행합니다.\n")
+        print(f"\n  ⚠️ 랜딩 이벤트 0건! → 기존 방식(전체 귀속)으로 진행")
 
     return dict(sa_sessions)
 
@@ -483,7 +577,6 @@ def get_mixpanel(from_d, to_d, sa_sessions=None):
     df_r = df_r.drop_duplicates(subset=['date', 'did', 'svc'], keep='first')
     print(f"  ✅ {before} → {len(df_r)}건 ({before - len(df_r)}건 제거)")
 
-    # ★★★ 세션 매칭 필터링 ★★★
     has_sessions = sa_sessions and len(sa_sessions) > 0
 
     if has_sessions:
@@ -564,9 +657,7 @@ def merge(df_naver, rev_data):
     return df
 
 
-# ══════════════════════════════════════════════════════════════
-# ★ 시트 쓰기 (retry 적용)
-# ══════════════════════════════════════════════════════════════
+# ── 네이버SA 시트 쓰기 ──
 def df_to_vals(df):
     data = [MASTER_HEADERS]
     for _, r in df.iterrows():
@@ -778,49 +869,460 @@ def write_trend(sp, df):
 
 
 # ══════════════════════════════════════════════════════════════
+#  Part 2: 채널별 추이차트
+# ══════════════════════════════════════════════════════════════
+
+def ch_cell_text(revenue, spend):
+    """채널별 추이차트용 셀 텍스트"""
+    if spend == 0 and revenue == 0: return ""
+    roas = (revenue / spend * 100) if spend > 0 else 0
+    profit = revenue - spend
+    return f"{roas:.0f}\n{money(profit)}\n{money(revenue)}\n-{money(spend)}"
+
+def ch_fmt_req(sid, sr, er, sc, ec, fmt):
+    return {"repeatCell":{"range":{"sheetId":sid,"startRowIndex":sr,"endRowIndex":er,"startColumnIndex":sc,"endColumnIndex":ec},"cell":{"userEnteredFormat":fmt},"fields":"userEnteredFormat"}}
+
+def ch_border_req(sid, sr, er, sc, ec):
+    bs={"style":"SOLID","width":1,"color":{"red":0.7,"green":0.7,"blue":0.7}}
+    return {"updateBorders":{"range":{"sheetId":sid,"startRowIndex":sr,"endRowIndex":er,"startColumnIndex":sc,"endColumnIndex":ec},"top":bs,"bottom":bs,"left":bs,"right":bs,"innerHorizontal":bs,"innerVertical":bs}}
+
+
+# ── 소스1: 전체 매출/지출 ──
+def fetch_total_daily():
+    print("\n" + "="*60)
+    print("📊 [소스1] 전체 매출/지출")
+    print("="*60)
+
+    ss = gc.open_by_url(URL_TOTAL)
+    ws = None
+    for s in ss.worksheets():
+        if s.id == GID_TOTAL: ws = s; break
+    if ws is None:
+        print("  ⚠️ gid 시트 못 찾음"); return {}
+
+    print(f"  📖 시트: {ws.title}")
+    vals = with_retry(ws.get_all_values); time.sleep(1)
+    if not vals or len(vals) < 2: return {}
+
+    date_col = 4; rev_col = 5; spend_col = 12
+    start_d = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
+    end_d   = datetime.strptime(CH_END_DATE, "%Y-%m-%d").date()
+    daily = {}
+
+    for ri in range(1, len(vals)):
+        row = vals[ri]
+        if date_col >= len(row): continue
+        dt = parse_date(row[date_col])
+        if dt is None or dt < start_d or dt > end_d: continue
+        rev   = _num(row[rev_col])   if rev_col   < len(row) else 0
+        spend = _num(row[spend_col]) if spend_col < len(row) else 0
+        if dt not in daily: daily[dt] = {'revenue':0.0, 'spend':0.0}
+        daily[dt]['revenue'] += rev
+        daily[dt]['spend']   += spend
+
+    ts = sum(d['spend'] for d in daily.values())
+    tr = sum(d['revenue'] for d in daily.values())
+    if ts > 0:
+        print(f"  합계   매출 ₩{tr:>14,.0f}  지출 ₩{ts:>14,.0f}  ROAS {tr/ts:.2f}")
+    print(f"  → {len(daily)}일 데이터")
+    return daily
+
+
+# ── 소스2: 네이버/구글 ──
+def fetch_naver_google():
+    print("\n" + "="*60)
+    print("📊 [소스2] 네이버/구글 Daily 탭")
+    print("="*60)
+
+    ss = gc.open_by_url(URL_NAV_GOO)
+    ws = None
+    for s in ss.worksheets():
+        if NAV_GOO_DAILY_TAB in s.title or s.title.strip() == NAV_GOO_DAILY_TAB:
+            ws = s; break
+    if ws is None:
+        for s in ss.worksheets():
+            if '네이버' in s.title and 'Daily' in s.title: ws = s; break
+    if ws is None:
+        print(f"  ⚠️ 탭 못 찾음"); return {}
+
+    print(f"  📖 시트: {ws.title}")
+    vals = with_retry(ws.get_all_values); time.sleep(1)
+    if not vals or len(vals) < 3: return {}
+
+    gh = [str(v).strip() for v in vals[0]]
+    ch = [str(v).strip() for v in vals[1]]
+
+    groups = {}; cg = None
+    for ci, val in enumerate(gh):
+        if val and val not in ['', 'nan']: cg = val; groups[cg] = {'start': ci, 'end': len(ch)}
+    sg = sorted(groups.items(), key=lambda x: x[1]['start'])
+    for i, (gn, gi) in enumerate(sg):
+        if i + 1 < len(sg): gi['end'] = sg[i+1][1]['start']
+
+    nsc = nrc = gsc = grc = None
+    for gn, gi in groups.items():
+        for ci in range(gi['start'], min(gi['end'], len(ch))):
+            h = ch[ci]
+            if '네이버' in gn or '파워링크' in gn:
+                if h == '총 지출':       nsc = ci
+                elif h == '총 구매전환값': nrc = ci
+            elif '구글' in gn or '검색' in gn:
+                if h == '총 지출':       gsc = ci
+                elif h in ['구매전환값', '총 구매전환값']: grc = ci
+
+    print(f"  → 네이버: 지출=col{nsc}, 매출=col{nrc}")
+    print(f"  → 구글:   지출=col{gsc}, 매출=col{grc}")
+
+    start_d = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
+    end_d   = datetime.strptime(CH_END_DATE, "%Y-%m-%d").date()
+    result = {
+        'naver_ads': defaultdict(lambda:{'spend':0.0,'revenue':0.0}),
+        'google_ads': defaultdict(lambda:{'spend':0.0,'revenue':0.0}),
+    }
+
+    for ri in range(2, len(vals)):
+        row = vals[ri]
+        if not row or len(row) < 1: continue
+        dt = parse_date(row[0])
+        if dt is None or dt < start_d or dt > end_d: continue
+        if nsc is not None and nsc < len(row): result['naver_ads'][dt]['spend']   += _num(row[nsc])
+        if nrc is not None and nrc < len(row): result['naver_ads'][dt]['revenue'] += _num(row[nrc])
+        if gsc is not None and gsc < len(row): result['google_ads'][dt]['spend']   += _num(row[gsc])
+        if grc is not None and grc < len(row): result['google_ads'][dt]['revenue'] += _num(row[grc])
+
+    for cn, cd in result.items():
+        ts = sum(d['spend'] for d in cd.values()); tr = sum(d['revenue'] for d in cd.values())
+        if ts > 0:
+            print(f"  {cn}: 지출 ₩{ts:>10,.0f}  매출 ₩{tr:>10,.0f}  ROAS {tr/ts:.2f}")
+        else:
+            print(f"  {cn}: 데이터 없음")
+    return dict(result)
+
+
+# ── 추이차트 Row2 종합 공통 파서 ──
+def _fetch_trend_row2(url, gid, label, line_config):
+    print(f"\n" + "="*60)
+    print(f"📊 [{label}]")
+    print("="*60)
+
+    ss = gc.open_by_url(url)
+    ws = None
+    for s in ss.worksheets():
+        if s.id == gid: ws = s; break
+    if ws is None:
+        for s in ss.worksheets():
+            if '추이차트' in s.title and '주간' not in s.title: ws = s; break
+    if ws is None:
+        print("  ⚠️ 추이차트 탭 못 찾음"); return {}
+
+    print(f"  📖 시트: {ws.title}")
+    vals = with_retry(ws.get_all_values); time.sleep(1)
+    if not vals or len(vals) < 2:
+        print("  ⚠️ 빈 시트"); return {}
+
+    headers = vals[0]
+    row2 = vals[1]
+
+    print(f"  → 전체 컬럼 수: {len(headers)}")
+    for ci in range(min(8, len(headers))):
+        print(f"    col{ci}: {repr(headers[ci])}")
+
+    date_start_col = None
+    for ci in range(len(headers)):
+        dt = parse_date(headers[ci])
+        if dt is not None:
+            date_start_col = ci
+            print(f"  → 날짜 시작: col{ci} = {repr(headers[ci])} → {dt}")
+            break
+
+    if date_start_col is None:
+        print("  ⚠️ 날짜 컬럼 못 찾음!")
+        return {}
+
+    first_cell = str(row2[date_start_col]) if date_start_col < len(row2) else ""
+    first_lines = first_cell.split('\n')
+    print(f"  → 파싱 모드: {line_config}")
+    print(f"  → 첫 셀 라인수={len(first_lines)}:")
+    for li, l in enumerate(first_lines):
+        print(f"    line[{li}] = {repr(l)}")
+
+    start_d = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
+    end_d   = datetime.strptime(CH_END_DATE, "%Y-%m-%d").date()
+    daily = {}
+    parsed_count = 0
+    skip_count = 0
+
+    for ci in range(date_start_col, len(headers)):
+        dt = parse_date(headers[ci])
+        if dt is None:
+            skip_count += 1; continue
+        if dt < start_d or dt > end_d: continue
+
+        cell = str(row2[ci]) if ci < len(row2) else ""
+        if not cell.strip(): continue
+        lines = [l.strip() for l in cell.split('\n')]
+
+        if line_config == 'meta':
+            raw_spend = _num(lines[2]) if len(lines) > 2 else 0
+            spend = abs(raw_spend)
+            profit = _num(lines[1]) if len(lines) > 1 else 0
+            revenue = spend + profit
+        elif line_config == 'vanced':
+            revenue = abs(_num(lines[2])) if len(lines) > 2 else 0
+            raw_spend = _num(lines[3]) if len(lines) > 3 else 0
+            spend = abs(raw_spend)
+            if spend == 0 and len(lines) <= 3 and len(lines) > 1:
+                profit = _num(lines[1])
+                spend = max(revenue - profit, 0) if revenue > 0 else 0
+        else:
+            continue
+
+        if parsed_count < 3:
+            print(f"  → {dt}: lines={[repr(l) for l in lines[:5]]} → spend={spend:.0f}, rev={revenue:.0f}")
+
+        if spend > 0 or revenue > 0:
+            daily[dt] = {'spend': spend, 'revenue': max(revenue, 0)}
+            parsed_count += 1
+
+    if skip_count > 0:
+        print(f"  → 날짜 파싱 실패 {skip_count}건")
+
+    ts = sum(d['spend'] for d in daily.values())
+    tr = sum(d['revenue'] for d in daily.values())
+    if ts > 0:
+        print(f"  합계   지출 ₩{ts:>12,.0f}  매출 ₩{tr:>12,.0f}  ROAS {tr/ts*100:.0f}%")
+    print(f"  → {len(daily)}일 데이터")
+    return daily
+
+
+# ── 소스3: 메타 ──
+def fetch_meta():
+    return _fetch_trend_row2(URL_META, GID_META_TREND,
+                              "소스3 메타 (추이차트 Row2)", 'meta')
+
+# ── 소스4: 밴스드 ──
+def fetch_vanced():
+    return _fetch_trend_row2(URL_VANCED, GID_VANCED_TREND,
+                              "소스4 밴스드 (추이차트 Row2)", 'vanced')
+
+
+# ── 채널별 추이차트 시트 생성 ──
+def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
+    print("\n" + "="*60)
+    print(f"📝 '{CH_SHEET_NAME}' 시트 생성")
+    print("="*60)
+
+    ss = gc.open_by_url(URL_CH_OUTPUT)
+    start = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
+    end   = datetime.strptime(CH_END_DATE, "%Y-%m-%d").date()
+    dates = []; d = end
+    while d >= start: dates.append(d); d -= timedelta(days=1)
+    nd = len(dates)
+
+    sun_cols = []; dh = []
+    for i, dt in enumerate(dates):
+        wd = WD[dt.weekday()]; dh.append(f"{dt.month:02d}/{dt.day:02d}({wd})")
+        if dt.weekday() == 6: sun_cols.append(3+i)
+    r7 = dates[:7] if len(dates) >= 7 else dates
+    na = naver_google.get('naver_ads', {})
+    ga = naver_google.get('google_ads', {})
+
+    def total_spend(dt):
+        base = total_daily.get(dt, {}).get('spend', 0)
+        nav  = na.get(dt, {}).get('spend', 0)
+        goo  = ga.get(dt, {}).get('spend', 0)
+        return base + nav + goo
+
+    channels = [
+        {
+            'name': '전체',
+            'get_rev':   lambda dt: total_daily.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: total_spend(dt),
+        },
+        {
+            'name': '메타',
+            'get_rev':   lambda dt: meta_data.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: meta_data.get(dt, {}).get('spend', 0),
+        },
+        {
+            'name': '밴스드',
+            'get_rev':   lambda dt: vanced_data.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: vanced_data.get(dt, {}).get('spend', 0),
+        },
+        {
+            'name': '네이버',
+            'get_rev':   lambda dt: na.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: na.get(dt, {}).get('spend', 0),
+        },
+        {
+            'name': '구글',
+            'get_rev':   lambda dt: ga.get(dt, {}).get('revenue', 0),
+            'get_spend': lambda dt: ga.get(dt, {}).get('spend', 0),
+        },
+    ]
+
+    nr = 2 + len(channels) + 5; nc = 4 + nd
+    try:
+        ws = ss.worksheet(CH_SHEET_NAME); ws.clear()
+        if ws.row_count < nr: ws.add_rows(nr - ws.row_count)
+        if ws.col_count < nc: ws.add_cols(nc - ws.col_count)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = ss.add_worksheet(CH_SHEET_NAME, nr, nc)
+    sid = ws.id
+
+    header = ["채널", "", "라벨", "7일 평균"] + dh
+
+    all_rows = []
+    for ch in channels:
+        ar  = sum(ch['get_rev'](dt)   for dt in r7)
+        asp = sum(ch['get_spend'](dt) for dt in r7)
+        row = [ch['name'], "", ""]
+        row.append(ch_cell_text(ar, asp))
+        for dt in dates:
+            row.append(ch_cell_text(ch['get_rev'](dt), ch['get_spend'](dt)))
+        all_rows.append(row)
+
+    all_data = [header] + all_rows
+    tdr = len(all_data)
+    print(f"  → {tdr}행 × {len(header)}열")
+    with_retry(ws.update, values=all_data, range_name="A1", value_input_option="USER_ENTERED")
+    print("  ✅ 데이터 기록"); time.sleep(2)
+
+    print("  🎨 서식...")
+    fr = []
+    fr.append(ch_fmt_req(sid,0,1,0,nc,{"backgroundColor":{"red":0.9,"green":0.9,"blue":0.9},"textFormat":{"bold":True,"fontSize":10},"horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE"}))
+    for ci in sun_cols:
+        if ci < nc: fr.append(ch_fmt_req(sid,0,1,ci,ci+1,{"backgroundColor":{"red":1,"green":0.85,"blue":0.85},"textFormat":{"bold":True}}))
+    fr.append(ch_fmt_req(sid,1,2,0,nc,{"textFormat":{"bold":True}}))
+    fr.append({"updateSheetProperties":{"properties":{"sheetId":sid,"gridProperties":{"frozenRowCount":1,"frozenColumnCount":1}},"fields":"gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
+    fr.append(ch_fmt_req(sid,1,tdr,3,nc,{"wrapStrategy":"WRAP","verticalAlignment":"TOP"}))
+    fr.append(ch_fmt_req(sid,1,tdr,0,1,{"textFormat":{"bold":True,"fontSize":10}}))
+    for ci,w in [(0,100),(1,40),(2,80)]:
+        fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":w},"fields":"pixelSize"}})
+    for ci in range(3,nc):
+        fr.append({"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":ci,"endIndex":ci+1},"properties":{"pixelSize":100},"fields":"pixelSize"}})
+    fr.append(ch_border_req(sid,0,tdr,0,nc))
+    with_retry(ss.batch_update, body={"requests":fr}); time.sleep(2)
+
+    BK={"foregroundColor":{"red":0,"green":0,"blue":0}}
+    GN={"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
+    RD={"foregroundColor":{"red":0.85,"green":0,"blue":0}}
+
+    label_text="ROAS\n순이익\n매출\n지출"; ln=label_text.split('\n'); idx=[0]; p=0
+    for l in ln[:-1]: p+=len(l)+1; idx.append(p)
+    with_retry(ss.batch_update, body={"requests":[{"updateCells":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":2,"startColumnIndex":2,"endColumnIndex":3},"rows":[{"values":[{"userEnteredValue":{"stringValue":label_text},"textFormatRuns":[{"startIndex":idx[0],"format":BK},{"startIndex":idx[1],"format":GN},{"startIndex":idx[2],"format":BK},{"startIndex":idx[3],"format":RD}]}]}],"fields":"userEnteredValue,textFormatRuns"}}]}); time.sleep(1)
+
+    print("  🎨 ROAS 조건부 서식...")
+    ve='VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))'
+    rf=lambda c:f'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,{c})'
+    rules=[
+        (f'{ve}=0',                       {"red":1,"green":0.6,"blue":0.6}),
+        (f'{ve}>=300',                     {"red":0.6,"green":1,"blue":1}),
+        (f'AND({ve}>=200,{ve}<300)',       {"red":0.7,"green":1,"blue":0.7}),
+        (f'AND({ve}>=100,{ve}<200)',       {"red":1,"green":1,"blue":0.6}),
+        (f'AND({ve}<100,{ve}>0)',          {"red":1,"green":0.8,"blue":0.8}),
+    ]
+    cr=[{"addConditionalFormatRule":{"rule":{"ranges":[{"sheetId":sid,"startRowIndex":1,"endRowIndex":tdr,"startColumnIndex":3,"endColumnIndex":nc}],"booleanRule":{"condition":{"type":"CUSTOM_FORMULA","values":[{"userEnteredValue":rf(c)}]},"format":{"backgroundColor":bg}}},"index":0}} for c,bg in rules]
+    with_retry(ss.batch_update, body={"requests":cr}); time.sleep(3)
+
+    print("  🎨 텍스트 색상...")
+    txr=[]
+    for ci in range(3,nc):
+        try: cv=with_retry(ws.col_values,ci+1)
+        except: continue
+        if not cv or len(cv)<2: continue
+        for ri in range(1,min(len(cv),tdr)):
+            val=cv[ri]
+            if not val or '\n' not in val: continue
+            lines_val=val.split('\n')
+            if len(lines_val)<3: continue
+            l1e=len(lines_val[0]); l2e=l1e+1+len(lines_val[1]); l3e=l2e+1+len(lines_val[2])
+            runs=[{"startIndex":0,"format":BK},{"startIndex":l1e+1,"format":GN},{"startIndex":l2e+1,"format":BK}]
+            if len(lines_val)>=4: runs.append({"startIndex":l3e+1,"format":RD})
+            txr.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri,"endRowIndex":ri+1,"startColumnIndex":ci,"endColumnIndex":ci+1},"rows":[{"values":[{"userEnteredValue":{"stringValue":val},"textFormatRuns":runs}]}],"fields":"userEnteredValue,textFormatRuns"}})
+            if len(txr)>=300:
+                try: with_retry(ss.batch_update,body={"requests":txr}); txr=[]; time.sleep(3)
+                except: txr=[]
+    if txr:
+        try: with_retry(ss.batch_update,body={"requests":txr}); time.sleep(2)
+        except: pass
+
+    print(f"\n  ✅ '{CH_SHEET_NAME}' 완성!")
+
+
+# ══════════════════════════════════════════════════════════════
 # ★ 메인
 # ══════════════════════════════════════════════════════════════
 def main():
     print("=" * 60)
-    print("🚀 네이버 검색광고 + 믹스패널 자동 리포트 (v4-session)")
+    print("🚀 통합 리포트: 네이버SA + 채널별 추이차트")
+    print(f"   네이버SA 기간:     {START_DATE_STR} ~ {END_DATE_STR}")
+    print(f"   채널별 추이 기간:  {CH_START_DATE} ~ {CH_END_DATE}")
     print(f"   세션 윈도우: {SESSION_WINDOW_SEC//60}분")
     print(f"   결제 이벤트: {PAYMENT_EVENTS}")
     print(f"   환경: GitHub Actions")
     print("=" * 60)
-    sp = gc.open_by_url(SPREADSHEET_URL)
+
+    # ══════════════════════════════════════
+    # Part 1: 네이버 검색광고 + 믹스패널
+    # ══════════════════════════════════════
+    print("\n" + "▶" * 30)
+    print("  Part 1: 네이버 검색광고 + 믹스패널 세션 리포트")
+    print("▶" * 30)
+
+    sp_naver = gc.open_by_url(SPREADSHEET_URL)
 
     # 1) 네이버 데이터 수집
     df_naver, date_range = collect_naver()
     if df_naver.empty:
-        print("❌ 데이터 없음")
-        sys.exit(1)
+        print("⚠️ 네이버 데이터 없음 — Part 1 스킵")
+    else:
+        # 2) 랜딩 이벤트명 자동 탐지 → 세션 수집
+        detected = detect_landing_events(date_range[1])
+        if detected:
+            global LANDING_EVENTS
+            LANDING_EVENTS = detected
+            print(f"  → 탐지된 이벤트로 변경: {LANDING_EVENTS}")
+        sa_sessions = collect_sa_landings(date_range[0], date_range[1])
 
-    # 2) 랜딩 이벤트명 자동 탐지 → 세션 수집
-    detected = detect_landing_events(date_range[1])
-    if detected:
-        global LANDING_EVENTS
-        LANDING_EVENTS = detected
-        print(f"  → 탐지된 이벤트로 변경: {LANDING_EVENTS}")
-    sa_sessions = collect_sa_landings(date_range[0], date_range[1])
+        # 3) 결제완료 수집 + 세션 매칭
+        rev = get_mixpanel(date_range[0], date_range[1], sa_sessions=sa_sessions)
 
-    # 3) 결제완료 수집 + 세션 매칭
-    rev = get_mixpanel(date_range[0], date_range[1], sa_sessions=sa_sessions)
+        # 4) 병합
+        df = merge(df_naver, rev)
+        print(f"\n📊 최종: {len(df)}행 ({df['Date'].min()}~{df['Date'].max()})")
 
-    # 4) 병합
-    df = merge(df_naver, rev)
-    print(f"\n📊 최종: {len(df)}행 ({df['Date'].min()}~{df['Date'].max()})")
+        # 5) 시트 쓰기
+        print("\n📝 네이버SA 시트 쓰기...")
+        write_master(sp_naver, df)
+        write_trend(sp_naver, df)
 
-    # 5) 시트 쓰기
-    print("\n📝 시트 쓰기...")
-    write_master(sp, df)
-    write_trend(sp, df)
+        tc = safe_float(df['총비용(VAT포함,원)'].sum())
+        tr = safe_float(df['매출'].sum())
+        print(f"\n📊 네이버SA — 비용 ₩{tc:,.0f} / 매출(직접전환) ₩{tr:,.0f}")
+        if tc > 0: print(f"  ROAS: {tr/tc*100:.1f}%")
 
-    tc = safe_float(df['총비용(VAT포함,원)'].sum())
-    tr = safe_float(df['매출'].sum())
+    # ══════════════════════════════════════
+    # Part 2: 채널별 추이차트
+    # ══════════════════════════════════════
+    print("\n" + "▶" * 30)
+    print("  Part 2: 채널별 추이차트")
+    print("▶" * 30)
+
+    total_daily  = fetch_total_daily()
+    naver_google = fetch_naver_google()
+    meta_data    = fetch_meta()
+    vanced_data  = fetch_vanced()
+
+    write_channel_trend(total_daily, naver_google, meta_data, vanced_data)
+
+    # ══════════════════════════════════════
+    # 완료
+    # ══════════════════════════════════════
     print("\n" + "=" * 60)
-    print(f"📊 비용 ₩{tc:,.0f} / 매출(직접전환) ₩{tr:,.0f}")
-    if tc > 0: print(f"  ROAS: {tr/tc*100:.1f}%")
-    print(f"🎉 완료! → {SPREADSHEET_URL}")
+    print("🎉 전체 완료!")
+    print(f"   네이버SA → {SPREADSHEET_URL}")
+    print(f"   채널별   → {URL_CH_OUTPUT} (탭: {CH_SHEET_NAME})")
     print("=" * 60)
 
 
