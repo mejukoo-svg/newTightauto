@@ -73,7 +73,7 @@ jobs:
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
-          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_GLOBAL_REVENUE }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_TW_ADSET }}
 
   domestic_adset:
     name: 국내_세트별
