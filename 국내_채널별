@@ -985,7 +985,7 @@ def fetch_total_daily():
     print("📊 [소스1] 전체 매출/지출")
     print("="*60)
 
-    ss = gc.open_by_url(URL_TOTAL)
+    ss = with_retry(gc.open_by_url, URL_TOTAL)
     ws = None
     for s in ss.worksheets():
         if s.id == GID_TOTAL: ws = s; break
@@ -1035,7 +1035,7 @@ def fetch_naver_google():
     print("📊 [소스2] 네이버/구글 Daily 탭")
     print("="*60)
 
-    ss = gc.open_by_url(URL_NAV_GOO)
+    ss = with_retry(gc.open_by_url, URL_NAV_GOO)
     ws = None
     for s in ss.worksheets():
         if NAV_GOO_DAILY_TAB in s.title or s.title.strip() == NAV_GOO_DAILY_TAB:
@@ -1114,7 +1114,7 @@ def _fetch_trend_row2(url, gid, label, line_config):
     print(f"📊 [{label}]")
     print("="*60)
 
-    ss = gc.open_by_url(url)
+    ss = with_retry(gc.open_by_url, url)
     ws = None
     for s in ss.worksheets():
         if s.id == gid: ws = s; break
@@ -1237,7 +1237,7 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
     print(f"  네이버: {len(naver_google.get('naver_ads', {}))}일")
     print(f"  구글:   {len(naver_google.get('google_ads', {}))}일")
 
-    ss = gc.open_by_url(URL_CH_OUTPUT)
+    ss = with_retry(gc.open_by_url, URL_CH_OUTPUT)
     start = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
     end   = datetime.strptime(CH_END_DATE, "%Y-%m-%d").date()
     dates = []; d = end
@@ -1404,13 +1404,29 @@ def main():
     print("  Part 1: 채널별 추이차트")
     print("▶" * 30)
 
-    total_daily  = fetch_total_daily()
+    try:
+        total_daily = fetch_total_daily()
+    except Exception as e:
+        print(f"  ⚠️ 전체 매출 수집 실패 (빈 데이터로 진행): {e}")
+        total_daily = {}
     time.sleep(3)
-    naver_google = fetch_naver_google()
+    try:
+        naver_google = fetch_naver_google()
+    except Exception as e:
+        print(f"  ⚠️ 네이버/구글 수집 실패 (빈 데이터로 진행): {e}")
+        naver_google = {}
     time.sleep(3)
-    meta_data    = fetch_meta()
+    try:
+        meta_data = fetch_meta()
+    except Exception as e:
+        print(f"  ⚠️ 메타 데이터 수집 실패 (빈 데이터로 진행): {e}")
+        meta_data = {}
     time.sleep(3)
-    vanced_data  = fetch_vanced()
+    try:
+        vanced_data = fetch_vanced()
+    except Exception as e:
+        print(f"  ⚠️ 밴스드 데이터 수집 실패 (빈 데이터로 진행): {e}")
+        vanced_data = {}
 
     write_channel_trend(total_daily, naver_google, meta_data, vanced_data)
 
@@ -1427,7 +1443,7 @@ def main():
         print("  Part 2: 네이버 검색광고 + 믹스패널 세션 리포트")
         print("▶" * 30)
 
-        sp_naver = gc.open_by_url(SPREADSHEET_URL)
+        sp_naver = with_retry(gc.open_by_url, SPREADSHEET_URL)
 
         # 1) 네이버 데이터 수집
         df_naver, date_range = collect_naver()
