@@ -91,9 +91,10 @@ META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
 print("\U0001f511 Meta 토큰 상태:")
-print(f"  TOKEN_1 (act_1054): {'\u2705' if META_TOKENS['act_1054081590008088'] else '\u274c'}")
-print(f"  TOKEN_4 (act_2677): {'\u2705' if META_TOKEN_4 else '\u274c'}")
-print(f"  act_2677 최종: {'\u2705' if META_TOKEN_ACT_2677 else '\u274c'}")
+_ok = "\u2705"; _no = "\u274c"
+print(f"  TOKEN_1 (act_1054): {_ok if META_TOKENS['act_1054081590008088'] else _no}")
+print(f"  TOKEN_4 (act_2677): {_ok if META_TOKEN_4 else _no}")
+print(f"  act_2677 최종: {_ok if META_TOKEN_ACT_2677 else _no}")
 
 # =========================================================
 # Mixpanel
