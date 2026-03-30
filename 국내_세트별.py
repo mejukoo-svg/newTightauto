@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# v3-ad 국내 세트별 (★ v27 - 상품별 분류 테이블):
+# v3-ad 국내 세트별 (★ v28 - 추이차트_상품별 추가):
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출 (FULL_REFRESH 시 전체)
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑
@@ -16,9 +16,10 @@
 #   - ★ v25: diagnose_chart_coverage에 cached_ws 전달 → 500 에러 해결
 #   - ★ v26: extract_product가 adset_name에서 못 찾으면 campaign_name에서 재탐색
 #   - ★ v27: 날짜탭 요약 아래 상품별 분류 테이블 (매출 기준 정렬)
+#   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v27 국내 세트별 (상품별 분류 테이블)")
+print("🚀 v3-ad v28 국내 세트별 (추이차트_상품별 추가)")
 print("="*60)
 
 # =========================================================
@@ -236,8 +237,9 @@ COLORS = {
 
 SUMMARY_PRODUCTS = []
 
+# ★ v28: 추이차트_상품별 추가
 FINAL_ANALYSIS_ORDER = [
-    "추이차트", "추이차트(주간)", "증감액", "예산",
+    "추이차트", "추이차트_상품별", "추이차트(주간)", "증감액", "예산",
     "주간종합", "주간종합_2", "주간종합_3", "마스터탭"
 ]
 ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
@@ -1527,7 +1529,8 @@ print(f"   매칭 매출: ₩{int(debug_matched_revenue):,}\n")
 
 # 6단계: 분석탭 삭제
 print("="*60); print("6단계: 분석탭만 삭제"); print("="*60)
-ANALYSIS_TAB_NAMES = ["마스터탭", "추이차트", "증감액", "추이차트(주간)", "주간종합", "주간종합_2", "주간종합_3", "예산", "_temp", "_temp_holder"]
+# ★ v28: 추이차트_상품별 추가
+ANALYSIS_TAB_NAMES = ["마스터탭", "추이차트", "추이차트_상품별", "증감액", "추이차트(주간)", "주간종합", "주간종합_2", "주간종합_3", "예산", "_temp", "_temp_holder"]
 for sn in ANALYSIS_TAB_NAMES:
     try:
         old = sh.worksheet(sn)
@@ -1893,6 +1896,154 @@ except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
 print("⏳ 30초 대기..."); time.sleep(30)
 
 # =========================================================
+# ★ v28: 10.5단계 - 추이차트_상품별
+# =========================================================
+print("\n10.5단계: 추이차트_상품별 (상품별 그룹핑)")
+
+# 상품별로 광고 세트 그룹핑
+_product_groups_chart = defaultdict(list)
+for it in sorted_list:
+    p = extract_product(it['adset_name'], it['campaign_name'])
+    _product_groups_chart[p].append(it)
+
+# 상품별 7일 평균 매출 계산 → 정렬
+_product_7d_revenue = {}
+for p, items in _product_groups_chart.items():
+    total_rev = 0
+    for it in items:
+        for d in chart_sd:
+            if d in it['data']['dates']:
+                total_rev += it['data']['dates'][d]['revenue']
+    _product_7d_revenue[p] = total_rev
+
+_sorted_products_chart = sorted(
+    _product_groups_chart.keys(),
+    key=lambda p: _product_7d_revenue.get(p, 0),
+    reverse=True
+)
+
+# 세트 내 정렬: 가장 최근 날짜의 하루 전날(chart_dn[1]) 매출 기준
+_second_recent = chart_dn[1] if len(chart_dn) >= 2 else (chart_dn[0] if chart_dn else None)
+for p in _sorted_products_chart:
+    _product_groups_chart[p].sort(
+        key=lambda it: it['data']['dates'].get(_second_recent, {}).get('revenue', 0) if _second_recent else 0,
+        reverse=True
+    )
+
+# 헤더 (추이차트와 동일)
+hdr_tp = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dhw
+
+# 행 구성
+rows_tp = []
+_product_header_indices = []  # (row_index_in_rows_tp, product_name) for formatting
+
+for p_idx, p in enumerate(_sorted_products_chart):
+    items = _product_groups_chart[p]
+    p_7d_rev = _product_7d_revenue.get(p, 0)
+
+    # 상품명 헤더 행
+    _product_header_indices.append(len(rows_tp))
+    product_label = f"📦 {p}  |  7일 매출 {money(p_7d_rev)}  |  {len(items)}개 세트"
+    product_header_row = [product_label] + [""] * (len(hdr_tp) - 1)
+    rows_tp.append(product_header_row)
+
+    # 상품 종합 행
+    psr = [f"{p} 종합", "", ""]
+    _tp, _tr, _ts = 0, 0, 0; _tcs, _tcc = 0, 0; _tvs, _tvc = 0, 0
+    for d in chart_sd:
+        for it in items:
+            if d in it['data']['dates']:
+                _tp += it['data']['dates'][d]['profit']; _tr += it['data']['dates'][d]['revenue']; _ts += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: _tcs += cv; _tcc += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: _tvs += vv; _tvc += 1
+    psr.append(cell_text(_tp, _tr, _ts, (_tcs / _tcc) if _tcc > 0 else 0, (_tvs / _tvc) if _tvc > 0 else 0))
+    for d in chart_dn:
+        dp, dr, ds_v = 0, 0, 0; dcs, dcc = 0, 0; dvs, dvc = 0, 0
+        for it in items:
+            if d in it['data']['dates']:
+                dp += it['data']['dates'][d]['profit']; dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: dcs += cv; dcc += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: dvs += vv; dvc += 1
+        psr.append(cell_text(dp, dr, ds_v, (dcs / dcc) if dcc > 0 else 0, (dvs / dvc) if dvc > 0 else 0))
+    rows_tp.append(psr)
+
+    # 개별 세트 행
+    for it in items:
+        r = [it['campaign_name'], it['adset_name'], it['adset_id']]
+        _tp2, _tr2, _ts2 = 0, 0, 0; _tcs2, _tcc2 = 0, 0; _tvs2, _tvc2 = 0, 0
+        for d in chart_sd:
+            if d in it['data']['dates']:
+                _tp2 += it['data']['dates'][d]['profit']; _tr2 += it['data']['dates'][d]['revenue']; _ts2 += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: _tcs2 += cv; _tcc2 += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: _tvs2 += vv; _tvc2 += 1
+        r.append(cell_text(_tp2, _tr2, _ts2, (_tcs2 / _tcc2) if _tcc2 > 0 else 0, (_tvs2 / _tvc2) if _tvc2 > 0 else 0))
+        for d in chart_dn:
+            if d in it['data']['dates']:
+                dt = it['data']['dates'][d]
+                r.append(cell_text(dt['profit'], dt['revenue'], dt['spend'], dt.get('cpm', 0), dt.get('cvr', 0)))
+            else:
+                r.append('')
+        rows_tp.append(r)
+
+    # 빈 행 (상품 간 구분)
+    rows_tp.append([""] * len(hdr_tp))
+
+ws_tp = safe_add_worksheet(sh, "추이차트_상품별", rows=len(rows_tp) + 100, cols=len(chart_dn) + 10); time.sleep(3)
+move_ws_to_front(sh, ws_tp)
+
+with_retry(ws_tp.update, values=[hdr_tp] + rows_tp, range_name="A1", value_input_option="USER_ENTERED")
+print(f"✅ 추이차트_상품별 데이터 완료 ({len(_sorted_products_chart)}개 상품, 전체 {len(chart_dn)}일)"); time.sleep(3)
+
+# 서식 적용 (추이차트와 동일한 기본 서식)
+ws_tp = refresh_ws(sh, ws_tp)
+apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci)
+try: ws_tp = refresh_ws(sh, ws_tp); apply_c2_label_formatting(sh, ws_tp)
+except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
+
+# 상품 헤더 행 서식 (진한 배경 + 흰색 글자 + 병합)
+try:
+    tp_fmt_reqs = []
+    sid_tp = ws_tp.id
+    PRODUCT_CHART_BG = [
+        {"red": 0.22, "green": 0.42, "blue": 0.65},
+        {"red": 0.33, "green": 0.57, "blue": 0.33},
+        {"red": 0.53, "green": 0.30, "blue": 0.58},
+        {"red": 0.68, "green": 0.42, "blue": 0.18},
+        {"red": 0.58, "green": 0.22, "blue": 0.22},
+        {"red": 0.20, "green": 0.52, "blue": 0.52},
+        {"red": 0.48, "green": 0.48, "blue": 0.25},
+        {"red": 0.38, "green": 0.25, "blue": 0.48},
+        {"red": 0.30, "green": 0.55, "blue": 0.45},
+        {"red": 0.60, "green": 0.35, "blue": 0.40},
+        {"red": 0.35, "green": 0.35, "blue": 0.55},
+    ]
+    num_cols_tp = len(hdr_tp)
+    for p_idx, row_idx in enumerate(_product_header_indices):
+        sheet_row = row_idx + 1  # +1 for header row (0-indexed in sheet = row_idx + 1)
+        color = PRODUCT_CHART_BG[p_idx % len(PRODUCT_CHART_BG)]
+        tp_fmt_reqs.append(create_format_request(
+            sid_tp, sheet_row, sheet_row + 1, 0, num_cols_tp,
+            get_cell_format(color, COLORS["white"], bold=True)
+        ))
+        tp_fmt_reqs.append({"mergeCells": {"range": {
+            "sheetId": sid_tp, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1,
+            "startColumnIndex": 0, "endColumnIndex": min(num_cols_tp, 26)
+        }, "mergeType": "MERGE_ALL"}})
+    if tp_fmt_reqs:
+        for i in range(0, len(tp_fmt_reqs), 50):
+            with_retry(sh.batch_update, body={"requests": tp_fmt_reqs[i:i+50]}); time.sleep(1)
+    print("  ✅ 상품 헤더 서식 완료")
+except Exception as e: print(f"  ⚠️ 상품 헤더 서식 오류: {e}")
+
+print("⏳ 30초 대기..."); time.sleep(30)
+
+# =========================================================
 # 11단계: 추이차트(주간)
 # =========================================================
 print("\n11단계: 추이차트(주간)")
@@ -2177,7 +2328,9 @@ print(f"🆕 새로 생성한 탭: {len(new_refresh_dates)}개")
 print(f"📊 분석탭: 전체 {len(date_names)}일치 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행")
 print(f"   → 추이차트: {len(date_names)}개 날짜 (전체)")
+print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품 그룹")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
 print(f"🔀 병렬 처리: Meta {META_DATE_WORKERS}×{META_ACCOUNT_WORKERS} | MP {MIXPANEL_CHUNK_WORKERS} | Sheets {SHEETS_READ_WORKERS}")
 print(f"📦 ★ v27: 날짜탭 상품별 분류 테이블 추가")
+print(f"📦 ★ v28: 추이차트_상품별 탭 추가")
 print(f"\n📊 {SPREADSHEET_URL}")
