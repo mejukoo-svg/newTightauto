@@ -697,9 +697,11 @@ def df_to_vals(df):
 def write_master(sp, df):
     from gspread_formatting import CellFormat, TextFormat, Color, format_cell_range, set_frozen, set_column_width
 
-    try: ws = sp.worksheet(MASTER_TAB); ws.clear()
+    try:
+        ws = with_retry(sp.worksheet, MASTER_TAB)
+        with_retry(ws.clear)
     except gspread.WorksheetNotFound:
-        ws = sp.add_worksheet(title=MASTER_TAB, rows=max(len(df)+10,100), cols=20)
+        ws = with_retry(sp.add_worksheet, title=MASTER_TAB, rows=max(len(df)+10,100), cols=20)
 
     vals = df_to_vals(df)
     retry_api(ws.update, range_name='A1', values=vals)
@@ -736,9 +738,11 @@ def write_trend(sp, df):
     헤더: 03/24~03/30  형식
     셀:   ROAS / 순이익 / 지출 / 매출 / 전환율
     """
-    try: ws = sp.worksheet(TREND_TAB); ws.clear()
+    try:
+        ws = with_retry(sp.worksheet, TREND_TAB)
+        with_retry(ws.clear)
     except gspread.WorksheetNotFound:
-        ws = sp.add_worksheet(title=TREND_TAB, rows=5000, cols=200)
+        ws = with_retry(sp.add_worksheet, title=TREND_TAB, rows=5000, cols=200)
     sid = ws.id
 
     # ── 날짜 → 주차 매핑 (월요일 기준 isocalendar) ──
@@ -1288,7 +1292,7 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
 
     nr = 2 + len(channels) + 5; nc = 4 + nd
     try:
-        ws = ss.worksheet(CH_SHEET_NAME)
+        ws = with_retry(ss.worksheet, CH_SHEET_NAME)
         with_retry(ws.clear)
         if ws.row_count < nr: with_retry(ws.add_rows, nr - ws.row_count)
         if ws.col_count < nc: with_retry(ws.add_cols, nc - ws.col_count)
@@ -1428,7 +1432,10 @@ def main():
         print(f"  ⚠️ 밴스드 데이터 수집 실패 (빈 데이터로 진행): {e}")
         vanced_data = {}
 
-    write_channel_trend(total_daily, naver_google, meta_data, vanced_data)
+    try:
+        write_channel_trend(total_daily, naver_google, meta_data, vanced_data)
+    except Exception as e:
+        print(f"  ⚠️ 채널별 추이차트 쓰기 실패: {e}")
 
     # ══════════════════════════════════════
     # Part 2: 네이버 검색광고 + 믹스패널
@@ -1467,8 +1474,14 @@ def main():
 
             # 5) 시트 쓰기
             print("\n📝 네이버SA 시트 쓰기...")
-            write_master(sp_naver, df)
-            write_trend(sp_naver, df)
+            try:
+                write_master(sp_naver, df)
+            except Exception as e:
+                print(f"  ⚠️ 마스터탭 쓰기 실패: {e}")
+            try:
+                write_trend(sp_naver, df)
+            except Exception as e:
+                print(f"  ⚠️ 주간추이 쓰기 실패: {e}")
 
             tc = safe_float(df['총비용(VAT포함,원)'].sum())
             tr = safe_float(df['매출'].sum())
