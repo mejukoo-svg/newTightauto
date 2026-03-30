@@ -493,7 +493,8 @@ def fetch_mixpanel_data(from_date, to_date):
     try:
         resp = req_lib.get(url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300)
         if resp.status_code != 200:
-            print(f"  ❌ Mixpanel {resp.status_code}"); return []
+            print(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:500]}")  # ★ 응답 본문 추가
+            return []
         lines = [l for l in resp.text.split('\n') if l.strip()]
         print(f"  📊 이벤트: {len(lines)}건")
         data = []
