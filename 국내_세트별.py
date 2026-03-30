@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-# v3-ad 국내 세트별 (★ v28 - 추이차트_상품별 추가):
+# v3-ad 국내 세트별 (★ v29b - 상품명=캠페인 첫 단어, CPM→매출, 정렬=전날지출순):
+#   - ★ v29b: extract_product → 캠페인명 첫 단어(이모지 제거) 기반 상품 추출
+#   - ★ v29b: PRODUCT_KEYWORDS 필터 제거 → 모든 감지 상품 나열
+#   - ★ v29: 추이차트 셀 CPM→매출 대체, C2 라벨 수정, 정렬=전날 지출 기준 내림차순
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출 (FULL_REFRESH 시 전체)
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑
@@ -11,15 +14,13 @@
 #   - 분석탭: 전체 날짜탭 데이터 읽어서 재구성
 #   - 탭 순서: [분석탭 맨 왼쪽] + [날짜탭 최신→과거] + [기타]
 #   - 구 구조(25열) / 신 구조(23열) 자동 판별
-#   - ★ v25: 한글 제품 키워드 (집착/결혼/커리어/0.01/별해/솔로/재물/재회/29금궁합/자녀/29금)
 #   - ★ v25: 분석탭 생성 즉시 맨 왼쪽으로 이동 (move_ws_to_front)
-#   - ★ v25: diagnose_chart_coverage에 cached_ws 전달 → 500 에러 해결
 #   - ★ v26: extract_product가 adset_name에서 못 찾으면 campaign_name에서 재탐색
 #   - ★ v27: 날짜탭 요약 아래 상품별 분류 테이블 (매출 기준 정렬)
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v28 국내 세트별 (추이차트_상품별 추가)")
+print("🚀 v3-ad v29b 국내 세트별 (상품=캠페인첫단어, CPM→매출, 전날지출순)")
 print("="*60)
 
 # =========================================================
@@ -209,20 +210,9 @@ print(f"📊 분석탭: 스프레드시트의 모든 날짜탭 데이터 사용"
 print(f"🔀 병렬 처리: Meta {META_DATE_WORKERS}×{META_ACCOUNT_WORKERS} | MP {MIXPANEL_CHUNK_WORKERS} | Sheets {SHEETS_READ_WORKERS}")
 print()
 
-# ★ v25: 한글 제품 키워드 (긴 키워드가 앞에 와야 부분매칭 방지)
-PRODUCT_KEYWORDS = ["집착", "결혼", "커리어", "0.01", "별해", "솔로", "재물", "재회", "29금궁합", "자녀", "29금"]
+# ★ v29b: PRODUCT_KEYWORDS는 참조용으로만 유지 (필터에 사용하지 않음)
+PRODUCT_KEYWORDS_REF = ["집착", "결혼", "커리어", "0.01", "별해", "솔로", "재물", "재회", "29금궁합", "자녀", "29금"]
 
-SKIP_WORDS = {
-    "tw", "kr", "hk", "my", "sg", "id", "jp", "th", "vn", "ph", "asia",
-    "broad", "interest", "lookalike", "retarget", "retargeting", "custom", "asc", "cbo", "abo",
-    "dpa", "daba", "advantage", "campaign", "adset", "ad", "ads", "set",
-    "purchase", "conversion", "traffic", "reach", "awareness", "engagement",
-    "auto", "manual", "daily", "lifetime", "budget",
-    "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10",
-    "test", "new", "old", "copy", "ver", "final", "draft", "temp",
-    "sajutight", "ttsaju", "saju", "tight",
-    "a", "b", "c", "d", "e", "f", "the", "and", "or", "for", "all", "img", "vid",
-}
 WEEKDAY_NAMES = ['월', '화', '수', '목', '금', '토', '일']
 
 COLORS = {
@@ -237,7 +227,6 @@ COLORS = {
 
 SUMMARY_PRODUCTS = []
 
-# ★ v28: 추이차트_상품별 추가
 FINAL_ANALYSIS_ORDER = [
     "추이차트", "추이차트_상품별", "추이차트(주간)", "증감액", "예산",
     "주간종합", "주간종합_2", "주간종합_3", "마스터탭"
@@ -297,27 +286,41 @@ def clean_id(val):
     return numeric_only if numeric_only else s
 
 
-# ★ v26: 캠페인명 폴백 제품감지 — adset_name에서 못 찾으면 campaign_name에서 재탐색
+# ★ v29b: 이모지 제거 헬퍼
+def _strip_leading_emojis(text):
+    """문자열 앞의 이모지/특수문자를 제거하고 첫 번째 의미있는 문자부터 반환"""
+    i = 0
+    while i < len(text):
+        c = text[i]
+        cp = ord(c)
+        # 한글 음절/자모, 영숫자, 마침표, 퍼센트 → 의미 있는 문자
+        if ('\uAC00' <= c <= '\uD7A3' or   # 한글 완성형
+            '\u3131' <= c <= '\u3163' or    # 한글 자모
+            c.isalnum() or c in '.%'):
+            break
+        i += 1
+    return text[i:].strip()
+
+
+# ★ v29b: 캠페인명 첫 단어 기반 상품 추출 (이모지 제거 후)
 def extract_product(adset_name, campaign_name=""):
-    """광고 세트 이름 → 캠페인 이름 순서로 제품명 추출. 긴 키워드 우선 매칭."""
-    for source in [adset_name, campaign_name]:
-        if not source: continue
-        name = str(source)
-        name_lower = name.lower()
-
-        # 긴 키워드 우선 (29금궁합 before 29금)
-        if "29금궁합" in name or "속궁합" in name: return "29금궁합"
-        if "집착" in name: return "집착"
-        if "결혼" in name: return "결혼"
-        if "커리어" in name or "career" in name_lower: return "커리어"
-        if "0.01" in name or "1%" in name or "1%25" in name: return "0.01"
-        if "별해" in name or "starsun" in name_lower: return "별해"
-        if "솔로" in name or "solo" in name_lower: return "솔로"
-        if "재물" in name or "money" in name_lower: return "재물"
-        if "재회" in name: return "재회"
-        if "자녀" in name: return "자녀"
-        if "29금" in name: return "29금"
-
+    """
+    캠페인 이름의 첫 단어(이모지 제거 후)에서 상품명 추출.
+    캠페인명 우선 → adset명 폴백.
+    """
+    for source in [campaign_name, adset_name]:
+        if not source:
+            continue
+        name = str(source).strip()
+        if not name:
+            continue
+        cleaned = _strip_leading_emojis(name)
+        if not cleaned:
+            continue
+        # 구분자로 분할하여 첫 번째 토큰 추출
+        first_word = re.split(r'[_\s\-/|,()\[\]]+', cleaned)[0].strip()
+        if first_word:
+            return first_word
     return "기타"
 
 
@@ -364,9 +367,7 @@ def safe_add_worksheet(sh, title, rows, cols):
     return with_retry(sh.add_worksheet, title=title, rows=rows, cols=cols)
 
 
-# ★ v25: 분석탭 생성 직후 맨 왼쪽(index 0)으로 이동
 def move_ws_to_front(sh, ws):
-    """워크시트를 맨 왼쪽(index 0)으로 이동"""
     try:
         with_retry(sh.batch_update, body={"requests":[
             {"updateSheetProperties":{"properties":{"sheetId":ws.id,"index":0},"fields":"index"}}
@@ -429,15 +430,17 @@ def reorder_tabs(sh):
         print("  ✅ 탭 순서 정리 완료"); time.sleep(2)
     except Exception as e: print(f"  ⚠️ 탭 순서 정리 오류: {e}")
 
+# ★ v29: cell_text - CPM → 매출(revenue) 대체
 def cell_text(profit, revenue, spend, cpm=0, cvr=0):
     if spend == 0: return ""
     roas = (revenue / spend * 100) if spend > 0 else 0
-    return f"{roas:.0f}\n{money(profit)}\n-{money(spend)}\n{'₩'+str(int(round(cpm)))+'' if cpm > 0 else '₩0'}\n{cvr:.1f}%"
+    return f"{roas:.0f}\n{money(profit)}\n-{money(spend)}\n{money(revenue)}\n{cvr:.1f}%"
 
-def cell_text_change(roas, chg, spend, cpm, cvr=0):
+# ★ v29: cell_text_change - CPM → 매출(revenue) 대체
+def cell_text_change(roas, chg, spend, revenue=0, cvr=0):
     if spend == 0: return ""
     cl = f"+{chg:.1f}%" if chg > 0 else f"{chg:.1f}%" if chg < 0 else "0.0%"
-    return f"{roas:.0f}\n{cl}\n-{money(spend)}\n{'₩'+str(int(round(cpm))) if cpm > 0 else '₩0'}\n{cvr:.1f}%"
+    return f"{roas:.0f}\n{cl}\n-{money(spend)}\n{money(revenue)}\n{cvr:.1f}%"
 
 def get_week_range(d):
     wd = d.weekday(); m = d - timedelta(days=wd); s = m + timedelta(days=6)
@@ -469,13 +472,8 @@ def parse_date_tab(tab_name):
                 candidate = datetime(now.year - 1, m, d)
             return candidate
         else:
-            print(f"  ⚠️ parse_date_tab: '{tab_name}' → {len(parts)}파트 (지원: 2 또는 3)")
             return None
-    except ValueError as e:
-        print(f"  ⚠️ parse_date_tab 실패: '{tab_name}' → {e}")
-        return None
-    except Exception as e:
-        print(f"  ⚠️ parse_date_tab 예외: '{tab_name}' → {e}")
+    except:
         return None
 
 
@@ -498,8 +496,9 @@ def create_border_request(sid, sr, er, sc, ec):
 def create_number_format_request(sid, sr, er, sc, ec, ft="NUMBER", p="#,##0"):
     return {"repeatCell": {"range": {"sheetId": sid, "startRowIndex": sr, "endRowIndex": er, "startColumnIndex": sc, "endColumnIndex": ec}, "cell": {"userEnteredFormat": {"numberFormat": {"type": ft, "pattern": p}}}, "fields": "userEnteredFormat.numberFormat"}}
 
+# ★ v29: C2 라벨 - CPM → 매출
 def apply_c2_label_formatting(sh, ws):
-    sid = ws.id; cv = "ROAS\n순이익\n지출\nCPM\n전환율"
+    sid = ws.id; cv = "ROAS\n순이익\n지출\n매출\n전환율"
     lines = cv.split('\n'); indices = [0]; pos = 0
     for line in lines[:-1]: pos += len(line) + 1; indices.append(pos)
     bk = {"foregroundColor":{"red":0,"green":0,"blue":0}}; dg = {"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
@@ -774,14 +773,7 @@ def find_last_data_row(all_values, structure):
 # ★ v27: 상품별 분류 테이블
 # =========================================================
 def generate_product_breakdown(rows, structure="new"):
-    """
-    ★ v27: 날짜탭 데이터를 상품별로 분류하는 테이블 생성.
-    - 상품: 종합 매출 높은 순 정렬
-    - 같은 상품 내 세트: 매출 높은 순 정렬
-    Returns: (breakdown_rows, product_meta)
-    """
     product_groups = defaultdict(list)
-
     for row in rows:
         nr = normalize_row_to_new(row, structure)
         cn = str(nr[0]).strip()
@@ -794,236 +786,82 @@ def generate_product_breakdown(rows, structure="new"):
         mp_count = _to_num(nr[14])
         unique_clicks = _to_num(nr[9])
         product_groups[p].append({
-            'row': list(nr),
-            'revenue': revenue,
-            'spend': spend,
-            'mp_count': mp_count,
-            'unique_clicks': unique_clicks,
+            'row': list(nr), 'revenue': revenue, 'spend': spend,
+            'mp_count': mp_count, 'unique_clicks': unique_clicks,
         })
-
-    # 상품별 종합 매출 기준 내림차순 정렬
-    sorted_products = sorted(
-        product_groups.keys(),
-        key=lambda p: sum(item['revenue'] for item in product_groups[p]),
-        reverse=True
-    )
-
-    breakdown_rows = []
-    product_meta = []
-    NC = len(DATE_TAB_HEADERS)
-
-    # 구분선 (빈 행 2줄)
+    sorted_products = sorted(product_groups.keys(), key=lambda p: sum(item['revenue'] for item in product_groups[p]), reverse=True)
+    breakdown_rows = []; product_meta = []; NC = len(DATE_TAB_HEADERS)
     breakdown_rows.append([""] * NC)
-
-    # 전체 제목 행
-    title_row = [""] * NC
-    title_row[0] = "📊 상품별 분류"
-    breakdown_rows.append(title_row)
-    breakdown_rows.append([""] * NC)
-
+    title_row = [""] * NC; title_row[0] = "📊 상품별 분류"; breakdown_rows.append(title_row); breakdown_rows.append([""] * NC)
     for p in sorted_products:
-        items = product_groups[p]
-        # 같은 상품 내 매출 높은 순 정렬
-        items.sort(key=lambda x: x['revenue'], reverse=True)
-
-        total_spend = sum(i['spend'] for i in items)
-        total_revenue = sum(i['revenue'] for i in items)
-        total_profit = total_revenue - total_spend
-        total_roas = (total_revenue / total_spend * 100) if total_spend > 0 else 0
-        total_mp = sum(i['mp_count'] for i in items)
-        total_uc = sum(i['unique_clicks'] for i in items)
+        items = product_groups[p]; items.sort(key=lambda x: x['revenue'], reverse=True)
+        total_spend = sum(i['spend'] for i in items); total_revenue = sum(i['revenue'] for i in items)
+        total_profit = total_revenue - total_spend; total_roas = (total_revenue / total_spend * 100) if total_spend > 0 else 0
+        total_mp = sum(i['mp_count'] for i in items); total_uc = sum(i['unique_clicks'] for i in items)
         total_cvr = (total_mp / total_uc * 100) if total_uc > 0 and total_mp > 0 else 0
-
         header_offset = len(breakdown_rows)
-
-        # 상품 헤더 행
         product_header = [""] * NC
-        product_header[0] = (
-            f"📦 {p}  |  "
-            f"매출 {money(total_revenue)}  |  "
-            f"이익 {money(total_profit)}  |  "
-            f"지출 {money(total_spend)}  |  "
-            f"ROAS {total_roas:.0f}%  |  "
-            f"{len(items)}개 세트"
-        )
+        product_header[0] = f"📦 {p}  |  매출 {money(total_revenue)}  |  이익 {money(total_profit)}  |  지출 {money(total_spend)}  |  ROAS {total_roas:.0f}%  |  {len(items)}개 세트"
         breakdown_rows.append(product_header)
-
-        # 컬럼 헤더
-        col_header_offset = len(breakdown_rows)
-        breakdown_rows.append(list(DATE_TAB_HEADERS))
-
-        # 데이터 행들
+        col_header_offset = len(breakdown_rows); breakdown_rows.append(list(DATE_TAB_HEADERS))
         data_start = len(breakdown_rows)
-        for item in items:
-            breakdown_rows.append(item['row'])
+        for item in items: breakdown_rows.append(item['row'])
         data_end = len(breakdown_rows)
-
-        # 소계 행
         subtotal_offset = len(breakdown_rows)
-        subtotal = [""] * NC
-        subtotal[0] = f"▸ {p} 소계"
-        subtotal[3] = round(total_spend)
-        subtotal[9] = round(total_uc) if total_uc > 0 else ""
-        subtotal[14] = int(total_mp) if total_mp > 0 else ""
-        subtotal[15] = round(total_revenue)
-        subtotal[16] = round(total_profit)
+        subtotal = [""] * NC; subtotal[0] = f"▸ {p} 소계"; subtotal[3] = round(total_spend)
+        subtotal[9] = round(total_uc) if total_uc > 0 else ""; subtotal[14] = int(total_mp) if total_mp > 0 else ""
+        subtotal[15] = round(total_revenue); subtotal[16] = round(total_profit)
         subtotal[17] = round(total_roas, 1) if total_spend > 0 and total_revenue > 0 else ""
         subtotal[18] = round(total_cvr, 2) if total_cvr > 0 else ""
         breakdown_rows.append(subtotal)
-
-        product_meta.append({
-            'product': p,
-            'header_offset': header_offset,
-            'col_header_offset': col_header_offset,
-            'data_start': data_start,
-            'data_end': data_end,
-            'subtotal_offset': subtotal_offset,
-            'count': len(items),
-            'total_revenue': total_revenue,
-        })
-
-        # 구분 빈 행
+        product_meta.append({'product': p, 'header_offset': header_offset, 'col_header_offset': col_header_offset,
+            'data_start': data_start, 'data_end': data_end, 'subtotal_offset': subtotal_offset,
+            'count': len(items), 'total_revenue': total_revenue})
         breakdown_rows.append([""] * NC)
-
     return breakdown_rows, product_meta
 
 
 def format_product_breakdown(sh, ws, breakdown_start_sheet_row, product_meta):
-    """
-    ★ v27: 상품별 분류 테이블 서식 적용.
-    breakdown_start_sheet_row: 1-indexed sheet row where breakdown starts
-    """
-    sid = ws.id
-    fmt_reqs = []
-    base = breakdown_start_sheet_row - 1  # 0-indexed
-    NC = len(DATE_TAB_HEADERS)
-
-    # 전체 제목 행 서식 (base+1 = "📊 상품별 분류")
-    fmt_reqs.append(create_format_request(
-        sid, base + 1, base + 2, 0, NC,
-        get_cell_format({"red": 0.15, "green": 0.15, "blue": 0.3}, COLORS["white"], bold=True)
-    ))
-    fmt_reqs.append({"mergeCells": {"range": {
-        "sheetId": sid, "startRowIndex": base + 1, "endRowIndex": base + 2,
-        "startColumnIndex": 0, "endColumnIndex": NC
-    }, "mergeType": "MERGE_ALL"}})
-
-    # 상품별 색상 팔레트
+    sid = ws.id; fmt_reqs = []; base = breakdown_start_sheet_row - 1; NC = len(DATE_TAB_HEADERS)
+    fmt_reqs.append(create_format_request(sid, base + 1, base + 2, 0, NC, get_cell_format({"red": 0.15, "green": 0.15, "blue": 0.3}, COLORS["white"], bold=True)))
+    fmt_reqs.append({"mergeCells": {"range": {"sheetId": sid, "startRowIndex": base + 1, "endRowIndex": base + 2, "startColumnIndex": 0, "endColumnIndex": NC}, "mergeType": "MERGE_ALL"}})
     PRODUCT_BG = [
-        {"red": 0.22, "green": 0.42, "blue": 0.65},   # 파랑
-        {"red": 0.33, "green": 0.57, "blue": 0.33},   # 초록
-        {"red": 0.53, "green": 0.30, "blue": 0.58},   # 보라
-        {"red": 0.68, "green": 0.42, "blue": 0.18},   # 주황
-        {"red": 0.58, "green": 0.22, "blue": 0.22},   # 빨강
-        {"red": 0.20, "green": 0.52, "blue": 0.52},   # 청록
-        {"red": 0.48, "green": 0.48, "blue": 0.25},   # 올리브
-        {"red": 0.38, "green": 0.25, "blue": 0.48},   # 자주
-        {"red": 0.30, "green": 0.55, "blue": 0.45},   # 민트
-        {"red": 0.60, "green": 0.35, "blue": 0.40},   # 로즈
-        {"red": 0.35, "green": 0.35, "blue": 0.55},   # 슬레이트
+        {"red": 0.22, "green": 0.42, "blue": 0.65}, {"red": 0.33, "green": 0.57, "blue": 0.33},
+        {"red": 0.53, "green": 0.30, "blue": 0.58}, {"red": 0.68, "green": 0.42, "blue": 0.18},
+        {"red": 0.58, "green": 0.22, "blue": 0.22}, {"red": 0.20, "green": 0.52, "blue": 0.52},
+        {"red": 0.48, "green": 0.48, "blue": 0.25}, {"red": 0.38, "green": 0.25, "blue": 0.48},
+        {"red": 0.30, "green": 0.55, "blue": 0.45}, {"red": 0.60, "green": 0.35, "blue": 0.40},
+        {"red": 0.35, "green": 0.35, "blue": 0.55},
     ]
-
     for idx, info in enumerate(product_meta):
         color = PRODUCT_BG[idx % len(PRODUCT_BG)]
-
-        # ── 상품 헤더 ──
         hr = base + info['header_offset']
-        fmt_reqs.append(create_format_request(
-            sid, hr, hr + 1, 0, NC,
-            get_cell_format(color, COLORS["white"], bold=True)
-        ))
-        fmt_reqs.append({"mergeCells": {"range": {
-            "sheetId": sid, "startRowIndex": hr, "endRowIndex": hr + 1,
-            "startColumnIndex": 0, "endColumnIndex": NC
-        }, "mergeType": "MERGE_ALL"}})
-
-        # ── 컬럼 헤더 (메인 테이블과 동일 스타일) ──
+        fmt_reqs.append(create_format_request(sid, hr, hr + 1, 0, NC, get_cell_format(color, COLORS["white"], bold=True)))
+        fmt_reqs.append({"mergeCells": {"range": {"sheetId": sid, "startRowIndex": hr, "endRowIndex": hr + 1, "startColumnIndex": 0, "endColumnIndex": NC}, "mergeType": "MERGE_ALL"}})
         chr_idx = base + info['col_header_offset']
-        fmt_reqs.append(create_format_request(
-            sid, chr_idx, chr_idx + 1, 0, 3,
-            {"textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}
-        ))
-        fmt_reqs.append(create_format_request(
-            sid, chr_idx, chr_idx + 1, 3, 14,
-            {"backgroundColor": {"red": 0.937, "green": 0.937, "blue": 0.937},
-             "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}
-        ))
-        fmt_reqs.append(create_format_request(
-            sid, chr_idx, chr_idx + 1, 14, 19,
-            {"backgroundColor": {"red": 0.6, "green": 0.6, "blue": 0.6},
-             "textFormat": {"bold": True}, "wrapStrategy": "WRAP",
-             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}
-        ))
-        fmt_reqs.append(create_format_request(
-            sid, chr_idx, chr_idx + 1, 19, NC,
-            {"backgroundColor": {"red": 0.75, "green": 0.75, "blue": 0.75},
-             "textFormat": {"bold": True}, "wrapStrategy": "WRAP",
-             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}
-        ))
-
-        # ── 데이터 행 숫자 서식 ──
-        ds = base + info['data_start']
-        de = base + info['data_end']
+        fmt_reqs.append(create_format_request(sid, chr_idx, chr_idx + 1, 0, 3, {"textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
+        fmt_reqs.append(create_format_request(sid, chr_idx, chr_idx + 1, 3, 14, {"backgroundColor": {"red": 0.937, "green": 0.937, "blue": 0.937}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
+        fmt_reqs.append(create_format_request(sid, chr_idx, chr_idx + 1, 14, 19, {"backgroundColor": {"red": 0.6, "green": 0.6, "blue": 0.6}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+        fmt_reqs.append(create_format_request(sid, chr_idx, chr_idx + 1, 19, NC, {"backgroundColor": {"red": 0.75, "green": 0.75, "blue": 0.75}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+        ds = base + info['data_start']; de = base + info['data_end']
         fmt_reqs.append(create_number_format_request(sid, ds, de, 14, 15, "NUMBER", "#,##0"))
         fmt_reqs.append(create_number_format_request(sid, ds, de, 15, 16, "NUMBER", "#,##0"))
         fmt_reqs.append(create_number_format_request(sid, ds, de, 16, 17, "NUMBER", "#,##0"))
         fmt_reqs.append(create_number_format_request(sid, ds, de, 17, 18, "NUMBER", "#,##0.0"))
         fmt_reqs.append(create_number_format_request(sid, ds, de, 18, 19, "NUMBER", "#,##0.00"))
         fmt_reqs.append(create_number_format_request(sid, ds, de, 19, 20, "NUMBER", "#,##0"))
-
-        # ── 이익 조건부 서식 ──
-        profit_cond = [
-            ("NUMBER_GREATER", "300000", {"red": 0, "green": 1, "blue": 1}),
-            ("NUMBER_GREATER", "200000", {"red": 0.576, "green": 0.769, "blue": 0.49}),
-            ("NUMBER_GREATER", "100000", {"red": 1, "green": 0.898, "blue": 0.6}),
-            ("NUMBER_GREATER", "0", {"red": 1, "green": 0.949, "blue": 0.8}),
-            ("NUMBER_LESS", "-50000", {"red": 0.878, "green": 0.4, "blue": 0.4}),
-            ("NUMBER_LESS", "-10000", {"red": 0.957, "green": 0.8, "blue": 0.8}),
-        ]
+        profit_cond = [("NUMBER_GREATER","300000",{"red":0,"green":1,"blue":1}),("NUMBER_GREATER","200000",{"red":0.576,"green":0.769,"blue":0.49}),("NUMBER_GREATER","100000",{"red":1,"green":0.898,"blue":0.6}),("NUMBER_GREATER","0",{"red":1,"green":0.949,"blue":0.8}),("NUMBER_LESS","-50000",{"red":0.878,"green":0.4,"blue":0.4}),("NUMBER_LESS","-10000",{"red":0.957,"green":0.8,"blue":0.8})]
         for ctype, val, bg in profit_cond:
-            fmt_reqs.append({"addConditionalFormatRule": {"rule": {
-                "ranges": [{"sheetId": sid, "startRowIndex": ds, "endRowIndex": de,
-                            "startColumnIndex": 16, "endColumnIndex": 17}],
-                "booleanRule": {
-                    "condition": {"type": ctype, "values": [{"userEnteredValue": val}]},
-                    "format": {"backgroundColor": bg}
-                }
-            }, "index": 0}})
-
-        # ── ROAS 조건부 서식 ──
-        roas_cond = [
-            ("NUMBER_GREATER_THAN_EQ", "300", {"red": 0, "green": 1, "blue": 1}),
-            ("NUMBER_GREATER_THAN_EQ", "200", {"red": 0.576, "green": 0.769, "blue": 0.49}),
-            ("NUMBER_GREATER_THAN_EQ", "100", {"red": 1, "green": 0.851, "blue": 0.4}),
-            ("NUMBER_LESS", "100", {"red": 0.878, "green": 0.4, "blue": 0.4}),
-        ]
+            fmt_reqs.append({"addConditionalFormatRule":{"rule":{"ranges":[{"sheetId":sid,"startRowIndex":ds,"endRowIndex":de,"startColumnIndex":16,"endColumnIndex":17}],"booleanRule":{"condition":{"type":ctype,"values":[{"userEnteredValue":val}]},"format":{"backgroundColor":bg}}},"index":0}})
+        roas_cond = [("NUMBER_GREATER_THAN_EQ","300",{"red":0,"green":1,"blue":1}),("NUMBER_GREATER_THAN_EQ","200",{"red":0.576,"green":0.769,"blue":0.49}),("NUMBER_GREATER_THAN_EQ","100",{"red":1,"green":0.851,"blue":0.4}),("NUMBER_LESS","100",{"red":0.878,"green":0.4,"blue":0.4})]
         for ctype, val, bg in roas_cond:
-            fmt_reqs.append({"addConditionalFormatRule": {"rule": {
-                "ranges": [{"sheetId": sid, "startRowIndex": ds, "endRowIndex": de,
-                            "startColumnIndex": 17, "endColumnIndex": 18}],
-                "booleanRule": {
-                    "condition": {"type": ctype, "values": [{"userEnteredValue": val}]},
-                    "format": {"backgroundColor": bg}
-                }
-            }, "index": 0}})
-
-        # ── 소계 행 서식 ──
+            fmt_reqs.append({"addConditionalFormatRule":{"rule":{"ranges":[{"sheetId":sid,"startRowIndex":ds,"endRowIndex":de,"startColumnIndex":17,"endColumnIndex":18}],"booleanRule":{"condition":{"type":ctype,"values":[{"userEnteredValue":val}]},"format":{"backgroundColor":bg}}},"index":0}})
         sr = base + info['subtotal_offset']
-        fmt_reqs.append(create_format_request(
-            sid, sr, sr + 1, 0, NC,
-            get_cell_format({"red": 0.93, "green": 0.93, "blue": 0.85}, bold=True)
-        ))
+        fmt_reqs.append(create_format_request(sid, sr, sr + 1, 0, NC, get_cell_format({"red": 0.93, "green": 0.93, "blue": 0.85}, bold=True)))
         fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 3, 4, "NUMBER", "#,##0"))
         fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 9, 10, "NUMBER", "#,##0"))
-        fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 14, 15, "NUMBER", "#,##0"))
-        fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 15, 16, "NUMBER", "#,##0"))
-        fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 16, 17, "NUMBER", "#,##0"))
-        fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 17, 18, "NUMBER", "#,##0.0"))
-        fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, 18, 19, "NUMBER", "#,##0.00"))
-
-        # ── 블록 테두리 ──
+        for c in range(14, 19): fmt_reqs.append(create_number_format_request(sid, sr, sr + 1, c, c + 1, "NUMBER", "#,##0" if c < 17 else ("#,##0.0" if c == 17 else "#,##0.00")))
         fmt_reqs.append(create_border_request(sid, hr, sr + 1, 0, NC))
-
     return fmt_reqs
 
 
@@ -1037,11 +875,8 @@ def _read_single_date_tab(sh, ws_ex, tn, dt_obj, dk, _mp_val, _mp_cnt):
             return {'dk': dk, 'dt_obj': dt_obj, 'status': 'empty'}
         structure = detect_tab_structure(all_values[0])
         _, scan_rows = find_last_data_row(all_values, structure)
-        row_count = 0
-        tab_ad_sets = {}
-        tab_budget_by_product = defaultdict(lambda: {'spend': 0.0, 'revenue': 0.0})
-        tab_master_rows = []
-        master_headers_local = ["Date"] + DATE_TAB_HEADERS
+        row_count = 0; tab_ad_sets = {}; tab_budget_by_product = defaultdict(lambda: {'spend': 0.0, 'revenue': 0.0})
+        tab_master_rows = []; master_headers_local = ["Date"] + DATE_TAB_HEADERS
         for row in scan_rows:
             norm_row = normalize_row_to_new(row, structure)
             cn = str(norm_row[0]).strip()
@@ -1053,28 +888,19 @@ def _read_single_date_tab(sh, ws_ex, tn, dt_obj, dk, _mp_val, _mp_cnt):
             profit = revenue - spend; roas = (revenue / spend * 100) if spend > 0 else 0
             cvr = (mpc / unique_clicks * 100) if unique_clicks > 0 and mpc > 0 else 0
             if asid:
-                tab_ad_sets[asid] = {
-                    'campaign_name': cn, 'adset_name': asn, 'adset_id': asid,
-                    'date_data': {'profit': profit, 'revenue': revenue, 'spend': spend, 'cpm': cpm, 'cvr': cvr, 'unique_clicks': unique_clicks, 'mpc': mpc}
-                }
+                tab_ad_sets[asid] = {'campaign_name': cn, 'adset_name': asn, 'adset_id': asid,
+                    'date_data': {'profit': profit, 'revenue': revenue, 'spend': spend, 'cpm': cpm, 'cvr': cvr, 'unique_clicks': unique_clicks, 'mpc': mpc}}
             p = extract_product(asn, cn)
-            tab_budget_by_product[p]['spend'] += spend
-            tab_budget_by_product[p]['revenue'] += revenue
+            tab_budget_by_product[p]['spend'] += spend; tab_budget_by_product[p]['revenue'] += revenue
             mrd = [dk] + list(norm_row)
-            mrd[14 + 1] = int(mpc) if mpc > 0 else ""
-            mrd[15 + 1] = round(revenue) if revenue > 0 else ""
-            mrd[16 + 1] = round(profit, 0) if spend > 0 else ""
-            mrd[17 + 1] = round(roas, 1) if spend > 0 and revenue > 0 else ""
-            mrd[18 + 1] = round(cvr, 2) if cvr > 0 else ""
+            mrd[14+1] = int(mpc) if mpc > 0 else ""; mrd[15+1] = round(revenue) if revenue > 0 else ""
+            mrd[16+1] = round(profit, 0) if spend > 0 else ""; mrd[17+1] = round(roas, 1) if spend > 0 and revenue > 0 else ""
+            mrd[18+1] = round(cvr, 2) if cvr > 0 else ""
             while len(mrd) < len(master_headers_local): mrd.append("")
             tab_master_rows.append({'date': dk, 'date_obj': dt_obj, 'spend': spend, 'row_data': mrd[:len(master_headers_local)]})
             row_count += 1
-        return {
-            'dk': dk, 'dt_obj': dt_obj, 'status': 'ok', 'row_count': row_count,
-            'structure': structure, 'ad_sets': tab_ad_sets,
-            'budget_by_product': dict(tab_budget_by_product),
-            'master_rows': tab_master_rows
-        }
+        return {'dk': dk, 'dt_obj': dt_obj, 'status': 'ok', 'row_count': row_count,
+            'structure': structure, 'ad_sets': tab_ad_sets, 'budget_by_product': dict(tab_budget_by_product), 'master_rows': tab_master_rows}
     except Exception as e:
         return {'dk': dk, 'dt_obj': dt_obj, 'status': 'error', 'error': str(e)}
 
@@ -1084,140 +910,71 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
     all_ad_sets = defaultdict(lambda: {'campaign_name': '', 'adset_name': '', 'adset_id': '', 'dates': {}})
     all_budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend': 0.0, 'revenue': 0.0}))
     all_master_raw_data = []; all_date_objects = {}; all_date_names = []
-    master_headers_local = ["Date"] + DATE_TAB_HEADERS
-
     analysis_set = set(analysis_tab_names); all_ws = with_retry(sh.worksheets); date_tabs_found = []
     print(f"\n  📋 전체 워크시트: {len(all_ws)}개")
     skipped_analysis = []; skipped_no_slash = []; skipped_parse_fail = []
-
     for ws_ex in all_ws:
         tn = ws_ex.title
-        if tn in analysis_set:
-            skipped_analysis.append(tn); continue
+        if tn in analysis_set: skipped_analysis.append(tn); continue
         dt_obj = parse_date_tab(tn)
         if dt_obj is None:
             if '/' in tn: skipped_parse_fail.append(tn)
             else: skipped_no_slash.append(tn)
             continue
         date_tabs_found.append((dt_obj, ws_ex, tn))
-
     date_tabs_found.sort(key=lambda x: x[0])
-
     print(f"  ✅ 날짜탭 파싱 성공: {len(date_tabs_found)}개")
-    print(f"  ⏭️ 분석탭 스킵: {len(skipped_analysis)}개 → {skipped_analysis}")
-    print(f"  ⏭️ 비날짜탭 스킵: {len(skipped_no_slash)}개 → {skipped_no_slash}")
-    if skipped_parse_fail:
-        print(f"  ❌ 슬래시 있지만 파싱 실패: {len(skipped_parse_fail)}개 → {skipped_parse_fail}")
-        for t in skipped_parse_fail: print(f"     '{t}' ← repr: {repr(t)}")
-    if date_tabs_found:
-        print(f"  📅 범위: {date_tabs_found[0][2]} ~ {date_tabs_found[-1][2]}")
-
+    if date_tabs_found: print(f"  📅 범위: {date_tabs_found[0][2]} ~ {date_tabs_found[-1][2]}")
     _mp_val = mp_value_map or {}; _mp_cnt = mp_count_map or {}
-
     print(f"\n  🔀 병렬 읽기 시작 (워커: {SHEETS_READ_WORKERS}개)...")
     results_list = []
-
     with ThreadPoolExecutor(max_workers=SHEETS_READ_WORKERS) as pool:
         future_map = {}
         for dt_obj, ws_ex, tn in date_tabs_found:
             dk = f"{dt_obj.year%100:02d}/{dt_obj.month:02d}/{dt_obj.day:02d}"
             future = pool.submit(_read_single_date_tab, sh, ws_ex, tn, dt_obj, dk, _mp_val, _mp_cnt)
             future_map[future] = (dk, tn)
-
         for future in as_completed(future_map):
             dk, tn = future_map[future]
-            try:
-                result = future.result()
-                results_list.append(result)
-            except Exception as e:
-                safe_print(f"  ❌ {dk} 읽기 예외: {e}")
-                results_list.append({'dk': dk, 'dt_obj': None, 'status': 'error', 'error': str(e)})
-
+            try: result = future.result(); results_list.append(result)
+            except Exception as e: safe_print(f"  ❌ {dk} 읽기 예외: {e}"); results_list.append({'dk': dk, 'dt_obj': None, 'status': 'error', 'error': str(e)})
     results_list.sort(key=lambda r: r['dk'])
-
-    empty_tabs = []; error_tabs = []; zero_data_tabs = []
     for result in results_list:
-        dk = result['dk']; dt_obj = result['dt_obj']
-        status = result['status']
-        if dt_obj:
-            all_date_objects[dk] = dt_obj
-            all_date_names.append(dk)
-        if status == 'empty':
-            empty_tabs.append(dk); safe_print(f"  📖 {dk} 빈 탭"); continue
-        elif status == 'error':
-            error_tabs.append((dk, result.get('error', '?'))); safe_print(f"  📖 {dk} 오류: {result.get('error', '?')}"); continue
+        dk = result['dk']; dt_obj = result['dt_obj']; status = result['status']
+        if dt_obj: all_date_objects[dk] = dt_obj; all_date_names.append(dk)
+        if status in ['empty', 'error']: continue
         row_count = result['row_count']
         safe_print(f"  📖 {dk} → {row_count}행")
-        if row_count == 0: zero_data_tabs.append(dk); continue
+        if row_count == 0: continue
         for asid, ad_data in result['ad_sets'].items():
             if not all_ad_sets[asid]['adset_id']:
                 all_ad_sets[asid] = {'campaign_name': ad_data['campaign_name'], 'adset_name': ad_data['adset_name'], 'adset_id': ad_data['adset_id'], 'dates': {}}
             all_ad_sets[asid]['dates'][dk] = ad_data['date_data']
         for p, bd in result['budget_by_product'].items():
-            all_budget_by_date[dk][p]['spend'] += bd['spend']
-            all_budget_by_date[dk][p]['revenue'] += bd['revenue']
+            all_budget_by_date[dk][p]['spend'] += bd['spend']; all_budget_by_date[dk][p]['revenue'] += bd['revenue']
         all_master_raw_data.extend(result['master_rows'])
-
-    print(f"\n  {'=' * 50}")
-    print(f"  📊 날짜탭 읽기 최종 리포트")
-    print(f"  {'=' * 50}")
-    print(f"  ✅ 전체 날짜탭: {len(date_tabs_found)}개")
-    print(f"  ✅ date_names 등록: {len(all_date_names)}개")
-    print(f"  ✅ 광고 세트: {len(all_ad_sets)}개")
-    print(f"  ✅ 마스터행: {len(all_master_raw_data)}개")
-    if empty_tabs: print(f"  ⚠️ 빈 탭: {len(empty_tabs)}개 → {empty_tabs}")
-    if zero_data_tabs: print(f"  ⚠️ 0행 탭: {len(zero_data_tabs)}개 → {zero_data_tabs}")
-    if error_tabs:
-        print(f"  ❌ 오류 탭: {len(error_tabs)}개")
-        for dk, err in error_tabs: print(f"     {dk}: {err}")
-
-    dates_with_adset_data = set()
-    for asid, d in all_ad_sets.items():
-        for dk2 in d['dates']: dates_with_adset_data.add(dk2)
-    orphan_dates = [dk for dk in all_date_names if dk not in dates_with_adset_data]
-    if orphan_dates:
-        print(f"  ⚠️ date_names에 있지만 adset 데이터 없음: {len(orphan_dates)}개 → {orphan_dates}")
-
+    print(f"\n  ✅ 날짜탭: {len(date_tabs_found)}개 | date_names: {len(all_date_names)}개 | 광고세트: {len(all_ad_sets)}개 | 마스터행: {len(all_master_raw_data)}개")
     return all_ad_sets, all_budget_by_date, all_master_raw_data, all_date_objects, all_date_names, all_ws
 
 
 def diagnose_chart_coverage(sh, date_names, ad_sets, analysis_tabs_set, all_ws=None):
-    """추이차트 커버리지 진단. ★ v25: all_ws 캐시 사용으로 500 에러 방지"""
-    print("\n" + "=" * 60)
-    print("★ 진단: 추이차트 커버리지 확인")
-    print("=" * 60)
-    if all_ws is None:
-        all_ws = with_retry(sh.worksheets)
-    all_tab_names = [ws.title for ws in all_ws]
-    slash_tabs = [t for t in all_tab_names if '/' in t]
+    print("\n" + "=" * 60); print("★ 진단: 추이차트 커버리지 확인"); print("=" * 60)
+    if all_ws is None: all_ws = with_retry(sh.worksheets)
+    all_tab_names = [ws.title for ws in all_ws]; slash_tabs = [t for t in all_tab_names if '/' in t]
     parsed_tabs = []; failed_tabs = []
     for t in slash_tabs:
         dt = parse_date_tab(t)
-        if dt:
-            dk = f"{dt.year%100:02d}/{dt.month:02d}/{dt.day:02d}"
-            parsed_tabs.append((t, dk, dt))
-        else:
-            failed_tabs.append(t)
+        if dt: dk = f"{dt.year%100:02d}/{dt.month:02d}/{dt.day:02d}"; parsed_tabs.append((t, dk, dt))
+        else: failed_tabs.append(t)
     date_names_set = set(date_names)
     in_chart = [(t, dk) for t, dk, dt in parsed_tabs if dk in date_names_set]
     not_in_chart = [(t, dk) for t, dk, dt in parsed_tabs if dk not in date_names_set]
-    print(f"  📋 슬래시 포함 탭: {len(slash_tabs)}개")
-    print(f"  ✅ 파싱 성공: {len(parsed_tabs)}개")
-    print(f"  ✅ 추이차트 포함: {len(in_chart)}개")
-    if not_in_chart:
-        print(f"  ❌ 파싱됐지만 추이차트 누락: {len(not_in_chart)}개")
-        for tab_name, dk in not_in_chart: print(f"     '{tab_name}' → dk='{dk}'")
-    if failed_tabs:
-        print(f"  ❌ 파싱 실패: {len(failed_tabs)}개")
-        for t in failed_tabs: print(f"     '{t}' ← repr: {repr(t)}")
-    if date_names:
-        print(f"\n  📊 추이차트 날짜 범위:")
-        print(f"     가장 오래된: {date_names[0]}")
-        print(f"     가장 최근:  {date_names[-1]}")
-        print(f"     총 일수:    {len(date_names)}일")
+    print(f"  ✅ 추이차트 포함: {len(in_chart)}개 | 누락: {len(not_in_chart)}개 | 파싱실패: {len(failed_tabs)}개")
+    if date_names: print(f"  📊 범위: {date_names[0]} ~ {date_names[-1]} ({len(date_names)}일)")
     return failed_tabs
 
 
+# ★ v29b: generate_date_tab_summary — PRODUCT_KEYWORDS 필터 제거, 모든 감지 상품 표시
 def generate_date_tab_summary(rows, structure="new"):
     total_spend=0.0;total_meta_purchase=0.0;total_mp_purchase=0.0;total_revenue=0.0;total_profit=0.0;total_unique_clicks=0.0
     spend_by_account={"본계정":0.0,"부계정":0.0,"3rd계정":0.0}
@@ -1233,7 +990,8 @@ def generate_date_tab_summary(rows, structure="new"):
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
-    sp = sorted([p for p in prod_spend if p in PRODUCT_KEYWORDS and (prod_spend[p] > 0 or prod_revenue[p] > 0)],
+    # ★ v29b: PRODUCT_KEYWORDS 필터 제거 → 지출/매출 있는 모든 상품 표시
+    sp = sorted([p for p in prod_spend if (prod_spend[p] > 0 or prod_revenue[p] > 0)],
                 key=lambda p: prod_spend[p], reverse=True)
     num_products = len(sp); NC = 25
     sum_col_idx = 9 + num_products
@@ -1319,7 +1077,7 @@ for acc in ALL_AD_ACCOUNTS: print(f"  - {acc}")
 print()
 
 # =========================================================
-# 2단계 Meta - 병렬의 병렬 (날짜 × 계정)
+# 2단계 Meta - 병렬의 병렬
 # =========================================================
 print("="*60); print(f"2단계: Meta Insights 수집 (병렬: 날짜 {META_DATE_WORKERS}워커 × 계정 {META_ACCOUNT_WORKERS}워커)"); print("="*60)
 
@@ -1327,15 +1085,12 @@ def _fetch_single_account(acc_id, target_str, date_key, target_date):
     rows = fetch_meta_insights_daily(acc_id, target_str)
     if rows:
         parsed = parse_single_day_insights(rows, date_key, target_date, ad_account_id=acc_id)
-        safe_print(f"    ✅ {date_key} {acc_id[-6:]}: {len(parsed)}건")
-        return parsed
+        safe_print(f"    ✅ {date_key} {acc_id[-6:]}: {len(parsed)}건"); return parsed
     else:
-        safe_print(f"    ⚠️ {date_key} {acc_id[-6:]}: 0건")
-        return []
+        safe_print(f"    ⚠️ {date_key} {acc_id[-6:]}: 0건"); return []
 
 def _fetch_single_date(day_offset):
-    target_date = TODAY - timedelta(days=day_offset)
-    target_str = target_date.strftime('%Y-%m-%d')
+    target_date = TODAY - timedelta(days=day_offset); target_str = target_date.strftime('%Y-%m-%d')
     date_key = f"{target_date.year%100:02d}/{target_date.month:02d}/{target_date.day:02d}"
     day_rows = []
     with ThreadPoolExecutor(max_workers=META_ACCOUNT_WORKERS) as inner_pool:
@@ -1346,18 +1101,14 @@ def _fetch_single_date(day_offset):
     return date_key, target_date, day_rows
 
 meta_date_data = defaultdict(list); meta_success_count = 0
-
 with ThreadPoolExecutor(max_workers=META_DATE_WORKERS) as date_pool:
     date_futures = {date_pool.submit(_fetch_single_date, day_offset): day_offset for day_offset in range(META_COLLECT_DAYS)}
     for f in as_completed(date_futures):
         try:
             date_key, target_date, day_rows = f.result()
-            if day_rows:
-                meta_date_data[date_key] = day_rows; meta_success_count += len(day_rows)
-                safe_print(f"  📊 {date_key} 합계: {len(day_rows)}개 광고 세트")
+            if day_rows: meta_date_data[date_key] = day_rows; meta_success_count += len(day_rows); safe_print(f"  📊 {date_key}: {len(day_rows)}개")
             else: safe_print(f"  ⚠️ {date_key} 데이터 없음")
         except Exception as e: safe_print(f"  ❌ 날짜 조회 오류: {e}")
-
 print(f"\n✅ Meta 수집 완료: {len(meta_date_data)}일, 총 {meta_success_count}건")
 
 ADSET_TO_ACCOUNT = {}
@@ -1367,77 +1118,51 @@ for dk, rows in meta_date_data.items():
         if asid and acc: ADSET_TO_ACCOUNT[asid] = acc
 print(f"  📦 adset→account 매핑: {len(ADSET_TO_ACCOUNT)}개\n")
 
-# =========================================================
-# 2.5단계 예산 - 병렬
-# =========================================================
-print("="*60); print(f"2.5단계: 광고 세트별 일일 예산 조회 (병렬: {BUDGET_WORKERS}워커)"); print("="*60)
+# 2.5단계 예산
+print("="*60); print(f"2.5단계: 예산 조회 (병렬: {BUDGET_WORKERS}워커)"); print("="*60)
 adset_budget_map = {}
-
 def _fetch_budget_for_account(acc_id):
-    safe_print(f"  📡 계정 {acc_id}...")
-    budgets = fetch_adset_budgets(acc_id)
-    safe_print(f"  ✅ {acc_id[-6:]}: {len(budgets)}개 활성 세트")
-    return budgets
-
+    safe_print(f"  📡 계정 {acc_id}..."); budgets = fetch_adset_budgets(acc_id); safe_print(f"  ✅ {acc_id[-6:]}: {len(budgets)}개"); return budgets
 with ThreadPoolExecutor(max_workers=BUDGET_WORKERS) as budget_pool:
     budget_futures = {budget_pool.submit(_fetch_budget_for_account, acc): acc for acc in ALL_AD_ACCOUNTS}
     for f in as_completed(budget_futures):
         try: budgets = f.result(); adset_budget_map.update(budgets)
         except Exception as e: safe_print(f"  ❌ 예산 조회 오류: {e}")
+print(f"\n✅ 예산 조회 완료: {len(adset_budget_map)}개 세트\n")
 
-print(f"\n✅ 전체 예산 조회 완료: {len(adset_budget_map)}개 세트")
-if adset_budget_map:
-    sample = list(adset_budget_map.items())[:3]
-    for asid, budget in sample: print(f"  예시: {asid} → ₩{budget:,}")
-print()
-
-# =========================================================
-# 3단계 Mixpanel - 병렬 청크
-# =========================================================
-print("="*60); print(f"3단계: Mixpanel 수집 ({REFRESH_DAYS}일, 이벤트: {MIXPANEL_EVENT_NAMES})"); print("="*60)
-YESTERDAY = TODAY - timedelta(days=1)
-mp_to_today = TODAY.strftime('%Y-%m-%d')
+# 3단계 Mixpanel
+print("="*60); print(f"3단계: Mixpanel 수집 ({REFRESH_DAYS}일)"); print("="*60)
+YESTERDAY = TODAY - timedelta(days=1); mp_to_today = TODAY.strftime('%Y-%m-%d')
 total_days = (TODAY - DATA_REFRESH_START).days + 1
-print(f"  📅 Mixpanel 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ {mp_to_today} ({total_days}일)")
+print(f"  📅 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ {mp_to_today} ({total_days}일)")
 mp_raw = []
-
 if REFRESH_DAYS > 14:
-    CHUNK_SIZE = 7; chunks = []
-    chunk_start = DATA_REFRESH_START
+    CHUNK_SIZE = 7; chunks = []; chunk_start = DATA_REFRESH_START
     while chunk_start <= YESTERDAY:
         chunk_end = min(chunk_start + timedelta(days=CHUNK_SIZE - 1), YESTERDAY)
-        chunks.append((chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
-        chunk_start = chunk_end + timedelta(days=1)
-    print(f"\n  🔀 병렬 청크 조회: {len(chunks)}개 청크 × {MIXPANEL_CHUNK_WORKERS}워커")
+        chunks.append((chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'))); chunk_start = chunk_end + timedelta(days=1)
     with ThreadPoolExecutor(max_workers=MIXPANEL_CHUNK_WORKERS) as mp_pool:
         mp_futures = {mp_pool.submit(fetch_mixpanel_data, c_from, c_to): (c_from, c_to) for c_from, c_to in chunks}
         for f in as_completed(mp_futures):
-            try: chunk_data = f.result(); mp_raw.extend(chunk_data); safe_print(f"  ✅ 청크 완료: +{len(chunk_data)}건 (누적: {len(mp_raw)}건)")
+            try: chunk_data = f.result(); mp_raw.extend(chunk_data)
             except Exception as e: safe_print(f"  ❌ 청크 오류: {e}")
 else:
-    mp_from = DATA_REFRESH_START.strftime('%Y-%m-%d')
-    mp_to_yesterday = YESTERDAY.strftime('%Y-%m-%d')
+    mp_from = DATA_REFRESH_START.strftime('%Y-%m-%d'); mp_to_yesterday = YESTERDAY.strftime('%Y-%m-%d')
     if DATA_REFRESH_START <= YESTERDAY:
-        chunk_data = fetch_mixpanel_data(mp_from, mp_to_yesterday); mp_raw.extend(chunk_data)
-        print(f"  ✅ 어제까지: {len(chunk_data)}건"); time.sleep(2)
-
+        chunk_data = fetch_mixpanel_data(mp_from, mp_to_yesterday); mp_raw.extend(chunk_data); time.sleep(2)
 print(f"\n  ── 오늘({mp_to_today}) 별도 호출 ──")
 today_data = fetch_mixpanel_data(mp_to_today, mp_to_today)
-if today_data: mp_raw.extend(today_data); print(f"  ✅ 오늘: {len(today_data)}건 (누적: {len(mp_raw)}건)")
-else: print(f"  ⚠️ 오늘 데이터 없음")
+if today_data: mp_raw.extend(today_data)
 print(f"\n  ✅ Mixpanel 수집 완료: 총 {len(mp_raw)}건")
-df = pd.DataFrame(mp_raw); print(f"  원본: {len(df)}건")
-mp_value_map = {}; mp_count_map = {}
+df = pd.DataFrame(mp_raw); mp_value_map = {}; mp_count_map = {}
 if len(df) > 0:
-    df = df[df['utm_term'].notna() & (df['utm_term'] != '') & (df['utm_term'] != 'None')]; print(f"  utm_term 있는 것: {len(df)}건")
-    df = df.sort_values('revenue', ascending=False); bf = len(df)
-    df_d = df.drop_duplicates(subset=['date', 'distinct_id', '서비스'], keep='first'); print(f"  중복 제거: {bf} → {len(df_d)}건")
+    df = df[df['utm_term'].notna() & (df['utm_term'] != '') & (df['utm_term'] != 'None')]
+    df = df.sort_values('revenue', ascending=False); df_d = df.drop_duplicates(subset=['date', 'distinct_id', '서비스'], keep='first')
     total_revenue = df_d['revenue'].sum(); print(f"  📊 매출 합계: ₩{int(total_revenue):,}")
     for (d, ut), v in df_d.groupby(['date', 'utm_term'])['revenue'].sum().items():
         if d and ut: mp_value_map[(d, str(ut))] = v
     for (d, ut), c in df_d.groupby(['date', 'utm_term']).size().items():
         if d and ut: mp_count_map[(d, str(ut))] = c
-    print(f"  날짜+adset_id 조합: {len(mp_value_map)}개")
 print()
 
 # 4단계: 기존 탭 파악
@@ -1445,56 +1170,36 @@ print("="*60); print(f"4단계: 최근 {REFRESH_DAYS}일 기존 날짜탭 파악
 refresh_date_keys = set()
 for day_offset in range(REFRESH_DAYS):
     td = TODAY - timedelta(days=day_offset); dk = f"{td.year%100:02d}/{td.month:02d}/{td.day:02d}"; refresh_date_keys.add(dk)
-print(f"  🔄 갱신 대상 날짜: {sorted(refresh_date_keys)}")
 existing_sheets = sh.worksheets(); existing_refresh_tabs = {}; new_refresh_dates = set(refresh_date_keys)
 for ws_ex in existing_sheets:
     tn = ws_ex.title; dt_obj = parse_date_tab(tn)
     if dt_obj is None: continue
     tab_dk = f"{dt_obj.year%100:02d}/{dt_obj.month:02d}/{dt_obj.day:02d}"
-    if tab_dk in refresh_date_keys:
-        existing_refresh_tabs[tab_dk] = ws_ex; new_refresh_dates.discard(tab_dk); print(f"  📝 기존 탭 발견: {tn}")
-    else: print(f"  ✅ 보존: {tn}")
-print(f"\n  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개")
-print(f"  🆕 새로 생성할 탭: {len(new_refresh_dates)}개\n")
+    if tab_dk in refresh_date_keys: existing_refresh_tabs[tab_dk] = ws_ex; new_refresh_dates.discard(tab_dk)
+print(f"  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새로 생성: {len(new_refresh_dates)}개\n")
 
-# =========================================================
-# 4.5단계 - 계정 통화 자동감지 + 환율
-# =========================================================
-print("="*60); print("4.5단계: 계정 통화 감지 + 환율 조회"); print("="*60)
-
-ACCOUNT_CURRENCY = {}
-has_usd_account = False
+# 4.5단계 - 통화 감지 + 환율
+print("="*60); print("4.5단계: 통화 감지 + 환율"); print("="*60)
+ACCOUNT_CURRENCY = {}; has_usd_account = False
 for acc_id in ALL_AD_ACCOUNTS:
-    currency, acc_name = detect_account_currency(acc_id)
-    ACCOUNT_CURRENCY[acc_id] = currency
+    currency, acc_name = detect_account_currency(acc_id); ACCOUNT_CURRENCY[acc_id] = currency
     if currency != 'KRW': has_usd_account = True
-    print(f"  💱 {acc_id[-6:]}: {currency} ({acc_name})")
-    time.sleep(0.5)
-
+    print(f"  💱 {acc_id[-6:]}: {currency}"); time.sleep(0.5)
 usd_krw_rates = {}
 if has_usd_account:
     rate_range_start = DATA_REFRESH_START - timedelta(days=7)
     usd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="USD")
-    if usd_krw_rates:
-        sample_rates = list(usd_krw_rates.items())[-3:]
-        for dk, rate in sample_rates: print(f"  USD {dk}: 1 USD = ₩{rate:,.2f}")
-    else: print(f"  ⚠️ USD 환율 조회 실패 → 폴백 ₩{FALLBACK_USD_KRW:,}")
-else:
-    print("  ✅ 모든 계정이 KRW → 환율 변환 불필요")
-
+else: print("  ✅ 모든 계정 KRW")
 def get_fx_for_account(acc_id, dk):
     cur = ACCOUNT_CURRENCY.get(acc_id, 'KRW')
     if cur == 'KRW': return 1.0
     return get_rate_for_date(usd_krw_rates, dk)
-
 def get_budget_divisor(acc_id):
-    cur = ACCOUNT_CURRENCY.get(acc_id, 'KRW')
-    return 100 if cur != 'KRW' else 1
-
+    cur = ACCOUNT_CURRENCY.get(acc_id, 'KRW'); return 100 if cur != 'KRW' else 1
 print()
 
 # 5단계: 병합
-print("="*60); print("5단계: Meta + Mixpanel(KRW) 병합"); print("="*60)
+print("="*60); print("5단계: Meta + Mixpanel 병합"); print("="*60)
 date_tab_rows = defaultdict(list); date_mp_by_adsetid = defaultdict(dict); new_date_names = []; product_count = defaultdict(int)
 debug_total_rows = 0; debug_matched_rows = 0; debug_matched_revenue = 0
 for dk in sorted(meta_date_data.keys(), key=lambda x: meta_date_data[x][0]['date_obj'] if meta_date_data[x] else datetime.min, reverse=True):
@@ -1504,32 +1209,26 @@ for dk in sorted(meta_date_data.keys(), key=lambda x: meta_date_data[x][0]['date
     for mr in rows:
         asid = mr['adset_id']
         if not asid: continue
-        debug_total_rows += 1
-        acc_id = mr.get('ad_account_id', '')
-        fx = get_fx_for_account(acc_id, dk)
-        budget_div = get_budget_divisor(acc_id)
-        sp = mr['spend'] * fx; impr = mr['impressions']; reach = mr['reach']; uc = mr['unique_clicks']; results = mr['results']
-        cpm = mr['cpm'] * fx; frequency = mr['frequency']; cost_per_result = mr['cost_per_result'] * fx; cost_per_click = mr['cost_per_unique_click'] * fx; unique_ctr = mr['unique_ctr']
+        debug_total_rows += 1; acc_id = mr.get('ad_account_id', '')
+        fx = get_fx_for_account(acc_id, dk); budget_div = get_budget_divisor(acc_id)
+        sp = mr['spend'] * fx; uc = mr['unique_clicks']; results = mr['results']
+        cpm = mr['cpm'] * fx; frequency = mr['frequency']; cost_per_result = mr['cost_per_result'] * fx
+        cost_per_click = mr['cost_per_unique_click'] * fx; unique_ctr = mr['unique_ctr']
         mpc = mp_count_map.get((dk, asid), 0); mpv = mp_value_map.get((dk, asid), 0.0)
         if mpc > 0 or mpv > 0: debug_matched_rows += 1; debug_matched_revenue += mpv
         rv = float(mpv); date_mp_by_adsetid[dk][asid] = {'mpc': mpc, 'mpv': rv}
         pf = rv - sp; roas_c = (rv / sp * 100) if sp > 0 else 0; cvr_c = (mpc / uc * 100) if uc > 0 and mpc > 0 else 0
         cn = mr['campaign_name']; asn = mr['adset_name']
-        budget_raw = adset_budget_map.get(asid, 0)
-        budget_val = round(budget_raw / budget_div * fx) if budget_raw and budget_raw > 0 else ""
-        tab_row = [cn, asn, asid, sp, cost_per_result, 0, round(cpm, 0), reach, impr, uc, round(unique_ctr, 2), round(cost_per_click, 0), round(frequency, 2), results,
+        budget_raw = adset_budget_map.get(asid, 0); budget_val = round(budget_raw / budget_div * fx) if budget_raw and budget_raw > 0 else ""
+        tab_row = [cn, asn, asid, sp, cost_per_result, 0, round(cpm, 0), mr['reach'], mr['impressions'], uc, round(unique_ctr, 2), round(cost_per_click, 0), round(frequency, 2), results,
             mpc if mpc > 0 else "", round(rv) if rv > 0 else "", round(pf, 0) if sp > 0 else "", round(roas_c, 1) if sp > 0 and rv > 0 else "", round(cvr_c, 2) if uc > 0 and mpc > 0 else "", budget_val, "", "", ""]
-        date_tab_rows[dk].append(tab_row)
-        p = extract_product(asn, cn)
-        product_count[p] += 1
-print(f"✅ 날짜탭 구성 완료: {len(new_date_names)}개")
-print(f"📦 제품별: {dict(product_count)}")
-print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)" if debug_total_rows > 0 else "")
-print(f"   매칭 매출: ₩{int(debug_matched_revenue):,}\n")
+        date_tab_rows[dk].append(tab_row); p = extract_product(asn, cn); product_count[p] += 1
+print(f"✅ 날짜탭: {len(new_date_names)}개 | 📦 제품별: {dict(product_count)}")
+if debug_total_rows > 0: print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%) | 매출: ₩{int(debug_matched_revenue):,}")
+print()
 
 # 6단계: 분석탭 삭제
 print("="*60); print("6단계: 분석탭만 삭제"); print("="*60)
-# ★ v28: 추이차트_상품별 추가
 ANALYSIS_TAB_NAMES = ["마스터탭", "추이차트", "추이차트_상품별", "증감액", "추이차트(주간)", "주간종합", "주간종합_2", "주간종합_3", "예산", "_temp", "_temp_holder"]
 for sn in ANALYSIS_TAB_NAMES:
     try:
@@ -1545,20 +1244,15 @@ print("\n"+"="*60); print("7단계: 기존 탭 업데이트 + 새 탭 생성"); 
 print("\n--- 7-A: 기존 날짜탭 업데이트 ---")
 for dk in sorted(existing_refresh_tabs.keys()):
     ws_ex = existing_refresh_tabs[dk]; mp_data = date_mp_by_adsetid.get(dk, {}); new_rows_for_date = date_tab_rows.get(dk, [])
-    print(f"\n  📝 {dk} (기존 탭) 업데이트 중...")
+    print(f"\n  📝 {dk} 업데이트 중...")
     try:
         ws_ex = refresh_ws(sh, ws_ex); all_values = with_retry(ws_ex.get_all_values); time.sleep(0.5)
-        if not all_values or len(all_values) < 2: print(f"    ⚠️ 빈 탭, 건너뜀"); continue
-        structure = detect_tab_structure(all_values[0]); print(f"    구조 감지: {'구 구조(25열)' if structure=='old' else '신 구조(23열)'}")
-        sid_ex = ws_ex.id
+        if not all_values or len(all_values) < 2: continue
+        structure = detect_tab_structure(all_values[0]); sid_ex = ws_ex.id
         total_rows_for_clear = max(len(all_values) + 50, 200); fmt_clear_start_col = get_col_index(structure, 3)
-        try:
-            with_retry(sh.batch_update, body={"requests": [
-                {"unmergeCells": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": 0, "endColumnIndex": 30}}},
-                {"repeatCell": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": fmt_clear_start_col, "endColumnIndex": 30}, "cell": {"userEnteredFormat": {}}, "fields": "userEnteredFormat.numberFormat"}}
-            ]}); print(f"    🔓 병합 해제 + numberFormat 초기화"); time.sleep(1)
-        except Exception as e: print(f"    ⚠️ 서식 초기화: {e}")
-        actual_asid_col = get_col_index(structure, 2); actual_memo_col = get_col_index(structure, 22)
+        try: with_retry(sh.batch_update, body={"requests": [{"unmergeCells": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": 0, "endColumnIndex": 30}}}, {"repeatCell": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": fmt_clear_start_col, "endColumnIndex": 30}, "cell": {"userEnteredFormat": {}}, "fields": "userEnteredFormat.numberFormat"}}]}); time.sleep(1)
+        except: pass
+        actual_asid_col = get_col_index(structure, 2)
         adset_id_row_map = {}; last_data_sheet_row = 1
         for i, row in enumerate(all_values[1:], start=2):
             if not row: continue
@@ -1567,8 +1261,7 @@ for dk in sorted(existing_refresh_tabs.keys()):
             if not cn and not asid: continue
             if asid: adset_id_row_map[asid] = i - 1
             last_data_sheet_row = i
-        data_end_idx = last_data_sheet_row; print(f"    기존 광고 세트: {len(adset_id_row_map)}개, 마지막 데이터 행: {data_end_idx}")
-        batch_updates = []; updated_count = 0; new_row_by_asid = {}
+        data_end_idx = last_data_sheet_row; batch_updates = []; updated_count = 0; new_row_by_asid = {}
         for tab_row in new_rows_for_date:
             asid_check = str(tab_row[2]).strip() if len(tab_row) > 2 else ""
             if asid_check: new_row_by_asid[asid_check] = tab_row
@@ -1597,66 +1290,50 @@ for dk in sorted(existing_refresh_tabs.keys()):
             else:
                 old_row = list(new_tab_row[:3]) + ["", ""] + list(new_tab_row[3:19])
                 while len(old_row) < data_col_count: old_row.append("")
-                old_row = old_row[:data_col_count]
-                batch_updates.append({'range': f'A{row_num}:{update_end_col_letter}{row_num}', 'values': [old_row]})
+                batch_updates.append({'range': f'A{row_num}:{update_end_col_letter}{row_num}', 'values': [old_row[:data_col_count]]})
             updated_count += 1
         if batch_updates:
-            for i in range(0, len(batch_updates), 100):
-                with_retry(ws_ex.batch_update, batch_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
-            print(f"    ✅ {updated_count}개 광고 세트 업데이트 완료")
-        else: print(f"    ℹ️ 업데이트할 데이터 없음")
+            for i in range(0, len(batch_updates), 100): with_retry(ws_ex.batch_update, batch_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
+            print(f"    ✅ {updated_count}개 업데이트")
+        # 예산 업데이트
         budget_updates = []; actual_budget_col = get_col_index(structure, 19); budget_col_letter = get_col_letter(actual_budget_col)
         for asid, row_idx in adset_id_row_map.items():
             if asid in adset_budget_map and adset_budget_map[asid] > 0:
-                acc = ADSET_TO_ACCOUNT.get(asid, '')
-                fx = get_fx_for_account(acc, dk)
-                div = get_budget_divisor(acc)
-                row_num = row_idx + 1; budget_krw = round(adset_budget_map[asid] / div * fx)
-                budget_updates.append({'range': f'{budget_col_letter}{row_num}', 'values': [[budget_krw]]})
+                acc = ADSET_TO_ACCOUNT.get(asid, ''); fx = get_fx_for_account(acc, dk); div = get_budget_divisor(acc)
+                budget_updates.append({'range': f'{budget_col_letter}{row_idx+1}', 'values': [[round(adset_budget_map[asid] / div * fx)]]})
         if budget_updates:
-            for i in range(0, len(budget_updates), 100):
-                with_retry(ws_ex.batch_update, budget_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
-            print(f"    💰 기존 예산 업데이트: {len(budget_updates)}개 세트")
+            for i in range(0, len(budget_updates), 100): with_retry(ws_ex.batch_update, budget_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
+        # 신규 행 추가
         existing_asids = set(adset_id_row_map.keys()); new_rows_to_add = []
         for tab_row in new_rows_for_date:
             asid_check = str(tab_row[2]).strip() if len(tab_row) > 2 else ""
             if asid_check and asid_check not in existing_asids:
                 if structure == "old":
                     old_row = list(tab_row[:3]) + ["", ""] + list(tab_row[3:])
-                    while len(old_row) < 25: old_row.append("")
-                    new_rows_to_add.append(old_row[:25])
+                    while len(old_row) < 25: old_row.append(""); new_rows_to_add.append(old_row[:25])
                 else: new_rows_to_add.append(tab_row)
         if new_rows_to_add:
             actual_profit_col = get_col_index(structure, 16)
             new_rows_to_add.sort(key=lambda r: _to_num(r[actual_profit_col]) if len(r) > actual_profit_col else 0, reverse=True)
-            append_row = data_end_idx + 1
-            with_retry(ws_ex.update, values=new_rows_to_add, range_name=f"A{append_row}", value_input_option="USER_ENTERED")
-            print(f"    ✅ {len(new_rows_to_add)}개 신규 광고 세트 행 추가"); time.sleep(1); data_end_idx += len(new_rows_to_add)
-        print(f"    🔍 요약표 위치 재계산 중...")
+            with_retry(ws_ex.update, values=new_rows_to_add, range_name=f"A{data_end_idx+1}", value_input_option="USER_ENTERED")
+            print(f"    ✅ {len(new_rows_to_add)}개 신규 행 추가"); time.sleep(1); data_end_idx += len(new_rows_to_add)
+        # 요약표 재생성
         all_values = with_retry(ws_ex.get_all_values); time.sleep(0.5); structure = detect_tab_structure(all_values[0])
         last_data_row, data_rows_for_summary = find_last_data_row(all_values, structure)
-        summary_start_row = last_data_row + 1; print(f"    📍 마지막 데이터: 행 {last_data_row} → 요약표 시작: 행 {summary_start_row}")
+        summary_start_row = last_data_row + 1
         NUM_COLS_FILTER = len(DATE_TAB_HEADERS) if structure == "new" else len(OLD_DATE_TAB_HEADERS)
         try:
             try: with_retry(sh.batch_update, body={"requests": [{"clearBasicFilter": {"sheetId": ws_ex.id}}]})
             except: pass
-            with_retry(sh.batch_update, body={"requests": [{"setBasicFilter": {"filter": {"range": {"sheetId": ws_ex.id, "startRowIndex": 0, "endRowIndex": last_data_row, "startColumnIndex": 0, "endColumnIndex": NUM_COLS_FILTER}}}}]})
-            print(f"    🔽 필터 설정: 행 1~{last_data_row}"); time.sleep(0.5)
-        except Exception as e: print(f"    ⚠️ 필터 설정 오류: {e}")
+            with_retry(sh.batch_update, body={"requests": [{"setBasicFilter": {"filter": {"range": {"sheetId": ws_ex.id, "startRowIndex": 0, "endRowIndex": last_data_row, "startColumnIndex": 0, "endColumnIndex": NUM_COLS_FILTER}}}}]}); time.sleep(0.5)
+        except: pass
         summary_rows, num_products = generate_date_tab_summary(data_rows_for_summary, structure=structure)
-
-        # ★ v27: 상품별 분류 테이블 생성
         breakdown_rows, product_meta = generate_product_breakdown(data_rows_for_summary, structure=structure)
-        print(f"    📦 상품별 분류: {len(product_meta)}개 상품")
-
-        # 요약 + 상품별 분류 합쳐서 필요 행 수 계산
-        total_extra_rows = len(summary_rows) + len(breakdown_rows)
-        needed_rows = summary_start_row + total_extra_rows + 10
-        total_sheet_rows = len(all_values)
-        if needed_rows > total_sheet_rows:
-            try: with_retry(ws_ex.resize, rows=needed_rows); print(f"    📐 시트 확장: {total_sheet_rows}행 → {needed_rows}행"); time.sleep(0.5)
-            except Exception as e: print(f"    ⚠️ 시트 확장 오류: {e}")
-        clear_end_row = max(total_sheet_rows + 50, needed_rows)
+        total_extra_rows = len(summary_rows) + len(breakdown_rows); needed_rows = summary_start_row + total_extra_rows + 10
+        if needed_rows > len(all_values):
+            try: with_retry(ws_ex.resize, rows=needed_rows); time.sleep(0.5)
+            except: pass
+        clear_end_row = max(len(all_values) + 50, needed_rows)
         try:
             ws_ex = refresh_ws(sh, ws_ex); clear_summary_conditional_formats(sh, ws_ex, summary_start_row - 1)
             with_retry(sh.batch_update, body={"requests": [
@@ -1665,33 +1342,22 @@ for dk in sorted(existing_refresh_tabs.keys()):
                 {"updateBorders": {"range": {"sheetId": ws_ex.id, "startRowIndex": summary_start_row - 1, "endRowIndex": clear_end_row, "startColumnIndex": 0, "endColumnIndex": 30}, "top": {"style": "NONE"}, "bottom": {"style": "NONE"}, "left": {"style": "NONE"}, "right": {"style": "NONE"}, "innerHorizontal": {"style": "NONE"}, "innerVertical": {"style": "NONE"}}}
             ]}); time.sleep(0.5)
         except: pass
-        print(f"    🧹 행 {summary_start_row}~{clear_end_row} 완전 초기화")
-
-        # 요약표 + 상품별 분류 한번에 쓰기
         combined_extra = summary_rows + breakdown_rows
         with_retry(ws_ex.update, values=combined_extra, range_name=f"A{summary_start_row}", value_input_option="USER_ENTERED"); time.sleep(1)
-
-        # 요약표 서식
         try:
             fmt_reqs = format_date_tab_summary(sh, ws_ex, summary_start_row, len(summary_rows), num_products=num_products)
             if fmt_reqs:
                 for i in range(0, len(fmt_reqs), 50): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+50]}); time.sleep(1)
-        except Exception as e: print(f"    ⚠️ 요약표 서식 오류: {e}")
-
-        # ★ v27: 상품별 분류 서식
+        except: pass
         if product_meta:
             breakdown_start_sheet_row = summary_start_row + len(summary_rows)
             try:
                 bd_fmt = format_product_breakdown(sh, ws_ex, breakdown_start_sheet_row, product_meta)
                 if bd_fmt:
-                    for i in range(0, len(bd_fmt), 50):
-                        with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+50]}); time.sleep(1)
-                print(f"    ✅ 상품별 분류 서식 완료")
-            except Exception as e: print(f"    ⚠️ 상품별 분류 서식 오류: {e}")
-
-        print(f"    ✅ 요약표 + 상품별 분류 재생성 완료 (행 {summary_start_row}부터, 활성 상품 {num_products}개)")
-    except Exception as e: print(f"    ⚠️ {dk} 업데이트 오류: {e}")
-print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 탭 업데이트 완료")
+                    for i in range(0, len(bd_fmt), 50): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+50]}); time.sleep(1)
+            except: pass
+        print(f"    ✅ 요약+상품분류 완료 ({num_products}개 상품)")
+    except Exception as e: print(f"    ⚠️ {dk} 오류: {e}")
 
 # 7-B: 새 날짜탭 생성
 print(f"\n--- 7-B: 새 날짜탭 생성 ({len(new_refresh_dates)}개) ---")
@@ -1699,23 +1365,16 @@ for dk in sorted(new_refresh_dates):
     rows = date_tab_rows.get(dk, [])
     if not rows: continue
     rows.sort(key=lambda r: _to_num(r[16]) if len(r) > 16 else 0, reverse=True)
-    print(f"  📅 {dk} ({len(rows)}개 광고 세트) - 새로 생성")
+    print(f"  📅 {dk} ({len(rows)}개) - 새로 생성")
     summary_rows, num_products = generate_date_tab_summary(rows, structure="new")
-
-    # ★ v27: 상품별 분류 테이블 생성
     breakdown_rows, product_meta = generate_product_breakdown(rows, structure="new")
-    print(f"    📦 상품별 분류: {len(product_meta)}개 상품")
-
     try:
-        total_rows = len(rows) + len(summary_rows) + len(breakdown_rows) + 5  # ★ v27: breakdown 행 추가
+        total_rows = len(rows) + len(summary_rows) + len(breakdown_rows) + 5
         NUM_COLS = len(DATE_TAB_HEADERS)
         ws_d = safe_add_worksheet(sh, dk, rows=total_rows, cols=NUM_COLS + 2); time.sleep(1)
         sid_d = ws_d.id; data_end = len(rows) + 1
-
-        # ★ v27: 요약 + 상품별 분류 합쳐서 쓰기
         all_data = [DATE_TAB_HEADERS] + rows + summary_rows + breakdown_rows
         with_retry(ws_d.update, values=all_data, range_name="A1", value_input_option="USER_ENTERED")
-
         fmt_all = []
         fmt_all.append(create_format_request(sid_d, 0, 1, 0, 3, {"textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
         fmt_all.append(create_format_request(sid_d, 0, 1, 3, 14, {"backgroundColor": {"red": 0.937, "green": 0.937, "blue": 0.937}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
@@ -1724,77 +1383,56 @@ for dk in sorted(new_refresh_dates):
         fmt_all.append(create_format_request(sid_d, 0, 1, 20, 21, {"backgroundColor": {"red": 0.706, "green": 0.655, "blue": 0.839}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
         fmt_all.append(create_format_request(sid_d, 0, 1, 21, 22, {"backgroundColor": {"red": 0.6, "green": 0, "blue": 1}, "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}, "wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
         fmt_all.append(create_format_request(sid_d, 0, 1, 22, 23, {"backgroundColor": {"red": 1, "green": 0.6, "blue": 0}, "textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 14, 15, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 15, 16, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 16, 17, "NUMBER", "#,##0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 17, 18, "NUMBER", "#,##0.0"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 18, 19, "NUMBER", "#,##0.00"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 19, 20, "NUMBER", "#,##0"))
+        for sc, ec, p in [(14,15,"#,##0"),(15,16,"#,##0"),(16,17,"#,##0"),(17,18,"#,##0.0"),(18,19,"#,##0.00"),(19,20,"#,##0")]:
+            fmt_all.append(create_number_format_request(sid_d, 1, data_end, sc, ec, "NUMBER", p))
         fmt_all.append(create_number_format_request(sid_d, 0, 1, 20, 21, "NUMBER", "0%"))
         fmt_all.append(create_number_format_request(sid_d, 1, data_end, 20, 21, "NUMBER", "0%"))
-        fmt_all.append(create_number_format_request(sid_d, 1, data_end, 21, 22, "NUMBER", "0.0"))
-        col_widths = [(0, 210), (1, 207), (2, 130)]
-        for ci, w in col_widths: fmt_all.append({"updateDimensionProperties": {"range": {"sheetId": sid_d, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": w}, "fields": "pixelSize"}})
+        for ci, w in [(0, 210), (1, 207), (2, 130)]: fmt_all.append({"updateDimensionProperties": {"range": {"sheetId": sid_d, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": w}, "fields": "pixelSize"}})
         fmt_all.append({"setBasicFilter": {"filter": {"range": {"sheetId": sid_d, "startRowIndex": 0, "endRowIndex": data_end, "startColumnIndex": 0, "endColumnIndex": NUM_COLS}}}})
         fmt_all.append({"updateSheetProperties": {"properties": {"sheetId": sid_d, "gridProperties": {"frozenRowCount": 1, "frozenColumnCount": 3}}, "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount"}})
-        profit_cond = [("NUMBER_GREATER", "0", {"red": 1, "green": 0.949, "blue": 0.8}, None), ("NUMBER_GREATER", "50000", {"red": 1, "green": 0.898, "blue": 0.6}, None), ("NUMBER_GREATER", "100000", {"red": 0.576, "green": 0.769, "blue": 0.49}, None), ("NUMBER_GREATER", "200000", {"red": 0, "green": 1, "blue": 0}, None), ("NUMBER_GREATER", "300000", {"red": 0, "green": 1, "blue": 1}, None), ("NUMBER_LESS", "-10000", {"red": 0.957, "green": 0.8, "blue": 0.8}, None), ("NUMBER_LESS", "-50000", {"red": 0.878, "green": 0.4, "blue": 0.4}, {"red": 0, "green": 0, "blue": 0})]
+        profit_cond = [("NUMBER_GREATER","0",{"red":1,"green":0.949,"blue":0.8},None),("NUMBER_GREATER","50000",{"red":1,"green":0.898,"blue":0.6},None),("NUMBER_GREATER","100000",{"red":0.576,"green":0.769,"blue":0.49},None),("NUMBER_GREATER","200000",{"red":0,"green":1,"blue":0},None),("NUMBER_GREATER","300000",{"red":0,"green":1,"blue":1},None),("NUMBER_LESS","-10000",{"red":0.957,"green":0.8,"blue":0.8},None),("NUMBER_LESS","-50000",{"red":0.878,"green":0.4,"blue":0.4},{"red":0,"green":0,"blue":0})]
         for ctype, val, bg, fc in profit_cond:
             rule_fmt = {"backgroundColor": bg}
             if fc: rule_fmt["textFormat"] = {"foregroundColor": fc}
             fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 16, "endColumnIndex": 17}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": rule_fmt}}, "index": 0}})
-        fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 16, "endColumnIndex": 17}], "gradientRule": {"minpoint": {"color": {"red": 0.902, "green": 0.486, "blue": 0.451}, "type": "MIN"}, "midpoint": {"color": {"red": 1, "green": 1, "blue": 1}, "type": "NUMBER", "value": "0"}, "maxpoint": {"color": {"red": 0.341, "green": 0.733, "blue": 0.541}, "type": "MAX"}}}, "index": 0}})
-        roas_cond = [("NUMBER_LESS", "100", {"red": 0.878, "green": 0.4, "blue": 0.4}), ("NUMBER_GREATER_THAN_EQ", "100", {"red": 1, "green": 0.851, "blue": 0.4}), ("NUMBER_GREATER_THAN_EQ", "200", {"red": 0.576, "green": 0.769, "blue": 0.49}), ("NUMBER_GREATER_THAN_EQ", "300", {"red": 0, "green": 1, "blue": 1})]
-        for ctype, val, bg in roas_cond: fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 17, "endColumnIndex": 18}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": {"backgroundColor": bg}}}, "index": 0}})
-        fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 18, "endColumnIndex": 19}], "gradientRule": {"minpoint": {"color": {"red": 1, "green": 1, "blue": 1}, "type": "MIN"}, "maxpoint": {"color": {"red": 0.341, "green": 0.733, "blue": 0.541}, "type": "MAX"}}}, "index": 0}})
+        roas_cond = [("NUMBER_LESS","100",{"red":0.878,"green":0.4,"blue":0.4}),("NUMBER_GREATER_THAN_EQ","100",{"red":1,"green":0.851,"blue":0.4}),("NUMBER_GREATER_THAN_EQ","200",{"red":0.576,"green":0.769,"blue":0.49}),("NUMBER_GREATER_THAN_EQ","300",{"red":0,"green":1,"blue":1})]
+        for ctype, val, bg in roas_cond:
+            fmt_all.append({"addConditionalFormatRule": {"rule": {"ranges": [{"sheetId": sid_d, "startRowIndex": 1, "endRowIndex": data_end, "startColumnIndex": 17, "endColumnIndex": 18}], "booleanRule": {"condition": {"type": ctype, "values": [{"userEnteredValue": val}]}, "format": {"backgroundColor": bg}}}, "index": 0}})
         try: with_retry(sh.batch_update, body={"requests": fmt_all}); time.sleep(2)
-        except Exception as e: print(f"    ⚠️ 서식 오류: {e}")
-
-        # 요약표 서식
+        except: pass
         try:
-            summary_start_for_new = len(rows) + 2
-            fmt_reqs = format_date_tab_summary(sh, ws_d, summary_start_for_new, len(summary_rows), num_products=num_products)
+            fmt_reqs = format_date_tab_summary(sh, ws_d, len(rows) + 2, len(summary_rows), num_products=num_products)
             if fmt_reqs:
                 for i in range(0, len(fmt_reqs), 50): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+50]}); time.sleep(1)
-        except Exception as e: print(f"    ⚠️ 요약표 서식 오류: {e}")
-
-        # ★ v27: 상품별 분류 서식
+        except: pass
         if product_meta:
-            breakdown_start_for_new = len(rows) + 1 + len(summary_rows) + 1  # header row(1) + data rows + summary rows + 1
             try:
-                bd_fmt = format_product_breakdown(sh, ws_d, breakdown_start_for_new, product_meta)
+                bd_fmt = format_product_breakdown(sh, ws_d, len(rows) + 1 + len(summary_rows) + 1, product_meta)
                 if bd_fmt:
-                    for i in range(0, len(bd_fmt), 50):
-                        with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+50]}); time.sleep(1)
-                print(f"    ✅ 상품별 분류 서식 완료")
-            except Exception as e: print(f"    ⚠️ 상품별 분류 서식 오류: {e}")
-
+                    for i in range(0, len(bd_fmt), 50): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+50]}); time.sleep(1)
+            except: pass
         time.sleep(1)
     except Exception as e: print(f"  ⚠️ {dk} 생성 오류: {e}")
-print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 업데이트 + 새 {len(new_refresh_dates)}개 생성 완료"); time.sleep(3)
+print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 + 새 {len(new_refresh_dates)}개 완료"); time.sleep(3)
 
 # 7.5: 탭 순서
-print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리"); print("="*60)
+print("\n"+"="*60); print("7.5단계: 탭 순서 정리"); print("="*60)
 reorder_tabs(sh)
 
-# 8.5: 전체 날짜탭 읽기 (병렬)
+# 8.5: 전체 날짜탭 읽기
 ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map, mp_count_map=mp_count_map)
-
-# 진단
 failed_tabs = diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET, all_ws=cached_ws)
-if failed_tabs:
-    print(f"\n  🔧 파싱 실패 탭 {len(failed_tabs)}개를 수동 확인하세요:")
-    print(f"     탭 이름에 공백, 특수문자, 또는 다른 형식이 있을 수 있습니다")
 
-print("\n⏳ 8.5→9단계 전환: Rate Limit 쿨다운 60초 대기..."); time.sleep(60)
-master_headers = ["Date"] + DATE_TAB_HEADERS; latest_date = date_names[-1] if date_names else ""
+print("\n⏳ 60초 대기..."); time.sleep(60)
+master_headers = ["Date"] + DATE_TAB_HEADERS
 all_products_in_budget = set()
 for dk in date_names:
     for p in budget_by_date[dk]:
         if budget_by_date[dk][p]['spend'] > 0 or budget_by_date[dk][p]['revenue'] > 0: all_products_in_budget.add(p)
-product_order = sorted([p for p in all_products_in_budget if p in PRODUCT_KEYWORDS], key=lambda p: sum(budget_by_date[dk][p]['spend'] for dk in date_names), reverse=True)
-print(f"\n📦 제품 순서: {product_order}")
+# ★ v29b: PRODUCT_KEYWORDS 필터 제거 → 모든 감지 상품 사용
+product_order = sorted(list(all_products_in_budget), key=lambda p: sum(budget_by_date[dk][p]['spend'] for dk in date_names), reverse=True)
+print(f"\n📦 제품 순서 (전체): {product_order}")
 chart_dn = list(reversed(date_names)); chart_sd = chart_dn[:7]
-print(f"📊 추이차트: 전체 {len(chart_dn)}개 날짜 사용")
 
 # 5.5: 주간 집계
 print("\n5.5단계: 주간 집계")
@@ -1808,28 +1446,24 @@ adset_weekly = defaultdict(lambda: {'campaign_name': '', 'adset_name': '', 'adse
 for asid, d in ad_sets.items():
     adset_weekly[asid]['campaign_name'] = d['campaign_name']; adset_weekly[asid]['adset_name'] = d['adset_name']; adset_weekly[asid]['adset_id'] = d['adset_id']
     for wk in week_keys:
-        wp, wr_v, ws_v = 0, 0, 0; wcs, wcc = 0, 0; wvs, wvc = 0, 0
+        wp, wr_v, ws_v = 0, 0, 0; wvs, wvc = 0, 0
         for dn in week_groups[wk]:
             if dn in d['dates']:
                 wp += d['dates'][dn]['profit']; wr_v += d['dates'][dn]['revenue']; ws_v += d['dates'][dn]['spend']
-                cv = d['dates'][dn].get('cpm', 0)
-                if cv > 0: wcs += cv; wcc += 1
                 vv = d['dates'][dn].get('cvr', 0)
                 if vv > 0: wvs += vv; wvc += 1
-        if ws_v > 0 or wr_v > 0: adset_weekly[asid]['weeks'][wk] = {'profit': wp, 'revenue': wr_v, 'spend': ws_v, 'cpm': (wcs / wcc) if wcc > 0 else 0, 'cvr': (wvs / wvc) if wvc > 0 else 0}
+        if ws_v > 0 or wr_v > 0: adset_weekly[asid]['weeks'][wk] = {'profit': wp, 'revenue': wr_v, 'spend': ws_v, 'cvr': (wvs / wvc) if wvc > 0 else 0}
 sorted_list = []
 for asid, d in ad_sets.items():
     sorted_list.append({'campaign_name': d['campaign_name'], 'adset_name': d['adset_name'], 'adset_id': d['adset_id'], 'data': d})
 
+# ★ v29: 정렬 — 전날(chart_dn[1])부터 지출 내림차순
 def _multi_spend_key(item):
-    return tuple(item['data']['dates'].get(d, {}).get('spend', 0) for d in chart_dn)
-
+    return tuple(item['data']['dates'].get(d, {}).get('spend', 0) for d in chart_dn[1:])
 sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk = list(reversed(week_keys))
 
-# =========================================================
 # 9단계: 마스터탭
-# =========================================================
-print("\n9단계: 마스터탭 생성")
+print("\n9단계: 마스터탭")
 ws_m = safe_add_worksheet(sh, "마스터탭", rows=max(2000, len(master_raw_data) + 100), cols=len(master_headers) + 5); time.sleep(3)
 move_ws_to_front(sh, ws_m)
 master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
@@ -1842,309 +1476,214 @@ try:
     with_retry(ws_m.format, 'A1:T1', {'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}, 'textFormat': {'bold': True}})
     with_retry(sh.batch_update, body={"requests": [{"updateSheetProperties": {"properties": {"sheetId": ws_m.id, "gridProperties": {"frozenRowCount": 1}}, "fields": "gridProperties.frozenRowCount"}}]})
 except: pass
-print(f"✅ 마스터탭 완료 ({len(master_raw_data)}행)"); time.sleep(2)
+print(f"✅ 마스터탭 ({len(master_raw_data)}행)"); time.sleep(2)
 
-# =========================================================
 # 10단계: 추이차트
-# =========================================================
-print("\n10단계: 추이차트 (전체 날짜탭)")
+print("\n10단계: 추이차트")
 ws_t = safe_add_worksheet(sh, "추이차트", rows=1000, cols=len(chart_dn) + 10); time.sleep(3)
 move_ws_to_front(sh, ws_t)
 dhw = []; sci = []
 for i, n in enumerate(chart_dn): do = date_objects[n]; wd = WEEKDAY_NAMES[do.weekday()]; dhw.append(f"{n}({wd})"); (sci.append(4 + i) if do.weekday() == 6 else None)
 hdr_t = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dhw
-sr = ["종합", "", ""]; tp, tr, ts = 0, 0, 0; tcs, tcc = 0, 0; tvs, tvc = 0, 0
+sr = ["종합", "", ""]; tp, tr, ts = 0, 0, 0; tvs, tvc = 0, 0
 for d in chart_sd:
     for it in sorted_list:
         if d in it['data']['dates']:
             tp += it['data']['dates'][d]['profit']; tr += it['data']['dates'][d]['revenue']; ts += it['data']['dates'][d]['spend']
-            cv = it['data']['dates'][d].get('cpm', 0)
-            if cv > 0: tcs += cv; tcc += 1
             vv = it['data']['dates'][d].get('cvr', 0)
             if vv > 0: tvs += vv; tvc += 1
-sr.append(cell_text(tp, tr, ts, (tcs / tcc) if tcc > 0 else 0, (tvs / tvc) if tvc > 0 else 0))
+sr.append(cell_text(tp, tr, ts, 0, (tvs / tvc) if tvc > 0 else 0))
 for d in chart_dn:
-    dp, dr, ds_v = 0, 0, 0; dcs, dcc = 0, 0; dvs, dvc = 0, 0
+    dp, dr, ds_v = 0, 0, 0; dvs, dvc = 0, 0
     for it in sorted_list:
         if d in it['data']['dates']:
             dp += it['data']['dates'][d]['profit']; dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
-            cv = it['data']['dates'][d].get('cpm', 0)
-            if cv > 0: dcs += cv; dcc += 1
             vv = it['data']['dates'][d].get('cvr', 0)
             if vv > 0: dvs += vv; dvc += 1
-    sr.append(cell_text(dp, dr, ds_v, (dcs / dcc) if dcc > 0 else 0, (dvs / dvc) if dvc > 0 else 0))
+    sr.append(cell_text(dp, dr, ds_v, 0, (dvs / dvc) if dvc > 0 else 0))
 rt = []
 for it in sorted_list:
-    r = [it['campaign_name'], it['adset_name'], it['adset_id']]; tp, tr, ts = 0, 0, 0; tcs, tcc = 0, 0; tvs, tvc = 0, 0
+    r = [it['campaign_name'], it['adset_name'], it['adset_id']]; tp, tr, ts = 0, 0, 0; tvs, tvc = 0, 0
     for d in chart_sd:
         if d in it['data']['dates']:
             tp += it['data']['dates'][d]['profit']; tr += it['data']['dates'][d]['revenue']; ts += it['data']['dates'][d]['spend']
-            cv = it['data']['dates'][d].get('cpm', 0)
-            if cv > 0: tcs += cv; tcc += 1
             vv = it['data']['dates'][d].get('cvr', 0)
             if vv > 0: tvs += vv; tvc += 1
-    r.append(cell_text(tp, tr, ts, (tcs / tcc) if tcc > 0 else 0, (tvs / tvc) if tvc > 0 else 0))
+    r.append(cell_text(tp, tr, ts, 0, (tvs / tvc) if tvc > 0 else 0))
     for d in chart_dn:
-        if d in it['data']['dates']: dt = it['data']['dates'][d]; r.append(cell_text(dt['profit'], dt['revenue'], dt['spend'], dt.get('cpm', 0), dt.get('cvr', 0)))
+        if d in it['data']['dates']:
+            dt = it['data']['dates'][d]; r.append(cell_text(dt['profit'], dt['revenue'], dt['spend'], 0, dt.get('cvr', 0)))
         else: r.append('')
     rt.append(r)
 with_retry(ws_t.update, values=[hdr_t] + [sr] + rt, range_name="A1", value_input_option="USER_ENTERED")
-print(f"✅ 추이차트 데이터 완료 (전체 {len(chart_dn)}일)"); time.sleep(3)
+print(f"✅ 추이차트 ({len(chart_dn)}일)"); time.sleep(3)
 ws_t = refresh_ws(sh, ws_t); apply_trend_chart_formatting(sh, ws_t, hdr_t, len(rt), sunday_col_indices=sci)
 try: ws_t = refresh_ws(sh, ws_t); apply_c2_label_formatting(sh, ws_t)
-except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
+except: pass
 print("⏳ 30초 대기..."); time.sleep(30)
 
-# =========================================================
-# ★ v28: 10.5단계 - 추이차트_상품별
-# =========================================================
-print("\n10.5단계: 추이차트_상품별 (상품별 그룹핑)")
-
-# 상품별로 광고 세트 그룹핑
+# 10.5단계: 추이차트_상품별
+print("\n10.5단계: 추이차트_상품별")
 _product_groups_chart = defaultdict(list)
-for it in sorted_list:
-    p = extract_product(it['adset_name'], it['campaign_name'])
-    _product_groups_chart[p].append(it)
-
-# 상품별 7일 평균 매출 계산 → 정렬
+for it in sorted_list: p = extract_product(it['adset_name'], it['campaign_name']); _product_groups_chart[p].append(it)
 _product_7d_revenue = {}
 for p, items in _product_groups_chart.items():
     total_rev = 0
     for it in items:
         for d in chart_sd:
-            if d in it['data']['dates']:
-                total_rev += it['data']['dates'][d]['revenue']
+            if d in it['data']['dates']: total_rev += it['data']['dates'][d]['revenue']
     _product_7d_revenue[p] = total_rev
-
-_sorted_products_chart = sorted(
-    _product_groups_chart.keys(),
-    key=lambda p: _product_7d_revenue.get(p, 0),
-    reverse=True
-)
-
-# 세트 내 정렬: 가장 최근 날짜의 하루 전날(chart_dn[1]) 매출 기준
+_sorted_products_chart = sorted(_product_groups_chart.keys(), key=lambda p: _product_7d_revenue.get(p, 0), reverse=True)
 _second_recent = chart_dn[1] if len(chart_dn) >= 2 else (chart_dn[0] if chart_dn else None)
 for p in _sorted_products_chart:
-    _product_groups_chart[p].sort(
-        key=lambda it: it['data']['dates'].get(_second_recent, {}).get('revenue', 0) if _second_recent else 0,
-        reverse=True
-    )
-
-# 헤더 (추이차트와 동일)
+    _product_groups_chart[p].sort(key=lambda it: it['data']['dates'].get(_second_recent, {}).get('spend', 0) if _second_recent else 0, reverse=True)
 hdr_tp = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dhw
-
-# 행 구성
-rows_tp = []
-_product_header_indices = []  # (row_index_in_rows_tp, product_name) for formatting
-
+rows_tp = []; _product_header_indices = []
 for p_idx, p in enumerate(_sorted_products_chart):
-    items = _product_groups_chart[p]
-    p_7d_rev = _product_7d_revenue.get(p, 0)
-
-    # 상품명 헤더 행
+    items = _product_groups_chart[p]; p_7d_rev = _product_7d_revenue.get(p, 0)
     _product_header_indices.append(len(rows_tp))
-    product_label = f"📦 {p}  |  7일 매출 {money(p_7d_rev)}  |  {len(items)}개 세트"
-    product_header_row = [product_label] + [""] * (len(hdr_tp) - 1)
-    rows_tp.append(product_header_row)
-
-    # 상품 종합 행
-    psr = [f"{p} 종합", "", ""]
-    _tp, _tr, _ts = 0, 0, 0; _tcs, _tcc = 0, 0; _tvs, _tvc = 0, 0
+    rows_tp.append([f"📦 {p}  |  7일 매출 {money(p_7d_rev)}  |  {len(items)}개 세트"] + [""] * (len(hdr_tp) - 1))
+    psr = [f"{p} 종합", "", ""]; _tp, _tr, _ts = 0, 0, 0; _tvs, _tvc = 0, 0
     for d in chart_sd:
         for it in items:
             if d in it['data']['dates']:
                 _tp += it['data']['dates'][d]['profit']; _tr += it['data']['dates'][d]['revenue']; _ts += it['data']['dates'][d]['spend']
-                cv = it['data']['dates'][d].get('cpm', 0)
-                if cv > 0: _tcs += cv; _tcc += 1
                 vv = it['data']['dates'][d].get('cvr', 0)
                 if vv > 0: _tvs += vv; _tvc += 1
-    psr.append(cell_text(_tp, _tr, _ts, (_tcs / _tcc) if _tcc > 0 else 0, (_tvs / _tvc) if _tvc > 0 else 0))
+    psr.append(cell_text(_tp, _tr, _ts, 0, (_tvs / _tvc) if _tvc > 0 else 0))
     for d in chart_dn:
-        dp, dr, ds_v = 0, 0, 0; dcs, dcc = 0, 0; dvs, dvc = 0, 0
+        dp, dr, ds_v = 0, 0, 0; dvs, dvc = 0, 0
         for it in items:
             if d in it['data']['dates']:
                 dp += it['data']['dates'][d]['profit']; dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
-                cv = it['data']['dates'][d].get('cpm', 0)
-                if cv > 0: dcs += cv; dcc += 1
                 vv = it['data']['dates'][d].get('cvr', 0)
                 if vv > 0: dvs += vv; dvc += 1
-        psr.append(cell_text(dp, dr, ds_v, (dcs / dcc) if dcc > 0 else 0, (dvs / dvc) if dvc > 0 else 0))
+        psr.append(cell_text(dp, dr, ds_v, 0, (dvs / dvc) if dvc > 0 else 0))
     rows_tp.append(psr)
-
-    # 개별 세트 행
     for it in items:
-        r = [it['campaign_name'], it['adset_name'], it['adset_id']]
-        _tp2, _tr2, _ts2 = 0, 0, 0; _tcs2, _tcc2 = 0, 0; _tvs2, _tvc2 = 0, 0
+        r = [it['campaign_name'], it['adset_name'], it['adset_id']]; _tp2, _tr2, _ts2 = 0, 0, 0; _tvs2, _tvc2 = 0, 0
         for d in chart_sd:
             if d in it['data']['dates']:
                 _tp2 += it['data']['dates'][d]['profit']; _tr2 += it['data']['dates'][d]['revenue']; _ts2 += it['data']['dates'][d]['spend']
-                cv = it['data']['dates'][d].get('cpm', 0)
-                if cv > 0: _tcs2 += cv; _tcc2 += 1
                 vv = it['data']['dates'][d].get('cvr', 0)
                 if vv > 0: _tvs2 += vv; _tvc2 += 1
-        r.append(cell_text(_tp2, _tr2, _ts2, (_tcs2 / _tcc2) if _tcc2 > 0 else 0, (_tvs2 / _tvc2) if _tvc2 > 0 else 0))
+        r.append(cell_text(_tp2, _tr2, _ts2, 0, (_tvs2 / _tvc2) if _tvc2 > 0 else 0))
         for d in chart_dn:
             if d in it['data']['dates']:
-                dt = it['data']['dates'][d]
-                r.append(cell_text(dt['profit'], dt['revenue'], dt['spend'], dt.get('cpm', 0), dt.get('cvr', 0)))
-            else:
-                r.append('')
+                dt = it['data']['dates'][d]; r.append(cell_text(dt['profit'], dt['revenue'], dt['spend'], 0, dt.get('cvr', 0)))
+            else: r.append('')
         rows_tp.append(r)
-
-    # 빈 행 (상품 간 구분)
     rows_tp.append([""] * len(hdr_tp))
-
 ws_tp = safe_add_worksheet(sh, "추이차트_상품별", rows=len(rows_tp) + 100, cols=len(chart_dn) + 10); time.sleep(3)
 move_ws_to_front(sh, ws_tp)
-
 with_retry(ws_tp.update, values=[hdr_tp] + rows_tp, range_name="A1", value_input_option="USER_ENTERED")
-print(f"✅ 추이차트_상품별 데이터 완료 ({len(_sorted_products_chart)}개 상품, 전체 {len(chart_dn)}일)"); time.sleep(3)
-
-# 서식 적용 (추이차트와 동일한 기본 서식)
-ws_tp = refresh_ws(sh, ws_tp)
-apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci)
+print(f"✅ 추이차트_상품별 ({len(_sorted_products_chart)}개 상품)"); time.sleep(3)
+ws_tp = refresh_ws(sh, ws_tp); apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci)
 try: ws_tp = refresh_ws(sh, ws_tp); apply_c2_label_formatting(sh, ws_tp)
-except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
-
-# 상품 헤더 행 서식 (진한 배경 + 흰색 글자 + 병합)
+except: pass
 try:
-    tp_fmt_reqs = []
-    sid_tp = ws_tp.id
-    PRODUCT_CHART_BG = [
-        {"red": 0.22, "green": 0.42, "blue": 0.65},
-        {"red": 0.33, "green": 0.57, "blue": 0.33},
-        {"red": 0.53, "green": 0.30, "blue": 0.58},
-        {"red": 0.68, "green": 0.42, "blue": 0.18},
-        {"red": 0.58, "green": 0.22, "blue": 0.22},
-        {"red": 0.20, "green": 0.52, "blue": 0.52},
-        {"red": 0.48, "green": 0.48, "blue": 0.25},
-        {"red": 0.38, "green": 0.25, "blue": 0.48},
-        {"red": 0.30, "green": 0.55, "blue": 0.45},
-        {"red": 0.60, "green": 0.35, "blue": 0.40},
-        {"red": 0.35, "green": 0.35, "blue": 0.55},
-    ]
-    num_cols_tp = len(hdr_tp)
+    tp_fmt_reqs = []; sid_tp = ws_tp.id
+    PRODUCT_CHART_BG = [{"red":0.22,"green":0.42,"blue":0.65},{"red":0.33,"green":0.57,"blue":0.33},{"red":0.53,"green":0.30,"blue":0.58},{"red":0.68,"green":0.42,"blue":0.18},{"red":0.58,"green":0.22,"blue":0.22},{"red":0.20,"green":0.52,"blue":0.52},{"red":0.48,"green":0.48,"blue":0.25},{"red":0.38,"green":0.25,"blue":0.48},{"red":0.30,"green":0.55,"blue":0.45},{"red":0.60,"green":0.35,"blue":0.40},{"red":0.35,"green":0.35,"blue":0.55}]
     for p_idx, row_idx in enumerate(_product_header_indices):
-        sheet_row = row_idx + 1  # +1 for header row (0-indexed in sheet = row_idx + 1)
-        color = PRODUCT_CHART_BG[p_idx % len(PRODUCT_CHART_BG)]
-        tp_fmt_reqs.append(create_format_request(
-            sid_tp, sheet_row, sheet_row + 1, 0, num_cols_tp,
-            get_cell_format(color, COLORS["white"], bold=True)
-        ))
-        tp_fmt_reqs.append({"mergeCells": {"range": {
-            "sheetId": sid_tp, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1,
-            "startColumnIndex": 0, "endColumnIndex": min(num_cols_tp, 26)
-        }, "mergeType": "MERGE_ALL"}})
+        sheet_row = row_idx + 1; color = PRODUCT_CHART_BG[p_idx % len(PRODUCT_CHART_BG)]
+        tp_fmt_reqs.append(create_format_request(sid_tp, sheet_row, sheet_row + 1, 0, len(hdr_tp), get_cell_format(color, COLORS["white"], bold=True)))
+        tp_fmt_reqs.append({"mergeCells": {"range": {"sheetId": sid_tp, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1, "startColumnIndex": 0, "endColumnIndex": min(len(hdr_tp), 26)}, "mergeType": "MERGE_ALL"}})
     if tp_fmt_reqs:
-        for i in range(0, len(tp_fmt_reqs), 50):
-            with_retry(sh.batch_update, body={"requests": tp_fmt_reqs[i:i+50]}); time.sleep(1)
-    print("  ✅ 상품 헤더 서식 완료")
-except Exception as e: print(f"  ⚠️ 상품 헤더 서식 오류: {e}")
-
+        for i in range(0, len(tp_fmt_reqs), 50): with_retry(sh.batch_update, body={"requests": tp_fmt_reqs[i:i+50]}); time.sleep(1)
+except: pass
 print("⏳ 30초 대기..."); time.sleep(30)
 
-# =========================================================
 # 11단계: 추이차트(주간)
-# =========================================================
 print("\n11단계: 추이차트(주간)")
 ws_tw = safe_add_worksheet(sh, "추이차트(주간)", rows=1000, cols=len(chart_wk) + 10); time.sleep(3)
 move_ws_to_front(sh, ws_tw)
 wdl = [week_display_names[wk] for wk in chart_wk]; hdr_w = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '전체 평균'] + wdl
-srw = ["종합", "", ""]; tap, tar, tas = 0, 0, 0; tacs, tacc = 0, 0; tavs, tavc = 0, 0
+srw = ["종합", "", ""]; tap, tar, tas = 0, 0, 0; tavs, tavc = 0, 0
 for wk in chart_wk:
     for it in sorted_list:
         wd = adset_weekly[it['adset_id']]['weeks'].get(wk, {})
-        if wd: tap += wd['profit']; tar += wd['revenue']; tas += wd['spend']; cv = wd.get('cpm', 0); (tacs := tacs + cv, tacc := tacc + 1) if cv > 0 else None; vv = wd.get('cvr', 0); (tavs := tavs + vv, tavc := tavc + 1) if vv > 0 else None
-srw.append(cell_text(tap, tar, tas, (tacs / tacc) if tacc > 0 else 0, (tavs / tavc) if tavc > 0 else 0))
+        if wd: tap += wd['profit']; tar += wd['revenue']; tas += wd['spend']; vv = wd.get('cvr', 0); (tavs := tavs + vv, tavc := tavc + 1) if vv > 0 else None
+srw.append(cell_text(tap, tar, tas, 0, (tavs / tavc) if tavc > 0 else 0))
 for wk in chart_wk:
-    wp, wr_v, ws_v = 0, 0, 0; wcs, wcc = 0, 0; wvs, wvc = 0, 0
+    wp, wr_v, ws_v = 0, 0, 0; wvs, wvc = 0, 0
     for it in sorted_list:
         wd = adset_weekly[it['adset_id']]['weeks'].get(wk, {})
-        if wd: wp += wd['profit']; wr_v += wd['revenue']; ws_v += wd['spend']; cv = wd.get('cpm', 0); (wcs := wcs + cv, wcc := wcc + 1) if cv > 0 else None; vv = wd.get('cvr', 0); (wvs := wvs + vv, wvc := wvc + 1) if vv > 0 else None
-    srw.append(cell_text(wp, wr_v, ws_v, (wcs / wcc) if wcc > 0 else 0, (wvs / wvc) if wvc > 0 else 0))
+        if wd: wp += wd['profit']; wr_v += wd['revenue']; ws_v += wd['spend']; vv = wd.get('cvr', 0); (wvs := wvs + vv, wvc := wvc + 1) if vv > 0 else None
+    srw.append(cell_text(wp, wr_v, ws_v, 0, (wvs / wvc) if wvc > 0 else 0))
 rtw = []
 for it in sorted_list:
-    r = [it['campaign_name'], it['adset_name'], it['adset_id']]; tp, tr, ts = 0, 0, 0; tcs, tcc = 0, 0; tvs, tvc = 0, 0
+    r = [it['campaign_name'], it['adset_name'], it['adset_id']]; tp, tr, ts = 0, 0, 0; tvs, tvc = 0, 0
     for wk in chart_wk:
         wd = adset_weekly[it['adset_id']]['weeks'].get(wk, {})
-        if wd: tp += wd['profit']; tr += wd['revenue']; ts += wd['spend']; cv = wd.get('cpm', 0); (tcs := tcs + cv, tcc := tcc + 1) if cv > 0 else None; vv = wd.get('cvr', 0); (tvs := tvs + vv, tvc := tvc + 1) if vv > 0 else None
-    r.append(cell_text(tp, tr, ts, (tcs / tcc) if tcc > 0 else 0, (tvs / tvc) if tvc > 0 else 0))
+        if wd: tp += wd['profit']; tr += wd['revenue']; ts += wd['spend']; vv = wd.get('cvr', 0); (tvs := tvs + vv, tvc := tvc + 1) if vv > 0 else None
+    r.append(cell_text(tp, tr, ts, 0, (tvs / tvc) if tvc > 0 else 0))
     for wk in chart_wk:
         wd = adset_weekly[it['adset_id']]['weeks'].get(wk, {})
-        r.append(cell_text(wd['profit'], wd['revenue'], wd['spend'], wd.get('cpm', 0), wd.get('cvr', 0)) if wd else '')
+        r.append(cell_text(wd['profit'], wd['revenue'], wd['spend'], 0, wd.get('cvr', 0)) if wd else '')
     rtw.append(r)
 with_retry(ws_tw.update, values=[hdr_w] + [srw] + rtw, range_name="A1", value_input_option="USER_ENTERED")
-print("✅ 추이차트(주간) 완료"); time.sleep(3)
+print("✅ 추이차트(주간)"); time.sleep(3)
 wfce = 3 + 1 + WEEKLY_TREND_REFRESH_WEEKS; ws_tw = refresh_ws(sh, ws_tw)
 apply_trend_chart_formatting(sh, ws_tw, hdr_w, len(rtw), format_col_end=wfce)
 try: ws_tw = refresh_ws(sh, ws_tw); apply_c2_label_formatting(sh, ws_tw)
-except Exception as e: print(f"  ⚠️ C2 라벨 서식 오류 (무시): {e}")
+except: pass
 print("⏳ 30초 대기..."); time.sleep(30)
 
-# =========================================================
 # 12단계: 증감액
-# =========================================================
 print("\n12단계: 증감액")
 ws_c = safe_add_worksheet(sh, "증감액", rows=1000, cols=len(chart_dn) + 10); time.sleep(3)
 move_ws_to_front(sh, ws_c)
 hdr_c = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + chart_dn
-src = ["종합", "", ""]; t7r, t7s = 0, 0; t7cs, t7cc = 0, 0; t7vs, t7vc = 0, 0
+src = ["종합", "", ""]; t7r, t7s = 0, 0; t7vs, t7vc = 0, 0
 for d in chart_sd:
     for it in sorted_list:
         if d in it['data']['dates']:
             t7r += it['data']['dates'][d]['revenue']; t7s += it['data']['dates'][d]['spend']
-            cv = it['data']['dates'][d].get('cpm', 0)
-            if cv > 0: t7cs += cv; t7cc += 1
             vv = it['data']['dates'][d].get('cvr', 0)
             if vv > 0: t7vs += vv; t7vc += 1
 t7roas = (t7r / t7s * 100) if t7s > 0 else 0
 fds = sum(it['data']['dates'].get(chart_sd[-1], {}).get('spend', 0) for it in sorted_list) if len(chart_sd) >= 2 else 0
 lds = sum(it['data']['dates'].get(chart_sd[0], {}).get('spend', 0) for it in sorted_list) if len(chart_sd) >= 2 else 0
 sdc = ((lds - fds) / fds * 100) if fds > 0 else 0
-src.append(cell_text_change(t7roas, sdc, t7s, (t7cs / t7cc) if t7cc > 0 else 0, (t7vs / t7vc) if t7vc > 0 else 0))
+src.append(cell_text_change(t7roas, sdc, t7s, t7r, (t7vs / t7vc) if t7vc > 0 else 0))
 for i, d in enumerate(chart_dn):
-    dr, ds_v = 0, 0; dcs, dcc = 0, 0; dvs, dvc = 0, 0
+    dr, ds_v = 0, 0; dvs, dvc = 0, 0
     for it in sorted_list:
         if d in it['data']['dates']:
             dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
-            cv = it['data']['dates'][d].get('cpm', 0)
-            if cv > 0: dcs += cv; dcc += 1
             vv = it['data']['dates'][d].get('cvr', 0)
             if vv > 0: dvs += vv; dvc += 1
     d_roas = (dr / ds_v * 100) if ds_v > 0 else 0
     if i < len(chart_dn) - 1: pd_key = chart_dn[i + 1]; ps = sum(it['data']['dates'].get(pd_key, {}).get('spend', 0) for it in sorted_list); chg = ((ds_v - ps) / ps * 100) if ps > 0 else 0
     else: chg = 0
-    src.append(cell_text_change(d_roas, chg, ds_v, (dcs / dcc) if dcc > 0 else 0, (dvs / dvc) if dvc > 0 else 0))
+    src.append(cell_text_change(d_roas, chg, ds_v, dr, (dvs / dvc) if dvc > 0 else 0))
 rtc = []
 for it in sorted_list:
-    r = [it['campaign_name'], it['adset_name'], it['adset_id']]; tr_v, ts_v = 0, 0; tcpm, tcpc = 0, 0; tcvr, tcvc = 0, 0
+    r = [it['campaign_name'], it['adset_name'], it['adset_id']]; tr_v, ts_v = 0, 0; tcvr, tcvc = 0, 0
     for d in chart_sd:
         if d in it['data']['dates']:
             tr_v += it['data']['dates'][d]['revenue']; ts_v += it['data']['dates'][d]['spend']
-            cv = it['data']['dates'][d].get('cpm', 0)
-            if cv > 0: tcpm += cv; tcpc += 1
             vv = it['data']['dates'][d].get('cvr', 0)
             if vv > 0: tcvr += vv; tcvc += 1
     ar = (tr_v / ts_v * 100) if ts_v > 0 else 0
     fs = it['data']['dates'].get(chart_sd[-1], {}).get('spend', 0) if len(chart_sd) >= 2 else 0
     ls = it['data']['dates'].get(chart_sd[0], {}).get('spend', 0) if len(chart_sd) >= 2 else 0
     cp = ((ls - fs) / fs * 100) if fs > 0 else 0
-    r.append(cell_text_change(ar, cp, ts_v, (tcpm / tcpc) if tcpc > 0 else 0, (tcvr / tcvc) if tcvc > 0 else 0))
+    r.append(cell_text_change(ar, cp, ts_v, tr_v, (tcvr / tcvc) if tcvc > 0 else 0))
     for i, d in enumerate(chart_dn):
         if d in it['data']['dates']:
             dt = it['data']['dates'][d]; roas = (dt['revenue'] / dt['spend'] * 100) if dt['spend'] > 0 else 0
             if i < len(chart_dn) - 1: pd_key = chart_dn[i + 1]; ps = it['data']['dates'].get(pd_key, {}).get('spend', 0); chg = ((dt['spend'] - ps) / ps * 100) if ps > 0 else 0
             else: chg = 0
-            r.append(cell_text_change(roas, chg, dt['spend'], dt.get('cpm', 0), dt.get('cvr', 0)))
+            r.append(cell_text_change(roas, chg, dt['spend'], dt.get('revenue', 0), dt.get('cvr', 0)))
         else: r.append('')
     rtc.append(r)
 with_retry(ws_c.update, values=[hdr_c] + [src] + rtc, range_name="A1", value_input_option="USER_ENTERED")
-print("✅ 증감액 완료"); time.sleep(3)
-ws_c = refresh_ws(sh, ws_c); apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True); print("⏳ 30초 대기..."); time.sleep(30)
+print("✅ 증감액"); time.sleep(3)
+ws_c = refresh_ws(sh, ws_c); apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True)
+print("⏳ 30초 대기..."); time.sleep(30)
 
-# =========================================================
 # 13단계: 예산
-# =========================================================
 print("\n13단계: 예산")
 bw = safe_add_worksheet(sh, "예산", rows=1000, cols=len(chart_dn) + 10); time.sleep(3)
 move_ws_to_front(sh, bw)
@@ -2159,10 +1698,10 @@ br.append([""] * (len(chart_dn) + 1)); br.append(["번돈 - 제품별"] + [""] *
 for p in product_order: br.append([p] + [budget_by_date[d][p]['revenue'] for d in chart_dn])
 br.append([""] * (len(chart_dn) + 1)); br.append(["순이익 - 제품별"] + [""] * len(chart_dn))
 for p in product_order: br.append([p] + [budget_by_date[d][p]['revenue'] - budget_by_date[d][p]['spend'] for d in chart_dn])
-with_retry(bw.update, values=br, range_name="A1", value_input_option="RAW"); print("✅ 예산 완료"); time.sleep(3)
+with_retry(bw.update, values=br, range_name="A1", value_input_option="RAW"); print("✅ 예산"); time.sleep(3)
 
 # 14~17: 주간종합
-print("\n14단계: 주간종합 데이터 준비")
+print("\n14단계: 주간종합 준비")
 month_groups = defaultdict(list)
 for t in date_names: do = date_objects[t]; mk = f"{do.year}년 {do.month}월"; month_groups[mk].append(t)
 month_names_list = sorted(month_groups.keys(), key=lambda x: (int(x.split('년')[0]), int(x.split('년')[1].replace('월', '').strip())), reverse=True)
@@ -2189,14 +1728,13 @@ all_found_products = set()
 for dn in date_names:
     for p in daily_product_data[dn]:
         if daily_product_data[dn][p]['spend'] > 0 or daily_product_data[dn][p]['revenue'] > 0: all_found_products.add(p)
-products = sorted([p for p in all_found_products if p in PRODUCT_KEYWORDS], key=lambda p: sum(daily_product_data[dn][p]['spend'] for dn in date_names), reverse=True)
+# ★ v29b: PRODUCT_KEYWORDS 필터 제거 → 모든 감지 상품
+products = sorted(list(all_found_products), key=lambda p: sum(daily_product_data[dn][p]['spend'] for dn in date_names), reverse=True)
 SUMMARY_PRODUCTS = products
 print(f"📆 월:{len(month_names_list)}, 주:{len(week_keys)}, 일:{len(date_names)}")
-print(f"📦 감지된 상품: {products}")
+print(f"📦 감지된 상품 (전체): {products}")
 
-# =========================================================
 # 15단계: 주간종합
-# =========================================================
 print("\n15단계: 주간종합")
 ws_ws = safe_add_worksheet(sh, "주간종합", rows=2000, cols=20); time.sleep(3)
 move_ws_to_front(sh, ws_ws)
@@ -2234,18 +1772,16 @@ try:
     for ci in range(1, 11): cw.append({"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": 100}, "fields": "pixelSize"}})
     with_retry(sh.batch_update, body={"requests": cw})
 except: pass
-print("✅ 주간종합 완료"); time.sleep(3)
+print("✅ 주간종합"); time.sleep(3)
 
-# =========================================================
 # 16단계: 주간종합_2
-# =========================================================
 print("\n16단계: 주간종합_2")
 ws2 = safe_add_worksheet(sh, "주간종합_2", rows=2000, cols=20); time.sleep(3)
 move_ws_to_front(sh, ws2)
 sid2 = ws2.id; fr2 = []; ar2 = []; cr2 = 0; npc = len(products) + 3; stl = []
 for mk in month_names_list:
     yr = int(mk.split('년')[0]); mn = int(mk.split('년')[1].replace('월', '').strip()); d = msd[mk]; roas = (d['revenue'] / d['spend']) if d['spend'] > 0 else 0
-    stl.append({'period': f"'{mk}", 'type': '월별', 'spend': d['spend'], 'revenue': d['revenue'], 'profit': d['profit'], 'roas': roas, 'im': True, 'mk': mk, 'yr': yr, 'mn': mn})
+    stl.append({'period': f"'{mk}", 'type': '월별', 'spend': d['spend'], 'revenue': d['revenue'], 'profit': d['profit'], 'roas': roas, 'im': True, 'mk': mk})
     mw = [wk for wk in week_keys if any(date_objects[dn].year == yr and date_objects[dn].month == mn for dn in week_groups[wk])]; mw.reverse()
     for wk in mw: wd = wsd[wk]; wr = (wd['revenue'] / wd['spend']) if wd['spend'] > 0 else 0; stl.append({'period': week_display_names[wk], 'type': '주간', 'spend': wd['spend'], 'revenue': wd['revenue'], 'profit': wd['profit'], 'roas': wr, 'im': False, 'mk': None, 'wk': wk})
 ar2.append(["📊 기간별 전체 요약"] + [""] * 6); fr2.append(create_format_request(sid2, cr2, cr2 + 1, 0, 7, get_cell_format(COLORS["navy"], COLORS["white"], bold=True))); cr2 += 1
@@ -2253,7 +1789,7 @@ ar2.append(["기간", "유형", "지출금액", "매출", "이익", "ROAS", "CVR
 for rd in stl:
     ar2.append([rd['period'], rd['type'], rd['spend'], rd['revenue'], rd['profit'], rd['roas'], 0]); bg = COLORS["light_blue"] if rd['im'] else COLORS["light_gray"]
     fr2.append(create_format_request(sid2, cr2, cr2 + 1, 0, 7, get_cell_format(bg))); fr2.append(create_number_format_request(sid2, cr2, cr2 + 1, 2, 5, "NUMBER", "#,##0")); fr2.append(create_number_format_request(sid2, cr2, cr2 + 1, 5, 7, "PERCENT", "0.00%")); cr2 += 1
-fr2.append(create_border_request(sid2, t1s - 1, cr2, 0, 7)); ar2 += [[""] * (npc), [""] * (npc)]; cr2 += 2
+fr2.append(create_border_request(sid2, t1s - 1, cr2, 0, 7)); ar2 += [[""] * npc, [""] * npc]; cr2 += 2
 for tt, tc, dk in [("📈 제품별 ROAS", COLORS["dark_green"], "roas"), ("💰 제품별 순이익", COLORS["dark_green"], "profit"), ("💵 제품별 매출", COLORS["orange"], "revenue"), ("💸 제품별 예산", COLORS["purple"], "spend"), ("📊 제품별 예산 비중", COLORS["purple"], "ratio")]:
     ar2.append([tt] + [""] * (npc - 1)); fr2.append(create_format_request(sid2, cr2, cr2 + 1, 0, npc, get_cell_format(tc, COLORS["white"], bold=True))); cr2 += 1
     ar2.append(["기간", "유형"] + products + ["합계"]); fr2.append(create_format_request(sid2, cr2, cr2 + 1, 0, npc, get_cell_format(COLORS["dark_gray"], COLORS["white"], bold=True))); cr2 += 1; tds = cr2
@@ -2270,17 +1806,15 @@ for tt, tc, dk in [("📈 제품별 ROAS", COLORS["dark_green"], "roas"), ("💰
         ar2.append(r); bg = COLORS["light_blue"] if rd['im'] else COLORS["light_gray"]; fr2.append(create_format_request(sid2, cr2, cr2 + 1, 0, npc, get_cell_format(bg)))
         ft = "PERCENT" if dk in ["roas", "ratio"] else "NUMBER"; fp = "0.00%" if dk in ["roas", "ratio"] else "#,##0"
         fr2.append(create_number_format_request(sid2, cr2, cr2 + 1, 2, npc, ft, fp)); cr2 += 1
-    fr2.append(create_border_request(sid2, tds - 1, cr2, 0, npc)); ar2 += [[""] * (npc), [""] * (npc)]; cr2 += 2
+    fr2.append(create_border_request(sid2, tds - 1, cr2, 0, npc)); ar2 += [[""] * npc, [""] * npc]; cr2 += 2
 with_retry(ws2.update, values=ar2, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
 try:
     for i in range(0, len(fr2), 100): with_retry(sh.batch_update, body={"requests": fr2[i:i+100]}); time.sleep(1)
 except: pass
-print("✅ 주간종합_2 완료"); time.sleep(3)
+print("✅ 주간종합_2"); time.sleep(3)
 
-# =========================================================
 # 17단계: 주간종합_3 (일별)
-# =========================================================
-print("\n17단계: 주간종합_3 (일별)")
+print("\n17단계: 주간종합_3")
 ws3 = safe_add_worksheet(sh, "주간종합_3", rows=3000, cols=20); time.sleep(3)
 move_ws_to_front(sh, ws3)
 sid3 = ws3.id; fr3 = []; ar3 = []; cr3 = 0; ndc = len(products) + 4; dsr = []
@@ -2290,7 +1824,7 @@ ar3.append(["날짜", "요일", "지출금액", "매출", "이익", "ROAS", "CVR
 for rd in dsr:
     ar3.append([rd['period'], rd['weekday'], rd['spend'], rd['revenue'], rd['profit'], rd['roas'], 0, ""]); bg = COLORS["light_blue"] if rd['weekday'] in ['토', '일'] else COLORS["light_gray"]
     fr3.append(create_format_request(sid3, cr3, cr3 + 1, 0, 8, get_cell_format(bg))); fr3.append(create_number_format_request(sid3, cr3, cr3 + 1, 2, 5, "NUMBER", "#,##0")); fr3.append(create_number_format_request(sid3, cr3, cr3 + 1, 5, 7, "PERCENT", "0.00%")); cr3 += 1
-fr3.append(create_border_request(sid3, t1s3 - 1, cr3, 0, 8)); ar3 += [[""] * (ndc), [""] * (ndc)]; cr3 += 2
+fr3.append(create_border_request(sid3, t1s3 - 1, cr3, 0, 8)); ar3 += [[""] * ndc, [""] * ndc]; cr3 += 2
 for tt, tc, dk in [("📈 일별 제품별 ROAS", COLORS["dark_green"], "roas"), ("💰 일별 제품별 순이익", COLORS["dark_green"], "profit"), ("💵 일별 제품별 매출", COLORS["orange"], "revenue"), ("💸 일별 제품별 예산", COLORS["purple"], "spend"), ("📊 일별 제품별 예산 비중", COLORS["purple"], "ratio")]:
     ar3.append([tt] + [""] * (ndc - 1)); fr3.append(create_format_request(sid3, cr3, cr3 + 1, 0, ndc, get_cell_format(tc, COLORS["white"], bold=True))); cr3 += 1
     ar3.append(["날짜", "요일"] + products + ["합계"]); fr3.append(create_format_request(sid3, cr3, cr3 + 1, 0, ndc, get_cell_format(COLORS["dark_gray"], COLORS["white"], bold=True))); cr3 += 1; tds = cr3
@@ -2307,30 +1841,25 @@ for tt, tc, dk in [("📈 일별 제품별 ROAS", COLORS["dark_green"], "roas"),
         ar3.append(r); bg = COLORS["light_blue"] if rd['weekday'] in ['토', '일'] else COLORS["light_gray"]; fr3.append(create_format_request(sid3, cr3, cr3 + 1, 0, ndc, get_cell_format(bg)))
         ft = "PERCENT" if dk in ["roas", "ratio"] else "NUMBER"; fp = "0.00%" if dk in ["roas", "ratio"] else "#,##0"
         fr3.append(create_number_format_request(sid3, cr3, cr3 + 1, 2, ndc, ft, fp)); cr3 += 1
-    fr3.append(create_border_request(sid3, tds - 1, cr3, 0, ndc)); ar3 += [[""] * (ndc), [""] * (ndc)]; cr3 += 2
+    fr3.append(create_border_request(sid3, tds - 1, cr3, 0, ndc)); ar3 += [[""] * ndc, [""] * ndc]; cr3 += 2
 with_retry(ws3.update, values=ar3, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
 try:
     for i in range(0, len(fr3), 100): with_retry(sh.batch_update, body={"requests": fr3[i:i+100]}); time.sleep(1)
 except: pass
-print("✅ 주간종합_3 완료"); time.sleep(3)
+print("✅ 주간종합_3"); time.sleep(3)
 
-# 18: 최종 탭 순서 정리
+# 18: 최종 탭 순서
 print("\n" + "=" * 60); print("18단계: 최종 탭 순서 정리"); print("=" * 60)
 reorder_tabs(sh)
 
 print("\n" + "=" * 60); print("✅ 완료!"); print("=" * 60)
 print()
-print(f"🔄 Meta 갱신: 최근 {REFRESH_DAYS}일 ({DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘)")
-print(f"🔄 Mixpanel 갱신: 최근 {REFRESH_DAYS}일 (이벤트: {MIXPANEL_EVENT_NAMES})")
-print(f"  ℹ️ 이전 날짜탭은 스프레드시트 기존 데이터 유지")
-print(f"📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개")
-print(f"🆕 새로 생성한 탭: {len(new_refresh_dates)}개")
-print(f"📊 분석탭: 전체 {len(date_names)}일치 기반")
-print(f"   → 마스터탭: {len(master_raw_data)}행")
-print(f"   → 추이차트: {len(date_names)}개 날짜 (전체)")
-print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품 그룹")
+print(f"🔄 Meta: 최근 {REFRESH_DAYS}일 | Mixpanel: {REFRESH_DAYS}일")
+print(f"📝 기존 탭: {len(existing_refresh_tabs)}개 | 🆕 새 탭: {len(new_refresh_dates)}개")
+print(f"📊 분석탭: {len(date_names)}일 기반")
+print(f"   → 마스터탭: {len(master_raw_data)}행 | 추이차트: {len(date_names)}일")
+print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
-print(f"🔀 병렬 처리: Meta {META_DATE_WORKERS}×{META_ACCOUNT_WORKERS} | MP {MIXPANEL_CHUNK_WORKERS} | Sheets {SHEETS_READ_WORKERS}")
-print(f"📦 ★ v27: 날짜탭 상품별 분류 테이블 추가")
-print(f"📦 ★ v28: 추이차트_상품별 탭 추가")
+print(f"📦 ★ v29b: 상품=캠페인 첫 단어(이모지 제거), 모든 상품 나열")
+print(f"📦 ★ v29: CPM→매출, 정렬=전날지출순")
 print(f"\n📊 {SPREADSHEET_URL}")
