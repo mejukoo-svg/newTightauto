@@ -23,7 +23,7 @@
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v30a 국내 세트별 (마스터탭 재활용, adset_id 정밀도 수정, dedup개선)")
+print("🚀 v3-ad v30b 국내 세트별 (마스터탭 날짜형식 수정, adset_id 정밀도, dedup개선)")
 print("="*60)
 
 # =========================================================
@@ -979,9 +979,22 @@ def read_from_master_tab(sh, master_ws, preloaded_date_data, mp_value_map=None, 
     for row in master_values[1:]:  # 헤더 건너뛰기
         if not row or len(row) < 4:
             continue
-        dk = str(row[0]).strip()
-        if not dk or '/' not in dk:
+        raw_dk = str(row[0]).strip()
+        if not raw_dk:
             continue
+
+        # ★ v30b: Sheets가 날짜를 자동 변환할 수 있으므로 parse_date_tab으로 정규화
+        dt_parsed = parse_date_tab(raw_dk)
+        if dt_parsed is None:
+            # '/' 없는 형식도 시도 (예: "2026. 3. 30.", "2026-03-30")
+            try:
+                cleaned = raw_dk.replace('.', '/').replace('-', '/').replace(' ', '')
+                dt_parsed = parse_date_tab(cleaned)
+            except:
+                pass
+            if dt_parsed is None:
+                continue
+        dk = f"{dt_parsed.year%100:02d}/{dt_parsed.month:02d}/{dt_parsed.day:02d}"
 
         # preloaded 날짜는 건너뛰기 (새 데이터로 대체할 것)
         if dk in preloaded_dates:
@@ -1790,7 +1803,15 @@ master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
 for item in master_raw_data:
     while len(item['row_data']) < len(master_headers): item['row_data'].append("")
     item['row_data'] = item['row_data'][:len(master_headers)]
-mr_all = [master_headers] + _make_rows_sheet_safe([i['row_data'] for i in master_raw_data], asid_col=3)  # ★ v30a: asid at col 3 in master tab
+mr_all_raw = [i['row_data'] for i in master_raw_data]
+# ★ v30b: 날짜(col 0)와 adset_id(col 3) 모두 텍스트 강제 → Sheets 자동변환 방지
+mr_safe = _make_rows_sheet_safe(mr_all_raw, asid_col=3)
+for row in mr_safe:
+    if len(row) > 0 and row[0] and str(row[0]).strip():
+        dk_str = str(row[0]).strip()
+        if not dk_str.startswith("'") and '/' in dk_str:
+            row[0] = "'" + dk_str
+mr_all = [master_headers] + mr_safe
 for i in range(0, len(mr_all), 5000): with_retry(ws_m.update, values=mr_all[i:i+5000], range_name=f"A{i+1}", value_input_option="USER_ENTERED"); time.sleep(2)
 try:
     with_retry(ws_m.format, 'A1:T1', {'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}, 'textFormat': {'bold': True}})
@@ -2179,7 +2200,7 @@ print(f"📊 분석탭: {len(date_names)}일 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행 | 추이차트: {len(date_names)}일")
 print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
-print(f"📦 ★ v30a: 마스터탭 재활용, adset_id 텍스트 강제(정밀도 보존), fuzzy 매칭, dedup 개선")
+print(f"📦 ★ v30b: 마스터탭 날짜 텍스트 강제, 날짜 정규화, adset_id 정밀도 보존, dedup 개선")
 print(f"📦 ★ v29b: 상품=캠페인 첫 단어(이모지 제거), 모든 상품 나열")
 print(f"📦 ★ v29: CPM→매출, 정렬=전날지출순")
 print(f"\n📊 {SPREADSHEET_URL}")
