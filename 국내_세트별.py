@@ -23,7 +23,7 @@
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v30 국내 세트별 (마스터탭 재활용, dedup개선, Rate Limit완화)")
+print("🚀 v3-ad v30a 국내 세트별 (마스터탭 재활용, adset_id 정밀도 수정, dedup개선)")
 print("="*60)
 
 # =========================================================
@@ -290,6 +290,32 @@ def clean_id(val):
     except: pass
     numeric_only = re.sub(r'[^0-9]', '', s)
     return numeric_only if numeric_only else s
+
+
+# ★ v30a: adset_id 정밀도 손실 대응 헬퍼
+def _asid_match_key(asid_str):
+    """15자리 prefix로 fuzzy 매칭 키 생성 (Sheets double 정밀도 = 유효숫자 15자리)"""
+    s = clean_id(asid_str)
+    return s[:15] if len(s) > 15 else s
+
+def _prefix_asid_for_sheet(val):
+    """Sheets 쓰기 시 adset_id를 텍스트로 강제 (' prefix → 정밀도 손실 방지)"""
+    s = str(val).strip() if val else ""
+    if s and re.match(r'^\d', s) and not s.startswith("'"):
+        return "'" + s
+    return s
+
+def _make_rows_sheet_safe(rows, asid_col=2):
+    """행 리스트의 adset_id 컬럼에 ' prefix 적용 (Sheets 쓰기용)"""
+    safe = []
+    for row in rows:
+        r = list(row)
+        if len(r) > asid_col and r[asid_col]:
+            s = str(r[asid_col]).strip()
+            if s and re.match(r'^\d', s) and s not in ["광고 세트 ID"]:
+                r[asid_col] = "'" + s
+        safe.append(r)
+    return safe
 
 
 # ★ v29b: 이모지 제거 헬퍼
@@ -978,7 +1004,7 @@ def read_from_master_tab(sh, master_ws, preloaded_date_data, mp_value_map=None, 
             continue
 
         asn = str(tab_row[1]).strip() if len(tab_row) > 1 else ""
-        asid = str(tab_row[2]).strip() if len(tab_row) > 2 else ""
+        asid = clean_id(tab_row[2]) if len(tab_row) > 2 else ""  # ★ v30a: clean_id
         spend = _to_num(tab_row[3]) if len(tab_row) > 3 else 0
         unique_clicks = _to_num(tab_row[9]) if len(tab_row) > 9 else 0
         cpm = _to_num(tab_row[6]) if len(tab_row) > 6 else 0
@@ -1024,7 +1050,7 @@ def read_from_master_tab(sh, master_ws, preloaded_date_data, mp_value_map=None, 
             if not cn or cn in ["캠페인 이름", "전체", "합계", "Total"]:
                 continue
             asn = str(tab_row[1]).strip()
-            asid = str(tab_row[2]).strip()
+            asid = clean_id(tab_row[2])  # ★ v30a: clean_id
             spend = _to_num(tab_row[3])
             unique_clicks = _to_num(tab_row[9])
             cpm = _to_num(tab_row[6])
@@ -1110,7 +1136,7 @@ def read_all_date_tabs_fallback(sh, analysis_tab_names, mp_value_map=None, mp_co
         if dk in _preloaded and _preloaded[dk]:
             tab_rows = _preloaded[dk]
             for tab_row in tab_rows:
-                cn = str(tab_row[0]).strip(); asn = str(tab_row[1]).strip(); asid = str(tab_row[2]).strip()
+                cn = str(tab_row[0]).strip(); asn = str(tab_row[1]).strip(); asid = clean_id(tab_row[2])  # ★ v30a
                 if not cn or cn in ["캠페인 이름", "전체", "합계", "Total"]: continue
                 spend = _to_num(tab_row[3]); unique_clicks = _to_num(tab_row[9]); cpm = _to_num(tab_row[6])
                 mpc = _to_num(tab_row[14]); revenue = _to_num(tab_row[15])
@@ -1496,43 +1522,60 @@ for dk in sorted(existing_refresh_tabs.keys()):
         try: with_retry(sh.batch_update, body={"requests": [{"unmergeCells": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": 0, "endColumnIndex": 30}}}, {"repeatCell": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": fmt_clear_start_col, "endColumnIndex": 30}, "cell": {"userEnteredFormat": {}}, "fields": "userEnteredFormat.numberFormat"}}]}); time.sleep(1)
         except: pass
         actual_asid_col = get_col_index(structure, 2)
+        # ★ v30a: clean_id로 시트의 정밀도 손실 ID 정규화
         adset_id_row_map = {}; last_data_sheet_row = 1
         for i, row in enumerate(all_values[1:], start=2):
             if not row: continue
-            cn = str(row[0]).strip() if len(row) > 0 else ""; asid = str(row[actual_asid_col]).strip() if len(row) > actual_asid_col else ""
+            cn = str(row[0]).strip() if len(row) > 0 else ""; asid = clean_id(row[actual_asid_col]) if len(row) > actual_asid_col else ""
             if cn in ["캠페인 이름", "전체", "합계", "Total"]: continue
             if not cn and not asid: continue
             if asid: adset_id_row_map[asid] = i - 1
             last_data_sheet_row = i
         data_end_idx = last_data_sheet_row; batch_updates = []; updated_count = 0; new_row_by_asid = {}
         for tab_row in new_rows_for_date:
-            asid_check = str(tab_row[2]).strip() if len(tab_row) > 2 else ""
+            asid_check = clean_id(tab_row[2]) if len(tab_row) > 2 else ""
             if asid_check: new_row_by_asid[asid_check] = tab_row
+        # ★ v30a: fuzzy 매칭 맵 (15자리 prefix → full asid)
+        _fuzzy_to_full = {}
+        for full_asid in new_row_by_asid:
+            fk = _asid_match_key(full_asid)
+            if fk: _fuzzy_to_full[fk] = full_asid
+        _fuzzy_mp = {}
+        for mp_asid in mp_data:
+            fk = _asid_match_key(mp_asid)
+            if fk: _fuzzy_mp[fk] = mp_asid
         if structure == "new": update_end_col_letter = "S"; data_col_count = 19
         else: update_end_col_letter = "U"; data_col_count = 21
-        for asid, row_idx in adset_id_row_map.items():
+        for sheet_asid, row_idx in adset_id_row_map.items():
             row_num = row_idx + 1
-            if asid not in new_row_by_asid:
-                if asid in mp_data:
+            # ★ v30a: exact match → fuzzy match 폴백
+            matched_asid = sheet_asid if sheet_asid in new_row_by_asid else _fuzzy_to_full.get(_asid_match_key(sheet_asid))
+            if not matched_asid:
+                # Mixpanel-only 매칭도 fuzzy 적용
+                mp_asid = sheet_asid if sheet_asid in mp_data else _fuzzy_mp.get(_asid_match_key(sheet_asid))
+                if mp_asid and mp_asid in mp_data:
                     existing_row = all_values[row_idx]; actual_spend_col = get_col_index(structure, 3); actual_uc_col = get_col_index(structure, 9)
                     actual_mp_col = get_col_index(structure, 14); actual_cvr_col = get_col_index(structure, 18)
                     spend = _to_num(existing_row[actual_spend_col]) if len(existing_row) > actual_spend_col else 0
                     unique_clicks = _to_num(existing_row[actual_uc_col]) if len(existing_row) > actual_uc_col else 0
-                    mpc = mp_data[asid]['mpc']; mpv = mp_data[asid]['mpv']; revenue = float(mpv)
+                    mpc = mp_data[mp_asid]['mpc']; mpv = mp_data[mp_asid]['mpv']; revenue = float(mpv)
                     profit = revenue - spend; roas_val = (revenue / spend * 100) if spend > 0 and revenue > 0 else 0
                     cvr_val = (mpc / unique_clicks * 100) if unique_clicks > 0 and mpc > 0 else 0
                     mp_col_letter = get_col_letter(actual_mp_col); cvr_col_letter = get_col_letter(actual_cvr_col)
                     batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
                         'values': [[int(mpc) if mpc > 0 else "", round(revenue) if revenue > 0 else "", round(profit, 0) if spend > 0 else "", round(roas_val, 1) if spend > 0 and revenue > 0 else "", round(cvr_val, 2) if unique_clicks > 0 and mpc > 0 else ""]]})
                 continue
-            new_tab_row = new_row_by_asid[asid]
+            new_tab_row = new_row_by_asid[matched_asid]
             if structure == "new":
                 update_row = list(new_tab_row[:data_col_count])
                 while len(update_row) < data_col_count: update_row.append("")
+                # ★ v30a: asid를 텍스트로 강제
+                update_row[2] = _prefix_asid_for_sheet(update_row[2])
                 batch_updates.append({'range': f'A{row_num}:{update_end_col_letter}{row_num}', 'values': [update_row]})
             else:
                 old_row = list(new_tab_row[:3]) + ["", ""] + list(new_tab_row[3:19])
                 while len(old_row) < data_col_count: old_row.append("")
+                old_row[2] = _prefix_asid_for_sheet(old_row[2])
                 batch_updates.append({'range': f'A{row_num}:{update_end_col_letter}{row_num}', 'values': [old_row[:data_col_count]]})
             updated_count += 1
         if batch_updates:
@@ -1540,21 +1583,30 @@ for dk in sorted(existing_refresh_tabs.keys()):
             print(f"    ✅ {updated_count}개 업데이트")
         # 예산 업데이트
         budget_updates = []; actual_budget_col = get_col_index(structure, 19); budget_col_letter = get_col_letter(actual_budget_col)
-        for asid, row_idx in adset_id_row_map.items():
-            if asid in adset_budget_map and adset_budget_map[asid] > 0:
-                acc = ADSET_TO_ACCOUNT.get(asid, ''); fx = get_fx_for_account(acc, dk); div = get_budget_divisor(acc)
-                budget_updates.append({'range': f'{budget_col_letter}{row_idx+1}', 'values': [[round(adset_budget_map[asid] / div * fx)]]})
+        for sheet_asid, row_idx in adset_id_row_map.items():
+            # ★ v30a: fuzzy 매칭으로 예산 lookup
+            budget_asid = sheet_asid if sheet_asid in adset_budget_map else _fuzzy_to_full.get(_asid_match_key(sheet_asid), sheet_asid)
+            if budget_asid in adset_budget_map and adset_budget_map[budget_asid] > 0:
+                acc = ADSET_TO_ACCOUNT.get(budget_asid, ''); fx = get_fx_for_account(acc, dk); div = get_budget_divisor(acc)
+                budget_updates.append({'range': f'{budget_col_letter}{row_idx+1}', 'values': [[round(adset_budget_map[budget_asid] / div * fx)]]})
         if budget_updates:
             for i in range(0, len(budget_updates), 100): with_retry(ws_ex.batch_update, budget_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
         # 신규 행 추가
-        existing_asids = set(adset_id_row_map.keys()); new_rows_to_add = []
+        # ★ v30a: fuzzy key도 포함하여 중복 방지
+        existing_asids = set(adset_id_row_map.keys())
+        existing_fuzzy_keys = set(_asid_match_key(a) for a in existing_asids)
+        new_rows_to_add = []
         for tab_row in new_rows_for_date:
-            asid_check = str(tab_row[2]).strip() if len(tab_row) > 2 else ""
-            if asid_check and asid_check not in existing_asids:
+            asid_check = clean_id(tab_row[2]) if len(tab_row) > 2 else ""
+            if asid_check and asid_check not in existing_asids and _asid_match_key(asid_check) not in existing_fuzzy_keys:
                 if structure == "old":
                     old_row = list(tab_row[:3]) + ["", ""] + list(tab_row[3:])
+                    old_row[2] = _prefix_asid_for_sheet(old_row[2])
                     while len(old_row) < 25: old_row.append(""); new_rows_to_add.append(old_row[:25])
-                else: new_rows_to_add.append(tab_row)
+                else:
+                    safe_row = list(tab_row)
+                    safe_row[2] = _prefix_asid_for_sheet(safe_row[2])
+                    new_rows_to_add.append(safe_row)
         if new_rows_to_add:
             actual_profit_col = get_col_index(structure, 16)
             new_rows_to_add.sort(key=lambda r: _to_num(r[actual_profit_col]) if len(r) > actual_profit_col else 0, reverse=True)
@@ -1616,7 +1668,10 @@ for dk in sorted(new_refresh_dates):
         NUM_COLS = len(DATE_TAB_HEADERS)
         ws_d = safe_add_worksheet(sh, dk, rows=total_rows, cols=NUM_COLS + 2); time.sleep(1)
         sid_d = ws_d.id; data_end = len(rows) + 1
-        all_data = [DATE_TAB_HEADERS] + rows + summary_rows + breakdown_rows
+        # ★ v30a: adset_id를 텍스트로 강제하여 정밀도 손실 방지
+        safe_rows = _make_rows_sheet_safe(rows)
+        safe_breakdown = _make_rows_sheet_safe(breakdown_rows)
+        all_data = [DATE_TAB_HEADERS] + safe_rows + summary_rows + safe_breakdown
         with_retry(ws_d.update, values=all_data, range_name="A1", value_input_option="USER_ENTERED")
         fmt_all = []
         fmt_all.append(create_format_request(sid_d, 0, 1, 0, 3, {"textFormat": {"bold": True}, "wrapStrategy": "WRAP", "verticalAlignment": "MIDDLE"}))
@@ -1735,7 +1790,7 @@ master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
 for item in master_raw_data:
     while len(item['row_data']) < len(master_headers): item['row_data'].append("")
     item['row_data'] = item['row_data'][:len(master_headers)]
-mr_all = [master_headers] + [i['row_data'] for i in master_raw_data]
+mr_all = [master_headers] + _make_rows_sheet_safe([i['row_data'] for i in master_raw_data], asid_col=3)  # ★ v30a: asid at col 3 in master tab
 for i in range(0, len(mr_all), 5000): with_retry(ws_m.update, values=mr_all[i:i+5000], range_name=f"A{i+1}", value_input_option="USER_ENTERED"); time.sleep(2)
 try:
     with_retry(ws_m.format, 'A1:T1', {'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}, 'textFormat': {'bold': True}})
@@ -2124,7 +2179,7 @@ print(f"📊 분석탭: {len(date_names)}일 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행 | 추이차트: {len(date_names)}일")
 print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
-print(f"📦 ★ v30: 마스터탭 재활용 (API 144→1회), dedup 개선, Rate Limit 완화")
+print(f"📦 ★ v30a: 마스터탭 재활용, adset_id 텍스트 강제(정밀도 보존), fuzzy 매칭, dedup 개선")
 print(f"📦 ★ v29b: 상품=캠페인 첫 단어(이모지 제거), 모든 상품 나열")
 print(f"📦 ★ v29: CPM→매출, 정렬=전날지출순")
 print(f"\n📊 {SPREADSHEET_URL}")
