@@ -581,12 +581,11 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
         fr = []
         bk={"foregroundColor":{"red":0,"green":0,"blue":0}}; dg3={"foregroundColor":{"red":0.22,"green":0.46,"blue":0.11}}
         rd={"foregroundColor":{"red":0.85,"green":0.0,"blue":0.0}}; gn={"foregroundColor":{"red":0.0,"green":0.7,"blue":0.0}}; bl={"foregroundColor":{"red":0.0,"green":0.0,"blue":0.85}}
+        # ★ v30b: col_values N회 → get_all_values 1회로 대체 (API 절약)
+        all_vals = with_retry(ws.get_all_values); time.sleep(2)
         for ci in range(tcs, tce):
-            try: cv = with_retry(ws.col_values, ci+1)
-            except: continue
-            if not cv or len(cv) < 2: continue
-            for ri in range(2, min(len(cv)+1, rows_count+3)):
-                val = cv[ri-1] if ri-1 < len(cv) else ""
+            for ri in range(2, min(len(all_vals)+1, rows_count+3)):
+                val = all_vals[ri-1][ci] if ri-1 < len(all_vals) and ci < len(all_vals[ri-1]) else ""
                 if not val or '\n' not in val: continue
                 lines = val.split('\n')
                 if len(lines) < 4: continue
@@ -599,11 +598,11 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
                     tr=[{"startIndex":0,"format":bk},{"startIndex":l1e+1,"format":dg3},{"startIndex":l2e+1,"format":rd},{"startIndex":l4s,"format":bl}]
                 if len(lines)>=5: tr.append({"startIndex":l5s,"format":bk})
                 fr.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri-1,"endRowIndex":ri,"startColumnIndex":ci,"endColumnIndex":ci+1},"rows":[{"values":[{"userEnteredValue":{"stringValue":val},"textFormatRuns":tr}]}],"fields":"userEnteredValue,textFormatRuns"}})
-                if len(fr) >= 300:
-                    try: with_retry(sh.batch_update, body={"requests":fr}); fr=[]; time.sleep(3)
+                if len(fr) >= 500:
+                    try: with_retry(sh.batch_update, body={"requests":fr}); fr=[]; time.sleep(5)
                     except: fr=[]
         if fr:
-            try: with_retry(sh.batch_update, body={"requests":fr}); time.sleep(2)
+            try: with_retry(sh.batch_update, body={"requests":fr}); time.sleep(3)
             except: pass
         print("  ✅ 텍스트 색상 완료")
     except Exception as e: print(f"  ⚠️ 텍스트 색상 오류: {e}")
