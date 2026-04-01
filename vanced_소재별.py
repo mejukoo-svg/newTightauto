@@ -106,7 +106,7 @@ def get_gc(cfg):
 # 병렬 제어
 # =============================================================================
 WRITE_SEMAPHORE = threading.Semaphore(2)
-FORMAT_SEMAPHORE = threading.Semaphore(2)
+FORMAT_SEMAPHORE = threading.Semaphore(1)  # ★ 서식 적용은 1개씩 직렬 실행
 
 def with_retry(fn, *args, max_retries=8, **kwargs):
     for attempt in range(max_retries):
@@ -240,22 +240,34 @@ def apply_rich_text(sh, ws, data_2d, start_row_idx, start_col_idx, cell_type='tr
     if not api_rows:
         return
     max_cols = max((len(r['values']) for r in api_rows), default=0)
-    CHUNK = 50
+    CHUNK = 20  # ★ 50→20 축소: API 안정성 향상
+    applied, failed = 0, 0
     for i in range(0, len(api_rows), CHUNK):
         chunk = api_rows[i:i+CHUNK]
-        with_retry(sh.batch_update, body={"requests": [{"updateCells": {
-            "rows": chunk,
-            "range": {
-                "sheetId": sheet_id,
-                "startRowIndex": start_row_idx + i,
-                "endRowIndex": start_row_idx + i + len(chunk),
-                "startColumnIndex": start_col_idx,
-                "endColumnIndex": start_col_idx + max_cols,
-            },
-            "fields": "userEnteredValue,userEnteredFormat,textFormatRuns"
-        }}]})
-        time.sleep(1)
-    print(f"      → 리치텍스트 포맷 적용 ({len(api_rows)}행)")
+        try:
+            # ★ 세마포어로 병렬 서식 충돌 방지
+            with FORMAT_SEMAPHORE:
+                with_retry(sh.batch_update, body={"requests": [{"updateCells": {
+                    "rows": chunk,
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": start_row_idx + i,
+                        "endRowIndex": start_row_idx + i + len(chunk),
+                        "startColumnIndex": start_col_idx,
+                        "endColumnIndex": start_col_idx + max_cols,
+                    },
+                    "fields": "userEnteredValue,userEnteredFormat,textFormatRuns"
+                }}]})
+            applied += len(chunk)
+        except Exception as e:
+            failed += len(chunk)
+            print(f"      ⚠️ 리치텍스트 청크 실패 (행 {i+1}~{i+len(chunk)}): {e}")
+        time.sleep(2)  # ★ 1→2초: API 쿨다운 여유
+    total = applied + failed
+    if failed:
+        print(f"      → 리치텍스트 포맷: {applied}/{total}행 성공, {failed}행 실패")
+    else:
+        print(f"      → 리치텍스트 포맷 적용 완료 ({applied}행)")
 
 # =============================================================================
 # Part 1: Meta Ads API — ad-level fetch (★ 재시도 로직 포함)
