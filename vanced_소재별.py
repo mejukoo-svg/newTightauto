@@ -258,18 +258,92 @@ def apply_rich_text(sh, ws, data_2d, start_row_idx, start_col_idx, cell_type='tr
     print(f"      → 리치텍스트 포맷 적용 ({len(api_rows)}행)")
 
 # =============================================================================
-# Part 1: Meta Ads API — ad-level fetch
+# Part 1: Meta Ads API — ad-level fetch (★ 재시도 로직 포함)
 # =============================================================================
+META_MAX_RETRIES = 3          # 최대 재시도 횟수
+META_RETRY_WAIT  = [60, 120, 180]  # 시도별 대기 시간(초)
+META_RETRYABLE_CODES = {2, 4, 17, 32, 613}  # 재시도 가능한 Meta error codes
+META_RETRYABLE_SUBCODES = {1504044, 2446079}  # 재시도 가능한 subcodes
+
+def _is_meta_retryable(resp):
+    """Meta API 응답이 재시도 가능한 일시적 오류인지 판별"""
+    if resp.status_code == 503:
+        return True
+    if resp.status_code == 429:
+        return True
+    if resp.status_code in (400, 500):
+        try:
+            err = resp.json().get('error', {})
+            if err.get('is_transient', False):
+                return True
+            if err.get('code') in META_RETRYABLE_CODES:
+                return True
+            if err.get('error_subcode') in META_RETRYABLE_SUBCODES:
+                return True
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return False
+
+def _meta_request_with_retry(url, params=None, max_retries=META_MAX_RETRIES):
+    """단일 Meta API 요청에 재시도 로직 적용"""
+    for attempt in range(max_retries + 1):
+        try:
+            if params:
+                resp = requests.get(url, params=params, timeout=120)
+            else:
+                resp = requests.get(url, timeout=120)
+
+            # 성공
+            if resp.status_code == 200:
+                return resp
+
+            # 재시도 가능한 오류
+            if _is_meta_retryable(resp) and attempt < max_retries:
+                wait = META_RETRY_WAIT[min(attempt, len(META_RETRY_WAIT) - 1)]
+                err_msg = ''
+                try:
+                    err_msg = resp.json().get('error', {}).get('message', '')[:100]
+                except Exception:
+                    err_msg = resp.text[:100]
+                print(f"   ⚠️ Meta API 일시 오류 (HTTP {resp.status_code}): {err_msg}")
+                print(f"   🔄 {wait}초 대기 후 재시도 ({attempt + 1}/{max_retries})...")
+                time.sleep(wait)
+                continue
+
+            # 재시도 불가능한 오류 → 그대로 반환
+            return resp
+
+        except requests.exceptions.Timeout:
+            if attempt < max_retries:
+                wait = META_RETRY_WAIT[min(attempt, len(META_RETRY_WAIT) - 1)]
+                print(f"   ⚠️ Meta API 타임아웃")
+                print(f"   🔄 {wait}초 대기 후 재시도 ({attempt + 1}/{max_retries})...")
+                time.sleep(wait)
+                continue
+            raise
+        except requests.exceptions.ConnectionError:
+            if attempt < max_retries:
+                wait = META_RETRY_WAIT[min(attempt, len(META_RETRY_WAIT) - 1)]
+                print(f"   ⚠️ Meta API 연결 오류")
+                print(f"   🔄 {wait}초 대기 후 재시도 ({attempt + 1}/{max_retries})...")
+                time.sleep(wait)
+                continue
+            raise
+
+    # 모든 재시도 소진 — 마지막 응답 반환
+    return resp
+
+
 def fetch_meta_raw(cfg):
-    """Meta API에서 ad-level raw 데이터 가져옴"""
+    """Meta API에서 ad-level raw 데이터 가져옴 (★ 재시도 로직 포함)"""
     print(f"\n📡 [Meta] ad(소재) 일간 데이터 fetch ({cfg['FROM_DATE']} ~ {cfg['TO_DATE']})...")
     meta_raw, next_url, page = [], None, 0
     while True:
         page += 1
         if next_url:
-            resp = requests.get(next_url, timeout=120)
+            resp = _meta_request_with_retry(next_url)
         else:
-            resp = requests.get(
+            resp = _meta_request_with_retry(
                 f"{cfg['META_BASE_URL']}/{cfg['META_AD_ACCOUNT_ID']}/insights",
                 params={
                     'access_token': cfg['META_ACCESS_TOKEN'],
@@ -277,16 +351,15 @@ def fetch_meta_raw(cfg):
                               'spend,cpm,reach,impressions,frequency,'
                               'actions,action_values,cost_per_action_type,purchase_roas,'
                               'unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click',
-                    'level': 'ad',  # ★ 소재별
+                    'level': 'ad',
                     'time_increment': 1,
                     'time_range': json.dumps({'since': cfg['FROM_DATE'], 'until': cfg['TO_DATE']}),
                     'limit': 500,
                     'filtering': json.dumps([{'field': 'spend', 'operator': 'GREATER_THAN', 'value': '0'}]),
                 },
-                timeout=120,
             )
         if resp.status_code != 200:
-            print(f"   ❌ Meta API 오류 {resp.status_code}: {resp.text[:300]}")
+            print(f"   ❌ Meta API 오류 {resp.status_code} (재시도 소진): {resp.text[:300]}")
             break
         data = resp.json()
         rows = data.get('data', [])
