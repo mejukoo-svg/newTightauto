@@ -19,6 +19,7 @@ on:
           - domestic_adset
           - domestic_creative
           - vanced_adset
+          - vanced_creative
 
 jobs:
   global_adset:
@@ -146,3 +147,30 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_VANCED }}
+
+  vanced_creative:
+    name: vanced_소재별
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event.inputs.script == 'all' ||
+      github.event.inputs.script == 'vanced_creative'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install gspread google-auth pandas requests yfinance
+      - run: python vanced_소재별.py
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_VANCED_creative }}
