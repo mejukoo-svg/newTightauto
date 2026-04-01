@@ -262,16 +262,16 @@ def apply_rich_text(sh, ws, data_2d, start_row_idx, start_col_idx, cell_type='tr
 # =============================================================================
 META_MAX_RETRIES = 3          # 최대 재시도 횟수
 META_RETRY_WAIT  = [60, 120, 180]  # 시도별 대기 시간(초)
-META_RETRYABLE_CODES = {2, 4, 17, 32, 613}  # 재시도 가능한 Meta error codes
-META_RETRYABLE_SUBCODES = {1504044, 2446079}  # 재시도 가능한 subcodes
+META_RETRYABLE_CODES = {1, 2, 4, 17, 32, 613}  # 재시도 가능한 Meta error codes
+META_RETRYABLE_SUBCODES = {99, 1504044, 2446079}  # 재시도 가능한 subcodes
 
 def _is_meta_retryable(resp):
     """Meta API 응답이 재시도 가능한 일시적 오류인지 판별"""
-    if resp.status_code == 503:
-        return True
+    if resp.status_code in (500, 502, 503):
+        return True  # ★ 서버 오류는 무조건 재시도
     if resp.status_code == 429:
         return True
-    if resp.status_code in (400, 500):
+    if resp.status_code == 400:
         try:
             err = resp.json().get('error', {})
             if err.get('is_transient', False):
