@@ -334,42 +334,68 @@ def _meta_request_with_retry(url, params=None, max_retries=META_MAX_RETRIES):
     return resp
 
 
+def _generate_monthly_ranges(from_date, to_date):
+    """날짜 범위를 월별 청크로 분할"""
+    chunks = []
+    start = datetime.strptime(from_date, '%Y-%m-%d')
+    end = datetime.strptime(to_date, '%Y-%m-%d')
+    while start <= end:
+        # 해당 월의 마지막 날
+        last_day = calendar.monthrange(start.year, start.month)[1]
+        month_end = datetime(start.year, start.month, last_day)
+        chunk_end = min(month_end, end)
+        chunks.append((start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
+        # 다음 월 1일로 이동
+        start = chunk_end + timedelta(days=1)
+    return chunks
+
+
 def fetch_meta_raw(cfg):
-    """Meta API에서 ad-level raw 데이터 가져옴 (★ 재시도 로직 포함)"""
+    """Meta API에서 ad-level raw 데이터 가져옴 (★ 월별 분할 + 재시도 로직)"""
     print(f"\n📡 [Meta] ad(소재) 일간 데이터 fetch ({cfg['FROM_DATE']} ~ {cfg['TO_DATE']})...")
-    meta_raw, next_url, page = [], None, 0
-    while True:
-        page += 1
-        if next_url:
-            resp = _meta_request_with_retry(next_url)
-        else:
-            resp = _meta_request_with_retry(
-                f"{cfg['META_BASE_URL']}/{cfg['META_AD_ACCOUNT_ID']}/insights",
-                params={
-                    'access_token': cfg['META_ACCESS_TOKEN'],
-                    'fields': 'campaign_name,adset_name,adset_id,ad_name,ad_id,'
-                              'spend,cpm,reach,impressions,frequency,'
-                              'actions,action_values,cost_per_action_type,purchase_roas,'
-                              'unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click',
-                    'level': 'ad',
-                    'time_increment': 1,
-                    'time_range': json.dumps({'since': cfg['FROM_DATE'], 'until': cfg['TO_DATE']}),
-                    'limit': 500,
-                    'filtering': json.dumps([{'field': 'spend', 'operator': 'GREATER_THAN', 'value': '0'}]),
-                },
-            )
-        if resp.status_code != 200:
-            print(f"   ❌ Meta API 오류 {resp.status_code} (재시도 소진): {resp.text[:300]}")
-            break
-        data = resp.json()
-        rows = data.get('data', [])
-        meta_raw.extend(rows)
-        print(f"   [Meta] 페이지 {page}: +{len(rows)}건 (누적 {len(meta_raw)}건)")
-        next_url = data.get('paging', {}).get('next')
-        if not next_url or not rows:
-            break
-        time.sleep(0.5)
-    print(f"✅ Meta: {len(meta_raw)}건")
+
+    # ★ 날짜 범위를 월별로 분할하여 Meta 서버 부하 방지
+    monthly_ranges = _generate_monthly_ranges(cfg['FROM_DATE'], cfg['TO_DATE'])
+    print(f"   📅 월별 분할: {len(monthly_ranges)}개 청크")
+
+    meta_raw = []
+    for chunk_idx, (chunk_from, chunk_to) in enumerate(monthly_ranges, 1):
+        print(f"\n   📦 [{chunk_idx}/{len(monthly_ranges)}] {chunk_from} ~ {chunk_to}")
+        next_url, page = None, 0
+        while True:
+            page += 1
+            if next_url:
+                resp = _meta_request_with_retry(next_url)
+            else:
+                resp = _meta_request_with_retry(
+                    f"{cfg['META_BASE_URL']}/{cfg['META_AD_ACCOUNT_ID']}/insights",
+                    params={
+                        'access_token': cfg['META_ACCESS_TOKEN'],
+                        'fields': 'campaign_name,adset_name,adset_id,ad_name,ad_id,'
+                                  'spend,cpm,reach,impressions,frequency,'
+                                  'actions,action_values,cost_per_action_type,purchase_roas,'
+                                  'unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click',
+                        'level': 'ad',
+                        'time_increment': 1,
+                        'time_range': json.dumps({'since': chunk_from, 'until': chunk_to}),
+                        'limit': 500,
+                        'filtering': json.dumps([{'field': 'spend', 'operator': 'GREATER_THAN', 'value': '0'}]),
+                    },
+                )
+            if resp.status_code != 200:
+                print(f"   ❌ Meta API 오류 {resp.status_code} (재시도 소진): {resp.text[:300]}")
+                break
+            data = resp.json()
+            rows = data.get('data', [])
+            meta_raw.extend(rows)
+            print(f"      페이지 {page}: +{len(rows)}건 (누적 {len(meta_raw)}건)")
+            next_url = data.get('paging', {}).get('next')
+            if not next_url or not rows:
+                break
+            time.sleep(0.5)
+        time.sleep(1)  # 청크 간 쿨다운
+
+    print(f"\n✅ Meta: {len(meta_raw)}건 (총 {len(monthly_ranges)}개 월별 청크)")
     return meta_raw
 
 def parse_meta(meta_raw):
