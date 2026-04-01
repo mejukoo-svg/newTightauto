@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 [Vanced] 소재별 퍼포먼스 데이터 자동 업데이트 — Parallel Edition
-Meta Ads API (ad-level: 지출/노출/클릭) + Mixpanel (매출/결과수 - utm_term 매칭)
+Meta Ads API (ad-level: 지출/노출/클릭) + Mixpanel (매출/결과수 - utm_content 매칭)
 → Google Sheets 전체 탭 자동 갱신
 
 ★ 핵심
   - Meta: ad-level(소재별) 데이터 수집
   - Mixpanel: '결제완료' + 'payment_complete' OR 조회
   - amount 필드: 'amount' → '결제금액' → 'value' 순으로 OR 추출
-  - utm_term → ad_id 매칭 (소재별)
+  - utm_content → ad_id 매칭 (소재별)
   - 모든 I/O를 병렬(ThreadPoolExecutor) 처리
   - 탭: 마스터탭, 추이차트, 증감액, 추이차트(주간), 예산, 주간종합, 주간종합_2, 주간종합_3
 """
@@ -28,7 +28,7 @@ from gspread.exceptions import APIError
 
 print("=" * 60)
 print("🚀 [Vanced] 소재별 자동화 (★ 병렬 최적화)")
-print("   Meta ad-level + Mixpanel utm_term 매칭")
+print("   Meta ad-level + Mixpanel utm_content 매칭")
 print("=" * 60)
 
 # =============================================================================
@@ -483,22 +483,13 @@ def fetch_mixpanel_raw(cfg):
 def parse_and_match_mixpanel(lines, all_ads):
     """
     Mixpanel raw lines → 파싱 + 중복제거 + ad_id 매칭 (소재별)
-    ★ utm_term 값을 ad_id로 매칭 시도
-    ★ utm_term이 adset_id인 경우 → 해당 adset 아래 모든 ad에 균등 배분
+    ★ utm_content 값을 ad_id로 직접 매칭 (소재별은 utm_content 사용)
     """
     mp_matched = defaultdict(lambda: {'count': 0, 'revenue': 0.0})
     total_events, matched_events, unmatched_events = 0, 0, 0
 
     if not lines:
         return mp_matched, 0, 0, 0
-
-    # adset_id → [ad_id, ...] 매핑 생성
-    adset_to_ads = defaultdict(set)
-    for ad_id, info in all_ads.items():
-        adset_to_ads[info['adset_id']].add(ad_id)
-
-    # 전체 adset_id set
-    all_adset_ids = set(adset_to_ads.keys())
 
     seen, events_parsed = set(), []
     for line in lines:
@@ -510,7 +501,7 @@ def parse_and_match_mixpanel(lines, all_ads):
                 continue
             dt_kst = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)
             dk = f"{dt_kst.month}/{dt_kst.day}"
-            utm_term = str(props.get('utm_term', '') or '').strip()
+            utm_content = str(props.get('utm_content', '') or '').strip()
 
             # amount 필드: 'amount' → '결제금액' → 'value' 순서
             amount = 0.0
@@ -528,7 +519,7 @@ def parse_and_match_mixpanel(lines, all_ads):
             events_parsed.append({
                 'dk': dk,
                 'ts': ts,
-                'utm_term': utm_term,
+                'utm_content': utm_content,
                 'amount': amount,
                 'distinct_id': props.get('distinct_id', ''),
                 'service': str(props.get('서비스', '')).strip(),
@@ -546,40 +537,21 @@ def parse_and_match_mixpanel(lines, all_ads):
     total_events = len(deduped)
     print(f"   중복 제거 후: {total_events}건")
 
-    # 매칭 통계
-    direct_ad_match = 0
-    adset_fallback_match = 0
-
     for e in deduped:
-        utm = e['utm_term']
+        utm = e['utm_content']
         if not utm:
             unmatched_events += 1
             continue
 
-        # ★ 1순위: utm_term이 ad_id와 직접 매칭
+        # ★ utm_content → ad_id 직접 매칭
         if utm in all_ads:
             mp_matched[(e['dk'], utm)]['count'] += 1
             mp_matched[(e['dk'], utm)]['revenue'] += e['amount']
             matched_events += 1
-            direct_ad_match += 1
-        # ★ 2순위: utm_term이 adset_id인 경우 → 해당 날짜에 지출이 있는 ad들에 균등 배분
-        elif utm in all_adset_ids:
-            ads_in_adset = adset_to_ads[utm]
-            if ads_in_adset:
-                n = len(ads_in_adset)
-                for aid in ads_in_adset:
-                    mp_matched[(e['dk'], aid)]['count'] += 1.0 / n
-                    mp_matched[(e['dk'], aid)]['revenue'] += e['amount'] / n
-                matched_events += 1
-                adset_fallback_match += 1
-            else:
-                unmatched_events += 1
         else:
             unmatched_events += 1
 
     print(f"   ★ 매칭: {matched_events}건 ({matched_events / max(total_events, 1) * 100:.1f}%)")
-    print(f"     - ad_id 직접: {direct_ad_match}건")
-    print(f"     - adset_id 폴백: {adset_fallback_match}건")
     print(f"     - 미매칭: {unmatched_events}건")
     return mp_matched, total_events, matched_events, unmatched_events
 
