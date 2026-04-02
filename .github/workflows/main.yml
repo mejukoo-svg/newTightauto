@@ -21,6 +21,10 @@ on:
           - vanced_adset
           - vanced_creative
 
+# ★ v30b: 전역 환경변수 — 실시간 로그 출력 + 타임아웃 방지
+env:
+  PYTHONUNBUFFERED: "1"
+
 jobs:
   global_adset:
     name: 글로벌_세트별
@@ -29,7 +33,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'global_adset'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,7 +60,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'global_revenue'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -76,7 +80,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'domestic_adset'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -102,7 +106,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'domestic_creative'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -128,7 +132,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'vanced_adset'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -155,7 +159,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'vanced_creative'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
