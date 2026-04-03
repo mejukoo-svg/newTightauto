@@ -58,7 +58,7 @@ URL_NAV_GOO = os.environ.get("URL_NAV_GOO", "https://docs.google.com/spreadsheet
 NAV_GOO_DAILY_TAB = "00. 네이버/구글 Daily"
 
 URL_META    = os.environ.get("URL_META",    "https://docs.google.com/spreadsheets/d/1PLMwesj4UYYkKPkHSza8loU_A2PvLEQL7qkOnINqrxs/edit")
-GID_META_TREND = int(os.environ.get("GID_META_TREND", "367316653"))
+GID_META_TREND = int(os.environ.get("GID_META_TREND", "33165508"))
 
 URL_VANCED  = os.environ.get("URL_VANCED",  "https://docs.google.com/spreadsheets/d/1RYXynsjUX2-7yV2z2gLB79sCFrnIH-5AVcLM6IIXA7U/edit")
 GID_VANCED_TREND = int(os.environ.get("GID_VANCED_TREND", "1052644005"))
@@ -990,32 +990,87 @@ def fetch_total_daily():
     print("="*60)
 
     ss = with_retry(gc.open_by_url, URL_TOTAL)
-    ws = None
-    for s in ss.worksheets():
-        if s.id == GID_TOTAL: ws = s; break
-    if ws is None:
-        print("  ⚠️ gid 시트 못 찾음"); return {}
-
-    print(f"  📖 시트: {ws.title}")
-    vals = with_retry(ws.get_all_values); time.sleep(1)
-    if not vals or len(vals) < 2:
-        print("  ⚠️ 데이터 없음"); return {}
-
-    date_col = 4; rev_col = 5; spend_col = 12
     start_d = datetime.strptime(CH_START_DATE, "%Y-%m-%d").date()
     end_d   = datetime.strptime(CH_END_DATE, "%Y-%m-%d").date()
+
+    # ── 기간에 해당하는 월별 탭 목록 생성 (YYMM 형식) ──
+    needed_months = set()
+    d = start_d.replace(day=1)
+    while d <= end_d:
+        needed_months.add(f"{d.year % 100:02d}{d.month:02d}")
+        if d.month == 12:
+            d = d.replace(year=d.year + 1, month=1)
+        else:
+            d = d.replace(month=d.month + 1)
+    print(f"  📅 필요 월: {sorted(needed_months)}")
+
+    # ── 탭 이름 매칭: 'YYMM_매출대시보드' 패턴 ──
+    all_sheets = ss.worksheets()
+    matched_tabs = []
+    for s in all_sheets:
+        title = s.title.strip()
+        m = re.match(r'^(\d{4})_매출대시보드$', title)
+        if m and m.group(1) in needed_months:
+            matched_tabs.append(s)
+            print(f"  ✅ 탭 발견: '{title}'")
+
+    # fallback: GID 기반 (기존 방식)
+    if not matched_tabs:
+        print(f"  ⚠️ 월별 탭 미발견 → GID fallback")
+        for s in all_sheets:
+            if s.id == GID_TOTAL:
+                matched_tabs.append(s)
+                print(f"  📖 GID fallback: '{s.title}'")
+                break
+
+    if not matched_tabs:
+        print("  ⚠️ 탭 못 찾음"); return {}
+
     daily = {}
 
-    for ri in range(1, len(vals)):
-        row = vals[ri]
-        if date_col >= len(row): continue
-        dt = parse_date(row[date_col])
-        if dt is None or dt < start_d or dt > end_d: continue
-        rev   = _num(row[rev_col])   if rev_col   < len(row) else 0
-        spend = _num(row[spend_col]) if spend_col < len(row) else 0
-        if dt not in daily: daily[dt] = {'revenue':0.0, 'spend':0.0}
-        daily[dt]['revenue'] += rev
-        daily[dt]['spend']   += spend
+    for ws in matched_tabs:
+        print(f"\n  📖 읽는 중: '{ws.title}'")
+        vals = with_retry(ws.get_all_values); time.sleep(1)
+        if not vals or len(vals) < 2:
+            print(f"    ⚠️ 데이터 없음, 스킵"); continue
+
+        # ── 헤더 기반 컬럼 자동 감지 ──
+        headers = [str(v).strip() for v in vals[0]]
+        date_col = rev_col = spend_col = None
+
+        # 새 형식 (2604~): col0='날짜', col1='매출', col4='비용'
+        if len(headers) > 0 and headers[0] == '날짜':
+            date_col = 0
+            for ci, h in enumerate(headers):
+                if h == '매출' and rev_col is None: rev_col = ci
+                if h == '비용' and spend_col is None: spend_col = ci
+            print(f"    → 새 형식 감지: 날짜=col{date_col}, 매출=col{rev_col}, 비용=col{spend_col}")
+
+        # 기존 형식 (~2603): col4='날짜', col5='매출', col12='비용'
+        else:
+            for ci, h in enumerate(headers):
+                if h == '날짜' and date_col is None: date_col = ci
+                if h == '매출' and rev_col is None: rev_col = ci
+                if h == '비용' and spend_col is None: spend_col = ci
+            print(f"    → 기존 형식 감지: 날짜=col{date_col}, 매출=col{rev_col}, 비용=col{spend_col}")
+
+        if date_col is None or rev_col is None:
+            print(f"    ⚠️ 필수 컬럼 못 찾음 (headers: {headers[:8]}), 스킵"); continue
+
+        tab_count = 0
+        for ri in range(1, len(vals)):
+            row = vals[ri]
+            if date_col >= len(row): continue
+            dt = parse_date(row[date_col])
+            if dt is None or dt < start_d or dt > end_d: continue
+            rev   = _num(row[rev_col])   if rev_col   < len(row) else 0
+            spend = _num(row[spend_col]) if spend_col is not None and spend_col < len(row) else 0
+            if rev == 0 and spend == 0: continue
+            if dt not in daily: daily[dt] = {'revenue':0.0, 'spend':0.0}
+            daily[dt]['revenue'] += rev
+            daily[dt]['spend']   += spend
+            tab_count += 1
+        print(f"    → {tab_count}건 수집")
 
     # ★ Colab 버전과 동일하게 일별 상세 로그 추가
     for dt in sorted(daily):
