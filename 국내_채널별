@@ -921,6 +921,7 @@ def write_trend(sp, df):
         print(f"  ⚠️ C2: {e}")
 
     # 셀 텍스트 색상 (ROAS=검정, 순이익=녹색, 지출=빨강, 매출=파랑, 전환율=검정)
+    # ★ 최적화: col_values() 개별 호출 대신 이미 메모리에 있는 all_rows 사용
     print("  🎨 셀 텍스트 색상...")
     try:
         bk = {"foregroundColor":{"red":0,"green":0,"blue":0}}
@@ -928,12 +929,11 @@ def write_trend(sp, df):
         rd = {"foregroundColor":{"red":0.85,"green":0,"blue":0}}
         bl = {"foregroundColor":{"red":0,"green":0,"blue":0.85}}
         creq = []
-        mx = min(nc, 60)  # 주별이라 컬럼 수 적으므로 더 넓게 커버
-        for ci in range(3, mx):
-            try: cv = ws.col_values(ci + 1)
-            except: continue
-            for ri in range(1, min(len(cv), rc)):
-                v = cv[ri] if ri < len(cv) else ""
+        mx = min(nc, 60)
+        for ri in range(1, len(all_rows)):
+            row = all_rows[ri]
+            for ci in range(3, min(len(row), mx)):
+                v = str(row[ci]) if ci < len(row) else ""
                 if not v or '\n' not in v: continue
                 ls = v.split('\n')
                 if len(ls) < 4: continue
@@ -944,21 +944,15 @@ def write_trend(sp, df):
                     l4e = l4s + len(ls[3]); runs.append({"startIndex":l4e+1,"format":bk})
                 creq.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri,"endRowIndex":ri+1,"startColumnIndex":ci,"endColumnIndex":ci+1},
                     "rows":[{"values":[{"userEnteredValue":{"stringValue":v},"textFormatRuns":runs}]}],"fields":"userEnteredValue,textFormatRuns"}})
-                if len(creq) >= 300:
-                    try:
-                        retry_batch_update(sp, body={"requests":creq})
-                        creq = []
-                        time.sleep(3)
-                    except Exception as e:
-                        print(f"    ⚠️ 배치 색상 일부 실패 (계속 진행): {e}")
-                        creq = []
-        if creq:
+        # ★ 배치 전송 (1000건씩)
+        for i in range(0, len(creq), 1000):
+            batch = creq[i:i+1000]
             try:
-                retry_batch_update(sp, body={"requests":creq})
+                retry_batch_update(sp, body={"requests":batch})
                 time.sleep(2)
             except Exception as e:
-                print(f"    ⚠️ 마지막 배치 색상 실패: {e}")
-        print("  ✅ 텍스트 색상 완료")
+                print(f"    ⚠️ 배치 색상 일부 실패 (계속 진행): {e}")
+        print(f"  ✅ 텍스트 색상 완료 ({len(creq)}건)")
     except Exception as e:
         print(f"  ⚠️ 텍스트 색상: {e}")
     print("  ✅ 추이차트(주별) 서식 완료")
@@ -1481,14 +1475,13 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
     cr=[{"addConditionalFormatRule":{"rule":{"ranges":[{"sheetId":sid,"startRowIndex":1,"endRowIndex":tdr,"startColumnIndex":3,"endColumnIndex":nc}],"booleanRule":{"condition":{"type":"CUSTOM_FORMULA","values":[{"userEnteredValue":rf(c)}]},"format":{"backgroundColor":bg}}},"index":0}} for c,bg in rules]
     with_retry(ss.batch_update, body={"requests":cr}); time.sleep(3)
 
+    # ★ 최적화: col_values() 개별 호출 대신 이미 메모리에 있는 all_data 사용
     print("  🎨 텍스트 색상...")
     txr=[]
-    for ci in range(3,nc):
-        try: cv=with_retry(ws.col_values,ci+1)
-        except: continue
-        if not cv or len(cv)<2: continue
-        for ri in range(1,min(len(cv),tdr)):
-            val=cv[ri]
+    for ri in range(1, len(all_data)):
+        row = all_data[ri]
+        for ci in range(3, min(len(row), nc)):
+            val = str(row[ci]) if ci < len(row) else ""
             if not val or '\n' not in val: continue
             lines_val=val.split('\n')
             if len(lines_val)<3: continue
@@ -1496,12 +1489,12 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
             runs=[{"startIndex":0,"format":BK},{"startIndex":l1e+1,"format":GN},{"startIndex":l2e+1,"format":BK}]
             if len(lines_val)>=4: runs.append({"startIndex":l3e+1,"format":RD})
             txr.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri,"endRowIndex":ri+1,"startColumnIndex":ci,"endColumnIndex":ci+1},"rows":[{"values":[{"userEnteredValue":{"stringValue":val},"textFormatRuns":runs}]}],"fields":"userEnteredValue,textFormatRuns"}})
-            if len(txr)>=300:
-                try: with_retry(ss.batch_update,body={"requests":txr}); txr=[]; time.sleep(3)
-                except: txr=[]
-    if txr:
-        try: with_retry(ss.batch_update,body={"requests":txr}); time.sleep(2)
-        except: pass
+    # ★ 배치 전송 (1000건씩)
+    for i in range(0, len(txr), 1000):
+        batch = txr[i:i+1000]
+        try: with_retry(ss.batch_update, body={"requests":batch}); time.sleep(2)
+        except Exception as e: print(f"    ⚠️ 배치 색상 실패 (계속 진행): {e}")
+    print(f"  ✅ 텍스트 색상 완료 ({len(txr)}건)")
 
     print(f"\n  ✅ '{CH_SHEET_NAME}' 완성!")
 
