@@ -1372,16 +1372,21 @@ def write_channel_trend(total_daily, naver_google, meta_data, vanced_data):
     na = naver_google.get('naver_ads', {})
     ga = naver_google.get('google_ads', {})
 
+    def total_rev_adjusted(dt):
+        """전체 매출에서 네이버/구글 지출을 차감한 순매출"""
+        base_rev = total_daily.get(dt, {}).get('revenue', 0)
+        nav_spend = na.get(dt, {}).get('spend', 0)
+        goo_spend = ga.get(dt, {}).get('spend', 0)
+        return base_rev - nav_spend - goo_spend
+
     def total_spend(dt):
-        base = total_daily.get(dt, {}).get('spend', 0)
-        nav  = na.get(dt, {}).get('spend', 0)
-        goo  = ga.get(dt, {}).get('spend', 0)
-        return base + nav + goo
+        """매출대시보드 비용 (메타+밴스드 지출)"""
+        return total_daily.get(dt, {}).get('spend', 0)
 
     channels = [
         {
             'name': '전체',
-            'get_rev':   lambda dt: total_daily.get(dt, {}).get('revenue', 0),
+            'get_rev':   lambda dt: total_rev_adjusted(dt),
             'get_spend': lambda dt: total_spend(dt),
         },
         {
