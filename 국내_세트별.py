@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-# v3-ad 국내 세트별 (★ v30 - 마스터탭 재활용, Mixpanel dedup 개선, Rate Limit 완화):
+# v3-ad 국내 세트별 (★ v30c - 주간종합 청크 쓰기, Rate Limit 강화):
+#   - ★ v30c: 15~17단계 주간종합 데이터 쓰기 청크 분할 (3000행)
+#   - ★ v30c: 15~17단계 포맷 배치 크기 축소 (100→50) + 대기 시간 증가 (1→3초)
+#   - ★ v30c: 14→15단계 전환 시 60초 쿨다운 추가
+#   - ★ v30b: 마스터탭 날짜형식 수정, adset_id 정밀도, dedup개선
 #   - ★ v30: 8.5단계 마스터탭 재활용 → 144개 탭 개별읽기 → 1개 탭 읽기로 대체
 #   - ★ v30: Mixpanel dedup 시 utm_term 있는 이벤트 우선 선택
 #   - ★ v30: Sheets 배치 크기 축소(8→4), 쿨다운 증가(12→25초), 워커 1개로 직렬화
@@ -23,7 +27,7 @@
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v30b 국내 세트별 (마스터탭 날짜형식 수정, adset_id 정밀도, dedup개선)")
+print("🚀 v3-ad v30c 국내 세트별 (주간종합 청크쓰기, Rate Limit 강화)")
 print("="*60)
 
 # =========================================================
@@ -79,6 +83,12 @@ SHEETS_READ_BATCH_SIZE = 4       # v29c: 8 → v30: 4
 SHEETS_READ_BATCH_DELAY = 25     # v29c: 12 → v30: 25초
 EXCHANGE_RATE_WORKERS = 2
 BUDGET_WORKERS = 3
+
+# ★ v30c: 주간종합 쓰기 설정
+WEEKLY_WRITE_CHUNK_SIZE = 3000   # 한 번에 쓸 최대 행 수
+WEEKLY_FORMAT_BATCH_SIZE = 50    # 포맷 요청 배치 크기 (v30b: 100 → v30c: 50)
+WEEKLY_FORMAT_BATCH_DELAY = 3    # 포맷 배치 간 대기 시간 (v30b: 1 → v30c: 3초)
+WEEKLY_STEP_COOLDOWN = 45        # 주간종합 단계 간 쿨다운 (v30b: 3 → v30c: 45초)
 
 _print_lock = threading.Lock()
 def safe_print(*args, **kwargs):
@@ -1253,7 +1263,7 @@ def generate_date_tab_summary(rows, structure="new"):
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
     sp = sorted([p for p in prod_spend if (prod_spend[p] > 0 or prod_revenue[p] > 0)],
                 key=lambda p: prod_spend[p], reverse=True)
-    num_products = len(sp); NC = 25
+    num_products = len(sp); NC = max(25, 9 + num_products + 2)  # ★ v30c: 상품 수 초과 방지
     sum_col_idx = 9 + num_products
     summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC); summary_data.append([""]*NC)
     r_title=[""]*NC; r_title[14]="전체"; summary_data.append(r_title)
@@ -1325,6 +1335,50 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
             fmt_requests.append(create_number_format_request(sid,t_start+3,t_start+4,sum_col,sum_col+1,"NUMBER","[$₩-412]#,##0"))
         fmt_requests.append(create_border_request(sid,t_start+2,t_start+4,9,prod_end_col))
     return fmt_requests
+
+
+# =========================================================
+# ★ v30c: 청크 쓰기 + 포맷 배치 헬퍼
+# =========================================================
+def chunked_sheet_write(ws, data_rows, range_start="A1", chunk_size=WEEKLY_WRITE_CHUNK_SIZE, label=""):
+    """데이터를 chunk_size 행씩 나눠 쓰기 (대량 데이터 timeout 방지)"""
+    total = len(data_rows)
+    if total == 0:
+        return
+    total_chunks = math.ceil(total / chunk_size)
+    for ci in range(total_chunks):
+        start_idx = ci * chunk_size
+        end_idx = min(start_idx + chunk_size, total)
+        chunk = data_rows[start_idx:end_idx]
+        # range_start가 "A1"이면 → "A{start_idx+1}"
+        if range_start == "A1":
+            rng = f"A{start_idx + 1}"
+        else:
+            rng = f"A{start_idx + 1}"
+        with_retry(ws.update, values=chunk, range_name=rng, value_input_option="USER_ENTERED")
+        if total_chunks > 1:
+            print(f"  📝 {label} 청크 {ci+1}/{total_chunks} ({len(chunk)}행) 쓰기 완료")
+            time.sleep(5)
+        else:
+            time.sleep(3)
+
+
+def chunked_format_apply(sh, format_requests, batch_size=WEEKLY_FORMAT_BATCH_SIZE, delay=WEEKLY_FORMAT_BATCH_DELAY, label=""):
+    """포맷 요청을 batch_size개씩 나눠 적용"""
+    if not format_requests:
+        return
+    total_batches = math.ceil(len(format_requests) / batch_size)
+    for bi in range(total_batches):
+        start = bi * batch_size
+        end = min(start + batch_size, len(format_requests))
+        batch = format_requests[start:end]
+        try:
+            with_retry(sh.batch_update, body={"requests": batch})
+        except Exception as e:
+            print(f"  ⚠️ {label} 포맷 배치 {bi+1}/{total_batches} 오류: {e}")
+        time.sleep(delay)
+    if total_batches > 1:
+        print(f"  ✅ {label} 포맷 적용 완료 ({len(format_requests)}개 → {total_batches}배치)")
 
 
 # =============================================================================
@@ -2073,6 +2127,10 @@ SUMMARY_PRODUCTS = products
 print(f"📆 월:{len(month_names_list)}, 주:{len(week_keys)}, 일:{len(date_names)}")
 print(f"📦 감지된 상품 (전체): {products}")
 
+# ★ v30c: 14→15단계 전환 시 충분한 쿨다운 (rate limit 누적 해소)
+print(f"\n⏳ 14→15단계 전환: 60초 대기 (rate limit 해소)...")
+time.sleep(60)
+
 # 15단계: 주간종합
 print("\n15단계: 주간종합")
 ws_ws = safe_add_worksheet(sh, "주간종합", rows=2000, cols=20); time.sleep(3)
@@ -2102,16 +2160,26 @@ for mk in month_names_list:
     b, cr_ws = ccb(f"'{mk} ({mr_d})", msd[mk], mps[mk], sid_ws, cr_ws, fr_ws, im=True); ar_ws.extend(b)
     mw = [wk for wk in week_keys if any(date_objects[d].year == yr and date_objects[d].month == mn for d in week_groups[wk])]; mw.reverse()
     for wk in mw: b, cr_ws = ccb(week_display_names[wk], wsd[wk], wps[wk], sid_ws, cr_ws, fr_ws); ar_ws.extend(b)
-with_retry(ws_ws.update, values=ar_ws, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
-try:
-    for i in range(0, len(fr_ws), 100): with_retry(sh.batch_update, body={"requests": fr_ws[i:i+100]}); time.sleep(1)
-except: pass
+
+# ★ v30c: 청크 쓰기로 대체 (timeout 방지)
+print(f"  📝 주간종합 데이터: {len(ar_ws)}행 → 청크 쓰기...")
+chunked_sheet_write(ws_ws, ar_ws, label="주간종합")
+time.sleep(5)
+
+# ★ v30c: 포맷도 배치 크기 줄여서 적용
+print(f"  🎨 주간종합 포맷: {len(fr_ws)}개 요청...")
+chunked_format_apply(sh, fr_ws, label="주간종합")
+
 try:
     cw = [{"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, "properties": {"pixelSize": 150}, "fields": "pixelSize"}}]
     for ci in range(1, 11): cw.append({"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": 100}, "fields": "pixelSize"}})
     with_retry(sh.batch_update, body={"requests": cw})
 except: pass
-print("✅ 주간종합"); time.sleep(3)
+print("✅ 주간종합")
+
+# ★ v30c: 주간종합 후 쿨다운
+print(f"⏳ 15→16단계 전환: {WEEKLY_STEP_COOLDOWN}초 대기...")
+time.sleep(WEEKLY_STEP_COOLDOWN)
 
 # 16단계: 주간종합_2
 print("\n16단계: 주간종합_2")
@@ -2146,11 +2214,20 @@ for tt, tc, dk in [("📈 제품별 ROAS", COLORS["dark_green"], "roas"), ("💰
         ft = "PERCENT" if dk in ["roas", "ratio"] else "NUMBER"; fp = "0.00%" if dk in ["roas", "ratio"] else "#,##0"
         fr2.append(create_number_format_request(sid2, cr2, cr2 + 1, 2, npc, ft, fp)); cr2 += 1
     fr2.append(create_border_request(sid2, tds - 1, cr2, 0, npc)); ar2 += [[""] * npc, [""] * npc]; cr2 += 2
-with_retry(ws2.update, values=ar2, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
-try:
-    for i in range(0, len(fr2), 100): with_retry(sh.batch_update, body={"requests": fr2[i:i+100]}); time.sleep(1)
-except: pass
-print("✅ 주간종합_2"); time.sleep(3)
+
+# ★ v30c: 청크 쓰기
+print(f"  📝 주간종합_2 데이터: {len(ar2)}행 → 청크 쓰기...")
+chunked_sheet_write(ws2, ar2, label="주간종합_2")
+time.sleep(5)
+
+# ★ v30c: 포맷 배치 적용
+print(f"  🎨 주간종합_2 포맷: {len(fr2)}개 요청...")
+chunked_format_apply(sh, fr2, label="주간종합_2")
+print("✅ 주간종합_2")
+
+# ★ v30c: 쿨다운
+print(f"⏳ 16→17단계 전환: {WEEKLY_STEP_COOLDOWN}초 대기...")
+time.sleep(WEEKLY_STEP_COOLDOWN)
 
 # 17단계: 주간종합_3 (일별)
 print("\n17단계: 주간종합_3")
@@ -2181,10 +2258,15 @@ for tt, tc, dk in [("📈 일별 제품별 ROAS", COLORS["dark_green"], "roas"),
         ft = "PERCENT" if dk in ["roas", "ratio"] else "NUMBER"; fp = "0.00%" if dk in ["roas", "ratio"] else "#,##0"
         fr3.append(create_number_format_request(sid3, cr3, cr3 + 1, 2, ndc, ft, fp)); cr3 += 1
     fr3.append(create_border_request(sid3, tds - 1, cr3, 0, ndc)); ar3 += [[""] * ndc, [""] * ndc]; cr3 += 2
-with_retry(ws3.update, values=ar3, range_name="A1", value_input_option="USER_ENTERED"); time.sleep(3)
-try:
-    for i in range(0, len(fr3), 100): with_retry(sh.batch_update, body={"requests": fr3[i:i+100]}); time.sleep(1)
-except: pass
+
+# ★ v30c: 청크 쓰기
+print(f"  📝 주간종합_3 데이터: {len(ar3)}행 → 청크 쓰기...")
+chunked_sheet_write(ws3, ar3, label="주간종합_3")
+time.sleep(5)
+
+# ★ v30c: 포맷 배치 적용
+print(f"  🎨 주간종합_3 포맷: {len(fr3)}개 요청...")
+chunked_format_apply(sh, fr3, label="주간종합_3")
 print("✅ 주간종합_3"); time.sleep(3)
 
 # 18: 최종 탭 순서
@@ -2199,6 +2281,7 @@ print(f"📊 분석탭: {len(date_names)}일 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행 | 추이차트: {len(date_names)}일")
 print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
+print(f"📦 ★ v30c: 주간종합 청크 쓰기({WEEKLY_WRITE_CHUNK_SIZE}행), 포맷 배치({WEEKLY_FORMAT_BATCH_SIZE}개/{WEEKLY_FORMAT_BATCH_DELAY}초), 단계간 쿨다운({WEEKLY_STEP_COOLDOWN}초)")
 print(f"📦 ★ v30b: 마스터탭 날짜 텍스트 강제, 날짜 정규화, adset_id 정밀도 보존, dedup 개선")
 print(f"📦 ★ v29b: 상품=캠페인 첫 단어(이모지 제거), 모든 상품 나열")
 print(f"📦 ★ v29: CPM→매출, 정렬=전날지출순")
