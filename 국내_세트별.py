@@ -13,7 +13,7 @@
 #   - ★ v29b: extract_product → 캠페인명 첫 단어(이모지 제거) 기반 상품 추출
 #   - ★ v29b: PRODUCT_KEYWORDS 필터 제거 → 모든 감지 상품 나열
 #   - ★ v29: 추이차트 셀 CPM→매출 대체, C2 라벨 수정, 정렬=전날 지출 기준 내림차순
-#   - Meta/Mixpanel: 최근 7일치만 새로 호출 (FULL_REFRESH 시 전체)
+#   - Meta/Mixpanel: 최근 10일치만 새로 호출 (FULL_REFRESH 시 전체)
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑
 #   - ★ v21: Mixpanel 이벤트 "결제완료" OR "payment_complete"
@@ -196,7 +196,7 @@ if FULL_REFRESH:
     REFRESH_DAYS = (TODAY - FULL_REFRESH_START).days + 1
     print(f"🔥 FULL_REFRESH 모드: {FULL_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘 ({REFRESH_DAYS}일)")
 else:
-    REFRESH_DAYS = 7
+    REFRESH_DAYS = 10
     print(f"🔄 일반 모드: 최근 {REFRESH_DAYS}일만 갱신")
 
 META_COLLECT_DAYS = REFRESH_DAYS
