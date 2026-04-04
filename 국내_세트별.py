@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-# v3-ad 국내 세트별 (★ v30c - 주간종합 청크 쓰기, Rate Limit 강화):
+# v3-ad 국내 세트별 (★ v30d - 기존 행 Mixpanel 컬럼만 업데이트, 요약표 API소스, 하이라이트 보존):
+#   - ★ v30d: 7-A 기존 행 업데이트 시 cols 14-18(결과MP,매출,이익,ROAS,CVR)만 갱신
+#   - ★ v30d: A~C 하이라이트, D~N 메타데이터, T~W 예산/메모 행 배열 모두 보존
+#   - ★ v30d: 요약표+상품분류를 date_tab_rows(API 원본)로 생성 → 추이차트와 동일 소스
 #   - ★ v30c: 15~17단계 주간종합 데이터 쓰기 청크 분할 (3000행)
 #   - ★ v30c: 15~17단계 포맷 배치 크기 축소 (100→50) + 대기 시간 증가 (1→3초)
 #   - ★ v30c: 14→15단계 전환 시 60초 쿨다운 추가
@@ -27,7 +30,7 @@
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v30c 국내 세트별 (주간종합 청크쓰기, Rate Limit 강화)")
+print("🚀 v3-ad v30d 국내 세트별 (Mixpanel 컬럼만 업데이트, 요약표 API소스, 하이라이트 보존)")
 print("="*60)
 
 # =========================================================
@@ -1584,9 +1587,7 @@ for dk in sorted(existing_refresh_tabs.keys()):
         ws_ex = refresh_ws(sh, ws_ex); all_values = with_retry(ws_ex.get_all_values); time.sleep(0.5)
         if not all_values or len(all_values) < 2: continue
         structure = detect_tab_structure(all_values[0]); sid_ex = ws_ex.id
-        total_rows_for_clear = max(len(all_values) + 50, 200); fmt_clear_start_col = get_col_index(structure, 3)
-        try: with_retry(sh.batch_update, body={"requests": [{"unmergeCells": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": 0, "endColumnIndex": 30}}}, {"repeatCell": {"range": {"sheetId": sid_ex, "startRowIndex": 1, "endRowIndex": total_rows_for_clear, "startColumnIndex": fmt_clear_start_col, "endColumnIndex": 30}, "cell": {"userEnteredFormat": {}}, "fields": "userEnteredFormat.numberFormat"}}]}); time.sleep(1)
-        except: pass
+        # ★ v30d: 데이터 영역 포맷 초기화 제거 (A~C 하이라이트, 메모 등 보존)
         actual_asid_col = get_col_index(structure, 2)
         # ★ v30a: clean_id로 시트의 정밀도 손실 ID 정규화
         adset_id_row_map = {}; last_data_sheet_row = 1
@@ -1610,8 +1611,12 @@ for dk in sorted(existing_refresh_tabs.keys()):
         for mp_asid in mp_data:
             fk = _asid_match_key(mp_asid)
             if fk: _fuzzy_mp[fk] = mp_asid
-        if structure == "new": update_end_col_letter = "S"; data_col_count = 19
-        else: update_end_col_letter = "U"; data_col_count = 21
+        # ★ v30d: 매칭된 행도 cols 14-18(결과MP, 매출, 이익, ROAS, CVR)만 업데이트
+        #         A~C 하이라이트, D~N 메타 데이터, T~W 예산/메모 모두 보존
+        actual_mp_col = get_col_index(structure, 14)
+        actual_cvr_col = get_col_index(structure, 18)
+        mp_col_letter = get_col_letter(actual_mp_col)
+        cvr_col_letter = get_col_letter(actual_cvr_col)
         for sheet_asid, row_idx in adset_id_row_map.items():
             row_num = row_idx + 1
             # ★ v30a: exact match → fuzzy match 폴백
@@ -1621,28 +1626,23 @@ for dk in sorted(existing_refresh_tabs.keys()):
                 mp_asid = sheet_asid if sheet_asid in mp_data else _fuzzy_mp.get(_asid_match_key(sheet_asid))
                 if mp_asid and mp_asid in mp_data:
                     existing_row = all_values[row_idx]; actual_spend_col = get_col_index(structure, 3); actual_uc_col = get_col_index(structure, 9)
-                    actual_mp_col = get_col_index(structure, 14); actual_cvr_col = get_col_index(structure, 18)
                     spend = _to_num(existing_row[actual_spend_col]) if len(existing_row) > actual_spend_col else 0
                     unique_clicks = _to_num(existing_row[actual_uc_col]) if len(existing_row) > actual_uc_col else 0
                     mpc = mp_data[mp_asid]['mpc']; mpv = mp_data[mp_asid]['mpv']; revenue = float(mpv)
                     profit = revenue - spend; roas_val = (revenue / spend * 100) if spend > 0 and revenue > 0 else 0
                     cvr_val = (mpc / unique_clicks * 100) if unique_clicks > 0 and mpc > 0 else 0
-                    mp_col_letter = get_col_letter(actual_mp_col); cvr_col_letter = get_col_letter(actual_cvr_col)
                     batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
                         'values': [[int(mpc) if mpc > 0 else "", round(revenue) if revenue > 0 else "", round(profit, 0) if spend > 0 else "", round(roas_val, 1) if spend > 0 and revenue > 0 else "", round(cvr_val, 2) if unique_clicks > 0 and mpc > 0 else ""]]})
                 continue
+            # ★ v30d: 매칭된 행 → cols 14-18만 업데이트 (A~C, D~N, T~W 보존)
             new_tab_row = new_row_by_asid[matched_asid]
-            if structure == "new":
-                update_row = list(new_tab_row[:data_col_count])
-                while len(update_row) < data_col_count: update_row.append("")
-                # ★ v30a: asid를 텍스트로 강제
-                update_row[2] = _prefix_asid_for_sheet(update_row[2])
-                batch_updates.append({'range': f'A{row_num}:{update_end_col_letter}{row_num}', 'values': [update_row]})
-            else:
-                old_row = list(new_tab_row[:3]) + ["", ""] + list(new_tab_row[3:19])
-                while len(old_row) < data_col_count: old_row.append("")
-                old_row[2] = _prefix_asid_for_sheet(old_row[2])
-                batch_updates.append({'range': f'A{row_num}:{update_end_col_letter}{row_num}', 'values': [old_row[:data_col_count]]})
+            mpc = new_tab_row[14] if len(new_tab_row) > 14 else ""
+            revenue = new_tab_row[15] if len(new_tab_row) > 15 else ""
+            profit = new_tab_row[16] if len(new_tab_row) > 16 else ""
+            roas_val = new_tab_row[17] if len(new_tab_row) > 17 else ""
+            cvr_val = new_tab_row[18] if len(new_tab_row) > 18 else ""
+            batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
+                'values': [[mpc, revenue, profit, roas_val, cvr_val]]})
             updated_count += 1
         if batch_updates:
             for i in range(0, len(batch_updates), 100): with_retry(ws_ex.batch_update, batch_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
@@ -1688,8 +1688,9 @@ for dk in sorted(existing_refresh_tabs.keys()):
             except: pass
             with_retry(sh.batch_update, body={"requests": [{"setBasicFilter": {"filter": {"range": {"sheetId": ws_ex.id, "startRowIndex": 0, "endRowIndex": last_data_row, "startColumnIndex": 0, "endColumnIndex": NUM_COLS_FILTER}}}}]}); time.sleep(0.5)
         except: pass
-        summary_rows, num_products = generate_date_tab_summary(data_rows_for_summary, structure=structure)
-        breakdown_rows, product_meta = generate_product_breakdown(data_rows_for_summary, structure=structure)
+        # ★ v30d: 요약표는 API 원본 데이터(date_tab_rows)로 생성 → 추이차트와 동일 소스
+        summary_rows, num_products = generate_date_tab_summary(date_tab_rows.get(dk, []), structure="new")
+        breakdown_rows, product_meta = generate_product_breakdown(date_tab_rows.get(dk, []), structure="new")
         total_extra_rows = len(summary_rows) + len(breakdown_rows); needed_rows = summary_start_row + total_extra_rows + 10
         if needed_rows > len(all_values):
             try: with_retry(ws_ex.resize, rows=needed_rows); time.sleep(0.5)
@@ -2281,6 +2282,7 @@ print(f"📊 분석탭: {len(date_names)}일 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행 | 추이차트: {len(date_names)}일")
 print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
+print(f"📦 ★ v30d: 기존 행 cols14-18만 갱신(하이라이트 보존), 요약표 API소스(추이차트 동기화)")
 print(f"📦 ★ v30c: 주간종합 청크 쓰기({WEEKLY_WRITE_CHUNK_SIZE}행), 포맷 배치({WEEKLY_FORMAT_BATCH_SIZE}개/{WEEKLY_FORMAT_BATCH_DELAY}초), 단계간 쿨다운({WEEKLY_STEP_COOLDOWN}초)")
 print(f"📦 ★ v30b: 마스터탭 날짜 텍스트 강제, 날짜 정규화, adset_id 정밀도 보존, dedup 개선")
 print(f"📦 ★ v29b: 상품=캠페인 첫 단어(이모지 제거), 모든 상품 나열")
