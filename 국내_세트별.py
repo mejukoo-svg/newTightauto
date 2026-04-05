@@ -1576,11 +1576,10 @@ if not FULL_REFRESH:
     except gspread.exceptions.WorksheetNotFound:
         print(f"  ⚠️ 마스터탭 없음 → 폴백 모드로 전환 예정")
 
-# ★ v30f: 차트 탭은 삭제하지 않고 재사용 (값만 덮어쓰기)
-# 재사용 대상: 추이차트, 추이차트_상품별, 증감액, 추이차트(주간), 예산
-ANALYSIS_TAB_NAMES_TO_DELETE = ["주간종합", "주간종합_2", "주간종합_3", "_temp", "_temp_holder"]
+# ★ v30f: 모든 분석탭 재사용 (삭제하지 않음), 임시탭만 삭제
+ANALYSIS_TAB_NAMES_TO_DELETE = ["_temp", "_temp_holder"]
 if FULL_REFRESH:
-    ANALYSIS_TAB_NAMES_TO_DELETE.extend(["추이차트", "추이차트_상품별", "증감액", "추이차트(주간)", "예산", "마스터탭"])
+    ANALYSIS_TAB_NAMES_TO_DELETE.extend(["추이차트", "추이차트_상품별", "증감액", "추이차트(주간)", "예산", "주간종합", "주간종합_2", "주간종합_3", "마스터탭"])
     print("  🔥 FULL_REFRESH: 모든 분석탭 삭제 후 재생성")
 
 for sn in ANALYSIS_TAB_NAMES_TO_DELETE:
@@ -1726,14 +1725,16 @@ for dk in sorted(existing_refresh_tabs.keys()):
         try:
             fmt_reqs = format_date_tab_summary(sh, ws_ex, summary_start_row, len(summary_rows), num_products=num_products)
             if fmt_reqs:
-                for i in range(0, len(fmt_reqs), 50): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+50]}); time.sleep(1)
+                # ★ v30f: 배치 크기 50→200, 대기 1→0.5초 (7-A 최적화)
+                for i in range(0, len(fmt_reqs), 200): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+200]}); time.sleep(0.5)
         except: pass
         if product_meta:
             breakdown_start_sheet_row = summary_start_row + len(summary_rows)
             try:
                 bd_fmt = format_product_breakdown(sh, ws_ex, breakdown_start_sheet_row, product_meta)
                 if bd_fmt:
-                    for i in range(0, len(bd_fmt), 50): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+50]}); time.sleep(1)
+                    # ★ v30f: 배치 크기 50→200, 대기 1→0.5초 (7-A 최적화)
+                    for i in range(0, len(bd_fmt), 200): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+200]}); time.sleep(0.5)
             except: pass
         print(f"    ✅ 요약+상품분류 완료 ({num_products}개 상품)")
     except Exception as e: print(f"    ⚠️ {dk} 오류: {e}")
@@ -1784,13 +1785,13 @@ for dk in sorted(new_refresh_dates):
         try:
             fmt_reqs = format_date_tab_summary(sh, ws_d, len(rows) + 2, len(summary_rows), num_products=num_products)
             if fmt_reqs:
-                for i in range(0, len(fmt_reqs), 50): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+50]}); time.sleep(1)
+                for i in range(0, len(fmt_reqs), 200): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+200]}); time.sleep(0.5)
         except: pass
         if product_meta:
             try:
                 bd_fmt = format_product_breakdown(sh, ws_d, len(rows) + 1 + len(summary_rows) + 1, product_meta)
                 if bd_fmt:
-                    for i in range(0, len(bd_fmt), 50): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+50]}); time.sleep(1)
+                    for i in range(0, len(bd_fmt), 200): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+200]}); time.sleep(0.5)
             except: pass
         time.sleep(1)
     except Exception as e: print(f"  ⚠️ {dk} 생성 오류: {e}")
@@ -2173,8 +2174,12 @@ time.sleep(PRE_WEEKLY_COOLDOWN)
 
 # 15단계: 주간종합
 print("\n15단계: 주간종합")
-ws_ws = safe_add_worksheet(sh, "주간종합", rows=2000, cols=20); time.sleep(2)
+ws_ws, _is_new_ws = get_or_create_ws(sh, "주간종합", rows=2000, cols=20); time.sleep(2)
 move_ws_to_front(sh, ws_ws)
+# ★ v30f: 기존 탭 재사용 시 기존 데이터 클리어
+if not _is_new_ws:
+    try: with_retry(ws_ws.clear); time.sleep(1)
+    except: pass
 sid_ws = ws_ws.id; fr_ws = []; ar_ws = []; cr_ws = 0
 def ccb(pn, d, pd, sid, cr, fr, im=False):
     block = []; bs = cr; rv = (d['revenue'] / d['spend']) if d['spend'] > 0 else 0; hb = COLORS["dark_blue"] if im else COLORS["dark_gray"]; cb = COLORS["navy"] if im else COLORS["black"]; nc = len(products) + 2
@@ -2221,8 +2226,11 @@ time.sleep(WEEKLY_STEP_COOLDOWN)
 
 # 16단계: 주간종합_2
 print("\n16단계: 주간종합_2")
-ws2 = safe_add_worksheet(sh, "주간종합_2", rows=2000, cols=20); time.sleep(2)
+ws2, _is_new_ws2 = get_or_create_ws(sh, "주간종합_2", rows=2000, cols=20); time.sleep(2)
 move_ws_to_front(sh, ws2)
+if not _is_new_ws2:
+    try: with_retry(ws2.clear); time.sleep(1)
+    except: pass
 sid2 = ws2.id; fr2 = []; ar2 = []; cr2 = 0; npc = len(products) + 3; stl = []
 for mk in month_names_list:
     yr = int(mk.split('년')[0]); mn = int(mk.split('년')[1].replace('월', '').strip()); d = msd[mk]; roas = (d['revenue'] / d['spend']) if d['spend'] > 0 else 0
@@ -2267,8 +2275,11 @@ time.sleep(WEEKLY_STEP_COOLDOWN)
 
 # 17단계: 주간종합_3 (일별)
 print("\n17단계: 주간종합_3")
-ws3 = safe_add_worksheet(sh, "주간종합_3", rows=3000, cols=20); time.sleep(2)
+ws3, _is_new_ws3 = get_or_create_ws(sh, "주간종합_3", rows=3000, cols=20); time.sleep(2)
 move_ws_to_front(sh, ws3)
+if not _is_new_ws3:
+    try: with_retry(ws3.clear); time.sleep(1)
+    except: pass
 sid3 = ws3.id; fr3 = []; ar3 = []; cr3 = 0; ndc = len(products) + 4; dsr = []
 for t in reversed(date_names): do = date_objects[t]; d = daily_data[t]; roas = (d['revenue'] / d['spend']) if d['spend'] > 0 else 0; wd = WEEKDAY_NAMES[do.weekday()]; dsr.append({'period': f"'{do.month}.{do.day}({wd})", 'weekday': wd, 'spend': d['spend'], 'revenue': d['revenue'], 'profit': d['profit'], 'roas': roas, 'tab_name': t})
 ar3.append(["📊 일별 전체 요약"] + [""] * 7); fr3.append(create_format_request(sid3, cr3, cr3 + 1, 0, 8, get_cell_format(COLORS["navy"], COLORS["white"], bold=True))); cr3 += 1
