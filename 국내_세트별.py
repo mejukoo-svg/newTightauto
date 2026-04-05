@@ -319,6 +319,25 @@ def clean_id(val):
     numeric_only = re.sub(r'[^0-9]', '', s)
     return numeric_only if numeric_only else s
 
+# ★ v30f: 이익/ROAS/CVR 수식 생성 헬퍼
+def _make_profit_formula(row_num, structure="new"):
+    """이익 = 매출 - 지출"""
+    spend_col = get_col_letter(get_col_index(structure, 3))
+    rev_col = get_col_letter(get_col_index(structure, 15))
+    return f'=IF({rev_col}{row_num}="","",{rev_col}{row_num}-{spend_col}{row_num})'
+
+def _make_roas_formula(row_num, structure="new"):
+    """ROAS = 매출/지출*100"""
+    spend_col = get_col_letter(get_col_index(structure, 3))
+    rev_col = get_col_letter(get_col_index(structure, 15))
+    return f'=IF(AND({spend_col}{row_num}>0,{rev_col}{row_num}>0),ROUND({rev_col}{row_num}/{spend_col}{row_num}*100,1),"")'
+
+def _make_cvr_formula(row_num, structure="new"):
+    """CVR = 결과MP/고유클릭*100"""
+    clicks_col = get_col_letter(get_col_index(structure, 9))
+    mp_col = get_col_letter(get_col_index(structure, 14))
+    return f'=IF(AND({clicks_col}{row_num}>0,{mp_col}{row_num}>0),ROUND({mp_col}{row_num}/{clicks_col}{row_num}*100,2),"")'
+
 
 # ★ v30a: adset_id 정밀도 손실 대응 헬퍼
 def _asid_match_key(asid_str):
@@ -1632,26 +1651,26 @@ for dk in sorted(existing_refresh_tabs.keys()):
             if not matched_asid:
                 mp_asid = sheet_asid if sheet_asid in mp_data else _fuzzy_mp.get(_asid_match_key(sheet_asid))
                 if mp_asid and mp_asid in mp_data:
-                    existing_row = all_values[row_idx]; actual_spend_col = get_col_index(structure, 3); actual_uc_col = get_col_index(structure, 9)
-                    spend = _to_num(existing_row[actual_spend_col]) if len(existing_row) > actual_spend_col else 0
-                    unique_clicks = _to_num(existing_row[actual_uc_col]) if len(existing_row) > actual_uc_col else 0
                     mpc = mp_data[mp_asid]['mpc']; mpv = mp_data[mp_asid]['mpv']; revenue = float(mpv)
-                    profit = revenue - spend; roas_val = (revenue / spend * 100) if spend > 0 and revenue > 0 else 0
-                    cvr_val = (mpc / unique_clicks * 100) if unique_clicks > 0 and mpc > 0 else 0
+                    # ★ v30f: O,P값 + Q,R,S수식
                     batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
-                        'values': [[int(mpc) if mpc > 0 else "", round(revenue) if revenue > 0 else "", round(profit, 0) if spend > 0 else "", round(roas_val, 1) if spend > 0 and revenue > 0 else "", round(cvr_val, 2) if unique_clicks > 0 and mpc > 0 else ""]]})
+                        'values': [[int(mpc) if mpc > 0 else "", round(revenue) if revenue > 0 else "",
+                            _make_profit_formula(row_num, structure),
+                            _make_roas_formula(row_num, structure),
+                            _make_cvr_formula(row_num, structure)]]})
                 continue
             new_tab_row = new_row_by_asid[matched_asid]
             mpc = new_tab_row[14] if len(new_tab_row) > 14 else ""
             revenue = new_tab_row[15] if len(new_tab_row) > 15 else ""
-            # ★ v30e: 믹스패널 데이터가 없으면(결과MP·매출 모두 빈값) 기존 시트 값 보존
+            # ★ v30e: 믹스패널 데이터가 없으면 기존 시트 값 보존
             if not mpc and not revenue:
                 continue
-            profit = new_tab_row[16] if len(new_tab_row) > 16 else ""
-            roas_val = new_tab_row[17] if len(new_tab_row) > 17 else ""
-            cvr_val = new_tab_row[18] if len(new_tab_row) > 18 else ""
+            # ★ v30f: O,P값 + Q,R,S수식
             batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
-                'values': [[mpc, revenue, profit, roas_val, cvr_val]]})
+                'values': [[mpc, revenue,
+                    _make_profit_formula(row_num, structure),
+                    _make_roas_formula(row_num, structure),
+                    _make_cvr_formula(row_num, structure)]]})
             updated_count += 1
         if batch_updates:
             for i in range(0, len(batch_updates), 100): with_retry(ws_ex.batch_update, batch_updates[i:i+100], value_input_option="USER_ENTERED"); time.sleep(1)
@@ -1683,60 +1702,18 @@ for dk in sorted(existing_refresh_tabs.keys()):
         if new_rows_to_add:
             actual_profit_col = get_col_index(structure, 16)
             new_rows_to_add.sort(key=lambda r: _to_num(r[actual_profit_col]) if len(r) > actual_profit_col else 0, reverse=True)
+            # ★ v30f: 신규 행에도 Q/R/S 수식 적용
+            for ri, row in enumerate(new_rows_to_add):
+                sheet_row = data_end_idx + 1 + ri  # 실제 시트 행 번호
+                pc = get_col_index(structure, 16)
+                if len(row) > pc + 2:
+                    row[pc] = _make_profit_formula(sheet_row, structure)
+                    row[pc + 1] = _make_roas_formula(sheet_row, structure)
+                    row[pc + 2] = _make_cvr_formula(sheet_row, structure)
             with_retry(ws_ex.update, values=new_rows_to_add, range_name=f"A{data_end_idx+1}", value_input_option="USER_ENTERED")
             print(f"    ✅ {len(new_rows_to_add)}개 신규 행 추가"); time.sleep(1); data_end_idx += len(new_rows_to_add)
-        # 요약표 재생성
-        all_values = with_retry(ws_ex.get_all_values); time.sleep(0.5); structure = detect_tab_structure(all_values[0])
-        last_data_row, data_rows_for_summary = find_last_data_row(all_values, structure)
-        summary_start_row = last_data_row + 1
-        NUM_COLS_FILTER = len(DATE_TAB_HEADERS) if structure == "new" else len(OLD_DATE_TAB_HEADERS)
-        try:
-            try: with_retry(sh.batch_update, body={"requests": [{"clearBasicFilter": {"sheetId": ws_ex.id}}]})
-            except: pass
-            with_retry(sh.batch_update, body={"requests": [{"setBasicFilter": {"filter": {"range": {"sheetId": ws_ex.id, "startRowIndex": 0, "endRowIndex": last_data_row, "startColumnIndex": 0, "endColumnIndex": NUM_COLS_FILTER}}}}]}); time.sleep(0.5)
-        except: pass
-        # ★ v30e: 믹스패널 데이터 존재 여부 확인 → 없으면 시트 데이터로 요약 생성
-        api_rows = date_tab_rows.get(dk, [])
-        _has_mp_data = any((_to_num(r[14]) > 0 or _to_num(r[15]) > 0) for r in api_rows) if api_rows else False
-        if _has_mp_data:
-            summary_source = api_rows
-            summary_structure = "new"
-        else:
-            # 믹스패널 데이터 없음 → 시트에서 읽은 데이터 사용 (기존 값 보존)
-            summary_source = [normalize_row_to_new(r, structure) for r in data_rows_for_summary]
-            summary_structure = "new"
-        summary_rows, num_products = generate_date_tab_summary(summary_source, structure=summary_structure)
-        breakdown_rows, product_meta = generate_product_breakdown(summary_source, structure=summary_structure)
-        total_extra_rows = len(summary_rows) + len(breakdown_rows); needed_rows = summary_start_row + total_extra_rows + 10
-        if needed_rows > len(all_values):
-            try: with_retry(ws_ex.resize, rows=needed_rows); time.sleep(0.5)
-            except: pass
-        clear_end_row = max(len(all_values) + 50, needed_rows)
-        try:
-            ws_ex = refresh_ws(sh, ws_ex); clear_summary_conditional_formats(sh, ws_ex, summary_start_row - 1)
-            with_retry(sh.batch_update, body={"requests": [
-                {"unmergeCells": {"range": {"sheetId": ws_ex.id, "startRowIndex": summary_start_row - 1, "endRowIndex": clear_end_row, "startColumnIndex": 0, "endColumnIndex": 30}}},
-                {"repeatCell": {"range": {"sheetId": ws_ex.id, "startRowIndex": summary_start_row - 1, "endRowIndex": clear_end_row, "startColumnIndex": 0, "endColumnIndex": 30}, "cell": {"userEnteredFormat": {}, "userEnteredValue": {}}, "fields": "userEnteredFormat,userEnteredValue"}},
-                {"updateBorders": {"range": {"sheetId": ws_ex.id, "startRowIndex": summary_start_row - 1, "endRowIndex": clear_end_row, "startColumnIndex": 0, "endColumnIndex": 30}, "top": {"style": "NONE"}, "bottom": {"style": "NONE"}, "left": {"style": "NONE"}, "right": {"style": "NONE"}, "innerHorizontal": {"style": "NONE"}, "innerVertical": {"style": "NONE"}}}
-            ]}); time.sleep(0.5)
-        except: pass
-        combined_extra = summary_rows + breakdown_rows
-        with_retry(ws_ex.update, values=combined_extra, range_name=f"A{summary_start_row}", value_input_option="USER_ENTERED"); time.sleep(1)
-        try:
-            fmt_reqs = format_date_tab_summary(sh, ws_ex, summary_start_row, len(summary_rows), num_products=num_products)
-            if fmt_reqs:
-                # ★ v30f: 배치 크기 50→200, 대기 1→0.5초 (7-A 최적화)
-                for i in range(0, len(fmt_reqs), 200): with_retry(sh.batch_update, body={"requests": fmt_reqs[i:i+200]}); time.sleep(0.5)
-        except: pass
-        if product_meta:
-            breakdown_start_sheet_row = summary_start_row + len(summary_rows)
-            try:
-                bd_fmt = format_product_breakdown(sh, ws_ex, breakdown_start_sheet_row, product_meta)
-                if bd_fmt:
-                    # ★ v30f: 배치 크기 50→200, 대기 1→0.5초 (7-A 최적화)
-                    for i in range(0, len(bd_fmt), 200): with_retry(sh.batch_update, body={"requests": bd_fmt[i:i+200]}); time.sleep(0.5)
-            except: pass
-        print(f"    ✅ 요약+상품분류 완료 ({num_products}개 상품)")
+        # ★ v30f: 요약표 재생성 스킵 (이전 실행에서 생성된 것 유지, API ~10회/탭 절감)
+        # 요약표는 7-B(새 탭) 또는 FULL_REFRESH 시에만 생성
     except Exception as e: print(f"    ⚠️ {dk} 오류: {e}")
 
 # 7-B: 새 날짜탭 생성
@@ -1754,6 +1731,13 @@ for dk in sorted(new_refresh_dates):
         ws_d = safe_add_worksheet(sh, dk, rows=total_rows, cols=NUM_COLS + 2); time.sleep(1)
         sid_d = ws_d.id; data_end = len(rows) + 1
         safe_rows = _make_rows_sheet_safe(rows)
+        # ★ v30f: Q(이익), R(ROAS), S(CVR) 수식으로 교체
+        for ri, row in enumerate(safe_rows):
+            sheet_row = ri + 2  # header가 1행이므로 데이터는 2행부터
+            if len(row) > 18:
+                row[16] = _make_profit_formula(sheet_row, "new")
+                row[17] = _make_roas_formula(sheet_row, "new")
+                row[18] = _make_cvr_formula(sheet_row, "new")
         safe_breakdown = _make_rows_sheet_safe(breakdown_rows)
         all_data = [DATE_TAB_HEADERS] + safe_rows + summary_rows + safe_breakdown
         with_retry(ws_d.update, values=all_data, range_name="A1", value_input_option="USER_ENTERED")
