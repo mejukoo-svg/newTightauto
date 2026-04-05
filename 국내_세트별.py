@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-# v3-ad 국내 세트별 (★ v30e - 타임아웃 방지: 대기시간 축소, 포맷 배치 최적화):
-#   - ★ v30e: 단계 간 대기시간 축소 (30→15초), 14→15 전환 60→30초
+# v3-ad 국내 세트별 (★ v30f - 텍스트색상 최적화+대기 강화축소):
+#   - ★ v30f: 텍스트 색상 컬럼 제한 (20→10), 배치 확대 (500→800), flush 1.5초
+#   - ★ v30f: sleep(3)→sleep(2) 일괄 축소, 단계 간 대기 추가 축소
+#   - ★ v30f: 주간종합 쿨다운 20초, 차트 대기 10초, 주간전 20초
+#   - ★ v30e: 믹스패널 데이터 없으면 기존 시트 값 보존 (빈값 덮어쓰기 방지)
 #   - ★ v30e: 주간종합 포맷 배치 크기 복원 (50→100), 대기 축소 (3→1.5초)
-#   - ★ v30e: 주간종합 단계 간 쿨다운 축소 (45→25초)
-#   - ★ v30e: 텍스트 색상 루프 내 sleep 축소 (5→3초)
 #   - ★ v30d: 7-A 기존 행 업데이트 시 cols 14-18(결과MP,매출,이익,ROAS,CVR)만 갱신
 #   - ★ v30d: A~C 하이라이트, D~N 메타데이터, T~W 예산/메모 행 배열 모두 보존
 #   - ★ v30d: 요약표+상품분류를 date_tab_rows(API 원본)로 생성 → 추이차트와 동일 소스
@@ -34,7 +35,7 @@
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v30e 국내 세트별 (타임아웃 방지: 대기축소+포맷최적화)")
+print("🚀 v3-ad v30f 국내 세트별 (텍스트색상 최적화+대기 강화축소)")
 print("="*60)
 
 # =========================================================
@@ -79,7 +80,7 @@ from decimal import Decimal
 import threading
 
 # =========================================================
-# ★ v21: 병렬 처리 설정  |  ★ v30e: 대기시간 최적화
+# ★ v21: 병렬 처리 설정  |  ★ v30f: 타임아웃 방지 강화
 # =========================================================
 META_DATE_WORKERS = 3
 META_ACCOUNT_WORKERS = 3
@@ -91,16 +92,21 @@ SHEETS_READ_BATCH_DELAY = 25     # v29c: 12 → v30: 25초
 EXCHANGE_RATE_WORKERS = 2
 BUDGET_WORKERS = 3
 
-# ★ v30e: 주간종합 쓰기 설정 (v30c 대비 배치 확대, 대기 축소)
+# ★ v30f: 주간종합 쓰기 설정
 WEEKLY_WRITE_CHUNK_SIZE = 3000   # 한 번에 쓸 최대 행 수
-WEEKLY_FORMAT_BATCH_SIZE = 100   # ★ v30e: 50 → 100 (v30b 수준 복원)
+WEEKLY_FORMAT_BATCH_SIZE = 100   # ★ v30e: 50 → 100
 WEEKLY_FORMAT_BATCH_DELAY = 1.5  # ★ v30e: 3 → 1.5초
-WEEKLY_STEP_COOLDOWN = 25        # ★ v30e: 45 → 25초
+WEEKLY_STEP_COOLDOWN = 20        # ★ v30f: 25 → 20초
 
-# ★ v30e: 단계 간 대기시간 상수
-CHART_STEP_SLEEP = 15            # ★ v30e: 30 → 15초 (추이차트/증감액 사이)
-MAJOR_STEP_SLEEP = 15            # ★ v30e: 30 → 15초 (8.5→9 등 주요 전환)
-PRE_WEEKLY_COOLDOWN = 30         # ★ v30e: 60 → 30초 (14→15 전환)
+# ★ v30f: 단계 간 대기시간 상수 (더 공격적 축소)
+CHART_STEP_SLEEP = 10            # ★ v30f: 15 → 10초
+MAJOR_STEP_SLEEP = 10            # ★ v30f: 15 → 10초
+PRE_WEEKLY_COOLDOWN = 20         # ★ v30f: 30 → 20초
+
+# ★ v30f: 텍스트 색상 포맷 설정 (핵심 병목 최적화)
+TEXT_COLOR_MAX_COLS = 10         # ★ v30f: 20 → 10 (최근 ~6일만 색상 적용)
+TEXT_COLOR_BATCH_SIZE = 800      # ★ v30f: 500 → 800 (배치 크기 확대)
+TEXT_COLOR_FLUSH_SLEEP = 1.5     # ★ v30f: 3 → 1.5초 (flush 대기 축소)
 
 _print_lock = threading.Lock()
 def safe_print(*args, **kwargs):
@@ -421,6 +427,29 @@ def safe_add_worksheet(sh, title, rows, cols):
     return with_retry(sh.add_worksheet, title=title, rows=rows, cols=cols)
 
 
+# ★ v30f: 기존 분석탭 재사용 헬퍼
+def get_or_create_ws(sh, title, rows, cols):
+    """기존 탭 재사용 or 새로 생성. Returns (ws, is_new)"""
+    try:
+        ws = sh.worksheet(title)
+        # 기존 탭 → resize if needed
+        need_resize = False
+        new_rows = max(rows, ws.row_count)
+        new_cols = max(cols, ws.col_count)
+        if rows > ws.row_count or cols > ws.col_count:
+            with_retry(ws.resize, rows=new_rows, cols=new_cols)
+            time.sleep(1)
+        print(f"  ♻️ '{title}' 기존 탭 재사용 (값만 덮어쓰기)")
+        return ws, False
+    except gspread.exceptions.WorksheetNotFound:
+        ws = with_retry(sh.add_worksheet, title=title, rows=rows, cols=cols)
+        print(f"  🆕 '{title}' 새로 생성")
+        return ws, True
+
+# ★ v30f: 재사용 시 텍스트 색상 적용할 컬럼 범위 (7일평균 + 최근 N일)
+REFRESH_FORMAT_COL_END = 4 + 10  # col3=7일평균, col4~col13=최근10일
+
+
 def move_ws_to_front(sh, ws):
     try:
         with_retry(sh.batch_update, body={"requests":[
@@ -564,40 +593,42 @@ def apply_c2_label_formatting(sh, ws):
             {"startIndex":indices[4],"format":bk}]}]}],"fields":"userEnteredValue,textFormatRuns"}}
     with_retry(sh.batch_update, body={"requests":[req]}); time.sleep(1)
 
-def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=False, sunday_col_indices=None, format_col_end=None):
+def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=False, sunday_col_indices=None, format_col_end=None, text_color_only=False):
     sid = ws.id
-    try: with_retry(ws.format, 'A1:Z1', {'backgroundColor':{'red':0.9,'green':0.9,'blue':0.9},'textFormat':{'bold':True}}); time.sleep(1)
-    except: pass
-    if sunday_col_indices:
-        try:
-            sr = [create_format_request(sid,0,1,ci,ci+1,get_cell_format(COLORS["light_red"],bold=True)) for ci in sunday_col_indices]
-            if sr: with_retry(sh.batch_update, body={"requests":sr}); time.sleep(1)
+    # ★ v30f: text_color_only=True이면 조건부 서식/헤더 포맷 스킵 (기존 탭 재사용 시)
+    if not text_color_only:
+        try: with_retry(ws.format, 'A1:Z1', {'backgroundColor':{'red':0.9,'green':0.9,'blue':0.9},'textFormat':{'bold':True}}); time.sleep(1)
         except: pass
-    try: with_retry(ws.format, 'A2:Z2', {'textFormat':{'bold':True}}); time.sleep(1)
-    except: pass
-    try: with_retry(sh.batch_update, body={"requests":[{"updateSheetProperties":{"properties":{"sheetId":sid,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}]}); time.sleep(2)
-    except: pass
-    try: with_retry(ws.format, 'D2:Z1000', {'wrapStrategy':'WRAP','verticalAlignment':'TOP'}); time.sleep(1)
-    except: pass
-    try:
-        cwr = [{"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":cn,"endIndex":cn+1},"properties":{"pixelSize":95},"fields":"pixelSize"}} for cn in range(3,min(len(headers),26))]
-        if cwr: with_retry(sh.batch_update, body={"requests":cwr})
-    except: pass
-    print("  🎨 ROAS 조건부 서식...")
-    try:
-        sc, ec = 3, len(headers)
-        rules = [
-            {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))=0)','clr':{'red':1.0,'green':0.6,'blue':0.6}},
-            {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=300)','clr':{'red':0.6,'green':1.0,'blue':1.0}},
-            {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=200,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<300)','clr':{'red':0.7,'green':1.0,'blue':0.7}},
-            {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<200)','clr':{'red':1.0,'green':1.0,'blue':0.6}},
-            {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>0)','clr':{'red':1.0,'green':0.8,'blue':0.8}},
-        ]
-        fr = [{'addConditionalFormatRule':{'rule':{'ranges':[{'sheetId':sid,'startRowIndex':1,'endRowIndex':rows_count+2,'startColumnIndex':sc,'endColumnIndex':ec}],
-            'booleanRule':{'condition':{'type':'CUSTOM_FORMULA','values':[{'userEnteredValue':r['c']}]},'format':{'backgroundColor':r['clr']}}},'index':0}} for r in rules]
-        with_retry(sh.batch_update, body={'requests':fr}); time.sleep(3)
-    except Exception as e: print(f"  ⚠️ 조건부 서식 오류: {e}")
-    tcs = 3; tce = min(format_col_end or len(headers), len(headers), 20)
+        if sunday_col_indices:
+            try:
+                sr = [create_format_request(sid,0,1,ci,ci+1,get_cell_format(COLORS["light_red"],bold=True)) for ci in sunday_col_indices]
+                if sr: with_retry(sh.batch_update, body={"requests":sr}); time.sleep(1)
+            except: pass
+        try: with_retry(ws.format, 'A2:Z2', {'textFormat':{'bold':True}}); time.sleep(1)
+        except: pass
+        try: with_retry(sh.batch_update, body={"requests":[{"updateSheetProperties":{"properties":{"sheetId":sid,"gridProperties":{"frozenRowCount":1}},"fields":"gridProperties.frozenRowCount"}}]}); time.sleep(2)
+        except: pass
+        try: with_retry(ws.format, 'D2:Z1000', {'wrapStrategy':'WRAP','verticalAlignment':'TOP'}); time.sleep(1)
+        except: pass
+        try:
+            cwr = [{"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"COLUMNS","startIndex":cn,"endIndex":cn+1},"properties":{"pixelSize":95},"fields":"pixelSize"}} for cn in range(3,min(len(headers),26))]
+            if cwr: with_retry(sh.batch_update, body={"requests":cwr})
+        except: pass
+        print("  🎨 ROAS 조건부 서식...")
+        try:
+            sc, ec = 3, len(headers)
+            rules = [
+                {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))=0)','clr':{'red':1.0,'green':0.6,'blue':0.6}},
+                {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=300)','clr':{'red':0.6,'green':1.0,'blue':1.0}},
+                {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=200,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<300)','clr':{'red':0.7,'green':1.0,'blue':0.7}},
+                {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<200)','clr':{'red':1.0,'green':1.0,'blue':0.6}},
+                {'c':'=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>0)','clr':{'red':1.0,'green':0.8,'blue':0.8}},
+            ]
+            fr = [{'addConditionalFormatRule':{'rule':{'ranges':[{'sheetId':sid,'startRowIndex':1,'endRowIndex':rows_count+2,'startColumnIndex':sc,'endColumnIndex':ec}],
+                'booleanRule':{'condition':{'type':'CUSTOM_FORMULA','values':[{'userEnteredValue':r['c']}]},'format':{'backgroundColor':r['clr']}}},'index':0}} for r in rules]
+            with_retry(sh.batch_update, body={'requests':fr}); time.sleep(3)
+        except Exception as e: print(f"  ⚠️ 조건부 서식 오류: {e}")
+    tcs = 3; tce = min(format_col_end or len(headers), len(headers), TEXT_COLOR_MAX_COLS)
     print(f"  🎨 텍스트 색상 (col {tcs}~{tce-1})...")
     try:
         fr = []
@@ -620,12 +651,12 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
                     tr=[{"startIndex":0,"format":bk},{"startIndex":l1e+1,"format":dg3},{"startIndex":l2e+1,"format":rd},{"startIndex":l4s,"format":bl}]
                 if len(lines)>=5: tr.append({"startIndex":l5s,"format":bk})
                 fr.append({"updateCells":{"range":{"sheetId":sid,"startRowIndex":ri-1,"endRowIndex":ri,"startColumnIndex":ci,"endColumnIndex":ci+1},"rows":[{"values":[{"userEnteredValue":{"stringValue":val},"textFormatRuns":tr}]}],"fields":"userEnteredValue,textFormatRuns"}})
-                # ★ v30e: 500 → 500 유지하되 sleep 축소 (5→3초)
-                if len(fr) >= 500:
-                    try: with_retry(sh.batch_update, body={"requests":fr}); fr=[]; time.sleep(3)
+                # ★ v30f: 배치 크기 800, 대기 1.5초 (v30e: 500/3초)
+                if len(fr) >= TEXT_COLOR_BATCH_SIZE:
+                    try: with_retry(sh.batch_update, body={"requests":fr}); fr=[]; time.sleep(TEXT_COLOR_FLUSH_SLEEP)
                     except: fr=[]
         if fr:
-            try: with_retry(sh.batch_update, body={"requests":fr}); time.sleep(2)
+            try: with_retry(sh.batch_update, body={"requests":fr}); time.sleep(1)
             except: pass
         print("  ✅ 텍스트 색상 완료")
     except Exception as e: print(f"  ⚠️ 텍스트 색상 오류: {e}")
@@ -924,7 +955,7 @@ def format_product_breakdown(sh, ws, breakdown_start_sheet_row, product_meta):
 # =========================================================
 def _read_single_date_tab(sh, ws_ex, tn, dt_obj, dk, _mp_val, _mp_cnt):
     try:
-        all_values = with_retry(ws_ex.get_all_values); time.sleep(3)
+        all_values = with_retry(ws_ex.get_all_values); time.sleep(2)
         if not all_values or len(all_values) < 2:
             return {'dk': dk, 'dt_obj': dt_obj, 'status': 'empty'}
         structure = detect_tab_structure(all_values[0])
@@ -981,7 +1012,7 @@ def read_from_master_tab(sh, master_ws, preloaded_date_data, mp_value_map=None, 
 
     print(f"  📖 마스터탭 읽기 중...")
     master_values = with_retry(master_ws.get_all_values)
-    time.sleep(3)
+    time.sleep(2)
 
     if not master_values or len(master_values) < 2:
         print("  ⚠️ 마스터탭 비어있음")
@@ -1348,7 +1379,7 @@ def chunked_sheet_write(ws, data_rows, range_start="A1", chunk_size=WEEKLY_WRITE
             print(f"  📝 {label} 청크 {ci+1}/{total_chunks} ({len(chunk)}행) 쓰기 완료")
             time.sleep(5)
         else:
-            time.sleep(3)
+            time.sleep(2)
 
 
 def chunked_format_apply(sh, format_requests, batch_size=WEEKLY_FORMAT_BATCH_SIZE, delay=WEEKLY_FORMAT_BATCH_DELAY, label=""):
@@ -1545,10 +1576,12 @@ if not FULL_REFRESH:
     except gspread.exceptions.WorksheetNotFound:
         print(f"  ⚠️ 마스터탭 없음 → 폴백 모드로 전환 예정")
 
-ANALYSIS_TAB_NAMES_TO_DELETE = ["추이차트", "추이차트_상품별", "증감액", "추이차트(주간)", "주간종합", "주간종합_2", "주간종합_3", "예산", "_temp", "_temp_holder"]
+# ★ v30f: 차트 탭은 삭제하지 않고 재사용 (값만 덮어쓰기)
+# 재사용 대상: 추이차트, 추이차트_상품별, 증감액, 추이차트(주간), 예산
+ANALYSIS_TAB_NAMES_TO_DELETE = ["주간종합", "주간종합_2", "주간종합_3", "_temp", "_temp_holder"]
 if FULL_REFRESH:
-    ANALYSIS_TAB_NAMES_TO_DELETE.append("마스터탭")
-    print("  🔥 FULL_REFRESH: 마스터탭도 삭제")
+    ANALYSIS_TAB_NAMES_TO_DELETE.extend(["추이차트", "추이차트_상품별", "증감액", "추이차트(주간)", "예산", "마스터탭"])
+    print("  🔥 FULL_REFRESH: 모든 분석탭 삭제 후 재생성")
 
 for sn in ANALYSIS_TAB_NAMES_TO_DELETE:
     try:
@@ -1556,7 +1589,7 @@ for sn in ANALYSIS_TAB_NAMES_TO_DELETE:
         if len(sh.worksheets()) <= 1: with_retry(sh.add_worksheet, title="_tmp", rows=1, cols=1); time.sleep(1)
         sh.del_worksheet(old); print(f"  ✅ '{sn}' 삭제"); time.sleep(2)
     except gspread.exceptions.WorksheetNotFound: pass
-    except Exception as e: print(f"  ⚠️ '{sn}' 삭제 실패: {e}"); time.sleep(3)
+    except Exception as e: print(f"  ⚠️ '{sn}' 삭제 실패: {e}"); time.sleep(2)
 print("⏳ 5초 대기..."); time.sleep(5)
 
 # 7-A: 기존 날짜탭 업데이트
@@ -1612,6 +1645,9 @@ for dk in sorted(existing_refresh_tabs.keys()):
             new_tab_row = new_row_by_asid[matched_asid]
             mpc = new_tab_row[14] if len(new_tab_row) > 14 else ""
             revenue = new_tab_row[15] if len(new_tab_row) > 15 else ""
+            # ★ v30e: 믹스패널 데이터가 없으면(결과MP·매출 모두 빈값) 기존 시트 값 보존
+            if not mpc and not revenue:
+                continue
             profit = new_tab_row[16] if len(new_tab_row) > 16 else ""
             roas_val = new_tab_row[17] if len(new_tab_row) > 17 else ""
             cvr_val = new_tab_row[18] if len(new_tab_row) > 18 else ""
@@ -1660,8 +1696,18 @@ for dk in sorted(existing_refresh_tabs.keys()):
             except: pass
             with_retry(sh.batch_update, body={"requests": [{"setBasicFilter": {"filter": {"range": {"sheetId": ws_ex.id, "startRowIndex": 0, "endRowIndex": last_data_row, "startColumnIndex": 0, "endColumnIndex": NUM_COLS_FILTER}}}}]}); time.sleep(0.5)
         except: pass
-        summary_rows, num_products = generate_date_tab_summary(date_tab_rows.get(dk, []), structure="new")
-        breakdown_rows, product_meta = generate_product_breakdown(date_tab_rows.get(dk, []), structure="new")
+        # ★ v30e: 믹스패널 데이터 존재 여부 확인 → 없으면 시트 데이터로 요약 생성
+        api_rows = date_tab_rows.get(dk, [])
+        _has_mp_data = any((_to_num(r[14]) > 0 or _to_num(r[15]) > 0) for r in api_rows) if api_rows else False
+        if _has_mp_data:
+            summary_source = api_rows
+            summary_structure = "new"
+        else:
+            # 믹스패널 데이터 없음 → 시트에서 읽은 데이터 사용 (기존 값 보존)
+            summary_source = [normalize_row_to_new(r, structure) for r in data_rows_for_summary]
+            summary_structure = "new"
+        summary_rows, num_products = generate_date_tab_summary(summary_source, structure=summary_structure)
+        breakdown_rows, product_meta = generate_product_breakdown(summary_source, structure=summary_structure)
         total_extra_rows = len(summary_rows) + len(breakdown_rows); needed_rows = summary_start_row + total_extra_rows + 10
         if needed_rows > len(all_values):
             try: with_retry(ws_ex.resize, rows=needed_rows); time.sleep(0.5)
@@ -1748,7 +1794,7 @@ for dk in sorted(new_refresh_dates):
             except: pass
         time.sleep(1)
     except Exception as e: print(f"  ⚠️ {dk} 생성 오류: {e}")
-print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 + 새 {len(new_refresh_dates)}개 완료"); time.sleep(3)
+print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 + 새 {len(new_refresh_dates)}개 완료"); time.sleep(2)
 
 # 7.5: 탭 순서
 print("\n"+"="*60); print("7.5단계: 탭 순서 정리"); print("="*60)
@@ -1818,7 +1864,7 @@ try:
 except gspread.exceptions.WorksheetNotFound: pass
 except Exception as e: print(f"  ⚠️ 마스터탭 삭제 오류: {e}")
 
-ws_m = safe_add_worksheet(sh, "마스터탭", rows=max(2000, len(master_raw_data) + 100), cols=len(master_headers) + 5); time.sleep(3)
+ws_m = safe_add_worksheet(sh, "마스터탭", rows=max(2000, len(master_raw_data) + 100), cols=len(master_headers) + 5); time.sleep(2)
 move_ws_to_front(sh, ws_m)
 master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
 for item in master_raw_data:
@@ -1841,7 +1887,7 @@ print(f"✅ 마스터탭 ({len(master_raw_data)}행)"); time.sleep(2)
 
 # 10단계: 추이차트
 print("\n10단계: 추이차트")
-ws_t = safe_add_worksheet(sh, "추이차트", rows=1000, cols=len(chart_dn) + 10); time.sleep(3)
+ws_t, _is_new_t = get_or_create_ws(sh, "추이차트", rows=1000, cols=len(chart_dn) + 10); time.sleep(2)
 move_ws_to_front(sh, ws_t)
 dhw = []; sci = []
 for i, n in enumerate(chart_dn): do = date_objects[n]; wd = WEEKDAY_NAMES[do.weekday()]; dhw.append(f"{n}({wd})"); (sci.append(4 + i) if do.weekday() == 6 else None)
@@ -1877,8 +1923,13 @@ for it in sorted_list:
         else: r.append('')
     rt.append(r)
 with_retry(ws_t.update, values=[hdr_t] + [sr] + rt, range_name="A1", value_input_option="USER_ENTERED")
-print(f"✅ 추이차트 ({len(chart_dn)}일)"); time.sleep(3)
-ws_t = refresh_ws(sh, ws_t); apply_trend_chart_formatting(sh, ws_t, hdr_t, len(rt), sunday_col_indices=sci)
+print(f"✅ 추이차트 ({len(chart_dn)}일)"); time.sleep(2)
+ws_t = refresh_ws(sh, ws_t)
+if _is_new_t:
+    apply_trend_chart_formatting(sh, ws_t, hdr_t, len(rt), sunday_col_indices=sci)
+else:
+    # ★ v30f: 기존 탭 → 텍스트 색상만 최근 컬럼 적용
+    apply_trend_chart_formatting(sh, ws_t, hdr_t, len(rt), sunday_col_indices=sci, format_col_end=REFRESH_FORMAT_COL_END, text_color_only=True)
 try: ws_t = refresh_ws(sh, ws_t); apply_c2_label_formatting(sh, ws_t)
 except: pass
 # ★ v30e: 30→15초
@@ -1936,11 +1987,22 @@ for p_idx, p in enumerate(_sorted_products_chart):
             else: r.append('')
         rows_tp.append(r)
     rows_tp.append([""] * len(hdr_tp))
-ws_tp = safe_add_worksheet(sh, "추이차트_상품별", rows=len(rows_tp) + 100, cols=len(chart_dn) + 10); time.sleep(3)
+ws_tp, _is_new_tp = get_or_create_ws(sh, "추이차트_상품별", rows=len(rows_tp) + 100, cols=len(chart_dn) + 10); time.sleep(2)
 move_ws_to_front(sh, ws_tp)
+# ★ v30f: 기존 탭 재사용 시 이전 머지 해제 (상품 헤더 위치 변동 대응)
+if not _is_new_tp:
+    try:
+        with_retry(sh.batch_update, body={"requests": [
+            {"unmergeCells": {"range": {"sheetId": ws_tp.id, "startRowIndex": 0, "endRowIndex": ws_tp.row_count, "startColumnIndex": 0, "endColumnIndex": min(len(hdr_tp), 26)}}}
+        ]}); time.sleep(1)
+    except: pass
 with_retry(ws_tp.update, values=[hdr_tp] + rows_tp, range_name="A1", value_input_option="USER_ENTERED")
-print(f"✅ 추이차트_상품별 ({len(_sorted_products_chart)}개 상품)"); time.sleep(3)
-ws_tp = refresh_ws(sh, ws_tp); apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci)
+print(f"✅ 추이차트_상품별 ({len(_sorted_products_chart)}개 상품)"); time.sleep(2)
+ws_tp = refresh_ws(sh, ws_tp)
+if _is_new_tp:
+    apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci)
+else:
+    apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci, format_col_end=REFRESH_FORMAT_COL_END, text_color_only=True)
 try: ws_tp = refresh_ws(sh, ws_tp); apply_c2_label_formatting(sh, ws_tp)
 except: pass
 try:
@@ -1958,7 +2020,7 @@ print(f"⏳ {CHART_STEP_SLEEP}초 대기..."); time.sleep(CHART_STEP_SLEEP)
 
 # 11단계: 추이차트(주간)
 print("\n11단계: 추이차트(주간)")
-ws_tw = safe_add_worksheet(sh, "추이차트(주간)", rows=1000, cols=len(chart_wk) + 10); time.sleep(3)
+ws_tw, _is_new_tw = get_or_create_ws(sh, "추이차트(주간)", rows=1000, cols=len(chart_wk) + 10); time.sleep(2)
 move_ws_to_front(sh, ws_tw)
 wdl = [week_display_names[wk] for wk in chart_wk]; hdr_w = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '전체 평균'] + wdl
 srw = ["종합", "", ""]; tap, tar, tas = 0, 0, 0; tavs, tavc = 0, 0
@@ -1985,9 +2047,12 @@ for it in sorted_list:
         r.append(cell_text(wd['profit'], wd['revenue'], wd['spend'], 0, wd.get('cvr', 0)) if wd else '')
     rtw.append(r)
 with_retry(ws_tw.update, values=[hdr_w] + [srw] + rtw, range_name="A1", value_input_option="USER_ENTERED")
-print("✅ 추이차트(주간)"); time.sleep(3)
+print("✅ 추이차트(주간)"); time.sleep(2)
 wfce = 3 + 1 + WEEKLY_TREND_REFRESH_WEEKS; ws_tw = refresh_ws(sh, ws_tw)
-apply_trend_chart_formatting(sh, ws_tw, hdr_w, len(rtw), format_col_end=wfce)
+if _is_new_tw:
+    apply_trend_chart_formatting(sh, ws_tw, hdr_w, len(rtw), format_col_end=wfce)
+else:
+    apply_trend_chart_formatting(sh, ws_tw, hdr_w, len(rtw), format_col_end=wfce, text_color_only=True)
 try: ws_tw = refresh_ws(sh, ws_tw); apply_c2_label_formatting(sh, ws_tw)
 except: pass
 # ★ v30e: 30→15초
@@ -1995,7 +2060,7 @@ print(f"⏳ {CHART_STEP_SLEEP}초 대기..."); time.sleep(CHART_STEP_SLEEP)
 
 # 12단계: 증감액
 print("\n12단계: 증감액")
-ws_c = safe_add_worksheet(sh, "증감액", rows=1000, cols=len(chart_dn) + 10); time.sleep(3)
+ws_c, _is_new_c = get_or_create_ws(sh, "증감액", rows=1000, cols=len(chart_dn) + 10); time.sleep(2)
 move_ws_to_front(sh, ws_c)
 hdr_c = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + chart_dn
 src = ["종합", "", ""]; t7r, t7s = 0, 0; t7vs, t7vc = 0, 0
@@ -2043,14 +2108,18 @@ for it in sorted_list:
         else: r.append('')
     rtc.append(r)
 with_retry(ws_c.update, values=[hdr_c] + [src] + rtc, range_name="A1", value_input_option="USER_ENTERED")
-print("✅ 증감액"); time.sleep(3)
-ws_c = refresh_ws(sh, ws_c); apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True)
+print("✅ 증감액"); time.sleep(2)
+ws_c = refresh_ws(sh, ws_c)
+if _is_new_c:
+    apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True)
+else:
+    apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True, format_col_end=REFRESH_FORMAT_COL_END, text_color_only=True)
 # ★ v30e: 30→15초
 print(f"⏳ {CHART_STEP_SLEEP}초 대기..."); time.sleep(CHART_STEP_SLEEP)
 
 # 13단계: 예산
 print("\n13단계: 예산")
-bw = safe_add_worksheet(sh, "예산", rows=1000, cols=len(chart_dn) + 10); time.sleep(3)
+bw, _is_new_bw = get_or_create_ws(sh, "예산", rows=1000, cols=len(chart_dn) + 10); time.sleep(2)
 move_ws_to_front(sh, bw)
 br = [[""] + chart_dn]
 br.append(["전체 쓴돈"] + [sum(budget_by_date[d][p]['spend'] for p in product_order) for d in chart_dn])
@@ -2063,7 +2132,7 @@ br.append([""] * (len(chart_dn) + 1)); br.append(["번돈 - 제품별"] + [""] *
 for p in product_order: br.append([p] + [budget_by_date[d][p]['revenue'] for d in chart_dn])
 br.append([""] * (len(chart_dn) + 1)); br.append(["순이익 - 제품별"] + [""] * len(chart_dn))
 for p in product_order: br.append([p] + [budget_by_date[d][p]['revenue'] - budget_by_date[d][p]['spend'] for d in chart_dn])
-with_retry(bw.update, values=br, range_name="A1", value_input_option="RAW"); print("✅ 예산"); time.sleep(3)
+with_retry(bw.update, values=br, range_name="A1", value_input_option="RAW"); print("✅ 예산"); time.sleep(2)
 
 # 14~17: 주간종합
 print("\n14단계: 주간종합 준비")
@@ -2104,7 +2173,7 @@ time.sleep(PRE_WEEKLY_COOLDOWN)
 
 # 15단계: 주간종합
 print("\n15단계: 주간종합")
-ws_ws = safe_add_worksheet(sh, "주간종합", rows=2000, cols=20); time.sleep(3)
+ws_ws = safe_add_worksheet(sh, "주간종합", rows=2000, cols=20); time.sleep(2)
 move_ws_to_front(sh, ws_ws)
 sid_ws = ws_ws.id; fr_ws = []; ar_ws = []; cr_ws = 0
 def ccb(pn, d, pd, sid, cr, fr, im=False):
@@ -2134,7 +2203,7 @@ for mk in month_names_list:
 
 print(f"  📝 주간종합 데이터: {len(ar_ws)}행 → 청크 쓰기...")
 chunked_sheet_write(ws_ws, ar_ws, label="주간종합")
-time.sleep(3)
+time.sleep(2)
 
 print(f"  🎨 주간종합 포맷: {len(fr_ws)}개 요청...")
 chunked_format_apply(sh, fr_ws, label="주간종합")
@@ -2152,7 +2221,7 @@ time.sleep(WEEKLY_STEP_COOLDOWN)
 
 # 16단계: 주간종합_2
 print("\n16단계: 주간종합_2")
-ws2 = safe_add_worksheet(sh, "주간종합_2", rows=2000, cols=20); time.sleep(3)
+ws2 = safe_add_worksheet(sh, "주간종합_2", rows=2000, cols=20); time.sleep(2)
 move_ws_to_front(sh, ws2)
 sid2 = ws2.id; fr2 = []; ar2 = []; cr2 = 0; npc = len(products) + 3; stl = []
 for mk in month_names_list:
@@ -2186,7 +2255,7 @@ for tt, tc, dk in [("📈 제품별 ROAS", COLORS["dark_green"], "roas"), ("💰
 
 print(f"  📝 주간종합_2 데이터: {len(ar2)}행 → 청크 쓰기...")
 chunked_sheet_write(ws2, ar2, label="주간종합_2")
-time.sleep(3)
+time.sleep(2)
 
 print(f"  🎨 주간종합_2 포맷: {len(fr2)}개 요청...")
 chunked_format_apply(sh, fr2, label="주간종합_2")
@@ -2198,7 +2267,7 @@ time.sleep(WEEKLY_STEP_COOLDOWN)
 
 # 17단계: 주간종합_3 (일별)
 print("\n17단계: 주간종합_3")
-ws3 = safe_add_worksheet(sh, "주간종합_3", rows=3000, cols=20); time.sleep(3)
+ws3 = safe_add_worksheet(sh, "주간종합_3", rows=3000, cols=20); time.sleep(2)
 move_ws_to_front(sh, ws3)
 sid3 = ws3.id; fr3 = []; ar3 = []; cr3 = 0; ndc = len(products) + 4; dsr = []
 for t in reversed(date_names): do = date_objects[t]; d = daily_data[t]; roas = (d['revenue'] / d['spend']) if d['spend'] > 0 else 0; wd = WEEKDAY_NAMES[do.weekday()]; dsr.append({'period': f"'{do.month}.{do.day}({wd})", 'weekday': wd, 'spend': d['spend'], 'revenue': d['revenue'], 'profit': d['profit'], 'roas': roas, 'tab_name': t})
@@ -2228,11 +2297,11 @@ for tt, tc, dk in [("📈 일별 제품별 ROAS", COLORS["dark_green"], "roas"),
 
 print(f"  📝 주간종합_3 데이터: {len(ar3)}행 → 청크 쓰기...")
 chunked_sheet_write(ws3, ar3, label="주간종합_3")
-time.sleep(3)
+time.sleep(2)
 
 print(f"  🎨 주간종합_3 포맷: {len(fr3)}개 요청...")
 chunked_format_apply(sh, fr3, label="주간종합_3")
-print("✅ 주간종합_3"); time.sleep(3)
+print("✅ 주간종합_3"); time.sleep(2)
 
 # 18: 최종 탭 순서
 print("\n" + "=" * 60); print("18단계: 최종 탭 순서 정리"); print("=" * 60)
@@ -2246,8 +2315,8 @@ print(f"📊 분석탭: {len(date_names)}일 기반")
 print(f"   → 마스터탭: {len(master_raw_data)}행 | 추이차트: {len(date_names)}일")
 print(f"   → 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
 print(f"   → 주간종합: {len(week_keys)}주 / {len(month_names_list)}개월")
-print(f"📦 ★ v30e: 타임아웃 방지 (대기: 차트{CHART_STEP_SLEEP}s, 주요{MAJOR_STEP_SLEEP}s, 주간전{PRE_WEEKLY_COOLDOWN}s, 주간간{WEEKLY_STEP_COOLDOWN}s)")
-print(f"📦 ★ v30e: 포맷 배치 {WEEKLY_FORMAT_BATCH_SIZE}개/{WEEKLY_FORMAT_BATCH_DELAY}초, 텍스트색상 flush 3초")
+print(f"📦 ★ v30f: 텍스트색상 {TEXT_COLOR_MAX_COLS}col/{TEXT_COLOR_BATCH_SIZE}배치/{TEXT_COLOR_FLUSH_SLEEP}초, 대기: 차트{CHART_STEP_SLEEP}s/주간전{PRE_WEEKLY_COOLDOWN}s/주간간{WEEKLY_STEP_COOLDOWN}s")
+print(f"📦 ★ v30f: sleep(3)→sleep(2) 일괄축소, 포맷 배치 {WEEKLY_FORMAT_BATCH_SIZE}개/{WEEKLY_FORMAT_BATCH_DELAY}초")
 print(f"📦 ★ v30d: 기존 행 cols14-18만 갱신(하이라이트 보존), 요약표 API소스(추이차트 동기화)")
 print(f"📦 ★ v30b: 마스터탭 날짜 텍스트 강제, 날짜 정규화, adset_id 정밀도 보존, dedup 개선")
 print(f"📦 ★ v29b: 상품=캠페인 첫 단어(이모지 제거), 모든 상품 나열")
