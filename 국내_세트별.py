@@ -647,6 +647,10 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
                 'booleanRule':{'condition':{'type':'CUSTOM_FORMULA','values':[{'userEnteredValue':r['c']}]},'format':{'backgroundColor':r['clr']}}},'index':0}} for r in rules]
             with_retry(sh.batch_update, body={'requests':fr}); time.sleep(3)
         except Exception as e: print(f"  ⚠️ 조건부 서식 오류: {e}")
+    # ★ v30f: text_color_only=True이면 텍스트 색상도 스킵 (조건부 서식 배경색이 유지되므로 충분)
+    if text_color_only:
+        print("  ⏩ 기존 탭 재사용 → 텍스트 색상 스킵 (조건부 서식 유지)")
+        return
     tcs = 3; tce = min(format_col_end or len(headers), len(headers), TEXT_COLOR_MAX_COLS)
     print(f"  🎨 텍스트 색상 (col {tcs}~{tce-1})...")
     try:
