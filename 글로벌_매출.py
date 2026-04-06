@@ -321,22 +321,35 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     rows.append(total_row)
 
     # --- 주간 총합 row ---
-    # 종합 row의 일별 값을 월~일 주 단위로 합산, 일요일 칸에 표시
+    # 각 날짜가 속하는 월~일 주의 월요일을 키로 그룹핑
     total_values = total_row[1:-1]  # 날짜별 종합 값 (합계 제외)
+    week_totals = defaultdict(float)  # monday_str → 주간합계
+    sunday_col_idx = {}               # monday_str → 합계 표시할 컬럼 index
+    first_col_idx = {}                # monday_str → 해당 주 가장 왼쪽 컬럼 (역순이라 최신)
+
+    for i, (dt_obj, wd) in enumerate(zip(date_objects, weekdays)):
+        monday = dt_obj - timedelta(days=wd)
+        mk = monday.strftime("%Y-%m-%d")
+        week_totals[mk] += total_values[i]
+        if mk not in first_col_idx:
+            first_col_idx[mk] = i  # 역순이므로 첫 등장이 가장 왼쪽
+        if wd == 6:
+            sunday_col_idx[mk] = i
+
+    # 합계 표시 위치: 일요일 있으면 일요일, 없으면 해당 주 첫 컬럼
+    show_at = {}
+    for mk in week_totals:
+        show_at[mk] = sunday_col_idx.get(mk, first_col_idx[mk])
+
     weekly_row = ["주간합계"]
-    week_sum = 0
-    for i, (ds, wd) in enumerate(zip(all_dates, weekdays)):
-        week_sum += total_values[i]
-        if wd == 6:  # 일요일 → 해당 칸에 주간합계 기록, 리셋
-            weekly_row.append(week_sum)
-            week_sum = 0
+    for i, (dt_obj, wd) in enumerate(zip(date_objects, weekdays)):
+        monday = dt_obj - timedelta(days=wd)
+        mk = monday.strftime("%Y-%m-%d")
+        if show_at[mk] == i:
+            weekly_row.append(round(week_totals[mk]))
         else:
             weekly_row.append("")
-    # 마지막 주가 일요일로 안 끝난 경우 → 맨 마지막 날짜 칸에 잔여 합계
-    if week_sum > 0:
-        # 뒤에서부터 마지막 비어있지 않은 곳 또는 마지막 칸에 넣기
-        weekly_row[-1] = week_sum
-    weekly_row.append("")  # 합계 열은 비움
+    weekly_row.append("")  # 합계 열
     rows.append(weekly_row)
 
     num_rows = len(rows); num_cols = len(rows[0])
