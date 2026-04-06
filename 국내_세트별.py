@@ -1965,23 +1965,58 @@ print(f"⏳ {CHART_STEP_SLEEP}초 대기..."); time.sleep(CHART_STEP_SLEEP)
 print("\n10.5단계: 추이차트_상품별")
 _product_groups_chart = defaultdict(list)
 for it in sorted_list: p = extract_product(it['adset_name'], it['campaign_name']); _product_groups_chart[p].append(it)
-_product_7d_revenue = {}
+
+# ★ v30g: 전날 매출 기준 정렬 (yesterday = chart_dn[1])
+_yesterday = chart_dn[1] if len(chart_dn) >= 2 else (chart_dn[0] if chart_dn else None)
+_product_yesterday_revenue = {}
 for p, items in _product_groups_chart.items():
-    total_rev = 0
-    for it in items:
-        for d in chart_sd:
-            if d in it['data']['dates']: total_rev += it['data']['dates'][d]['revenue']
-    _product_7d_revenue[p] = total_rev
-_sorted_products_chart = sorted(_product_groups_chart.keys(), key=lambda p: _product_7d_revenue.get(p, 0), reverse=True)
-_second_recent = chart_dn[1] if len(chart_dn) >= 2 else (chart_dn[0] if chart_dn else None)
+    rev = 0
+    if _yesterday:
+        for it in items:
+            rev += it['data']['dates'].get(_yesterday, {}).get('revenue', 0)
+    _product_yesterday_revenue[p] = rev
+
+_sorted_products_chart = sorted(_product_groups_chart.keys(), key=lambda p: _product_yesterday_revenue.get(p, 0), reverse=True)
+_second_recent = _yesterday
 for p in _sorted_products_chart:
     _product_groups_chart[p].sort(key=lambda it: it['data']['dates'].get(_second_recent, {}).get('spend', 0) if _second_recent else 0, reverse=True)
 hdr_tp = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dhw
-rows_tp = []; _product_header_indices = []
+
+# ★ v30g: 상단에 상품별 종합 성과 요약
+_summary_sorted_products = list(_sorted_products_chart)  # 같은 정렬 기준 사용
+
+# 종합 성과 행 생성
+rows_tp = []
+_summary_header_idx = len(rows_tp)
+rows_tp.append(["📊 상품별 종합 성과"] + [""] * (len(hdr_tp) - 1))
+for p in _summary_sorted_products:
+    items = _product_groups_chart[p]
+    psr = [f"{p}", f"({len(items)}개 세트)", ""]; _tp, _tr, _ts = 0, 0, 0; _tvs, _tvc = 0, 0
+    for d in chart_sd:
+        for it in items:
+            if d in it['data']['dates']:
+                _tp += it['data']['dates'][d]['profit']; _tr += it['data']['dates'][d]['revenue']; _ts += it['data']['dates'][d]['spend']
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: _tvs += vv; _tvc += 1
+    psr.append(cell_text(_tp, _tr, _ts, 0, (_tvs / _tvc) if _tvc > 0 else 0))
+    for d in chart_dn:
+        dp, dr, ds_v = 0, 0, 0; dvs, dvc = 0, 0
+        for it in items:
+            if d in it['data']['dates']:
+                dp += it['data']['dates'][d]['profit']; dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: dvs += vv; dvc += 1
+        psr.append(cell_text(dp, dr, ds_v, 0, (dvs / dvc) if dvc > 0 else 0))
+    rows_tp.append(psr)
+_summary_end_idx = len(rows_tp)
+rows_tp.append([""] * len(hdr_tp))  # 구분 빈 행
+
+# 상세 상품별 세트 목록 (기존 구조, 전날 매출순 정렬)
+_product_header_indices = []
 for p_idx, p in enumerate(_sorted_products_chart):
-    items = _product_groups_chart[p]; p_7d_rev = _product_7d_revenue.get(p, 0)
+    items = _product_groups_chart[p]; p_yd_rev = _product_yesterday_revenue.get(p, 0)
     _product_header_indices.append(len(rows_tp))
-    rows_tp.append([f"📦 {p}  |  7일 매출 {money(p_7d_rev)}  |  {len(items)}개 세트"] + [""] * (len(hdr_tp) - 1))
+    rows_tp.append([f"📦 {p}  |  전날 매출 {money(p_yd_rev)}  |  {len(items)}개 세트"] + [""] * (len(hdr_tp) - 1))
     psr = [f"{p} 종합", "", ""]; _tp, _tr, _ts = 0, 0, 0; _tvs, _tvc = 0, 0
     for d in chart_sd:
         for it in items:
@@ -2033,6 +2068,15 @@ try: ws_tp = refresh_ws(sh, ws_tp); apply_c2_label_formatting(sh, ws_tp)
 except: pass
 try:
     tp_fmt_reqs = []; sid_tp = ws_tp.id
+    # ★ v30g: 상단 종합 성과 헤더 포맷
+    tp_fmt_reqs.append(create_format_request(sid_tp, _summary_header_idx + 1, _summary_header_idx + 2, 0, len(hdr_tp),
+        get_cell_format({"red": 0.15, "green": 0.15, "blue": 0.3}, COLORS["white"], bold=True)))
+    tp_fmt_reqs.append({"mergeCells": {"range": {"sheetId": sid_tp, "startRowIndex": _summary_header_idx + 1, "endRowIndex": _summary_header_idx + 2,
+        "startColumnIndex": 0, "endColumnIndex": min(len(hdr_tp), 26)}, "mergeType": "MERGE_ALL"}})
+    # 종합 성과 행 볼드
+    tp_fmt_reqs.append(create_format_request(sid_tp, _summary_header_idx + 2, _summary_end_idx + 1, 0, 1,
+        get_cell_format(bold=True, ha="LEFT")))
+    # 상세 상품별 헤더 포맷
     PRODUCT_CHART_BG = [{"red":0.22,"green":0.42,"blue":0.65},{"red":0.33,"green":0.57,"blue":0.33},{"red":0.53,"green":0.30,"blue":0.58},{"red":0.68,"green":0.42,"blue":0.18},{"red":0.58,"green":0.22,"blue":0.22},{"red":0.20,"green":0.52,"blue":0.52},{"red":0.48,"green":0.48,"blue":0.25},{"red":0.38,"green":0.25,"blue":0.48},{"red":0.30,"green":0.55,"blue":0.45},{"red":0.60,"green":0.35,"blue":0.40},{"red":0.35,"green":0.35,"blue":0.55}]
     for p_idx, row_idx in enumerate(_product_header_indices):
         sheet_row = row_idx + 1; color = PRODUCT_CHART_BG[p_idx % len(PRODUCT_CHART_BG)]
