@@ -103,6 +103,9 @@ CHART_STEP_SLEEP = 10            # ★ v30f: 15 → 10초
 MAJOR_STEP_SLEEP = 10            # ★ v30f: 15 → 10초
 PRE_WEEKLY_COOLDOWN = 20         # ★ v30f: 30 → 20초
 
+# ★ v30g: 날짜탭 Mixpanel 업데이트 일수 (이전 날짜는 확정 → 최근만 갱신)
+TAB_UPDATE_DAYS = 3              # 최근 3일만 7-A에서 업데이트 (나머지는 이전 실행 값 유지)
+
 # ★ v30f: 텍스트 색상 포맷 설정 (핵심 병목 최적화)
 TEXT_COLOR_MAX_COLS = 10         # ★ v30f: 20 → 10 (최근 ~6일만 색상 적용)
 TEXT_COLOR_BATCH_SIZE = 800      # ★ v30f: 500 → 800 (배치 크기 확대)
@@ -1616,8 +1619,15 @@ print("⏳ 5초 대기..."); time.sleep(5)
 
 # 7-A: 기존 날짜탭 업데이트
 print("\n"+"="*60); print("7단계: 기존 탭 업데이트 + 새 탭 생성"); print("="*60)
-print("\n--- 7-A: 기존 날짜탭 업데이트 ---")
-for dk in sorted(existing_refresh_tabs.keys()):
+# ★ v30g: 최근 TAB_UPDATE_DAYS일만 업데이트 (이전 날짜는 확정 → 스킵)
+_all_existing_keys = sorted(existing_refresh_tabs.keys())
+if FULL_REFRESH:
+    _update_keys = _all_existing_keys
+else:
+    _update_keys = _all_existing_keys[-TAB_UPDATE_DAYS:] if len(_all_existing_keys) > TAB_UPDATE_DAYS else _all_existing_keys
+_skip_count = len(_all_existing_keys) - len(_update_keys)
+print(f"\n--- 7-A: 기존 날짜탭 업데이트 ({len(_update_keys)}개 갱신, {_skip_count}개 스킵) ---")
+for dk in _update_keys:
     ws_ex = existing_refresh_tabs[dk]; mp_data = date_mp_by_adsetid.get(dk, {}); new_rows_for_date = date_tab_rows.get(dk, [])
     print(f"\n  📝 {dk} 업데이트 중...")
     try:
