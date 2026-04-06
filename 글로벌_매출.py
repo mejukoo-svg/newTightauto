@@ -4,8 +4,9 @@
 ============================================================
 두 가지 모드:
   1) daily   - 국가별(대만/홍콩/일본) 일별 매출 → "매출" 시트
+               ★ 최신 10일만 Stripe API 호출, 기존 시트 데이터와 병합
   2) weekly  - 월별 블록 + 주차별 달러/원화 매출 → "주간매출" 시트
-  3) all     - 위 두 가지 모두 실행 (병렬 수집 → 순차 기록)
+  3) all     - 위 두 가지 모두 실행
 
 [사용법]
   python 글로벌_매출.py daily
@@ -19,7 +20,7 @@
 ============================================================
 """
 
-import os, sys, json, time, stripe, gspread, requests, threading
+import os, sys, json, time, stripe, gspread, requests, threading, re
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta, timezone, date
 from collections import defaultdict
@@ -39,7 +40,8 @@ else:
 DAILY_SHEET_NAME = "매출"
 WEEKLY_SHEET_NAME = "주간매출"
 
-DAYS_BACK = 45
+# ★ daily 모드: 최신 10일만 API 호출
+DAYS_BACK = 10
 
 START_YEAR = 2025
 START_MONTH = 12
@@ -66,13 +68,11 @@ DAY_NAMES_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
 MAX_WORKERS = 16
 
-# 맨 왼쪽에 배치할 탭 순서
 LEFT_TABS_ORDER = ["매출", "주간매출"]
 
 # ==================== 재시도 로직 ====================
 
 def retry_on_quota(fn, label="", max_retries=5, base_wait=30):
-    """429 Quota 초과 시 exponential backoff 재시도"""
     for attempt in range(max_retries):
         try:
             return fn()
@@ -115,7 +115,6 @@ _rate_lock = threading.Lock()
 
 
 def _fetch_single_rate(date_str):
-    """단일 날짜 환율 조회"""
     with _rate_lock:
         if date_str in _rate_cache:
             return date_str, _rate_cache[date_str]
@@ -158,7 +157,6 @@ def get_rate(date_str):
 
 
 def prefetch_rates(start_date, end_date):
-    """날짜 범위 환율 병렬 일괄 조회"""
     print(f"\n💱 환율 병렬 조회 중...")
     dates = []
     d = start_date
@@ -237,7 +235,6 @@ def _process_charge_daily(charge):
 
 
 def aggregate_revenue_daily_mode(charges, start_date, end_date):
-    """국가별/날짜별 매출 병렬 집계"""
     revenue = defaultdict(lambda: defaultdict(float))
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -275,28 +272,128 @@ def _cell_format_req(sheet_id, start_row, end_row, start_col, end_col, fmt, fiel
 
 
 def _single_cell_format_req(sheet_id, row, col, fmt, fields):
-    """단일 셀 서식"""
     return _cell_format_req(sheet_id, row, row + 1, col, col + 1, fmt, fields)
 
 
-def write_daily_sheet(revenue, all_dates, all_countries):
+def _parse_header_date(cell_text):
+    """헤더 셀 'MM-DD(요일)' → 'YYYY-MM-DD' 변환 (연도 추정)"""
+    m = re.match(r"(\d{2})-(\d{2})", str(cell_text).strip())
+    if not m:
+        return None
+    month, day = int(m.group(1)), int(m.group(2))
+    now = datetime.now(KST)
+    # 현재 월보다 크면 작년으로 추정
+    year = now.year if month <= now.month else now.year - 1
+    try:
+        return date(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _read_existing_daily_sheet(gc):
+    """기존 매출 시트에서 국가별/날짜별 데이터 읽기"""
+    try:
+        ss = gc.open_by_key(SPREADSHEET_ID)
+        ws = ss.worksheet(DAILY_SHEET_NAME)
+    except (gspread.exceptions.WorksheetNotFound, gspread.exceptions.SpreadsheetNotFound):
+        return None
+
+    all_values = retry_on_quota(lambda: ws.get_all_values(), label="기존 시트 읽기")
+    if not all_values or len(all_values) < 2:
+        return None
+
+    header = all_values[0]
+    if header[0] != "국가":
+        return None
+
+    # 헤더에서 날짜 파싱
+    date_map = {}  # col_idx → YYYY-MM-DD
+    for col_idx in range(1, len(header)):
+        ds = _parse_header_date(header[col_idx])
+        if ds:
+            date_map[col_idx] = ds
+
+    if not date_map:
+        return None
+
+    existing_dates = set(date_map.values())
+    existing_revenue = defaultdict(lambda: defaultdict(float))
+    existing_rates = {}
+
+    for row in all_values[1:]:
+        label = row[0] if row else ""
+        if label in COUNTRY_ORDER:
+            for col_idx, ds in date_map.items():
+                if col_idx < len(row) and row[col_idx]:
+                    try:
+                        val = float(str(row[col_idx]).replace(",", ""))
+                        existing_revenue[label][ds] = val
+                    except ValueError:
+                        pass
+        elif label == "USD/KRW":
+            for col_idx, ds in date_map.items():
+                if col_idx < len(row) and row[col_idx]:
+                    try:
+                        existing_rates[ds] = float(str(row[col_idx]).replace(",", ""))
+                    except ValueError:
+                        pass
+
+    existing_countries = [c for c in COUNTRY_ORDER if c in existing_revenue]
+    print(f"📖 기존 시트: {len(existing_dates)}일, 국가: {existing_countries}")
+    return existing_revenue, existing_dates, existing_countries, existing_rates
+
+
+def write_daily_sheet(revenue, fresh_dates, all_countries):
+    """기존 시트 읽기 → 최신 10일 병합 → 전체 쓰기"""
     gc = get_gspread_client()
     ss = gc.open_by_key(SPREADSHEET_ID)
 
+    # ── 1. 기존 시트 데이터 읽기 ──
+    existing = _read_existing_daily_sheet(gc)
+
+    if existing:
+        old_revenue, old_dates, old_countries, old_rates = existing
+        merged_dates_set = old_dates | set(fresh_dates)
+        merged_revenue = defaultdict(lambda: defaultdict(float))
+
+        for country in COUNTRY_ORDER:
+            for ds, val in old_revenue[country].items():
+                merged_revenue[country][ds] = val
+        for country in COUNTRY_ORDER:
+            for ds, val in revenue[country].items():
+                merged_revenue[country][ds] = val
+
+        merged_countries = [c for c in COUNTRY_ORDER
+                           if c in set(old_countries) | set(all_countries)]
+
+        all_dates = sorted(merged_dates_set, reverse=True)
+        all_countries = merged_countries
+        revenue = merged_revenue
+
+        for ds, rate_krw in old_rates.items():
+            with _rate_lock:
+                if ds not in _rate_cache:
+                    _rate_cache[ds] = {"krw": rate_krw, "twd": 32, "hkd": 7.8, "jpy": 150}
+
+        print(f"🔀 병합 완료: {len(all_dates)}일 (기존 {len(old_dates)}일 + 신규 {len(fresh_dates)}일)")
+    else:
+        all_dates = fresh_dates
+        print(f"🆕 신규 시트 생성: {len(all_dates)}일")
+
+    # ── 2. 시트 준비 ──
     try:
         ws = ss.worksheet(DAILY_SHEET_NAME)
         retry_on_quota(lambda: ws.clear(), label="매출 시트 초기화")
-        print(f"📋 기존 시트 초기화: {DAILY_SHEET_NAME}")
+        print(f"📋 시트 초기화: {DAILY_SHEET_NAME}")
     except gspread.exceptions.WorksheetNotFound:
         ws = ss.add_worksheet(title=DAILY_SHEET_NAME, rows=100, cols=len(all_dates)+3)
         print(f"📋 새 시트 생성: {DAILY_SHEET_NAME}")
 
-    # --- 날짜별 요일 정보 계산 ---
+    # ── 3. 데이터 빌드 ──
     date_objects = [datetime.strptime(ds, "%Y-%m-%d") for ds in all_dates]
-    weekdays = [d.weekday() for d in date_objects]  # 0=월 ~ 6=일
+    weekdays = [d.weekday() for d in date_objects]
 
     rows = []
-    # 헤더: MM-DD(요일)
     header = ["국가"]
     for ds, dt_obj, wd in zip(all_dates, date_objects, weekdays):
         header.append(f"{dt_obj.strftime('%m-%d')}({DAY_NAMES_KR[wd]})")
@@ -312,7 +409,6 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     rate_row = ["USD/KRW"] + [round(get_rate(ds).get("krw", 0), 2) for ds in all_dates] + [""]
     rows.append(rate_row)
 
-    # 종합 row
     total_row = ["종합"]; gt = 0
     for ds in all_dates:
         ds_sum = sum(round(revenue[c].get(ds, 0)) for c in all_countries)
@@ -320,23 +416,21 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     total_row.append(gt)
     rows.append(total_row)
 
-    # --- 주간 총합 row ---
-    # 각 날짜가 속하는 월~일 주의 월요일을 키로 그룹핑
-    total_values = total_row[1:-1]  # 날짜별 종합 값 (합계 제외)
-    week_totals = defaultdict(float)  # monday_str → 주간합계
-    sunday_col_idx = {}               # monday_str → 합계 표시할 컬럼 index
-    first_col_idx = {}                # monday_str → 해당 주 가장 왼쪽 컬럼 (역순이라 최신)
+    # ── 주간 총합 row ──
+    total_values = total_row[1:-1]
+    week_totals = defaultdict(float)
+    sunday_col_idx = {}
+    first_col_idx = {}
 
     for i, (dt_obj, wd) in enumerate(zip(date_objects, weekdays)):
         monday = dt_obj - timedelta(days=wd)
         mk = monday.strftime("%Y-%m-%d")
         week_totals[mk] += total_values[i]
         if mk not in first_col_idx:
-            first_col_idx[mk] = i  # 역순이므로 첫 등장이 가장 왼쪽
+            first_col_idx[mk] = i
         if wd == 6:
             sunday_col_idx[mk] = i
 
-    # 합계 표시 위치: 일요일 있으면 일요일, 없으면 해당 주 첫 컬럼
     show_at = {}
     for mk in week_totals:
         show_at[mk] = sunday_col_idx.get(mk, first_col_idx[mk])
@@ -349,9 +443,10 @@ def write_daily_sheet(revenue, all_dates, all_countries):
             weekly_row.append(round(week_totals[mk]))
         else:
             weekly_row.append("")
-    weekly_row.append("")  # 합계 열
+    weekly_row.append("")
     rows.append(weekly_row)
 
+    # ── 4. 시트 기록 ──
     num_rows = len(rows); num_cols = len(rows[0])
     if ws.row_count < num_rows: ws.resize(rows=num_rows)
     if ws.col_count < num_cols: ws.resize(cols=num_cols)
@@ -363,16 +458,15 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     )
     print(f"📊 {len(all_countries)}국가 × {len(all_dates)}일 기록")
 
-    # ============ 서식 (batch_update 1회) ============
+    # ── 5. 서식 ──
     sid = ws.id
     num_countries = len(all_countries)
-    data_last_row = 1 + num_countries      # row index (0-based) 바로 다음
-    rate_row_idx = data_last_row            # USD/KRW row
-    total_row_idx = data_last_row + 1       # 종합 row
-    weekly_row_idx = data_last_row + 2      # 주간합계 row
+    data_last_row = 1 + num_countries
+    rate_row_idx = data_last_row
+    total_row_idx = data_last_row + 1
+    weekly_row_idx = data_last_row + 2
 
     reqs = [
-        # 헤더 서식
         _cell_format_req(sid, 0, 1, 0, num_cols, {
             "backgroundColor": {"red": 0.267, "green": 0.447, "blue": 0.769},
             "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
@@ -380,24 +474,21 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         }, "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"),
     ]
 
-    # 일요일 헤더 셀 → 연한 빨간색 배경
     for i, wd in enumerate(weekdays):
-        if wd == 6:  # 일요일
-            col_idx = i + 1  # 0번은 "국가" 열
+        if wd == 6:
+            col_idx = i + 1
             reqs.append(_single_cell_format_req(sid, 0, col_idx, {
                 "backgroundColor": {"red": 0.957, "green": 0.78, "blue": 0.78},
                 "textFormat": {"bold": True, "foregroundColor": {"red": 0.6, "green": 0.0, "blue": 0.0}},
                 "horizontalAlignment": "CENTER",
             }, "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"))
 
-    # 국가별 데이터 숫자 서식
     if num_countries > 0:
         reqs.append(_cell_format_req(sid, 1, data_last_row, 1, num_cols, {
             "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
             "horizontalAlignment": "RIGHT",
         }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
-    # USD/KRW row
     reqs.append(_cell_format_req(sid, rate_row_idx, rate_row_idx + 1, 0, num_cols, {
         "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95},
     }, "userEnteredFormat(backgroundColor)"))
@@ -406,7 +497,6 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
-    # 종합 row
     reqs.append(_cell_format_req(sid, total_row_idx, total_row_idx + 1, 0, num_cols, {
         "textFormat": {"bold": True},
         "borders": {"top": {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}},
@@ -416,7 +506,6 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
-    # 주간합계 row 서식
     reqs.append(_cell_format_req(sid, weekly_row_idx, weekly_row_idx + 1, 0, num_cols, {
         "textFormat": {"bold": True},
         "backgroundColor": {"red": 1.0, "green": 0.95, "blue": 0.8},
@@ -426,13 +515,11 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
     }, "userEnteredFormat(numberFormat)"))
 
-    # 국가 열 서식
     reqs.append(_cell_format_req(sid, 1, num_rows, 0, 1, {
         "textFormat": {"bold": True},
         "horizontalAlignment": "CENTER",
     }, "userEnteredFormat(textFormat,horizontalAlignment)"))
 
-    # 고정
     reqs.append({
         "updateSheetProperties": {
             "properties": {
@@ -452,9 +539,9 @@ def write_daily_sheet(revenue, all_dates, all_countries):
 
 
 def run_daily(charges=None):
-    """일별 매출 모드 (charges 전달 시 재수집 안 함)"""
+    """일별 매출 모드 - 최신 10일만 Stripe API → 기존 시트와 병합"""
     print("\n" + "=" * 50)
-    print("💳 [daily] 국가별 일별 매출 → 매출 탭")
+    print("💳 [daily] 국가별 일별 매출 → 매출 탭 (최신 10일)")
     print("=" * 50)
 
     end_date = datetime.now(KST)
@@ -465,25 +552,24 @@ def run_daily(charges=None):
         charges = fetch_all_charges(start_date, end_date)
 
     if not charges:
-        print("⚠️ 수집된 결제 내역이 없습니다.")
-        return
+        print("⚠️ 수집된 결제 내역이 없습니다 (기존 시트 데이터는 유지됩니다)")
+        revenue = defaultdict(lambda: defaultdict(float))
+        fresh_dates = []
+        all_countries = []
+    else:
+        revenue, fresh_dates, all_countries = aggregate_revenue_daily_mode(charges, start_date, end_date)
 
-    revenue, all_dates, all_countries = aggregate_revenue_daily_mode(charges, start_date, end_date)
+        print(f"\n📊 신규 수집 국가: {all_countries}")
+        for country in all_countries:
+            total = sum(revenue[country].values())
+            print(f"  {country}: {total:,.0f} KRW")
 
-    print(f"\n📊 국가: {all_countries}")
-    for country in all_countries:
-        total = sum(revenue[country].values())
-        print(f"  {country}: {total:,.0f} KRW")
-    grand_total = sum(sum(revenue[c].values()) for c in all_countries)
-    print(f"  종합: {grand_total:,.0f} KRW")
-
-    write_daily_sheet(revenue, all_dates, all_countries)
+    write_daily_sheet(revenue, fresh_dates, all_countries)
     print("✅ daily 완료!")
 
 # ==================== [모드 2] 주간 매출 (주간매출 탭) ====================
 
 def aggregate_daily_for_weekly(charges):
-    """일별 USD/KRW 집계 (주간매출 탭용)"""
     daily = defaultdict(lambda: {"usd": 0.0, "krw": 0.0})
     skipped = 0
 
@@ -514,7 +600,6 @@ def aggregate_daily_for_weekly(charges):
 
 
 def get_weeks_for_month(year, month):
-    """해당 월에 속하는 주차 리스트: [(월요일, 일요일), ...]"""
     first_day = date(year, month, 1)
     last_day = date(year, month, monthrange(year, month)[1])
     mon = first_day - timedelta(days=first_day.weekday())
@@ -527,14 +612,12 @@ def get_weeks_for_month(year, month):
 
 
 def build_weekly_sheet_data(daily, start_year, start_month):
-    """주간매출 시트용 2D 배열 생성"""
     rows = []
     now = datetime.now(KST)
     current_year, current_month = now.year, now.month
     y, m = start_year, start_month
 
     while (y, m) <= (current_year, current_month):
-        # 월별 합계
         month_total_krw = 0
         month_total_usd = 0
         for ds, vals in daily.items():
@@ -559,7 +642,6 @@ def build_weekly_sheet_data(daily, start_year, start_month):
         r3 = ["", ""] + DAY_NAMES + ["주간 매출", "달성", round(achievement, 4)]
         rows.append(r3)
 
-        # 주차별
         weeks = get_weeks_for_month(y, m)
         for wi, (mon_day, sun_day) in enumerate(weeks, 1):
             week_usd = 0
@@ -628,7 +710,6 @@ def write_weekly_sheet(rows):
 
 
 def _apply_weekly_formatting(ws, ss, rows, num_cols):
-    """주간매출 서식 적용 (batch_update 1회)"""
     sid = ws.id
     reqs = []
 
@@ -660,7 +741,6 @@ def _apply_weekly_formatting(ws, ss, rows, num_cols):
                 "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
             }, "userEnteredFormat(numberFormat)"))
 
-    # 열 고정
     reqs.append({
         "updateSheetProperties": {
             "properties": {
@@ -680,7 +760,6 @@ def _apply_weekly_formatting(ws, ss, rows, num_cols):
 
 
 def run_weekly(charges=None):
-    """주간 매출 모드 (charges 전달 시 재수집 안 함)"""
     print("\n" + "=" * 50)
     print("💳 [weekly] 주간 매출 통계 → 주간매출 탭")
     print("=" * 50)
@@ -713,7 +792,6 @@ def run_weekly(charges=None):
 # ==================== 탭 순서 정렬 ====================
 
 def reorder_tabs_to_left():
-    """매출, 주간매출 탭을 맨 왼쪽으로 이동"""
     gc = get_gspread_client()
     ss = gc.open_by_key(SPREADSHEET_ID)
     ws_map = {w.title: w for w in ss.worksheets()}
@@ -757,31 +835,23 @@ def main():
         run_weekly()
         reorder_tabs_to_left()
     elif mode == "all":
-        # ── 공통 데이터 1회 수집 (환율 + Stripe 병렬) ──
         end_date = datetime.now(KST)
+
+        # ── daily: 최신 10일만 ──
         start_date_daily = (end_date - timedelta(days=DAYS_BACK)).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
+        prefetch_rates(start_date_daily, end_date)
+        daily_charges = fetch_all_charges(start_date_daily, end_date)
+        run_daily(daily_charges)
+
+        # ── weekly: 전체 기간 ──
         start_date_weekly = datetime(START_YEAR, START_MONTH, 1, tzinfo=KST)
-        earliest = min(start_date_daily, start_date_weekly)
+        prefetch_rates(start_date_weekly, end_date)
+        weekly_charges = fetch_all_charges(start_date_weekly, end_date)
+        run_weekly(weekly_charges)
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            rate_future = executor.submit(prefetch_rates, earliest, end_date)
-            charge_future = executor.submit(fetch_all_charges, earliest, end_date)
-            rate_future.result()
-            charges = charge_future.result()
-
-        if not charges:
-            print("⚠️ 수집된 결제 내역이 없습니다.")
-            return
-
-        # ── daily → weekly 순차 실행 (Sheets API 할당량 보호) ──
-        run_daily(charges)
-        run_weekly(charges)
-
-        # ── 탭 순서 정렬 ──
         reorder_tabs_to_left()
-
         print("\n🎉 all 모드 완료!")
     else:
         print(f"❌ 알 수 없는 모드: {mode}")
