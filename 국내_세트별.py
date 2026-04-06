@@ -35,7 +35,7 @@
 #   - ★ v28: 추이차트_상품별 탭 (상품별 그룹핑, 7일평균매출순 정렬, 세트는 전날매출순)
 
 print("="*60)
-print("🚀 v3-ad v30g 국내 세트별 (폴백스킵+3일갱신+수식자동계산)")
+print("🚀 v3-ad v30h 국내 세트별 (마스터탭 우선+구조 재설계)")
 print("="*60)
 
 # =========================================================
@@ -1617,8 +1617,95 @@ for sn in ANALYSIS_TAB_NAMES_TO_DELETE:
     except Exception as e: print(f"  ⚠️ '{sn}' 삭제 실패: {e}"); time.sleep(2)
 print("⏳ 5초 대기..."); time.sleep(5)
 
-# 7-A: 기존 날짜탭 업데이트
-print("\n"+"="*60); print("7단계: 기존 탭 업데이트 + 새 탭 생성"); print("="*60)
+# =========================================================
+# ★ v30h: 7단계 → 마스터탭 먼저 (8.5+9를 앞으로 이동)
+# =========================================================
+print("\n"+"="*60); print("7단계: 마스터탭 갱신 (먼저 처리)"); print("="*60)
+master_headers = ["Date"] + DATE_TAB_HEADERS
+
+if _existing_master_ws and not FULL_REFRESH:
+    _preloaded_only = False
+    ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_from_master_tab(
+        sh, _existing_master_ws, date_tab_rows, mp_value_map=mp_value_map, mp_count_map=mp_count_map
+    )
+elif FULL_REFRESH:
+    _preloaded_only = False
+    print("  🔥 FULL_REFRESH → 개별 탭 읽기 모드")
+    ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_all_date_tabs_fallback(
+        sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map, mp_count_map=mp_count_map, preloaded_date_data=date_tab_rows
+    )
+else:
+    _preloaded_only = True
+    print("  ⚠️ 마스터탭 없음 → preloaded 10일 데이터로 진행 (폴백 스킵)")
+    ad_sets = defaultdict(lambda: {'campaign_name': '', 'adset_name': '', 'adset_id': '', 'dates': {}})
+    budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend': 0.0, 'revenue': 0.0}))
+    master_raw_data = []; date_objects = {}; date_names = []
+    master_headers_local = ["Date"] + DATE_TAB_HEADERS
+    for dk, tab_rows in date_tab_rows.items():
+        dt_obj = parse_date_tab(dk)
+        if not dt_obj: continue
+        date_objects[dk] = dt_obj; date_names.append(dk)
+        for tab_row in tab_rows:
+            cn = str(tab_row[0]).strip(); asn = str(tab_row[1]).strip(); asid = clean_id(tab_row[2])
+            if not cn or cn in ["캠페인 이름", "전체", "합계", "Total"]: continue
+            spend = _to_num(tab_row[3]); unique_clicks = _to_num(tab_row[9]); cpm = _to_num(tab_row[6])
+            mpc = _to_num(tab_row[14]); revenue = _to_num(tab_row[15])
+            profit = revenue - spend; roas = (revenue / spend * 100) if spend > 0 else 0
+            cvr = (mpc / unique_clicks * 100) if unique_clicks > 0 and mpc > 0 else 0
+            if asid:
+                if not ad_sets[asid]['adset_id']:
+                    ad_sets[asid] = {'campaign_name': cn, 'adset_name': asn, 'adset_id': asid, 'dates': {}}
+                ad_sets[asid]['dates'][dk] = {'profit': profit, 'revenue': revenue, 'spend': spend, 'cpm': cpm, 'cvr': cvr, 'unique_clicks': unique_clicks, 'mpc': mpc}
+            p = extract_product(asn, cn)
+            budget_by_date[dk][p]['spend'] += spend; budget_by_date[dk][p]['revenue'] += revenue
+            mrd = [dk] + list(tab_row)
+            while len(mrd) < len(master_headers_local): mrd.append("")
+            master_raw_data.append({'date': dk, 'date_obj': dt_obj, 'spend': spend, 'row_data': mrd[:len(master_headers_local)]})
+    date_names = sorted(date_names, key=lambda x: date_objects.get(x, datetime.min))
+    cached_ws = with_retry(sh.worksheets)
+    print(f"  ✅ preloaded: {len(date_names)}일 | 광고세트: {len(ad_sets)}개 | 마스터행: {len(master_raw_data)}개")
+
+# 마스터탭 쓰기
+print("\n  📝 마스터탭 쓰기...")
+ws_m, _is_new_m = get_or_create_ws(sh, "마스터탭", rows=max(2000, len(master_raw_data) + 100), cols=len(master_headers) + 5); time.sleep(2)
+if not _is_new_m:
+    try: with_retry(ws_m.clear); time.sleep(1)
+    except: pass
+move_ws_to_front(sh, ws_m)
+master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
+for item in master_raw_data:
+    while len(item['row_data']) < len(master_headers): item['row_data'].append("")
+    item['row_data'] = item['row_data'][:len(master_headers)]
+mr_all_raw = [i['row_data'] for i in master_raw_data]
+mr_safe = _make_rows_sheet_safe(mr_all_raw, asid_col=3)
+for row in mr_safe:
+    if len(row) > 0 and row[0] and str(row[0]).strip():
+        dk_str = str(row[0]).strip()
+        if not dk_str.startswith("'") and '/' in dk_str:
+            row[0] = "'" + dk_str
+mr_all = [master_headers] + mr_safe
+for i in range(0, len(mr_all), 5000): with_retry(ws_m.update, values=mr_all[i:i+5000], range_name=f"A{i+1}", value_input_option="USER_ENTERED"); time.sleep(2)
+try:
+    with_retry(ws_m.format, 'A1:T1', {'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}, 'textFormat': {'bold': True}})
+    with_retry(sh.batch_update, body={"requests": [{"updateSheetProperties": {"properties": {"sheetId": ws_m.id, "gridProperties": {"frozenRowCount": 1}}, "fields": "gridProperties.frozenRowCount"}}]})
+except: pass
+print(f"  ✅ 마스터탭 ({len(master_raw_data)}행)")
+
+# ★ v30h: preloaded 모드에서는 마스터탭만 생성하고 종료
+if _preloaded_only:
+    print("\n" + "=" * 60)
+    print("⏩ preloaded 모드: 마스터탭 생성 완료, 차트/주간종합 스킵")
+    print("   → 다음 실행에서 마스터탭 기반 전체 차트 복구")
+    print("=" * 60)
+    reorder_tabs(sh)
+    print("\n" + "=" * 60); print("✅ 완료! (preloaded 모드 - 마스터탭 복구)"); print("=" * 60)
+    print(f"\n📊 {SPREADSHEET_URL}")
+    import sys; sys.exit(0)
+
+# =========================================================
+# 8단계: 날짜탭 업데이트 (마스터탭 데이터 기반)
+# =========================================================
+print("\n"+"="*60); print("8단계: 날짜탭 업데이트 + 새 탭 생성"); print("="*60)
 # ★ v30g: 최근 TAB_UPDATE_DAYS일만 업데이트 (이전 날짜는 확정 → 스킵)
 _all_existing_keys = sorted(existing_refresh_tabs.keys())
 if FULL_REFRESH:
@@ -1626,7 +1713,7 @@ if FULL_REFRESH:
 else:
     _update_keys = _all_existing_keys[-TAB_UPDATE_DAYS:] if len(_all_existing_keys) > TAB_UPDATE_DAYS else _all_existing_keys
 _skip_count = len(_all_existing_keys) - len(_update_keys)
-print(f"\n--- 7-A: 기존 날짜탭 업데이트 ({len(_update_keys)}개 갱신, {_skip_count}개 스킵) ---")
+print(f"\n--- 8-A: 기존 날짜탭 업데이트 ({len(_update_keys)}개 갱신, {_skip_count}개 스킵) ---")
 for dk in _update_keys:
     ws_ex = existing_refresh_tabs[dk]; mp_data = date_mp_by_adsetid.get(dk, {}); new_rows_for_date = date_tab_rows.get(dk, [])
     print(f"\n  📝 {dk} 업데이트 중...")
@@ -1730,8 +1817,8 @@ for dk in _update_keys:
         # 요약표는 7-B(새 탭) 또는 FULL_REFRESH 시에만 생성
     except Exception as e: print(f"    ⚠️ {dk} 오류: {e}")
 
-# 7-B: 새 날짜탭 생성
-print(f"\n--- 7-B: 새 날짜탭 생성 ({len(new_refresh_dates)}개) ---")
+# 8-B: 새 날짜탭 생성
+print(f"\n--- 8-B: 새 날짜탭 생성 ({len(new_refresh_dates)}개) ---")
 for dk in sorted(new_refresh_dates):
     rows = date_tab_rows.get(dk, [])
     if not rows: continue
@@ -1795,62 +1882,13 @@ for dk in sorted(new_refresh_dates):
     except Exception as e: print(f"  ⚠️ {dk} 생성 오류: {e}")
 print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 + 새 {len(new_refresh_dates)}개 완료"); time.sleep(2)
 
-# 7.5: 탭 순서
-print("\n"+"="*60); print("7.5단계: 탭 순서 정리"); print("="*60)
+# 8.5: 탭 순서
+print("\n"+"="*60); print("8.5단계: 탭 순서 정리"); print("="*60)
 reorder_tabs(sh)
-
-# =========================================================
-# ★ v30: 8.5단계 — 마스터탭 재활용 or 폴백
-# =========================================================
-if _existing_master_ws and not FULL_REFRESH:
-    _preloaded_only = False
-    ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_from_master_tab(
-        sh, _existing_master_ws, date_tab_rows, mp_value_map=mp_value_map, mp_count_map=mp_count_map
-    )
-elif FULL_REFRESH:
-    _preloaded_only = False
-    print("  🔥 FULL_REFRESH → 개별 탭 읽기 모드")
-    ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_all_date_tabs_fallback(
-        sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map, mp_count_map=mp_count_map, preloaded_date_data=date_tab_rows
-    )
-else:
-    # ★ v30g: 마스터탭 없을 때 폴백(156탭 읽기) 대신 preloaded 10일만 사용
-    # → 마스터탭만 생성하고 차트/주간종합 스킵, 다음 실행에서 복구
-    _preloaded_only = True
-    print("  ⚠️ 마스터탭 없음 → preloaded 10일 데이터로 진행 (폴백 스킵)")
-    ad_sets = defaultdict(lambda: {'campaign_name': '', 'adset_name': '', 'adset_id': '', 'dates': {}})
-    budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend': 0.0, 'revenue': 0.0}))
-    master_raw_data = []; date_objects = {}; date_names = []
-    master_headers_local = ["Date"] + DATE_TAB_HEADERS
-    for dk, tab_rows in date_tab_rows.items():
-        dt_obj = parse_date_tab(dk)
-        if not dt_obj: continue
-        date_objects[dk] = dt_obj; date_names.append(dk)
-        for tab_row in tab_rows:
-            cn = str(tab_row[0]).strip(); asn = str(tab_row[1]).strip(); asid = clean_id(tab_row[2])
-            if not cn or cn in ["캠페인 이름", "전체", "합계", "Total"]: continue
-            spend = _to_num(tab_row[3]); unique_clicks = _to_num(tab_row[9]); cpm = _to_num(tab_row[6])
-            mpc = _to_num(tab_row[14]); revenue = _to_num(tab_row[15])
-            profit = revenue - spend; roas = (revenue / spend * 100) if spend > 0 else 0
-            cvr = (mpc / unique_clicks * 100) if unique_clicks > 0 and mpc > 0 else 0
-            if asid:
-                if not ad_sets[asid]['adset_id']:
-                    ad_sets[asid] = {'campaign_name': cn, 'adset_name': asn, 'adset_id': asid, 'dates': {}}
-                ad_sets[asid]['dates'][dk] = {'profit': profit, 'revenue': revenue, 'spend': spend, 'cpm': cpm, 'cvr': cvr, 'unique_clicks': unique_clicks, 'mpc': mpc}
-            p = extract_product(asn, cn)
-            budget_by_date[dk][p]['spend'] += spend; budget_by_date[dk][p]['revenue'] += revenue
-            mrd = [dk] + list(tab_row)
-            while len(mrd) < len(master_headers_local): mrd.append("")
-            master_raw_data.append({'date': dk, 'date_obj': dt_obj, 'spend': spend, 'row_data': mrd[:len(master_headers_local)]})
-    date_names = sorted(date_names, key=lambda x: date_objects.get(x, datetime.min))
-    cached_ws = with_retry(sh.worksheets)
-    print(f"  ✅ preloaded: {len(date_names)}일 | 광고세트: {len(ad_sets)}개 | 마스터행: {len(master_raw_data)}개")
 
 failed_tabs = diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET, all_ws=cached_ws)
 
-# ★ v30e: 30→15초
-print(f"\n⏳ 8.5→9단계 전환: {MAJOR_STEP_SLEEP}초 대기..."); time.sleep(MAJOR_STEP_SLEEP)
-master_headers = ["Date"] + DATE_TAB_HEADERS
+# 차트 데이터 준비
 all_products_in_budget = set()
 for dk in date_names:
     for p in budget_by_date[dk]:
@@ -1859,8 +1897,8 @@ product_order = sorted(list(all_products_in_budget), key=lambda p: sum(budget_by
 print(f"\n📦 제품 순서 (전체): {product_order}")
 chart_dn = list(reversed(date_names)); chart_sd = chart_dn[:7]
 
-# 5.5: 주간 집계
-print("\n5.5단계: 주간 집계")
+# 주간 집계
+print("\n주간 집계")
 week_groups = defaultdict(list); week_display_names = {}
 for t in date_names: do = date_objects[t]; wk = get_week_range_short(do); wd = get_week_range(do); week_groups[wk].append(t); week_display_names[wk] = wd
 week_ranges = []
@@ -1885,46 +1923,6 @@ for asid, d in ad_sets.items():
 def _multi_spend_key(item):
     return tuple(item['data']['dates'].get(d, {}).get('spend', 0) for d in chart_dn[1:])
 sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk = list(reversed(week_keys))
-
-# =========================================================
-# ★ v30g: 9단계 — 마스터탭 재사용 (삭제하지 않음)
-# =========================================================
-print("\n9단계: 마스터탭 (★ v30g: 재사용+값 덮어쓰기)")
-ws_m, _is_new_m = get_or_create_ws(sh, "마스터탭", rows=max(2000, len(master_raw_data) + 100), cols=len(master_headers) + 5); time.sleep(2)
-if not _is_new_m:
-    try: with_retry(ws_m.clear); time.sleep(1)
-    except: pass
-move_ws_to_front(sh, ws_m)
-master_raw_data.sort(key=lambda x: (x['date_obj'], -x['spend']), reverse=True)
-for item in master_raw_data:
-    while len(item['row_data']) < len(master_headers): item['row_data'].append("")
-    item['row_data'] = item['row_data'][:len(master_headers)]
-mr_all_raw = [i['row_data'] for i in master_raw_data]
-mr_safe = _make_rows_sheet_safe(mr_all_raw, asid_col=3)
-for row in mr_safe:
-    if len(row) > 0 and row[0] and str(row[0]).strip():
-        dk_str = str(row[0]).strip()
-        if not dk_str.startswith("'") and '/' in dk_str:
-            row[0] = "'" + dk_str
-mr_all = [master_headers] + mr_safe
-for i in range(0, len(mr_all), 5000): with_retry(ws_m.update, values=mr_all[i:i+5000], range_name=f"A{i+1}", value_input_option="USER_ENTERED"); time.sleep(2)
-try:
-    with_retry(ws_m.format, 'A1:T1', {'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}, 'textFormat': {'bold': True}})
-    with_retry(sh.batch_update, body={"requests": [{"updateSheetProperties": {"properties": {"sheetId": ws_m.id, "gridProperties": {"frozenRowCount": 1}}, "fields": "gridProperties.frozenRowCount"}}]})
-except: pass
-print(f"✅ 마스터탭 ({len(master_raw_data)}행)"); time.sleep(2)
-
-# ★ v30g: preloaded 모드에서는 차트/주간종합 스킵 (마스터탭만 생성하고 종료)
-if _preloaded_only:
-    print("\n" + "=" * 60)
-    print("⏩ preloaded 모드: 마스터탭 생성 완료, 차트/주간종합 스킵")
-    print("   → 다음 실행에서 마스터탭 기반 전체 차트 복구")
-    print("=" * 60)
-    # 최종 탭 순서 정리만 수행
-    reorder_tabs(sh)
-    print("\n" + "=" * 60); print("✅ 완료! (preloaded 모드 - 마스터탭 복구)"); print("=" * 60)
-    print(f"\n📊 {SPREADSHEET_URL}")
-    import sys; sys.exit(0)
 
 # 10단계: 추이차트
 print("\n10단계: 추이차트")
