@@ -96,12 +96,12 @@ BUDGET_WORKERS = 3
 WEEKLY_WRITE_CHUNK_SIZE = 3000   # 한 번에 쓸 최대 행 수
 WEEKLY_FORMAT_BATCH_SIZE = 100   # ★ v30e: 50 → 100
 WEEKLY_FORMAT_BATCH_DELAY = 1.5  # ★ v30e: 3 → 1.5초
-WEEKLY_STEP_COOLDOWN = 20        # ★ v30f: 25 → 20초
+WEEKLY_STEP_COOLDOWN = 5        # ★ v30h: 20 → 5초 (포맷 스킵 시 불필요)
 
 # ★ v30f: 단계 간 대기시간 상수 (더 공격적 축소)
-CHART_STEP_SLEEP = 10            # ★ v30f: 15 → 10초
-MAJOR_STEP_SLEEP = 10            # ★ v30f: 15 → 10초
-PRE_WEEKLY_COOLDOWN = 20         # ★ v30f: 30 → 20초
+CHART_STEP_SLEEP = 5             # ★ v30h: 10 → 5초 (포맷 스킵 시)
+MAJOR_STEP_SLEEP = 5             # ★ v30h: 10 → 5초
+PRE_WEEKLY_COOLDOWN = 10         # ★ v30h: 20 → 10초
 
 # ★ v30g: 날짜탭 Mixpanel 업데이트 일수 (이전 날짜는 확정 → 최근만 갱신)
 TAB_UPDATE_DAYS = 3              # 최근 3일만 7-A에서 업데이트 (나머지는 이전 실행 값 유지)
@@ -650,10 +650,7 @@ def apply_trend_chart_formatting(sh, ws, headers, rows_count, is_change_tab=Fals
                 'booleanRule':{'condition':{'type':'CUSTOM_FORMULA','values':[{'userEnteredValue':r['c']}]},'format':{'backgroundColor':r['clr']}}},'index':0}} for r in rules]
             with_retry(sh.batch_update, body={'requests':fr}); time.sleep(3)
         except Exception as e: print(f"  ⚠️ 조건부 서식 오류: {e}")
-    # ★ v30f: text_color_only=True이면 텍스트 색상도 스킵 (조건부 서식 배경색이 유지되므로 충분)
-    if text_color_only:
-        print("  ⏩ 기존 탭 재사용 → 텍스트 색상 스킵 (조건부 서식 유지)")
-        return
+    # ★ v30h: text_color_only=True → 조건부 서식 스킵했지만, 텍스트 색상은 최근 컬럼만 적용
     tcs = 3; tce = min(format_col_end or len(headers), len(headers), TEXT_COLOR_MAX_COLS)
     print(f"  🎨 텍스트 색상 (col {tcs}~{tce-1})...")
     try:
@@ -1615,7 +1612,7 @@ for sn in ANALYSIS_TAB_NAMES_TO_DELETE:
         sh.del_worksheet(old); print(f"  ✅ '{sn}' 삭제"); time.sleep(2)
     except gspread.exceptions.WorksheetNotFound: pass
     except Exception as e: print(f"  ⚠️ '{sn}' 삭제 실패: {e}"); time.sleep(2)
-print("⏳ 5초 대기..."); time.sleep(5)
+print("⏳ 2초 대기..."); time.sleep(2)
 
 # =========================================================
 # ★ v30h: 7단계 → 마스터탭 먼저 (8.5+9를 앞으로 이동)
@@ -2293,13 +2290,15 @@ chunked_sheet_write(ws_ws, ar_ws, label="주간종합")
 time.sleep(2)
 
 print(f"  🎨 주간종합 포맷: {len(fr_ws)}개 요청...")
-chunked_format_apply(sh, fr_ws, label="주간종합")
-
-try:
-    cw = [{"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, "properties": {"pixelSize": 150}, "fields": "pixelSize"}}]
-    for ci in range(1, 11): cw.append({"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": 100}, "fields": "pixelSize"}})
-    with_retry(sh.batch_update, body={"requests": cw})
-except: pass
+if _is_new_ws:
+    chunked_format_apply(sh, fr_ws, label="주간종합")
+    try:
+        cw = [{"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, "properties": {"pixelSize": 150}, "fields": "pixelSize"}}]
+        for ci in range(1, 11): cw.append({"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": 100}, "fields": "pixelSize"}})
+        with_retry(sh.batch_update, body={"requests": cw})
+    except: pass
+else:
+    print("  ⏩ 기존 탭 재사용 → 포맷 스킵")
 print("✅ 주간종합")
 
 # ★ v30e: 45→25초
@@ -2348,7 +2347,10 @@ chunked_sheet_write(ws2, ar2, label="주간종합_2")
 time.sleep(2)
 
 print(f"  🎨 주간종합_2 포맷: {len(fr2)}개 요청...")
-chunked_format_apply(sh, fr2, label="주간종합_2")
+if _is_new_ws2:
+    chunked_format_apply(sh, fr2, label="주간종합_2")
+else:
+    print("  ⏩ 기존 탭 재사용 → 포맷 스킵")
 print("✅ 주간종합_2")
 
 # ★ v30e: 45→25초
@@ -2393,7 +2395,10 @@ chunked_sheet_write(ws3, ar3, label="주간종합_3")
 time.sleep(2)
 
 print(f"  🎨 주간종합_3 포맷: {len(fr3)}개 요청...")
-chunked_format_apply(sh, fr3, label="주간종합_3")
+if _is_new_ws3:
+    chunked_format_apply(sh, fr3, label="주간종합_3")
+else:
+    print("  ⏩ 기존 탭 재사용 → 포맷 스킵")
 print("✅ 주간종합_3"); time.sleep(2)
 
 # 18: 최종 탭 순서
