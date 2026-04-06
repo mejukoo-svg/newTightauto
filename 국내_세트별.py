@@ -2132,7 +2132,7 @@ wfce = 3 + 1 + WEEKLY_TREND_REFRESH_WEEKS; ws_tw = refresh_ws(sh, ws_tw)
 if _is_new_tw:
     apply_trend_chart_formatting(sh, ws_tw, hdr_w, len(rtw), format_col_end=wfce)
 else:
-    apply_trend_chart_formatting(sh, ws_tw, hdr_w, len(rtw), format_col_end=wfce, text_color_only=True)
+    print("  ⏩ 기존 탭 → 텍스트 색상 스킵 (주간은 컬럼 적음)")
 try: ws_tw = refresh_ws(sh, ws_tw); apply_c2_label_formatting(sh, ws_tw)
 except: pass
 # ★ v30e: 30→15초
@@ -2193,7 +2193,7 @@ ws_c = refresh_ws(sh, ws_c)
 if _is_new_c:
     apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True)
 else:
-    apply_trend_chart_formatting(sh, ws_c, hdr_c, len(rtc), is_change_tab=True, format_col_end=REFRESH_FORMAT_COL_END, text_color_only=True)
+    print("  ⏩ 기존 탭 → 텍스트 색상 스킵")
 # ★ v30e: 30→15초
 print(f"⏳ {CHART_STEP_SLEEP}초 대기..."); time.sleep(CHART_STEP_SLEEP)
 
