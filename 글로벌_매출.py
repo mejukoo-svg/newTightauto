@@ -62,7 +62,7 @@ WEEKLY_ALLOWED_CURRENCIES = {"twd", "hkd", "jpy"}
 CURRENCY_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100}
 
 KST = timezone(timedelta(hours=9))
-DAY_NAMES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+DAY_NAMES_KR = ["월", "화", "수", "목", "금", "토", "일"]
 
 MAX_WORKERS = 16
 
@@ -274,6 +274,11 @@ def _cell_format_req(sheet_id, start_row, end_row, start_col, end_col, fmt, fiel
     }
 
 
+def _single_cell_format_req(sheet_id, row, col, fmt, fields):
+    """단일 셀 서식"""
+    return _cell_format_req(sheet_id, row, row + 1, col, col + 1, fmt, fields)
+
+
 def write_daily_sheet(revenue, all_dates, all_countries):
     gc = get_gspread_client()
     ss = gc.open_by_key(SPREADSHEET_ID)
@@ -286,8 +291,16 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         ws = ss.add_worksheet(title=DAILY_SHEET_NAME, rows=100, cols=len(all_dates)+3)
         print(f"📋 새 시트 생성: {DAILY_SHEET_NAME}")
 
+    # --- 날짜별 요일 정보 계산 ---
+    date_objects = [datetime.strptime(ds, "%Y-%m-%d") for ds in all_dates]
+    weekdays = [d.weekday() for d in date_objects]  # 0=월 ~ 6=일
+
     rows = []
-    header = ["국가"] + [datetime.strptime(ds, "%Y-%m-%d").strftime("%m-%d") for ds in all_dates] + ["합계"]
+    # 헤더: MM-DD(요일)
+    header = ["국가"]
+    for ds, dt_obj, wd in zip(all_dates, date_objects, weekdays):
+        header.append(f"{dt_obj.strftime('%m-%d')}({DAY_NAMES_KR[wd]})")
+    header.append("합계")
     rows.append(header)
 
     for country in all_countries:
@@ -299,11 +312,32 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     rate_row = ["USD/KRW"] + [round(get_rate(ds).get("krw", 0), 2) for ds in all_dates] + [""]
     rows.append(rate_row)
 
+    # 종합 row
     total_row = ["종합"]; gt = 0
     for ds in all_dates:
         ds_sum = sum(round(revenue[c].get(ds, 0)) for c in all_countries)
         total_row.append(ds_sum); gt += ds_sum
-    total_row.append(gt); rows.append(total_row)
+    total_row.append(gt)
+    rows.append(total_row)
+
+    # --- 주간 총합 row ---
+    # 종합 row의 일별 값을 월~일 주 단위로 합산, 일요일 칸에 표시
+    total_values = total_row[1:-1]  # 날짜별 종합 값 (합계 제외)
+    weekly_row = ["주간합계"]
+    week_sum = 0
+    for i, (ds, wd) in enumerate(zip(all_dates, weekdays)):
+        week_sum += total_values[i]
+        if wd == 6:  # 일요일 → 해당 칸에 주간합계 기록, 리셋
+            weekly_row.append(week_sum)
+            week_sum = 0
+        else:
+            weekly_row.append("")
+    # 마지막 주가 일요일로 안 끝난 경우 → 맨 마지막 날짜 칸에 잔여 합계
+    if week_sum > 0:
+        # 뒤에서부터 마지막 비어있지 않은 곳 또는 마지막 칸에 넣기
+        weekly_row[-1] = week_sum
+    weekly_row.append("")  # 합계 열은 비움
+    rows.append(weekly_row)
 
     num_rows = len(rows); num_cols = len(rows[0])
     if ws.row_count < num_rows: ws.resize(rows=num_rows)
@@ -316,26 +350,41 @@ def write_daily_sheet(revenue, all_dates, all_countries):
     )
     print(f"📊 {len(all_countries)}국가 × {len(all_dates)}일 기록")
 
-    # 서식 (batch_update 1회)
+    # ============ 서식 (batch_update 1회) ============
     sid = ws.id
     num_countries = len(all_countries)
-    data_last_row = 1 + num_countries
-    rate_row_idx = data_last_row
-    total_row_idx = data_last_row + 1
+    data_last_row = 1 + num_countries      # row index (0-based) 바로 다음
+    rate_row_idx = data_last_row            # USD/KRW row
+    total_row_idx = data_last_row + 1       # 종합 row
+    weekly_row_idx = data_last_row + 2      # 주간합계 row
 
     reqs = [
+        # 헤더 서식
         _cell_format_req(sid, 0, 1, 0, num_cols, {
             "backgroundColor": {"red": 0.267, "green": 0.447, "blue": 0.769},
             "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
             "horizontalAlignment": "CENTER",
         }, "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"),
     ]
+
+    # 일요일 헤더 셀 → 연한 빨간색 배경
+    for i, wd in enumerate(weekdays):
+        if wd == 6:  # 일요일
+            col_idx = i + 1  # 0번은 "국가" 열
+            reqs.append(_single_cell_format_req(sid, 0, col_idx, {
+                "backgroundColor": {"red": 0.957, "green": 0.78, "blue": 0.78},
+                "textFormat": {"bold": True, "foregroundColor": {"red": 0.6, "green": 0.0, "blue": 0.0}},
+                "horizontalAlignment": "CENTER",
+            }, "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"))
+
+    # 국가별 데이터 숫자 서식
     if num_countries > 0:
         reqs.append(_cell_format_req(sid, 1, data_last_row, 1, num_cols, {
             "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
             "horizontalAlignment": "RIGHT",
         }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
 
+    # USD/KRW row
     reqs.append(_cell_format_req(sid, rate_row_idx, rate_row_idx + 1, 0, num_cols, {
         "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95},
     }, "userEnteredFormat(backgroundColor)"))
@@ -343,6 +392,8 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         "numberFormat": {"type": "NUMBER", "pattern": "#,##0.00"},
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
+
+    # 종합 row
     reqs.append(_cell_format_req(sid, total_row_idx, total_row_idx + 1, 0, num_cols, {
         "textFormat": {"bold": True},
         "borders": {"top": {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}},
@@ -351,10 +402,24 @@ def write_daily_sheet(revenue, all_dates, all_countries):
         "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
+
+    # 주간합계 row 서식
+    reqs.append(_cell_format_req(sid, weekly_row_idx, weekly_row_idx + 1, 0, num_cols, {
+        "textFormat": {"bold": True},
+        "backgroundColor": {"red": 1.0, "green": 0.95, "blue": 0.8},
+        "horizontalAlignment": "RIGHT",
+    }, "userEnteredFormat(textFormat,backgroundColor,horizontalAlignment)"))
+    reqs.append(_cell_format_req(sid, weekly_row_idx, weekly_row_idx + 1, 1, num_cols, {
+        "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
+    }, "userEnteredFormat(numberFormat)"))
+
+    # 국가 열 서식
     reqs.append(_cell_format_req(sid, 1, num_rows, 0, 1, {
         "textFormat": {"bold": True},
         "horizontalAlignment": "CENTER",
     }, "userEnteredFormat(textFormat,horizontalAlignment)"))
+
+    # 고정
     reqs.append({
         "updateSheetProperties": {
             "properties": {
@@ -468,6 +533,8 @@ def build_weekly_sheet_data(daily, start_year, start_month):
         target = MONTHLY_TARGETS.get((y, m), DEFAULT_TARGET)
         achievement = month_total_krw / target if target else 0
         month_name = f"{y}년 {m}월"
+
+        DAY_NAMES = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
         r1 = ["실제매출", round(month_total_krw, 2), f"{month_name} Stripe 매출 통계"]
         r1 += [""] * 7
