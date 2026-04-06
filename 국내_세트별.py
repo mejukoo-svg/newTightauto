@@ -2289,16 +2289,8 @@ print(f"  📝 주간종합 데이터: {len(ar_ws)}행 → 청크 쓰기...")
 chunked_sheet_write(ws_ws, ar_ws, label="주간종합")
 time.sleep(2)
 
-print(f"  🎨 주간종합 포맷: {len(fr_ws)}개 요청...")
-if _is_new_ws:
-    chunked_format_apply(sh, fr_ws, label="주간종합")
-    try:
-        cw = [{"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": 0, "endIndex": 1}, "properties": {"pixelSize": 150}, "fields": "pixelSize"}}]
-        for ci in range(1, 11): cw.append({"updateDimensionProperties": {"range": {"sheetId": sid_ws, "dimension": "COLUMNS", "startIndex": ci, "endIndex": ci + 1}, "properties": {"pixelSize": 100}, "fields": "pixelSize"}})
-        with_retry(sh.batch_update, body={"requests": cw})
-    except: pass
-else:
-    print("  ⏩ 기존 탭 재사용 → 포맷 스킵")
+# 주간종합 포맷 생략
+print("  ⏩ 포맷 스킵 (데이터만 쓰기)")
 print("✅ 주간종합")
 
 # ★ v30e: 45→25초
@@ -2346,11 +2338,8 @@ print(f"  📝 주간종합_2 데이터: {len(ar2)}행 → 청크 쓰기...")
 chunked_sheet_write(ws2, ar2, label="주간종합_2")
 time.sleep(2)
 
-print(f"  🎨 주간종합_2 포맷: {len(fr2)}개 요청...")
-if _is_new_ws2:
-    chunked_format_apply(sh, fr2, label="주간종합_2")
-else:
-    print("  ⏩ 기존 탭 재사용 → 포맷 스킵")
+# 주간종합_2 포맷 생략
+print("  ⏩ 포맷 스킵 (데이터만 쓰기)")
 print("✅ 주간종합_2")
 
 # ★ v30e: 45→25초
@@ -2394,11 +2383,8 @@ print(f"  📝 주간종합_3 데이터: {len(ar3)}행 → 청크 쓰기...")
 chunked_sheet_write(ws3, ar3, label="주간종합_3")
 time.sleep(2)
 
-print(f"  🎨 주간종합_3 포맷: {len(fr3)}개 요청...")
-if _is_new_ws3:
-    chunked_format_apply(sh, fr3, label="주간종합_3")
-else:
-    print("  ⏩ 기존 탭 재사용 → 포맷 스킵")
+# 주간종합_3 포맷 생략
+print("  ⏩ 포맷 스킵 (데이터만 쓰기)")
 print("✅ 주간종합_3"); time.sleep(2)
 
 # 18: 최종 탭 순서
