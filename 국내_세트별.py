@@ -1803,17 +1803,20 @@ reorder_tabs(sh)
 # ★ v30: 8.5단계 — 마스터탭 재활용 or 폴백
 # =========================================================
 if _existing_master_ws and not FULL_REFRESH:
+    _preloaded_only = False
     ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_from_master_tab(
         sh, _existing_master_ws, date_tab_rows, mp_value_map=mp_value_map, mp_count_map=mp_count_map
     )
 elif FULL_REFRESH:
+    _preloaded_only = False
     print("  🔥 FULL_REFRESH → 개별 탭 읽기 모드")
     ad_sets, budget_by_date, master_raw_data, date_objects, date_names, cached_ws = read_all_date_tabs_fallback(
         sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map, mp_count_map=mp_count_map, preloaded_date_data=date_tab_rows
     )
 else:
     # ★ v30g: 마스터탭 없을 때 폴백(156탭 읽기) 대신 preloaded 10일만 사용
-    # → 차트가 10일만 나오지만 스크립트 완주 보장, 다음 실행에서 마스터탭 복구
+    # → 마스터탭만 생성하고 차트/주간종합 스킵, 다음 실행에서 복구
+    _preloaded_only = True
     print("  ⚠️ 마스터탭 없음 → preloaded 10일 데이터로 진행 (폴백 스킵)")
     ad_sets = defaultdict(lambda: {'campaign_name': '', 'adset_name': '', 'adset_id': '', 'dates': {}})
     budget_by_date = defaultdict(lambda: defaultdict(lambda: {'spend': 0.0, 'revenue': 0.0}))
@@ -1910,6 +1913,18 @@ try:
     with_retry(sh.batch_update, body={"requests": [{"updateSheetProperties": {"properties": {"sheetId": ws_m.id, "gridProperties": {"frozenRowCount": 1}}, "fields": "gridProperties.frozenRowCount"}}]})
 except: pass
 print(f"✅ 마스터탭 ({len(master_raw_data)}행)"); time.sleep(2)
+
+# ★ v30g: preloaded 모드에서는 차트/주간종합 스킵 (마스터탭만 생성하고 종료)
+if _preloaded_only:
+    print("\n" + "=" * 60)
+    print("⏩ preloaded 모드: 마스터탭 생성 완료, 차트/주간종합 스킵")
+    print("   → 다음 실행에서 마스터탭 기반 전체 차트 복구")
+    print("=" * 60)
+    # 최종 탭 순서 정리만 수행
+    reorder_tabs(sh)
+    print("\n" + "=" * 60); print("✅ 완료! (preloaded 모드 - 마스터탭 복구)"); print("=" * 60)
+    print(f"\n📊 {SPREADSHEET_URL}")
+    import sys; sys.exit(0)
 
 # 10단계: 추이차트
 print("\n10단계: 추이차트")
