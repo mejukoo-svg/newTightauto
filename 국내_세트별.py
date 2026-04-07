@@ -1741,18 +1741,21 @@ for dk in _update_keys:
         for mp_asid in mp_data:
             fk = _asid_match_key(mp_asid)
             if fk: _fuzzy_mp[fk] = mp_asid
-        actual_mp_col = get_col_index(structure, 14)
-        actual_cvr_col = get_col_index(structure, 18)
-        mp_col_letter = get_col_letter(actual_mp_col)
+        # ★ v30h: D~S 전체 덮어쓰기 (Meta D~N + Mixpanel O~P + 수식 Q~S)
+        actual_spend_col = get_col_index(structure, 3)   # D열
+        actual_cvr_col = get_col_index(structure, 18)     # S열
+        spend_col_letter = get_col_letter(actual_spend_col)
         cvr_col_letter = get_col_letter(actual_cvr_col)
         for sheet_asid, row_idx in adset_id_row_map.items():
             row_num = row_idx + 1
             matched_asid = sheet_asid if sheet_asid in new_row_by_asid else _fuzzy_to_full.get(_asid_match_key(sheet_asid))
             if not matched_asid:
+                # Meta 매칭 안 되는 행 → Mixpanel만이라도 업데이트
                 mp_asid = sheet_asid if sheet_asid in mp_data else _fuzzy_mp.get(_asid_match_key(sheet_asid))
                 if mp_asid and mp_asid in mp_data:
+                    actual_mp_col = get_col_index(structure, 14)
+                    mp_col_letter = get_col_letter(actual_mp_col)
                     mpc = mp_data[mp_asid]['mpc']; mpv = mp_data[mp_asid]['mpv']; revenue = float(mpv)
-                    # ★ v30f: O,P값 + Q,R,S수식
                     batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
                         'values': [[int(mpc) if mpc > 0 else "", round(revenue) if revenue > 0 else "",
                             _make_profit_formula(row_num, structure),
@@ -1760,17 +1763,14 @@ for dk in _update_keys:
                             _make_cvr_formula(row_num, structure)]]})
                 continue
             new_tab_row = new_row_by_asid[matched_asid]
-            mpc = new_tab_row[14] if len(new_tab_row) > 14 else ""
-            revenue = new_tab_row[15] if len(new_tab_row) > 15 else ""
-            # ★ v30e: 믹스패널 데이터가 없으면 기존 시트 값 보존
-            if not mpc and not revenue:
-                continue
-            # ★ v30f: O,P값 + Q,R,S수식
-            batch_updates.append({'range': f'{mp_col_letter}{row_num}:{cvr_col_letter}{row_num}',
-                'values': [[mpc, revenue,
-                    _make_profit_formula(row_num, structure),
-                    _make_roas_formula(row_num, structure),
-                    _make_cvr_formula(row_num, structure)]]})
+            # D~N (Meta: 지출~결과) + O~P (Mixpanel: 결과MP, 매출) + Q~S (수식)
+            row_data = list(new_tab_row[3:16]) + [
+                _make_profit_formula(row_num, structure),
+                _make_roas_formula(row_num, structure),
+                _make_cvr_formula(row_num, structure)
+            ]
+            batch_updates.append({'range': f'{spend_col_letter}{row_num}:{cvr_col_letter}{row_num}',
+                'values': [row_data]})
             updated_count += 1
         # ★ v30g: 예산도 같은 batch에 합치기 (별도 API 호출 제거)
         actual_budget_col = get_col_index(structure, 19); budget_col_letter = get_col_letter(actual_budget_col)
