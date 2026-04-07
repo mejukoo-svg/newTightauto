@@ -9,6 +9,7 @@
 #   6) 날짜 탭 쓰기: ★병렬 쓰기★ (세마포어로 rate-limit 제어)
 #   7) 분석 탭 데이터 생성: 병렬 준비 + ★병렬 쓰기★
 #   8) 분석 탭 서식: ★병렬 서식 적용★
+#   ★ FIX: Mixpanel to_date를 UTC 기준으로 보정하여 400 에러 방지
 
 print("=" * 60)
 print("🚀 v3-ad 통합 자동화 (★ 병렬의 병렬 최적화 버전)")
@@ -94,6 +95,9 @@ DATA_START_DATE = datetime(2026, 1, 1)
 REFRESH_DAYS = 7
 WEEKLY_TREND_REFRESH_WEEKS = 2
 
+# ★ FIX: Mixpanel은 UTC 기준이므로 UTC 오늘 날짜를 별도로 구함
+TODAY_UTC = datetime.now(timezone.utc).replace(tzinfo=None)
+
 DATE_TAB_HEADERS = [
     "캠페인 이름", "광고 세트 이름", "광고 이름", "광고 세트 ID", "광고 ID",
     "지출 금액 (KRW)", "결과당 비용", "구매 ROAS(광고 지출 대비 수익률)",
@@ -105,6 +109,7 @@ DATE_TAB_HEADERS = [
 ]
 
 print(f"📅 현재 날짜: {TODAY.strftime('%Y-%m-%d')} (KST)")
+print(f"📅 UTC 날짜: {TODAY_UTC.strftime('%Y-%m-%d')} (Mixpanel 기준)")
 print(f"📅 Meta/Mixpanel 수집: 최근 {REFRESH_DAYS}일만")
 print(f"📅 ★ 병렬의 병렬: Meta(날짜×계정 동시) + Mixpanel 동시 + 탭 읽기/쓰기 병렬")
 print(f"📅 ★ Mixpanel 이벤트: {MIXPANEL_EVENT_NAMES}")
@@ -493,7 +498,7 @@ def fetch_mixpanel_data(from_date, to_date):
     try:
         resp = req_lib.get(url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300)
         if resp.status_code != 200:
-            print(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:500]}")  # ★ 응답 본문 추가
+            print(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:500]}")
             return []
         lines = [l for l in resp.text.split('\n') if l.strip()]
         print(f"  📊 이벤트: {len(lines)}건")
@@ -764,10 +769,12 @@ def _fetch_meta_one(acc_id, target_date):
     return (date_key, target_date, acc_id, parsed)
 
 
-# --- (C) Mixpanel 래퍼 ---
+# --- (C) Mixpanel 래퍼 — ★ FIX: to_date를 UTC 기준으로 보정 ★ ---
 def _fetch_mixpanel():
     mp_from = (TODAY - timedelta(days=REFRESH_DAYS-1)).strftime('%Y-%m-%d')
-    mp_to = TODAY.strftime('%Y-%m-%d')
+    # ★ FIX: Mixpanel 서버는 UTC 기준이므로 to_date가 UTC 오늘을 넘지 않도록 보정
+    mp_to = min(TODAY, TODAY_UTC).strftime('%Y-%m-%d')
+    print(f"  ★ Mixpanel to_date 보정: KST={TODAY.strftime('%Y-%m-%d')}, UTC={TODAY_UTC.strftime('%Y-%m-%d')} → 사용={mp_to}")
     return fetch_mixpanel_data(mp_from, mp_to)
 
 
@@ -1754,6 +1761,7 @@ print()
 print(f"📋 Meta: 최근 {REFRESH_DAYS}일 × {len(ALL_AD_ACCOUNTS)}계정 = {REFRESH_DAYS*len(ALL_AD_ACCOUNTS)}건 ★동시 호출★")
 print(f"📋 Mixpanel: Meta와 ★동시 수집★ (이벤트: {MIXPANEL_EVENT_NAMES})")
 print(f"📋 매출 필드: amount OR 결제금액 (OR fallback)")
+print(f"📋 ★ Mixpanel to_date 보정: UTC 기준 적용")
 print(f"📋 기존 탭 읽기: ★병렬 읽기★")
 print(f"📋 데이터 준비: 날짜탭+분석탭 ★10개 동시 생성★")
 print(f"📋 Sheets 쓰기: ★★★ 병렬의 병렬 — 날짜탭+분석탭 동시 쓰기 ★★★")
