@@ -1,7 +1,7 @@
 name: 채널별 추이차트 v6
 on:
   schedule:
-    - cron: '0 18 * * *'
+    - cron: '0 21 * * *'
   workflow_dispatch:
 jobs:
   run:
