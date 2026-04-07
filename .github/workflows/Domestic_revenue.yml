@@ -20,6 +20,13 @@ jobs:
       - name: Install dependencies
         run: pip install gspread google-auth requests
 
+      - name: Debug - show file structure
+        run: |
+          echo "=== repo root ==="
+          ls -la
+          echo "=== find all .py files ==="
+          find . -name "*.py" -type f
+
       - name: Run dashboard script
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
