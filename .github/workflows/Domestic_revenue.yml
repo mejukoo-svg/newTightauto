@@ -24,7 +24,7 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
-          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
-          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META3RD_TOKEN: ${{ secrets.META3RD_TOKEN }}
+          VANCED_TOKEN: ${{ secrets.VANCED_TOKEN }}
           TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
         run: python 국내_매출.py
