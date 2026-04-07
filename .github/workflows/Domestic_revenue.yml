@@ -24,7 +24,6 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
-          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
           META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
