@@ -96,12 +96,12 @@ BUDGET_WORKERS = 3
 WEEKLY_WRITE_CHUNK_SIZE = 3000   # 한 번에 쓸 최대 행 수
 WEEKLY_FORMAT_BATCH_SIZE = 100   # ★ v30e: 50 → 100
 WEEKLY_FORMAT_BATCH_DELAY = 1.5  # ★ v30e: 3 → 1.5초
-WEEKLY_STEP_COOLDOWN = 5        # ★ v30h: 20 → 5초 (포맷 스킵 시 불필요)
+WEEKLY_STEP_COOLDOWN = 2        # ★ v30h: 5 → 2초 (포맷 완전 스킵)
 
 # ★ v30f: 단계 간 대기시간 상수 (더 공격적 축소)
-CHART_STEP_SLEEP = 5             # ★ v30h: 10 → 5초 (포맷 스킵 시)
-MAJOR_STEP_SLEEP = 5             # ★ v30h: 10 → 5초
-PRE_WEEKLY_COOLDOWN = 10         # ★ v30h: 20 → 10초
+CHART_STEP_SLEEP = 2             # ★ v30h: 5 → 2초
+MAJOR_STEP_SLEEP = 2             # ★ v30h: 5 → 2초
+PRE_WEEKLY_COOLDOWN = 5          # ★ v30h: 10 → 5초 (포맷 스킵으로 rate limit 여유)
 
 # ★ v30g: 날짜탭 Mixpanel 업데이트 일수 (이전 날짜는 확정 → 최근만 갱신)
 TAB_UPDATE_DAYS = 3              # 최근 3일만 7-A에서 업데이트 (나머지는 이전 실행 값 유지)
@@ -1810,8 +1810,16 @@ for dk in _update_keys:
                     row[pc + 2] = _make_cvr_formula(sheet_row, structure)
             with_retry(ws_ex.update, values=new_rows_to_add, range_name=f"A{data_end_idx+1}", value_input_option="USER_ENTERED")
             print(f"    ✅ {len(new_rows_to_add)}개 신규 행 추가"); time.sleep(1); data_end_idx += len(new_rows_to_add)
-        # ★ v30f: 요약표 재생성 스킵 (이전 실행에서 생성된 것 유지, API ~10회/탭 절감)
-        # 요약표는 7-B(새 탭) 또는 FULL_REFRESH 시에만 생성
+        # ★ v30h: 요약표 데이터만 쓰기 (포맷 스킵 → API 1회 추가)
+        api_rows = date_tab_rows.get(dk, [])
+        _has_mp = any((_to_num(r[14]) > 0 or _to_num(r[15]) > 0) for r in api_rows) if api_rows else False
+        if _has_mp and api_rows:
+            summary_rows, num_products = generate_date_tab_summary(api_rows, structure="new")
+            breakdown_rows, product_meta = generate_product_breakdown(api_rows, structure="new")
+            combined_extra = summary_rows + breakdown_rows
+            summary_start = data_end_idx + 1
+            with_retry(ws_ex.update, values=combined_extra, range_name=f"A{summary_start}", value_input_option="USER_ENTERED"); time.sleep(0.5)
+            print(f"    ✅ 요약표 갱신 ({num_products}개 상품, 포맷 스킵)")
     except Exception as e: print(f"    ⚠️ {dk} 오류: {e}")
 
 # 8-B: 새 날짜탭 생성
