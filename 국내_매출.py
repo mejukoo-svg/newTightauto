@@ -27,8 +27,8 @@ print("✅ Google 인증 완료")
 META_ACCOUNTS = [
     {"account_id": "707835224206178",    "access_token": os.environ["META_TOKEN_1"]},
     {"account_id": "1270614404675034",   "access_token": os.environ["META_TOKEN_1"]},
-    {"account_id": "25183853061243175",  "access_token": os.environ["META3RD_TOKEN"]},
-    {"account_id": "1808141386564262",   "access_token": os.environ["VANCED_TOKEN"]},
+    {"account_id": "25183853061243175",  "access_token": os.environ["VANCED_TOKEN"]},
+    {"account_id": "1808141386564262",   "access_token": os.environ["META3RD_TOKEN"]},
 ]
 META_API_VERSION = "v21.0"
 
