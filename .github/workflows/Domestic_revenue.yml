@@ -20,13 +20,6 @@ jobs:
       - name: Install dependencies
         run: pip install gspread google-auth requests
 
-      - name: Debug - show file structure
-        run: |
-          echo "=== repo root ==="
-          ls -la
-          echo "=== find all .py files ==="
-          find . -name "*.py" -type f
-
       - name: Run dashboard script
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
@@ -35,4 +28,4 @@ jobs:
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
           META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
-        run: python scripts/국내_매출.py
+        run: python 국내_매출.py
