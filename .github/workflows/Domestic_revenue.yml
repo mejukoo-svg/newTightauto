@@ -20,6 +20,14 @@ jobs:
       - name: Install dependencies
         run: pip install gspread google-auth requests
 
+      - name: Debug - check token prefixes
+        env:
+          META3RD_TOKEN: ${{ secrets.META3RD_TOKEN }}
+          VANCED_TOKEN: ${{ secrets.VANCED_TOKEN }}
+        run: |
+          echo "META3RD_TOKEN starts with: ${META3RD_TOKEN:0:10}"
+          echo "VANCED_TOKEN starts with: ${VANCED_TOKEN:0:10}"
+
       - name: Run dashboard script
         env:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
