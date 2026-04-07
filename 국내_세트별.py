@@ -1721,12 +1721,23 @@ for dk in _update_keys:
         if not col_ac or len(col_ac) < 2: continue
         structure = "new"  # 최근 탭은 항상 new 구조
         actual_asid_col = 2  # column C (0-based)
-        adset_id_row_map = {}; last_data_sheet_row = 1
+        adset_id_row_map = {}; last_data_sheet_row = 1; consecutive_empty = 0
         for i, row in enumerate(col_ac[1:], start=2):
-            if not row: continue
+            if not row or len(row) == 0:
+                consecutive_empty += 1
+                if consecutive_empty >= 3: break  # ★ v30h: 빈 행 3개 연속 → 데이터 영역 끝
+                continue
             cn = str(row[0]).strip() if len(row) > 0 else ""; asid = clean_id(row[actual_asid_col]) if len(row) > actual_asid_col else ""
-            if cn in ["캠페인 이름", "전체", "합계", "Total"]: continue
-            if not cn and not asid: continue
+            if cn in ["캠페인 이름", "전체", "합계", "Total"]:
+                consecutive_empty += 1
+                if consecutive_empty >= 3: break
+                continue
+            if cn.startswith("📊") or cn.startswith("📦") or cn.startswith("▸"): break  # 상품분류 영역 진입
+            if not cn and not asid:
+                consecutive_empty += 1
+                if consecutive_empty >= 3: break
+                continue
+            consecutive_empty = 0
             if asid: adset_id_row_map[asid] = i - 1
             last_data_sheet_row = i
         data_end_idx = last_data_sheet_row; batch_updates = []; updated_count = 0; new_row_by_asid = {}
@@ -1810,14 +1821,22 @@ for dk in _update_keys:
                     row[pc + 2] = _make_cvr_formula(sheet_row, structure)
             with_retry(ws_ex.update, values=new_rows_to_add, range_name=f"A{data_end_idx+1}", value_input_option="USER_ENTERED")
             print(f"    ✅ {len(new_rows_to_add)}개 신규 행 추가"); time.sleep(1); data_end_idx += len(new_rows_to_add)
-        # ★ v30h: 요약표 데이터만 쓰기 (포맷 스킵 → API 1회 추가)
+        # ★ v30h: 요약표+상품분류 재생성 (포맷 스킵, 이전 영역 클리어)
         api_rows = date_tab_rows.get(dk, [])
-        _has_mp = any((_to_num(r[14]) > 0 or _to_num(r[15]) > 0) for r in api_rows) if api_rows else False
-        if _has_mp and api_rows:
+        if api_rows:
             summary_rows, num_products = generate_date_tab_summary(api_rows, structure="new")
             breakdown_rows, product_meta = generate_product_breakdown(api_rows, structure="new")
             combined_extra = summary_rows + breakdown_rows
             summary_start = data_end_idx + 1
+            # 이전 요약+상품분류 영역 클리어 (잔여 데이터 방지)
+            clear_end = summary_start + len(combined_extra) + 200  # 넉넉하게
+            try:
+                with_retry(sh.batch_update, body={"requests": [
+                    {"repeatCell": {"range": {"sheetId": ws_ex.id, "startRowIndex": summary_start - 1, "endRowIndex": clear_end,
+                        "startColumnIndex": 0, "endColumnIndex": 25},
+                        "cell": {"userEnteredValue": {}}, "fields": "userEnteredValue"}}
+                ]}); time.sleep(0.5)
+            except: pass
             with_retry(ws_ex.update, values=combined_extra, range_name=f"A{summary_start}", value_input_option="USER_ENTERED"); time.sleep(0.5)
             print(f"    ✅ 요약표 갱신 ({num_products}개 상품, 포맷 스킵)")
     except Exception as e: print(f"    ⚠️ {dk} 오류: {e}")
