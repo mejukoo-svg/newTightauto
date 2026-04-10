@@ -106,7 +106,7 @@ jobs:
       github.event.inputs.script == 'all' ||
       github.event.inputs.script == 'domestic_creative'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
