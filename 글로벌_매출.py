@@ -5,6 +5,7 @@
 두 가지 모드:
   1) daily   - 국가별(대만/홍콩/일본) 일별 매출 → "매출" 시트
                ★ 최신 10일만 Stripe API 호출, 기존 시트 데이터와 병합
+               ★ 순이익 = 종합 매출 - 추이차트 탭 지출
   2) weekly  - 월별 블록 + 주차별 달러/원화 매출 → "주간매출" 시트
   3) all     - 위 두 가지 모두 실행
 
@@ -39,6 +40,7 @@ else:
 
 DAILY_SHEET_NAME = "매출"
 WEEKLY_SHEET_NAME = "주간매출"
+TREND_SHEET_NAME = "추이차트"
 
 # ★ daily 모드: 최신 10일만 API 호출
 DAYS_BACK = 10
@@ -343,6 +345,39 @@ def _read_existing_daily_sheet(gc):
     return existing_revenue, existing_dates, existing_countries, existing_rates
 
 
+def _read_trend_spending(gc, all_dates):
+    """추이차트 탭 row1(날짜 헤더) + row2(지출금액) → {YYYY-MM-DD: 지출액} 반환"""
+    spending = {}
+    try:
+        ss = gc.open_by_key(SPREADSHEET_ID)
+        ws = ss.worksheet(TREND_SHEET_NAME)
+    except (gspread.exceptions.WorksheetNotFound, gspread.exceptions.SpreadsheetNotFound):
+        print(f"⚠️ '{TREND_SHEET_NAME}' 탭을 찾을 수 없습니다. 순이익은 매출과 동일하게 표시됩니다.")
+        return spending
+
+    # row1, row2만 읽기
+    try:
+        header_row = retry_on_quota(lambda: ws.row_values(1), label="추이차트 row1")
+        spend_row = retry_on_quota(lambda: ws.row_values(2), label="추이차트 row2")
+    except Exception as e:
+        print(f"⚠️ 추이차트 읽기 실패: {e}")
+        return spending
+
+    # 헤더에서 날짜 파싱 → 지출 매핑
+    for col_idx in range(len(header_row)):
+        ds = _parse_header_date(header_row[col_idx])
+        if ds and col_idx < len(spend_row) and spend_row[col_idx]:
+            try:
+                val = float(str(spend_row[col_idx]).replace(",", ""))
+                spending[ds] = val
+            except ValueError:
+                pass
+
+    matched = sum(1 for d in all_dates if d in spending)
+    print(f"💰 추이차트 지출 데이터: {len(spending)}일 로드, 매출 탭과 {matched}일 매칭")
+    return spending
+
+
 def write_daily_sheet(revenue, fresh_dates, all_countries):
     """기존 시트 읽기 → 최신 10일 병합 → 전체 쓰기"""
     gc = get_gspread_client()
@@ -380,6 +415,9 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
         all_dates = fresh_dates
         print(f"🆕 신규 시트 생성: {len(all_dates)}일")
 
+    # ── 1.5. 추이차트 탭에서 지출 데이터 읽기 ──
+    spending = _read_trend_spending(gc, all_dates)
+
     # ── 2. 시트 준비 ──
     try:
         ws = ss.worksheet(DAILY_SHEET_NAME)
@@ -415,6 +453,17 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
         total_row.append(ds_sum); gt += ds_sum
     total_row.append(gt)
     rows.append(total_row)
+
+    # ── 순이익 row (종합 - 지출) ──
+    net_profit_row = ["순이익"]; np_total = 0
+    for ds in all_dates:
+        ds_revenue = sum(round(revenue[c].get(ds, 0)) for c in all_countries)
+        ds_spend = spending.get(ds, 0)
+        np_val = round(ds_revenue - ds_spend)
+        net_profit_row.append(np_val)
+        np_total += np_val
+    net_profit_row.append(np_total)
+    rows.append(net_profit_row)
 
     # ── 주간 총합 row ──
     total_values = total_row[1:-1]
@@ -461,10 +510,11 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
     # ── 5. 서식 ──
     sid = ws.id
     num_countries = len(all_countries)
-    data_last_row = 1 + num_countries
-    rate_row_idx = data_last_row
-    total_row_idx = data_last_row + 1
-    weekly_row_idx = data_last_row + 2
+    data_last_row = 1 + num_countries          # 국가 데이터 끝 (0-indexed)
+    rate_row_idx = data_last_row               # USD/KRW
+    total_row_idx = data_last_row + 1          # 종합
+    net_profit_row_idx = data_last_row + 2     # 순이익
+    weekly_row_idx = data_last_row + 3         # 주간합계
 
     reqs = [
         _cell_format_req(sid, 0, 1, 0, num_cols, {
@@ -502,6 +552,16 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
         "borders": {"top": {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}},
     }, "userEnteredFormat(textFormat,borders)"))
     reqs.append(_cell_format_req(sid, total_row_idx, total_row_idx + 1, 1, num_cols, {
+        "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
+        "horizontalAlignment": "RIGHT",
+    }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
+
+    # ── 순이익 서식: 녹색 배경, 볼드 ──
+    reqs.append(_cell_format_req(sid, net_profit_row_idx, net_profit_row_idx + 1, 0, num_cols, {
+        "textFormat": {"bold": True},
+        "backgroundColor": {"red": 0.85, "green": 0.95, "blue": 0.85},
+    }, "userEnteredFormat(textFormat,backgroundColor)"))
+    reqs.append(_cell_format_req(sid, net_profit_row_idx, net_profit_row_idx + 1, 1, num_cols, {
         "numberFormat": {"type": "NUMBER", "pattern": "#,##0"},
         "horizontalAlignment": "RIGHT",
     }, "userEnteredFormat(numberFormat,horizontalAlignment)"))
