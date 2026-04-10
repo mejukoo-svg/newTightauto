@@ -385,15 +385,18 @@ def _read_master_spending(gc, all_dates):
         raw_date = str(row[date_col]).strip()
         raw_spend = str(row[spend_col]).strip().replace(",", "").replace("₩", "").replace("\\", "")
 
-        # 날짜 파싱: YYYY-MM-DD, YYYY/MM/DD, MM/DD 등
+        # 날짜 파싱: YYYY-MM-DD, YYYY/MM/DD, YY/MM/DD, MM/DD 등
         ds = None
         if re.match(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", raw_date):
             ds = raw_date.replace("/", "-")
-            # 월/일 zero-pad
             parts = ds.split("-")
             if len(parts) == 3:
                 ds = f"{parts[0]}-{int(parts[1]):02d}-{int(parts[2]):02d}"
-        elif re.match(r"\d{1,2}/\d{1,2}", raw_date):
+        elif re.match(r"\d{2}/\d{2}/\d{2}$", raw_date):
+            # YY/MM/DD → 20YY-MM-DD
+            parts = raw_date.split("/")
+            ds = f"20{parts[0]}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+        elif re.match(r"\d{1,2}/\d{1,2}$", raw_date):
             parts = raw_date.split("/")
             now = datetime.now(KST)
             m, d = int(parts[0]), int(parts[1])
