@@ -1040,7 +1040,6 @@ def read_from_master_tab(sh, master_ws, preloaded_date_data, mp_value_map=None, 
     if not master_values or len(master_values) < 2:
         print("  ⚠️ 마스터탭 비어있음")
         all_ws = with_retry(sh.worksheets)
-        return all_ad_sets, all_budget_by_date, all_master_raw_data, all_date_objects, sorted(list(all_date_names_set)), all_ws
 
     historical_count = 0
     skipped_count = 0
