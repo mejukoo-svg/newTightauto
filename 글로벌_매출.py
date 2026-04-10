@@ -5,7 +5,7 @@
 두 가지 모드:
   1) daily   - 국가별(대만/홍콩/일본) 일별 매출 → "매출" 시트
                ★ 최신 10일만 Stripe API 호출, 기존 시트 데이터와 병합
-               ★ 순이익 = 종합 매출 - 추이차트 탭 지출
+               ★ 순이익 = 종합 매출 - 마스터탭 지출금액 합산
   2) weekly  - 월별 블록 + 주차별 달러/원화 매출 → "주간매출" 시트
   3) all     - 위 두 가지 모두 실행
 
@@ -40,7 +40,7 @@ else:
 
 DAILY_SHEET_NAME = "매출"
 WEEKLY_SHEET_NAME = "주간매출"
-TREND_SHEET_NAME = "추이차트"
+MASTER_SHEET_NAME = "마스터탭"
 
 # ★ daily 모드: 최신 10일만 API 호출
 DAYS_BACK = 10
@@ -345,36 +345,73 @@ def _read_existing_daily_sheet(gc):
     return existing_revenue, existing_dates, existing_countries, existing_rates
 
 
-def _read_trend_spending(gc, all_dates):
-    """추이차트 탭 row1(날짜 헤더) + row2(지출금액) → {YYYY-MM-DD: 지출액} 반환"""
-    spending = {}
+def _read_master_spending(gc, all_dates):
+    """마스터탭에서 Date + 지출금액 컬럼을 읽어 날짜별 지출 합산 → {YYYY-MM-DD: 지출액}"""
+    spending = defaultdict(float)
     try:
         ss = gc.open_by_key(SPREADSHEET_ID)
-        ws = ss.worksheet(TREND_SHEET_NAME)
+        ws = ss.worksheet(MASTER_SHEET_NAME)
     except (gspread.exceptions.WorksheetNotFound, gspread.exceptions.SpreadsheetNotFound):
-        print(f"⚠️ '{TREND_SHEET_NAME}' 탭을 찾을 수 없습니다. 순이익은 매출과 동일하게 표시됩니다.")
+        print(f"⚠️ '{MASTER_SHEET_NAME}' 탭을 찾을 수 없습니다. 순이익은 매출과 동일하게 표시됩니다.")
         return spending
 
-    # row1, row2만 읽기
-    try:
-        header_row = retry_on_quota(lambda: ws.row_values(1), label="추이차트 row1")
-        spend_row = retry_on_quota(lambda: ws.row_values(2), label="추이차트 row2")
-    except Exception as e:
-        print(f"⚠️ 추이차트 읽기 실패: {e}")
+    all_values = retry_on_quota(lambda: ws.get_all_values(), label="마스터탭 읽기")
+    if not all_values or len(all_values) < 2:
+        print(f"⚠️ 마스터탭에 데이터가 없습니다.")
         return spending
 
-    # 헤더에서 날짜 파싱 → 지출 매핑
-    for col_idx in range(len(header_row)):
-        ds = _parse_header_date(header_row[col_idx])
-        if ds and col_idx < len(spend_row) and spend_row[col_idx]:
-            try:
-                val = float(str(spend_row[col_idx]).replace(",", ""))
-                spending[ds] = val
-            except ValueError:
-                pass
+    # 헤더에서 Date, 지출금액 컬럼 찾기
+    header = all_values[0]
+    date_col = None
+    spend_col = None
+    for i, h in enumerate(header):
+        h_lower = str(h).strip().lower()
+        if h_lower in ("date", "날짜"):
+            date_col = i
+        if "지출" in str(h).strip():
+            spend_col = i
+
+    if date_col is None or spend_col is None:
+        print(f"⚠️ 마스터탭 헤더에서 Date({date_col}) 또는 지출금액({spend_col}) 컬럼을 찾을 수 없습니다.")
+        print(f"   헤더: {header[:10]}...")
+        return spending
+
+    print(f"📖 마스터탭: Date=col{date_col}, 지출금액=col{spend_col}, 데이터 {len(all_values)-1}행")
+
+    # 날짜별 지출금액 합산
+    for row in all_values[1:]:
+        if len(row) <= max(date_col, spend_col):
+            continue
+        raw_date = str(row[date_col]).strip()
+        raw_spend = str(row[spend_col]).strip().replace(",", "").replace("₩", "").replace("\\", "")
+
+        # 날짜 파싱: YYYY-MM-DD, YYYY/MM/DD, MM/DD 등
+        ds = None
+        if re.match(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", raw_date):
+            ds = raw_date.replace("/", "-")
+            # 월/일 zero-pad
+            parts = ds.split("-")
+            if len(parts) == 3:
+                ds = f"{parts[0]}-{int(parts[1]):02d}-{int(parts[2]):02d}"
+        elif re.match(r"\d{1,2}/\d{1,2}", raw_date):
+            parts = raw_date.split("/")
+            now = datetime.now(KST)
+            m, d = int(parts[0]), int(parts[1])
+            year = now.year if m <= now.month else now.year - 1
+            ds = f"{year}-{m:02d}-{d:02d}"
+
+        if not ds:
+            continue
+
+        try:
+            val = float(raw_spend) if raw_spend and raw_spend not in ("-", "", "0", "#DIV/0!") else 0.0
+            spending[ds] += val
+        except ValueError:
+            pass
 
     matched = sum(1 for d in all_dates if d in spending)
-    print(f"💰 추이차트 지출 데이터: {len(spending)}일 로드, 매출 탭과 {matched}일 매칭")
+    total_spend = sum(spending.values())
+    print(f"💰 마스터탭 지출: {len(spending)}일, 총 {total_spend:,.0f}원, 매출 탭과 {matched}일 매칭")
     return spending
 
 
@@ -415,8 +452,8 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
         all_dates = fresh_dates
         print(f"🆕 신규 시트 생성: {len(all_dates)}일")
 
-    # ── 1.5. 추이차트 탭에서 지출 데이터 읽기 ──
-    spending = _read_trend_spending(gc, all_dates)
+    # ── 1.5. 마스터탭에서 날짜별 지출 데이터 읽기 ──
+    spending = _read_master_spending(gc, all_dates)
 
     # ── 2. 시트 준비 ──
     try:
