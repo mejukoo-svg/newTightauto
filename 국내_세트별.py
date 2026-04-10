@@ -1506,9 +1506,13 @@ else:
     mp_from = DATA_REFRESH_START.strftime('%Y-%m-%d'); mp_to_yesterday = YESTERDAY.strftime('%Y-%m-%d')
     if DATA_REFRESH_START <= YESTERDAY:
         chunk_data = fetch_mixpanel_data(mp_from, mp_to_yesterday); mp_raw.extend(chunk_data); time.sleep(2)
-print(f"\n  ── 오늘({mp_to_today}) 별도 호출 ──")
-today_data = fetch_mixpanel_data(mp_to_today, mp_to_today)
-if today_data: mp_raw.extend(today_data)
+utc_today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+if mp_to_today <= utc_today:
+    print(f"\n  ── 오늘({mp_to_today}) 별도 호출 ──")
+    today_data = fetch_mixpanel_data(mp_to_today, mp_to_today)
+    if today_data: mp_raw.extend(today_data)
+else:
+    print(f"\n  ⏩ 오늘({mp_to_today})은 UTC 기준 미래 → 스킵 (UTC today={utc_today})")
 print(f"\n  ✅ Mixpanel 수집 완료: 총 {len(mp_raw)}건")
 df = pd.DataFrame(mp_raw); mp_value_map = {}; mp_count_map = {}
 if len(df) > 0:
