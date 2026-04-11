@@ -274,7 +274,7 @@ COLORS = {
 
 SUMMARY_PRODUCTS = []
 LEFTMOST_TABS_ORDER = ["매출", "주간매출"]
-FINAL_ANALYSIS_ORDER = ["추이차트", "추이차트(주간)", "증감액", "예산", "주간종합", "주간종합_2", "주간종합_3", "마스터탭"]
+FINAL_ANALYSIS_ORDER = ["추이차트", "추이차트_상품별", "추이차트(주간)", "증감액", "예산", "주간종합", "주간종합_2", "주간종합_3", "마스터탭"]
 ANALYSIS_TABS_SET = set(FINAL_ANALYSIS_ORDER) | set(LEFTMOST_TABS_ORDER) | {"_temp", "_temp_holder", "_tmp"}
 
 USD_NUMBER_PATTERN = "[$$-en-US]#,##0.00"
@@ -982,7 +982,7 @@ print()
 
 # 6단계: 분석탭 삭제
 print("="*60); print("6단계: 분석탭 삭제"); print("="*60)
-ANALYSIS_TAB_NAMES=["마스터탭","추이차트","증감액","추이차트(주간)","주간종합","주간종합_2","주간종합_3","예산","_temp","_temp_holder"]
+ANALYSIS_TAB_NAMES=["마스터탭","추이차트","추이차트_상품별","증감액","추이차트(주간)","주간종합","주간종합_2","주간종합_3","예산","_temp","_temp_holder"]
 for sn in ANALYSIS_TAB_NAMES:
     try:
         old=sh.worksheet(sn)
@@ -1257,6 +1257,125 @@ try: ws_t=refresh_ws(sh,ws_t);apply_c2_label_formatting(sh,ws_t)
 except: pass
 time.sleep(30)
 
+# 10.5단계: 추이차트_상품별
+print("\n10.5단계: 추이차트_상품별")
+_product_groups_chart = defaultdict(list)
+for it in sorted_list: p = extract_product(it['adset_name'], it['campaign_name']); _product_groups_chart[p].append(it)
+
+_yesterday = chart_dn[1] if len(chart_dn) >= 2 else (chart_dn[0] if chart_dn else None)
+_product_yesterday_revenue = {}
+for p, items in _product_groups_chart.items():
+    rev = 0
+    if _yesterday:
+        for it in items: rev += it['data']['dates'].get(_yesterday, {}).get('revenue', 0)
+    _product_yesterday_revenue[p] = rev
+
+_sorted_products_chart = sorted(_product_groups_chart.keys(), key=lambda p: _product_yesterday_revenue.get(p, 0), reverse=True)
+_second_recent = _yesterday
+for p in _sorted_products_chart:
+    _product_groups_chart[p].sort(key=lambda it: it['data']['dates'].get(_second_recent, {}).get('spend', 0) if _second_recent else 0, reverse=True)
+hdr_tp = ['캠페인 이름', '광고 세트 이름', '광고 세트 ID', '7일 평균'] + dhw
+
+rows_tp = []
+# 상단: 상품별 종합 성과 요약
+_summary_header_idx = len(rows_tp)
+rows_tp.append(["📊 상품별 종합 성과"] + [""] * (len(hdr_tp) - 1))
+for p in _sorted_products_chart:
+    items = _product_groups_chart[p]
+    psr = [f"{p}", f"({len(items)}개 세트)", ""]; _tp, _tr, _ts = 0, 0, 0; _tcs, _tcc = 0, 0; _tvs, _tvc = 0, 0
+    for d in chart_sd:
+        for it in items:
+            if d in it['data']['dates']:
+                _tp += it['data']['dates'][d]['profit']; _tr += it['data']['dates'][d]['revenue']; _ts += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: _tcs += cv; _tcc += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: _tvs += vv; _tvc += 1
+    psr.append(cell_text(_tp, _tr, _ts, (_tcs/_tcc) if _tcc > 0 else 0, (_tvs/_tvc) if _tvc > 0 else 0))
+    for d in chart_dn:
+        dp, dr, ds_v = 0, 0, 0; dcs, dcc = 0, 0; dvs, dvc = 0, 0
+        for it in items:
+            if d in it['data']['dates']:
+                dp += it['data']['dates'][d]['profit']; dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: dcs += cv; dcc += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: dvs += vv; dvc += 1
+        psr.append(cell_text(dp, dr, ds_v, (dcs/dcc) if dcc > 0 else 0, (dvs/dvc) if dvc > 0 else 0))
+    rows_tp.append(psr)
+_summary_end_idx = len(rows_tp)
+rows_tp.append([""] * len(hdr_tp))
+
+# 하단: 상품별 세트 상세
+_product_header_indices = []
+for p_idx, p in enumerate(_sorted_products_chart):
+    items = _product_groups_chart[p]; p_yd_rev = _product_yesterday_revenue.get(p, 0)
+    _product_header_indices.append(len(rows_tp))
+    rows_tp.append([f"📦 {p}  |  전날 매출 {money(p_yd_rev)}  |  {len(items)}개 세트"] + [""] * (len(hdr_tp) - 1))
+    psr = [f"{p} 종합", "", ""]; _tp, _tr, _ts = 0, 0, 0; _tcs, _tcc = 0, 0; _tvs, _tvc = 0, 0
+    for d in chart_sd:
+        for it in items:
+            if d in it['data']['dates']:
+                _tp += it['data']['dates'][d]['profit']; _tr += it['data']['dates'][d]['revenue']; _ts += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: _tcs += cv; _tcc += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: _tvs += vv; _tvc += 1
+    psr.append(cell_text(_tp, _tr, _ts, (_tcs/_tcc) if _tcc > 0 else 0, (_tvs/_tvc) if _tvc > 0 else 0))
+    for d in chart_dn:
+        dp, dr, ds_v = 0, 0, 0; dcs, dcc = 0, 0; dvs, dvc = 0, 0
+        for it in items:
+            if d in it['data']['dates']:
+                dp += it['data']['dates'][d]['profit']; dr += it['data']['dates'][d]['revenue']; ds_v += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: dcs += cv; dcc += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: dvs += vv; dvc += 1
+        psr.append(cell_text(dp, dr, ds_v, (dcs/dcc) if dcc > 0 else 0, (dvs/dvc) if dvc > 0 else 0))
+    rows_tp.append(psr)
+    for it in items:
+        r = [it['campaign_name'], it['adset_name'], it['adset_id']]; _tp2, _tr2, _ts2 = 0, 0, 0; _tcs2, _tcc2 = 0, 0; _tvs2, _tvc2 = 0, 0
+        for d in chart_sd:
+            if d in it['data']['dates']:
+                _tp2 += it['data']['dates'][d]['profit']; _tr2 += it['data']['dates'][d]['revenue']; _ts2 += it['data']['dates'][d]['spend']
+                cv = it['data']['dates'][d].get('cpm', 0)
+                if cv > 0: _tcs2 += cv; _tcc2 += 1
+                vv = it['data']['dates'][d].get('cvr', 0)
+                if vv > 0: _tvs2 += vv; _tvc2 += 1
+        r.append(cell_text(_tp2, _tr2, _ts2, (_tcs2/_tcc2) if _tcc2 > 0 else 0, (_tvs2/_tvc2) if _tvc2 > 0 else 0))
+        for d in chart_dn:
+            if d in it['data']['dates']:
+                dt = it['data']['dates'][d]; r.append(cell_text(dt['profit'], dt['revenue'], dt['spend'], dt.get('cpm', 0), dt.get('cvr', 0)))
+            else: r.append('')
+        rows_tp.append(r)
+    rows_tp.append([""] * len(hdr_tp))
+
+ws_tp = safe_add_worksheet(sh, "추이차트_상품별", rows=len(rows_tp) + 100, cols=len(chart_dn) + 10); time.sleep(3)
+move_to_front(sh, ws_tp)
+with_retry(ws_tp.update, values=[hdr_tp] + rows_tp, range_name="A1", value_input_option="USER_ENTERED")
+print(f"✅ 추이차트_상품별 ({len(_sorted_products_chart)}개 상품)"); time.sleep(3)
+ws_tp = refresh_ws(sh, ws_tp)
+apply_trend_chart_formatting(sh, ws_tp, hdr_tp, len(rows_tp), sunday_col_indices=sci)
+try: ws_tp = refresh_ws(sh, ws_tp); apply_c2_label_formatting(sh, ws_tp)
+except: pass
+# 상품 헤더 포맷
+try:
+    tp_fmt_reqs = []; sid_tp = ws_tp.id
+    PRODUCT_CHART_BG = [{"red":0.22,"green":0.42,"blue":0.65},{"red":0.33,"green":0.57,"blue":0.33},{"red":0.53,"green":0.30,"blue":0.58},{"red":0.68,"green":0.42,"blue":0.18},{"red":0.58,"green":0.22,"blue":0.22},{"red":0.20,"green":0.52,"blue":0.52},{"red":0.48,"green":0.48,"blue":0.25},{"red":0.38,"green":0.25,"blue":0.48}]
+    tp_fmt_reqs.append(create_format_request(sid_tp, _summary_header_idx + 1, _summary_header_idx + 2, 0, len(hdr_tp),
+        get_cell_format({"red": 0.15, "green": 0.15, "blue": 0.3}, COLORS["white"], bold=True)))
+    tp_fmt_reqs.append({"mergeCells": {"range": {"sheetId": sid_tp, "startRowIndex": _summary_header_idx + 1, "endRowIndex": _summary_header_idx + 2,
+        "startColumnIndex": 0, "endColumnIndex": min(len(hdr_tp), 26)}, "mergeType": "MERGE_ALL"}})
+    tp_fmt_reqs.append(create_format_request(sid_tp, _summary_header_idx + 2, _summary_end_idx + 1, 0, 1, get_cell_format(bold=True, ha="LEFT")))
+    for p_idx, row_idx in enumerate(_product_header_indices):
+        sheet_row = row_idx + 1; color = PRODUCT_CHART_BG[p_idx % len(PRODUCT_CHART_BG)]
+        tp_fmt_reqs.append(create_format_request(sid_tp, sheet_row, sheet_row + 1, 0, len(hdr_tp), get_cell_format(color, COLORS["white"], bold=True)))
+        tp_fmt_reqs.append({"mergeCells": {"range": {"sheetId": sid_tp, "startRowIndex": sheet_row, "endRowIndex": sheet_row + 1, "startColumnIndex": 0, "endColumnIndex": min(len(hdr_tp), 26)}, "mergeType": "MERGE_ALL"}})
+    if tp_fmt_reqs:
+        for i in range(0, len(tp_fmt_reqs), 50): with_retry(sh.batch_update, body={"requests": tp_fmt_reqs[i:i+50]}); time.sleep(1)
+except: pass
+time.sleep(30)
+
 # 추이차트(주간)
 print("\n11단계: 추이차트(주간)")
 ws_tw=safe_add_worksheet(sh,"추이차트(주간)",rows=1000,cols=len(chart_wk)+10);time.sleep(3);move_to_front(sh,ws_tw)
@@ -1505,5 +1624,6 @@ print("\n"+"="*60);print("✅ 완료!");print("="*60)
 print(f"🔄 갱신: 최근 {REFRESH_DAYS}일 | 기존: {len(existing_refresh_tabs)}개 | 새: {len(new_refresh_dates)}개")
 print(f"📊 전체 {len(date_names)}일 | 마스터: {len(master_raw_data)}행 | 주간: {len(week_keys)}주")
 print(f"💲 ★v30: Meta=USD 그대로, Mixpanel=현지통화({','.join(sorted(debug_currency_count.keys()))})→USD 환산")
-print(f"📦 제품: {len(products)}개 | 탭 순서: [매출] → [분석] → [날짜] → [기타]")
+print(f"📦 제품: {len(products)}개 | 추이차트_상품별: {len(_sorted_products_chart)}개 상품")
+print(f"📋 탭 순서: [매출] → [분석] → [날짜] → [기타]")
 print(f"\n📊 {SPREADSHEET_URL}")
