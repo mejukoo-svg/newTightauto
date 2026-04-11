@@ -249,7 +249,13 @@ print()
 PRODUCT_KEYWORDS = []
 
 SKIP_WORDS = {
+    # 나라/지역 코드 + 풀네임 (상품명 추출 시 스킵)
     "tw", "kr", "hk", "my", "sg", "id", "jp", "th", "vn", "ph", "asia",
+    "taiwan", "japan", "hongkong", "korea", "singapore", "malaysia",
+    "thailand", "vietnam", "philippines", "indonesia", "global", "domestic",
+    "대만", "일본", "홍콩", "한국", "국내", "글로벌", "타이완", "해외",
+    "台灣", "台湾", "日本", "香港", "韓國",
+    # 타겟팅/캠페인 구조
     "broad", "interest", "lookalike", "retarget", "retargeting", "custom", "asc", "cbo", "abo",
     "dpa", "daba", "advantage", "campaign", "adset", "ad", "ads", "set",
     "purchase", "conversion", "traffic", "reach", "awareness", "engagement",
