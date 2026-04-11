@@ -1,17 +1,12 @@
 # -*- coding: utf-8 -*-
-# v3-ad 통합 코드 (★ v27 - 동적 제품명 추출: 캠페인 이름 기반, 하드코딩 제거):
+# v3-ad 통합 코드 (★ v28 - 모든 매출 통화를 Meta 기본 통화 USD로 통일):
+#   - ★ v28: detect_currency()가 항상 "USD" 반환 → TWD/JPY/HKD 판별 로직 제거
+#   - ★ v28: get_revenue_fx()가 항상 USD→KRW 환율 사용
+#   - ★ v28: TWD/JPY/HKD 환율 조회 제거 → USD 환율만 조회
+#   - ★ v28: 나라별 집계 제거 (통화 구분 없으므로 의미 없음)
 #   - ★ v27: extract_product()가 캠페인 이름(A컬럼)에서 동적으로 제품명 추출
 #   - ★ v27: PRODUCT_KEYWORDS 하드코딩 의존 제거 → SKIP_WORDS 외 첫 의미 있는 단어 = 제품명
 #   - ★ v27: 날짜탭 요약표, 주간종합, 예산탭 등 모든 곳에서 동적 제품 목록 사용
-#   - ★ v26: _detect_currency_from_name 강화 — 서브스트링 + 한글("일본","대만","홍콩","국내") 매칭
-#   - ★ v26: 캠페인 이름에서도 나라 판별 (세트 이름에 없으면 캠페인 이름 검사)
-#   - ★ v25: detect_currency()에 campaign_name 파라미터 추가 → 세트명에 없으면 캠페인명도 검사
-#   - ★ v25: adset_id_to_campaign 맵 추가 → mp_value_map_krw 변환 시 campaign_name 참조
-#   - ★ v25: generate_date_tab_summary에 campaign_name 전달 → 나라별 집계 정확도 향상
-#   - ★ v24: 분석/매출탭이 맨 왼쪽, 날짜탭은 최신→과거 순, 기타가 맨 오른쪽
-#   - ★ v24: 분석탭 생성 즉시 index=0 으로 이동
-#   - ★ v23: 날짜탭 하단 요약표에 나라별 ROAS, 순이익, 매출 테이블 추가
-#   - ★ v22: 광고 세트 이름 기준 통화 판별 (TWD/JPY/HKD/KRW) + 통화별 환율 적용
 #   - Meta/Mixpanel: 최근 7일치만 새로 호출
 #   - 광고 세트 이름/광고 세트 ID 기준으로 집계
 #   - Mixpanel: utm_term = adset_id 기준으로 매핑
@@ -24,7 +19,7 @@
 #   - ★ GitHub Actions 호환: 서비스 계정 인증
 
 print("="*60)
-print("🚀 v3-ad v27 (동적 제품명 추출: 캠페인 이름 기반, 하드코딩 제거)")
+print("🚀 v3-ad v28 (모든 매출 통화 → Meta 기본 통화 USD 통일)")
 print("="*60)
 
 # =========================================================
@@ -67,18 +62,14 @@ from gspread.exceptions import APIError
 from decimal import Decimal
 
 # =========================================================
-# ★ v22: USD/TWD/JPY/HKD → KRW 일별 환율 조회
+# ★ v28: USD → KRW 일별 환율 조회만 사용
 # =========================================================
 FALLBACK_USD_KRW = 1450
-FALLBACK_TWD_KRW = 45
-FALLBACK_JPY_KRW = 10
-FALLBACK_HKD_KRW = 185
 
 def fetch_daily_exchange_rates(start_date, end_date, currency="USD"):
     rates = {}
     pair = f"{currency}KRW=X"
-    fallback_map = {"USD": FALLBACK_USD_KRW, "TWD": FALLBACK_TWD_KRW, "JPY": FALLBACK_JPY_KRW, "HKD": FALLBACK_HKD_KRW}
-    fallback = fallback_map.get(currency, FALLBACK_USD_KRW)
+    fallback = FALLBACK_USD_KRW
     try:
         import yfinance as yf
     except ImportError:
@@ -126,67 +117,17 @@ def get_rate_for_date(rates, dk, fallback=FALLBACK_USD_KRW):
     return fallback
 
 # =========================================================
-# ★ v26: 통화 판별 — 캠페인/세트 이름 기반 (서브스트링+한글)
+# ★ v28: 통화 판별 — 항상 USD 반환 (Meta 기본 통화)
 # =========================================================
-CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국"}
-
-def _detect_currency_from_name(name):
-    """★ v26: 단일 이름에서 통화 감지 — 파트매칭 + 서브스트링 + 한글."""
-    if not name:
-        return None
-    name_str = str(name)
-    name_lower = name_str.lower()
-    parts = re.split(r'[-_\s]', name_lower)
-    # 1) 정확한 파트 매칭
-    if "jp" in parts or "japan" in parts:
-        return "JPY"
-    if "hk" in parts or "hongkong" in parts:
-        return "HKD"
-    if "kr" in parts or "korea" in parts:
-        return "KRW"
-    if "tw" in parts or "taiwan" in parts:
-        return "TWD"
-    # 2) 서브스트링 매칭 (구분자 없이 붙어있는 경우: "솔로JP", "JP솔로" 등)
-    if "japan" in name_lower:
-        return "JPY"
-    if re.search(r'(?:^|[^a-z])jp(?:[^a-z]|$)', name_lower):
-        return "JPY"
-    if "hongkong" in name_lower or "hong kong" in name_lower:
-        return "HKD"
-    if re.search(r'(?:^|[^a-z])hk(?:[^a-z]|$)', name_lower):
-        return "HKD"
-    # 3) 한글 매칭
-    if "일본" in name_str:
-        return "JPY"
-    if "홍콩" in name_str:
-        return "HKD"
-    if "대만" in name_str or "타이완" in name_str or "台灣" in name_str or "台湾" in name_str:
-        return "TWD"
-    if "한국" in name_str or "국내" in name_str:
-        return "KRW"
-    return None
+CURRENCY_TO_COUNTRY = {"USD": "글로벌"}
 
 def detect_currency(adset_name, campaign_name=None):
-    """★ v26: 세트명 → 캠페인명 순서로 통화 추론. 둘 다 없으면 TWD."""
-    result = _detect_currency_from_name(adset_name)
-    if result:
-        return result
-    if campaign_name:
-        result = _detect_currency_from_name(campaign_name)
-        if result:
-            return result
-    return "TWD"
+    """★ v28: 모든 매출을 Meta 기본 통화 USD로 처리."""
+    return "USD"
 
 def get_revenue_fx(currency, dk):
-    """통화별 KRW 환율 반환."""
-    if currency == "KRW":
-        return 1.0
-    elif currency == "JPY":
-        return get_rate_for_date(jpy_krw_rates, dk, fallback=FALLBACK_JPY_KRW)
-    elif currency == "HKD":
-        return get_rate_for_date(hkd_krw_rates, dk, fallback=FALLBACK_HKD_KRW)
-    else:
-        return get_rate_for_date(twd_krw_rates, dk, fallback=FALLBACK_TWD_KRW)
+    """★ v28: 항상 USD→KRW 환율 반환."""
+    return get_rate_for_date(usd_krw_rates, dk, fallback=FALLBACK_USD_KRW)
 
 
 # =========================================================
@@ -266,13 +207,12 @@ print(f"📅 현재 날짜: {TODAY.strftime('%Y-%m-%d')}")
 print(f"🔄 API 갱신 범위: {DATA_REFRESH_START.strftime('%Y-%m-%d')} ~ 오늘 (최근 {REFRESH_DAYS}일)")
 print(f"📊 분석탭: 스프레드시트의 모든 날짜탭 데이터 사용")
 print(f"📡 Mixpanel 이벤트: {MIXPANEL_EVENT_NAMES} (OR 수집)")
-print(f"💱 환율 지원: USD, TWD, JPY, HKD → KRW (★v26: 캠페인/세트 이름 기반 통화 판별)")
+print(f"💱 환율: ★v28 모든 매출 USD → KRW 단일 환율 적용")
 print(f"📦 제품명: ★v27 동적 추출 (캠페인 이름 A컬럼 기반, 하드코딩 없음)")
 print()
 
 # ★ v27: PRODUCT_KEYWORDS 하드코딩 제거 — SKIP_WORDS만 사용하여 동적 추출
-# (이전: PRODUCT_KEYWORDS = ["starsun", "money", "solo"] 에 의존)
-PRODUCT_KEYWORDS = []  # ★ v27: 빈 리스트 — 더 이상 하드코딩에 의존하지 않음
+PRODUCT_KEYWORDS = []
 
 SKIP_WORDS = {
     "tw", "kr", "hk", "my", "sg", "id", "jp", "th", "vn", "ph", "asia",
@@ -365,23 +305,14 @@ def clean_id(val):
 
 # =========================================================
 # ★ v27: extract_product — 캠페인 이름(A컬럼)에서 동적으로 제품명 추출
-#   - campaign_name 우선, adset_name 보조
-#   - SKIP_WORDS에 없는 첫 의미 있는 단어를 제품명으로 사용
-#   - 더 이상 PRODUCT_KEYWORDS 하드코딩에 의존하지 않음
 # =========================================================
 def extract_product(adset_name, campaign_name=None):
-    """★ v27: 캠페인 이름(우선) → 광고 세트 이름(보조)에서 제품명 동적 추출.
-
-    이름을 '_', '-', 공백 등으로 분할 → SKIP_WORDS 제외 →
-    길이 2 이상 + 숫자만은 제외 → 첫 번째 후보를 제품명으로 반환.
-    """
+    """★ v27: 캠페인 이름(우선) → 광고 세트 이름(보조)에서 제품명 동적 추출."""
     for name in [campaign_name, adset_name]:
         if not name:
             continue
         name_lower = str(name).lower().strip()
-        # 구분자로 분할
         parts = re.split(r'[-_\s]+', name_lower)
-        # SKIP_WORDS 제외, 길이 2 이상, 순수 숫자 제외
         candidates = [
             p for p in parts
             if p
@@ -466,9 +397,6 @@ def clear_summary_conditional_formats(sh, ws, summary_start_row_0indexed):
     except Exception as e: print(f"    ⚠️ 조건부 서식 삭제 오류 (무시): {e}")
 
 
-# =========================================================
-# ★ v24: move_to_front — 워크시트를 index=0 (맨 왼쪽)으로 이동
-# =========================================================
 def move_to_front(sh, ws, target_index=0):
     """워크시트를 지정된 인덱스(기본 0, 맨 왼쪽)로 이동."""
     try:
@@ -483,13 +411,8 @@ def move_to_front(sh, ws, target_index=0):
         print(f"  ⚠️ 탭 이동 오류: {e}")
 
 
-# =========================================================
-# ★ v24: reorder_tabs — 분석/매출탭 맨 왼쪽 + 날짜탭 최신→과거 + 기타 맨 오른쪽
-# =========================================================
 def reorder_tabs(sh):
-    """
-    탭 순서: [매출/주간매출] + [분석탭] + [날짜탭 최신→과거] + [기타]
-    """
+    """탭 순서: [매출/주간매출] + [분석탭] + [날짜탭 최신→과거] + [기타]"""
     try:
         all_ws = sh.worksheets()
         leftmost_tabs, analysis_tabs, date_tabs, other_tabs = [], [], [], []
@@ -890,7 +813,6 @@ def read_all_date_tabs(sh, analysis_tab_names, mp_value_map=None, mp_count_map=N
                 if asid:
                     if not all_ad_sets[asid]['adset_id']: all_ad_sets[asid]={'campaign_name':cn,'adset_name':asn,'adset_id':asid,'dates':{}}
                     all_ad_sets[asid]['dates'][dk]={'profit':profit,'revenue':revenue,'spend':spend,'cpm':cpm,'cvr':cvr,'unique_clicks':unique_clicks,'mpc':mpc}
-                # ★ v27: campaign_name(cn) 전달하여 동적 제품명 추출
                 p=extract_product(asn, campaign_name=cn)
                 all_budget_by_date[dk][p]['spend']+=spend; all_budget_by_date[dk][p]['revenue']+=revenue
                 mrd=[dk]+list(norm_row); mrd[14+1]=int(mpc) if mpc>0 else ""; mrd[15+1]=round(revenue) if revenue>0 else ""
@@ -916,14 +838,12 @@ def diagnose_chart_coverage(sh, date_names, ad_sets, analysis_tabs_set):
 
 
 # =========================================================
-# ★ v27: generate_date_tab_summary — 동적 제품명 추출, 하드코딩 제거
+# ★ v28: generate_date_tab_summary — 나라별 집계 제거 (통화 구분 없음)
 # =========================================================
 def generate_date_tab_summary(rows, structure="new"):
     total_spend=0.0;total_meta_purchase=0.0;total_mp_purchase=0.0;total_revenue=0.0;total_profit=0.0;total_unique_clicks=0.0
     spend_by_account={"본계정":0.0,"부계정":0.0,"3rd계정":0.0}
     prod_spend=defaultdict(float);prod_revenue=defaultdict(float);prod_profit=defaultdict(float)
-    # ★ v23/v25: 나라별 집계
-    country_spend=defaultdict(float);country_revenue=defaultdict(float);country_profit=defaultdict(float)
 
     for row in rows:
         nr=normalize_row_to_new(row,structure);cn=str(nr[0]);asn=str(nr[1]);adset_id=str(nr[2]);spend=_to_num(nr[3]);meta_p=_to_num(nr[13]);mp_p=_to_num(nr[14]);rev=_to_num(nr[15]);prof=_to_num(nr[16]);uc=_to_num(nr[9])
@@ -932,31 +852,18 @@ def generate_date_tab_summary(rows, structure="new"):
         if adset_id.startswith("12023"): spend_by_account["본계정"]+=spend
         elif adset_id.startswith("12024"): spend_by_account["부계정"]+=spend
         elif adset_id.startswith("6"): spend_by_account["3rd계정"]+=spend
-        # ★ v27: campaign_name(cn) 전달하여 동적 제품명 추출
         p = extract_product(asn, campaign_name=cn)
         prod_spend[p]+=spend;prod_revenue[p]+=rev;prod_profit[p]+=prof
-        # ★ v26: 캠페인 이름 + 광고 세트 이름 + adset_id로 나라 판별
-        currency = detect_currency(asn, campaign_name=cn)
-        country = CURRENCY_TO_COUNTRY.get(currency, "기타")
-        country_spend[country]+=spend;country_revenue[country]+=rev;country_profit[country]+=prof
 
     total_roas=(total_revenue/total_spend*100) if total_spend>0 else 0
     total_cvr=(total_mp_purchase/total_unique_clicks*100) if total_unique_clicks>0 else 0
 
-    # ★ v27: 하드코딩 필터 제거 — 지출 또는 매출이 있는 모든 제품 표시
     sp = sorted([p for p in prod_spend if (prod_spend[p] > 0 or prod_revenue[p] > 0)],
                 key=lambda p: prod_spend[p], reverse=True)
     num_products = len(sp); NC = 25
     sum_col_idx = 9 + num_products
 
-    # ★ v23: 나라 목록 (지출 기준 내림차순)
-    countries = sorted([c for c in country_spend if country_spend[c] > 0 or country_revenue[c] > 0],
-                       key=lambda c: country_spend[c], reverse=True)
-    num_countries = len(countries)
-    country_sum_col = 9 + num_countries
-
-    # ★ v27: NC를 동적으로 확장 (제품 수에 맞게)
-    NC = max(NC, sum_col_idx + 2, country_sum_col + 2)
+    NC = max(NC, sum_col_idx + 2)
 
     summary_data = []; summary_data.append([""]*NC); summary_data.append([""]*NC); summary_data.append([""]*NC)
     r_title=[""]*NC; r_title[14]="전체"; summary_data.append(r_title)
@@ -968,7 +875,7 @@ def generate_date_tab_summary(rows, structure="new"):
     r_val[17]=round(total_revenue);r_val[18]=round(total_profit);r_val[19]=round(total_roas,1);r_val[20]=total_cvr/100 if total_cvr else 0
     summary_data.append(r_val)
 
-    # --- 제품별 테이블 (★ v27: 모든 제품 동적 표시) ---
+    # --- 제품별 테이블 ---
     if num_products > 0:
         total_prod_spend=sum(prod_spend[p] for p in sp); total_prod_revenue=sum(prod_revenue[p] for p in sp); total_prod_profit=sum(prod_profit[p] for p in sp)
         tables=[("제품별 ROAS","roas"),("제품별 순이익","profit"),("제품별 매출","revenue"),("제품별 순이익율","profit_margin"),("제품별 예산","spend"),("제품별 예산 비중","spend_ratio")]
@@ -994,34 +901,14 @@ def generate_date_tab_summary(rows, structure="new"):
             elif data_type=="spend_ratio": r_pv[sum_col_idx]=""
             summary_data.append(r_pv)
 
-    # ★ v23/v25: --- 나라별 테이블 ---
-    if num_countries > 0:
-        total_c_spend=sum(country_spend[c] for c in countries)
-        total_c_revenue=sum(country_revenue[c] for c in countries)
-        total_c_profit=sum(country_profit[c] for c in countries)
-        country_tables=[("🌏 나라별 ROAS","roas"),("🌏 나라별 순이익","profit"),("🌏 나라별 매출","revenue")]
-        for table_title, data_type in country_tables:
-            summary_data.append([""]*NC)
-            r_tt=[""]*NC; r_tt[12]=table_title; summary_data.append(r_tt)
-            r_ch=[""]*NC
-            for i,c in enumerate(countries): r_ch[9+i]=c
-            r_ch[country_sum_col]="합"; summary_data.append(r_ch)
-            r_cv=[""]*NC
-            for i,c in enumerate(countries):
-                cs=country_spend[c];cr_v=country_revenue[c];cp=country_profit[c]
-                if data_type=="roas": r_cv[9+i]=cr_v/cs if cs>0 else 0
-                elif data_type=="profit": r_cv[9+i]=round(cp)
-                elif data_type=="revenue": r_cv[9+i]=round(cr_v)
-            if data_type=="roas": r_cv[country_sum_col]=total_c_revenue/total_c_spend if total_c_spend>0 else 0
-            elif data_type=="profit": r_cv[country_sum_col]=round(total_c_profit)
-            elif data_type=="revenue": r_cv[country_sum_col]=round(total_c_revenue)
-            summary_data.append(r_cv)
+    # ★ v28: 나라별 테이블 제거 (통화 구분 없으므로)
+    countries = []
 
     return summary_data, num_products, countries
 
 
 # =========================================================
-# ★ v23: format_date_tab_summary — 나라별 테이블 서식 추가
+# ★ v28: format_date_tab_summary — 나라별 서식 제거
 # =========================================================
 def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, num_products=0, countries=None):
     sid=ws.id; base=summary_start_sheet_row-1
@@ -1029,7 +916,6 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
     C_LGREEN={"red":0.851,"green":0.918,"blue":0.827}; C_GRAY={"red":0.69,"green":0.7,"blue":0.698}
     C_DGRAY={"red":0.6,"green":0.6,"blue":0.6}; C_BLACK={"red":0,"green":0,"blue":0}
     C_WHITE={"red":1,"green":1,"blue":1}; C_LYELLOW={"red":1,"green":1,"blue":0.8}
-    C_TEAL={"red":0.0,"green":0.5,"blue":0.5}
     fmt_requests=[]; r=base+3
     fmt_requests.append(create_format_request(sid,r,r+1,14,21,{"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
     fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":r,"endRowIndex":r+1,"startColumnIndex":14,"endColumnIndex":21},"mergeType":"MERGE_ALL"}})
@@ -1061,27 +947,7 @@ def format_date_tab_summary(sh, ws, summary_start_sheet_row, summary_row_count, 
                 fmt_requests.append(create_number_format_request(sid,t_start+3,t_start+4,sum_col,sum_col+1,"NUMBER","[$₩-412]#,##0"))
             fmt_requests.append(create_border_request(sid,t_start+2,t_start+4,9,prod_end_col))
 
-    # ★ v23: --- 나라별 서식 ---
-    if countries and len(countries) > 0:
-        num_c = len(countries)
-        c_sum_col = 9 + num_c; c_end_col = 9 + num_c + 1
-        if num_products > 0:
-            c_offset = base + 6 + num_products * 0 + 6 * 4
-        else:
-            c_offset = base + 6
-
-        country_table_formats = [("ROAS", "0.00%"), ("순이익", "[$₩-412]#,##0"), ("매출", "#,##0")]
-        country_hdr_fmt = {**hdr_fmt_base, "backgroundColor": C_TEAL}
-        for t_idx, (tname, nfmt) in enumerate(country_table_formats):
-            t_start = c_offset + t_idx * 4
-            fmt_requests.append(create_format_request(sid, t_start+1, t_start+2, 12, c_end_col, {"horizontalAlignment":"CENTER","textFormat":{"bold":True}}))
-            fmt_requests.append({"mergeCells":{"range":{"sheetId":sid,"startRowIndex":t_start+1,"endRowIndex":t_start+2,"startColumnIndex":12,"endColumnIndex":c_end_col},"mergeType":"MERGE_ALL"}})
-            fmt_requests.append(create_format_request(sid, t_start+2, t_start+3, 9, c_end_col, country_hdr_fmt))
-            fmt_requests.append(create_number_format_request(sid, t_start+3, t_start+4, 9, c_end_col, "NUMBER", nfmt))
-            if t_idx in [1, 2]:
-                fmt_requests.append(create_format_request(sid, t_start+3, t_start+4, c_sum_col, c_sum_col+1, {"backgroundColor":C_LYELLOW,"textFormat":{"bold":True}}))
-                fmt_requests.append(create_number_format_request(sid, t_start+3, t_start+4, c_sum_col, c_sum_col+1, "NUMBER", "[$₩-412]#,##0"))
-            fmt_requests.append(create_border_request(sid, t_start+2, t_start+4, 9, c_end_col))
+    # ★ v28: 나라별 서식 제거
 
     return fmt_requests
 
@@ -1165,28 +1031,24 @@ for ws_ex in existing_sheets:
     if tab_dk in refresh_date_keys: existing_refresh_tabs[tab_dk]=ws_ex; new_refresh_dates.discard(tab_dk)
 print(f"  📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새로 생성: {len(new_refresh_dates)}개\n")
 
-# 4.5단계: 환율 (USD/TWD/JPY/HKD)
-print("="*60); print("4.5단계: USD/TWD/JPY/HKD → KRW 일별 환율 조회"); print("="*60)
+# ★ v28: 4.5단계: 환율 — USD → KRW 만 조회
+print("="*60); print("4.5단계: USD → KRW 일별 환율 조회 (★v28: USD만)"); print("="*60)
 rate_range_start = DATA_REFRESH_START - timedelta(days=7)
 usd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="USD")
-twd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="TWD")
-jpy_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="JPY")
-hkd_krw_rates = fetch_daily_exchange_rates(rate_range_start, TODAY, currency="HKD")
-for curr, rates, fb in [("USD",usd_krw_rates,FALLBACK_USD_KRW),("TWD",twd_krw_rates,FALLBACK_TWD_KRW),("JPY",jpy_krw_rates,FALLBACK_JPY_KRW),("HKD",hkd_krw_rates,FALLBACK_HKD_KRW)]:
-    if rates:
-        sample = list(rates.items())[-2:]
-        for dk, rate in sample: print(f"  {curr} {dk}: ₩{rate:,.2f}")
-    else: print(f"  ⚠️ {curr} 환율 조회 실패 → 폴백 ₩{fb:,}")
+if usd_krw_rates:
+    sample = list(usd_krw_rates.items())[-2:]
+    for dk, rate in sample: print(f"  USD {dk}: ₩{rate:,.2f}")
+else:
+    print(f"  ⚠️ USD 환율 조회 실패 → 폴백 ₩{FALLBACK_USD_KRW:,}")
 print()
 
 # =========================================================
-# ★ v27: 5단계 - Meta + Mixpanel 병합 (동적 제품명 + 통화 판별)
+# ★ v28: 5단계 - Meta + Mixpanel 병합 (모든 매출 USD 기준)
 # =========================================================
-print("="*60); print("5단계: Meta + Mixpanel 병합 (★v27: 동적 제품명 추출)"); print("="*60)
+print("="*60); print("5단계: Meta + Mixpanel 병합 (★v28: 모든 매출 USD→KRW)"); print("="*60)
 date_tab_rows=defaultdict(list);date_mp_by_adsetid=defaultdict(dict);new_date_names=[];product_count=defaultdict(int)
 debug_total_rows=0;debug_matched_rows=0;debug_matched_revenue=0
 debug_기타_adset_names = set()
-debug_currency_revenue = defaultdict(float); debug_currency_count = defaultdict(int)
 adset_id_to_name = {}
 adset_id_to_campaign = {}
 
@@ -1205,10 +1067,9 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
         cpm=mr['cpm']*fx_usd;frequency=mr['frequency'];cost_per_result=mr['cost_per_result']*fx_usd;cost_per_click=mr['cost_per_unique_click']*fx_usd;unique_ctr=mr['unique_ctr']
         mpc=mp_count_map.get((dk,asid),0);mpv=mp_value_map.get((dk,asid),0.0)
         if mpc>0 or mpv>0: debug_matched_rows+=1;debug_matched_revenue+=mpv
-        currency = detect_currency(mr['adset_name'], campaign_name=mr['campaign_name'])
-        fx_revenue = get_revenue_fx(currency, dk)
+        # ★ v28: 모든 매출을 USD→KRW로 환산
+        fx_revenue = get_revenue_fx("USD", dk)
         rv = float(mpv) * fx_revenue
-        if mpv > 0: debug_currency_revenue[currency] += rv; debug_currency_count[currency] += 1
         date_mp_by_adsetid[dk][asid]={'mpc':mpc,'mpv':rv}
         pf=rv-sp;roas_c=(rv/sp*100) if sp>0 else 0;cvr_c=(mpc/uc*100) if uc>0 and mpc>0 else 0
         cn=mr['campaign_name'];asn=mr['adset_name']
@@ -1217,7 +1078,6 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
         tab_row=[cn,asn,asid,sp,cost_per_result,0,round(cpm,0),reach,impr,uc,round(unique_ctr,2),round(cost_per_click,0),round(frequency,2),results,
             mpc if mpc>0 else "",round(rv) if rv>0 else "",round(pf,0) if sp>0 else "",round(roas_c,1) if sp>0 and rv>0 else "",round(cvr_c,2) if uc>0 and mpc>0 else "",budget_val,"","",""]
         date_tab_rows[dk].append(tab_row)
-        # ★ v27: campaign_name 전달하여 동적 제품명 추출
         p=extract_product(asn, campaign_name=cn)
         product_count[p]+=1
         if p == "기타": debug_기타_adset_names.add(f"[C]{cn} / [A]{asn}")
@@ -1225,31 +1085,7 @@ for dk in sorted(meta_date_data.keys(),key=lambda x:meta_date_data[x][0]['date_o
 print(f"✅ 날짜탭 구성 완료: {len(new_date_names)}개")
 print(f"📦 제품별 (★v27 동적 추출): {dict(product_count)}")
 if debug_total_rows>0: print(f"🔍 매칭: {debug_matched_rows}/{debug_total_rows} ({debug_matched_rows/debug_total_rows*100:.1f}%)")
-if debug_currency_revenue:
-    print(f"\n💱 통화별 KRW 환산 매출:")
-    for curr in sorted(debug_currency_revenue.keys()): print(f"  {curr} ({CURRENCY_TO_COUNTRY.get(curr,'?')}): ₩{int(debug_currency_revenue[curr]):,} ({debug_currency_count[curr]}건)")
-# ★ v26: 통화 판별 디버그
-debug_detected_by_campaign = 0
-debug_undetected = 0
-debug_currency_final = defaultdict(int)
-for asid in adset_id_to_name:
-    asn = adset_id_to_name[asid]
-    cn = adset_id_to_campaign.get(asid, '')
-    from_adset = _detect_currency_from_name(asn)
-    from_campaign = _detect_currency_from_name(cn) if not from_adset else None
-    if from_campaign:
-        debug_detected_by_campaign += 1
-    elif not from_adset and not from_campaign:
-        debug_undetected += 1
-    final_currency = detect_currency(asn, campaign_name=cn)
-    debug_currency_final[final_currency] += 1
-print(f"\n  ★ v26 통화 판별 결과:")
-for curr in sorted(debug_currency_final.keys()):
-    print(f"    {curr} ({CURRENCY_TO_COUNTRY.get(curr,'?')}): {debug_currency_final[curr]}개 세트")
-if debug_detected_by_campaign > 0:
-    print(f"    → 캠페인 이름으로 감지: {debug_detected_by_campaign}개 (세트명에는 나라 없었음)")
-if debug_undetected > 0:
-    print(f"    ⚠️ 이름에서 나라 미감지 → TWD 기본값: {debug_undetected}개")
+print(f"\n💱 ★v28: 모든 매출 USD→KRW 단일 환율 적용")
 if debug_기타_adset_names:
     print(f"\n  ⚠️ '기타' 제품 (★v27: 이름에서 추출 실패): {len(debug_기타_adset_names)}개")
     for name in sorted(debug_기타_adset_names)[:10]: print(f"     → '{name}'")
@@ -1385,7 +1221,7 @@ for dk in sorted(existing_refresh_tabs.keys()):
             if fmt_reqs:
                 for i in range(0,len(fmt_reqs),50): with_retry(sh.batch_update,body={"requests":fmt_reqs[i:i+50]}); time.sleep(1)
         except Exception as e: print(f"    ⚠️ 요약표 서식 오류: {e}")
-        print(f"    ✅ 요약표 완료 (상품 {num_products}개, 나라 {len(countries)}개)")
+        print(f"    ✅ 요약표 완료 (상품 {num_products}개)")
     except Exception as e: print(f"    ⚠️ {dk} 업데이트 오류: {e}")
 print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 탭 업데이트 완료")
 
@@ -1445,17 +1281,14 @@ for dk in sorted(new_refresh_dates):
     except Exception as e: print(f"  ⚠️ {dk} 생성 오류: {e}")
 print(f"\n✅ 기존 {len(existing_refresh_tabs)}개 업데이트 + 새 {len(new_refresh_dates)}개 생성 완료"); time.sleep(3)
 
-# ★ v24: 7.5단계 — 날짜탭 생성 직후 바로 탭 순서 정리
+# 7.5단계 — 날짜탭 생성 직후 바로 탭 순서 정리
 print("\n"+"="*60); print("7.5단계: 날짜탭 순서 정리 (최신→과거)"); print("="*60)
 reorder_tabs(sh)
 
-# ★ v26: 8.5단계 — mp_value_map_krw 변환 시 campaign_name + adset_id 활용
+# ★ v28: mp_value_map_krw 변환 — 모든 매출 USD→KRW
 mp_value_map_krw = {}
 for (d, ut), v in mp_value_map.items():
-    adset_name = adset_id_to_name.get(ut, '')
-    campaign_name = adset_id_to_campaign.get(ut, '')
-    currency = detect_currency(adset_name, campaign_name=campaign_name)
-    fx = get_revenue_fx(currency, d)
+    fx = get_revenue_fx("USD", d)
     mp_value_map_krw[(d, ut)] = v * fx
 ad_sets, budget_by_date, master_raw_data, date_objects, date_names = read_all_date_tabs(sh, ANALYSIS_TABS_SET, mp_value_map=mp_value_map_krw, mp_count_map=mp_count_map)
 diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET)
@@ -1463,12 +1296,10 @@ diagnose_chart_coverage(sh, date_names, ad_sets, ANALYSIS_TABS_SET)
 print("\n⏳ 8.5→9단계 전환: 60초 대기..."); time.sleep(60)
 master_headers = ["Date"] + DATE_TAB_HEADERS; latest_date = date_names[-1] if date_names else ""
 
-# ★ v27: 동적 제품 목록 — 하드코딩 필터 제거
 all_products_in_budget = set()
 for dk in date_names:
     for p in budget_by_date[dk]:
         if budget_by_date[dk][p]['spend'] > 0 or budget_by_date[dk][p]['revenue'] > 0: all_products_in_budget.add(p)
-# ★ v27: PRODUCT_KEYWORDS 필터 제거 — 모든 감지된 제품 사용
 product_order = sorted(list(all_products_in_budget), key=lambda p: sum(budget_by_date[dk][p]['spend'] for dk in date_names), reverse=True)
 print(f"\n📦 제품 순서 (★v27 동적): {product_order}")
 chart_dn = list(reversed(date_names)); chart_sd = chart_dn[:7]
@@ -1503,7 +1334,7 @@ def _multi_spend_key(item):
 sorted_list.sort(key=_multi_spend_key, reverse=True); chart_wk=list(reversed(week_keys))
 
 # =========================================================
-# ★ v24: 분석탭 생성 — 생성 즉시 맨 왼쪽(index=0)으로 이동
+# 분석탭 생성
 # =========================================================
 
 # 9: 마스터탭
@@ -1693,7 +1524,6 @@ for t in date_names:
     for it in sorted_list:
         if t in it['data']['dates']:
             dt=it['data']['dates'][t];daily_data[t]['spend']+=dt['spend'];daily_data[t]['revenue']+=dt['revenue'];daily_data[t]['profit']+=dt['profit']
-            # ★ v27: campaign_name 전달하여 동적 제품명 추출
             p=extract_product(it['adset_name'], campaign_name=it['campaign_name'])
             daily_product_data[t][p]['spend']+=dt['spend'];daily_product_data[t][p]['revenue']+=dt['revenue'];daily_product_data[t][p]['profit']+=dt['profit']
 wsd={};wps={}
@@ -1709,12 +1539,10 @@ for mk in month_names_list:
         msd[mk]['spend']+=daily_data[dn]['spend'];msd[mk]['revenue']+=daily_data[dn]['revenue'];msd[mk]['profit']+=daily_data[dn]['profit']
         for p in daily_product_data[dn]: mps[mk][p]['spend']+=daily_product_data[dn][p]['spend'];mps[mk][p]['revenue']+=daily_product_data[dn][p]['revenue'];mps[mk][p]['profit']+=daily_product_data[dn][p]['profit']
 
-# ★ v27: 동적 제품 목록 — 하드코딩 필터 제거
 all_found_products = set()
 for dn in date_names:
     for p in daily_product_data[dn]:
         if daily_product_data[dn][p]['spend'] > 0 or daily_product_data[dn][p]['revenue'] > 0: all_found_products.add(p)
-# ★ v27: PRODUCT_KEYWORDS 필터 제거 — 모든 감지된 제품 사용
 products = sorted(list(all_found_products), key=lambda p: sum(daily_product_data[dn][p]['spend'] for dn in date_names), reverse=True)
 SUMMARY_PRODUCTS = products
 print(f"📆 월:{len(month_names_list)}, 주:{len(week_keys)}, 일:{len(date_names)}")
@@ -1831,7 +1659,7 @@ try:
 except: pass
 print("✅ 주간종합_3 완료"); time.sleep(3)
 
-# ★ v24: 18단계 — 최종 탭 순서 정리 (분석→최신날짜→과거→기타)
+# 18단계 — 최종 탭 순서 정리
 print("\n"+"="*60); print("18단계: 최종 탭 순서 정리 (분석→최신날짜→과거→기타)"); print("="*60)
 reorder_tabs(sh)
 
@@ -1840,8 +1668,7 @@ print()
 print(f"🔄 Meta/Mixpanel 갱신: 최근 {REFRESH_DAYS}일")
 print(f"📝 기존 탭 업데이트: {len(existing_refresh_tabs)}개 | 🆕 새 탭: {len(new_refresh_dates)}개")
 print(f"📊 분석탭: 전체 {len(date_names)}일 | 마스터: {len(master_raw_data)}행 | 주간: {len(week_keys)}주")
-print(f"💱 환율: USD/TWD/JPY/HKD → KRW (★v26: 캠페인/세트 이름 서브스트링+한글 매칭)")
+print(f"💱 환율: ★v28 모든 매출 USD→KRW 단일 환율 적용")
 print(f"📦 제품명: ★v27 동적 추출 (캠페인 이름 기반, 하드코딩 없음) → {len(products)}개 감지")
-print(f"🌏 나라별 요약: 날짜탭 하단 테이블에 포함 (★v26: 일본·홍콩·대만·한국 이름 기반 감지)")
 print(f"📋 탭 순서: [매출/주간매출] → [분석탭] → [최신날짜→과거] → [기타]")
 print(f"\n📊 {SPREADSHEET_URL}")
