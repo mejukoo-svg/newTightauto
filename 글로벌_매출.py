@@ -347,7 +347,8 @@ def _read_existing_daily_sheet(gc):
 def _read_trend_spending(gc, all_dates):
     """추이차트 탭 row1(날짜 헤더) + row2(종합 멀티라인 셀)에서 지출금액 추출
     셀 형식: ROAS / 순이익 / 지출 / CPM / 전환율 (줄바꿈 구분)
-    → 3번째 줄(index 2)이 지출금액
+    → 3번째 줄(index 2)이 지출금액 (USD)
+    ★ USD → KRW 환산하여 반환
     """
     spending = {}
     try:
@@ -384,13 +385,13 @@ def _read_trend_spending(gc, all_dates):
         return None
 
     def _parse_spend_from_cell(cell_text):
-        """멀티라인 셀에서 3번째 줄(지출) 금액 추출"""
+        """멀티라인 셀에서 3번째 줄(지출) 금액 추출 (USD)"""
         lines = str(cell_text).strip().split("\n")
         if len(lines) < 3:
             return 0.0
         spend_line = lines[2].strip()
-        # ₩, -, 쉼표 등 제거
-        cleaned = spend_line.replace("₩", "").replace(",", "").replace("-", "").replace("\\", "").replace("W", "").replace("￦", "").strip()
+        # ₩, $, -, 쉼표 등 제거
+        cleaned = spend_line.replace("₩", "").replace("$", "").replace(",", "").replace("-", "").replace("\\", "").replace("W", "").replace("￦", "").strip()
         try:
             return float(cleaned) if cleaned else 0.0
         except ValueError:
@@ -399,13 +400,16 @@ def _read_trend_spending(gc, all_dates):
     for col_idx in range(len(header_row)):
         ds = _parse_trend_date(header_row[col_idx])
         if ds and col_idx < len(spend_row) and spend_row[col_idx]:
-            val = _parse_spend_from_cell(spend_row[col_idx])
-            if val > 0:
-                spending[ds] = val
+            val_usd = _parse_spend_from_cell(spend_row[col_idx])
+            if val_usd > 0:
+                # ★ USD → KRW 환산 (해당 날짜 환율 적용)
+                rates = get_rate(ds)
+                val_krw = round(val_usd * rates.get("krw", 1480))
+                spending[ds] = val_krw
 
     matched = sum(1 for d in all_dates if d in spending)
     total = sum(spending.values())
-    print(f"💰 추이차트 지출: {len(spending)}일 로드 (총 {total:,.0f}원), 매출 탭과 {matched}일 매칭")
+    print(f"💰 추이차트 지출: {len(spending)}일 로드 (총 {total:,.0f}원, USD→KRW 환산), 매출 탭과 {matched}일 매칭")
     return spending
 
 
@@ -446,7 +450,7 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
         all_dates = fresh_dates
         print(f"🆕 신규 시트 생성: {len(all_dates)}일")
 
-    # ── 1.5. 추이차트 탭 row2에서 날짜별 지출 데이터 읽기 ──
+    # ── 1.5. 추이차트 탭 row2에서 날짜별 지출 데이터 읽기 (USD→KRW 환산 완료) ──
     spending = _read_trend_spending(gc, all_dates)
 
     # ── 2. 시트 준비 ──
@@ -485,7 +489,7 @@ def write_daily_sheet(revenue, fresh_dates, all_countries):
     total_row.append(gt)
     rows.append(total_row)
 
-    # ── 순이익 row (종합 - 지출) ──
+    # ── 순이익 row (종합 - 지출, 지출은 이미 KRW 환산됨) ──
     net_profit_row = ["순이익"]; np_total = 0
     for ds in all_dates:
         ds_revenue = sum(round(revenue[c].get(ds, 0)) for c in all_countries)
