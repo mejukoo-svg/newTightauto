@@ -873,6 +873,76 @@ def _update_product_trend_tab(sh, ws, dc, all_adsets, adset_daily, daily_total):
             }
         })
 
+    # ── 셀 wrap + 세로 정렬 (D열 이후 데이터 영역) ──
+    total_rows = len(rows) + 2  # header + data
+    fmt_reqs.append({
+        "repeatCell": {
+            "range": {"sheetId": sheet_id,
+                      "startRowIndex": 1, "endRowIndex": total_rows,
+                      "startColumnIndex": 3, "endColumnIndex": min(len(hdr), 26)},
+            "cell": {"userEnteredFormat": {
+                "wrapStrategy": "WRAP",
+                "verticalAlignment": "TOP",
+            }},
+            "fields": "userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment",
+        }
+    })
+
+    # ── ROAS 조건부 서식 (셀 첫줄 = ROAS 값 기준 배경색) ──
+    # trend_cell 형식: "ROAS\n₩이익\n+₩매출\n-₩지출"
+    # → 첫줄(CHAR(10) 앞)을 숫자로 추출하여 조건 판정
+    sc, ec = 3, min(len(hdr), 26)
+    roas_rules = [
+        # ROAS = 0 (지출만 있고 매출 없음) → 빨간 배경
+        {
+            'formula': '=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))=0)',
+            'bg': {"red": 1.0, "green": 0.6, "blue": 0.6},
+        },
+        # ROAS >= 300 → 시안
+        {
+            'formula': '=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=300)',
+            'bg': {"red": 0.6, "green": 1.0, "blue": 1.0},
+        },
+        # ROAS 200~299 → 연두
+        {
+            'formula': '=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=200,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<300)',
+            'bg': {"red": 0.7, "green": 1.0, "blue": 0.7},
+        },
+        # ROAS 100~199 → 노란
+        {
+            'formula': '=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>=100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<200)',
+            'bg': {"red": 1.0, "green": 1.0, "blue": 0.6},
+        },
+        # ROAS 1~99 → 연분홍
+        {
+            'formula': '=AND(NOT(ISBLANK(INDIRECT(ADDRESS(ROW(),COLUMN())))),LEN(TRIM(INDIRECT(ADDRESS(ROW(),COLUMN()))))>0,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))<100,VALUE(LEFT(INDIRECT(ADDRESS(ROW(),COLUMN())),FIND(CHAR(10),INDIRECT(ADDRESS(ROW(),COLUMN()))&CHAR(10))-1))>0)',
+            'bg': {"red": 1.0, "green": 0.8, "blue": 0.8},
+        },
+    ]
+    for rule in roas_rules:
+        fmt_reqs.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sheet_id,
+                        "startRowIndex": 1,
+                        "endRowIndex": total_rows,
+                        "startColumnIndex": sc,
+                        "endColumnIndex": ec,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "CUSTOM_FORMULA",
+                            "values": [{"userEnteredValue": rule['formula']}],
+                        },
+                        "format": {"backgroundColor": rule['bg']},
+                    },
+                },
+                "index": 0,
+            }
+        })
+    print(f"      → ROAS 조건부 서식 {len(roas_rules)}개 규칙 추가")
+
     if fmt_reqs:
         # 배치로 나눠 적용 (rate limit 방지)
         BATCH = 50
