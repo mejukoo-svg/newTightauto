@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       full_refresh:
-        description: '전체 기간 갱신 (2026-01-01~오늘)'
+        description: '전체 기간 갱신 (2025-01-01~오늘)'
         required: false
         default: 'false'
         type: choice
@@ -15,14 +15,21 @@ on:
           - 'false'
           - 'true'
       refresh_days:
-        description: '갱신 일수 (기본 10)'
+        description: '갱신 기간'
         required: false
         default: '10'
+        type: choice
+        options:
+          - '7'
+          - '10'
+          - '30'
+          - '180'
+          - '365'
 
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
