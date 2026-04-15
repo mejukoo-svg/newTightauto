@@ -68,7 +68,7 @@ MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
-FULL_REFRESH_START = datetime(2026, 1, 1)
+FULL_REFRESH_START = datetime(2025, 1, 1)
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
 
 if FULL_REFRESH:
