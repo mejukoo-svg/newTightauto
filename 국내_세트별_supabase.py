@@ -129,16 +129,22 @@ def _strip_leading_emojis(text):
 
 
 def extract_product(adset_name, campaign_name=""):
-    """캠페인 이름의 첫 단어(이모지 제거)에서 상품명 추출"""
+    """캠페인 이름에서 상품명 추출. 순수 숫자(날짜)는 건너뛰기."""
     for source in [campaign_name, adset_name]:
         if not source:
             continue
         cleaned = _strip_leading_emojis(str(source).strip())
         if not cleaned:
             continue
-        first_word = re.split(r"[_\s\-/|,()\[\]]+", cleaned)[0].strip()
-        if first_word:
-            return first_word
+        tokens = re.split(r"[_\s\-/|,()\[\]]+", cleaned)
+        for token in tokens:
+            token = token.strip()
+            if not token:
+                continue
+            # 순수 숫자(0626, 1003, 260213 등 날짜)는 건너뛰기
+            if re.match(r"^\d+$", token):
+                continue
+            return token
     return "기타"
 
 
