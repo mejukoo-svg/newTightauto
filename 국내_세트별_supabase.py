@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-meta_mp_to_supabase.py
+국내_세트별_supabase.py
 ======================
 Meta Ads + Mixpanel → Supabase 직통 파이프라인
 
@@ -10,9 +10,9 @@ Google Sheets 의존 없이 API → Supabase로 바로 적재.
 GitHub Actions cron으로 하루 2회 실행.
 
 환경변수:
-  - META_TOKEN_KR_A / META_TOKEN_KR_B  (Meta 광고 토큰)
+  - META_TOKEN_1 / META_TOKEN_2  (Meta 광고 토큰)
   - MIXPANEL_PROJECT_ID / MIXPANEL_USERNAME / MIXPANEL_SECRET
-  - SUPABASE_URL / SUPABASE_KEY
+  - SUPABASE_URL / SUPABASE_SERVICE_KEY
   - REFRESH_DAYS (기본 10)
   - FULL_REFRESH (true면 전체 기간)
 """
@@ -44,10 +44,10 @@ log = logging.getLogger(__name__)
 # 환경변수 로드
 # =========================================================
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
-META_TOKEN_A = os.environ.get("META_TOKEN_KR_A", os.environ.get("META_TOKEN_1", ""))
-META_TOKEN_B = os.environ.get("META_TOKEN_KR_B", os.environ.get("META_TOKEN_2", ""))
+META_TOKEN_A = os.environ.get("META_TOKEN_1", "")
+META_TOKEN_B = os.environ.get("META_TOKEN_2", "")
 
 META_TOKENS = {
     "act_1270614404675034": META_TOKEN_A,
@@ -586,6 +586,8 @@ def main():
     log.info("🚀 Meta + Mixpanel → Supabase 직통 파이프라인")
     log.info("=" * 60)
     log.info(f"📅 오늘: {TODAY:%Y-%m-%d} | 갱신: {DATA_REFRESH_START:%Y-%m-%d} ~ 오늘 ({REFRESH_DAYS}일)")
+    log.info(f"🔑 Meta TOKEN_1: {'✅' if META_TOKEN_A else '❌'} | TOKEN_2: {'✅' if META_TOKEN_B else '❌'}")
+    log.info(f"🔑 Mixpanel: {'✅' if MIXPANEL_USERNAME else '❌'} | Supabase: {'✅' if SUPABASE_KEY else '❌'}")
 
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
 
@@ -853,7 +855,7 @@ def main():
         log.warning("⚠️ upsert할 레코드 없음")
 
     # =======================================================
-    # 7) 일별 집계 테이블 (선택)
+    # 7) 일별 집계 테이블
     # =======================================================
     log.info(f"\n7단계: 일별/상품별 집계 테이블")
 
