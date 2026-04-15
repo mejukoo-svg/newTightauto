@@ -39,17 +39,13 @@ jobs:
 
       - name: Run pipeline
         env:
-          # Meta Ads
           META_TOKEN_KR_A: ${{ secrets.META_TOKEN_KR_A }}
           META_TOKEN_KR_B: ${{ secrets.META_TOKEN_KR_B }}
-          # Mixpanel
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
-          # Supabase
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          # 옵션
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
-        run: python meta_mp_to_supabase.py
+        run: python 국내_세트별_supabase.py
