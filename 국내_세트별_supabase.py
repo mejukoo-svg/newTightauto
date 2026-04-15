@@ -83,7 +83,7 @@ FALLBACK_USD_KRW = 1450
 # 병렬 워커 수
 META_DATE_WORKERS = 3
 META_ACCOUNT_WORKERS = 3
-MIXPANEL_CHUNK_WORKERS = 3
+MIXPANEL_CHUNK_WORKERS = 1  # sequential to avoid 429
 BUDGET_WORKERS = 3
 
 
@@ -447,61 +447,62 @@ def fetch_mixpanel_data(from_date, to_date):
     }
     log.info(f"  📡 Mixpanel: {from_date} ~ {to_date}")
 
-    try:
-        resp = req_lib.get(
-            url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300
-        )
-        if resp.status_code != 200:
-            log.error(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:300]}")
-            return []
+    for attempt in range(4):
+        try:
+            resp = req_lib.get(
+                url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300
+            )
+            if resp.status_code == 429:
+                wait = 30 + attempt * 30
+                log.warning(f"  ⏳ Mixpanel 429 rate limit → {wait}초 대기 ({attempt+1}/4)")
+                time.sleep(wait)
+                continue
+            if resp.status_code != 200:
+                log.error(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:300]}")
+                return []
 
-        lines = [l for l in resp.text.split("\n") if l.strip()]
-        log.info(f"  📊 이벤트: {len(lines)}건")
+            lines = [l for l in resp.text.split("\n") if l.strip()]
+            log.info(f"  📊 이벤트: {len(lines)}건")
 
-        data = []
-        for line in lines:
-            try:
-                ev = json.loads(line)
-                props = ev.get("properties", {})
-                ts = props.get("time", 0)
+            data = []
+            for line in lines:
+                try:
+                    ev = json.loads(line)
+                    props = ev.get("properties", {})
+                    ts = props.get("time", 0)
 
-                if ts:
-                    dt_kst = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(
-                        hours=9
-                    )
-                    ds = f"{dt_kst.year % 100:02d}/{dt_kst.month:02d}/{dt_kst.day:02d}"
-                else:
-                    ds = None
+                    if ts:
+                        dt_kst = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)
+                        ds = f"{dt_kst.year % 100:02d}/{dt_kst.month:02d}/{dt_kst.day:02d}"
+                    else:
+                        ds = None
 
-                # utm_term = adset_id
-                ut = None
-                for k in ["utm_term", "UTM_Term", "UTM Term"]:
-                    if k in props and props[k]:
-                        ut = clean_id(str(props[k]).strip())
-                        break
+                    ut = None
+                    for k in ["utm_term", "UTM_Term", "UTM Term"]:
+                        if k in props and props[k]:
+                            ut = clean_id(str(props[k]).strip())
+                            break
 
-                # 매출 금액
-                raw_amount = props.get("amount") or props.get("결제금액")
-                raw_value = props.get("value")
+                    raw_amount = props.get("amount") or props.get("결제금액")
+                    raw_value = props.get("value")
 
-                amount_val = 0.0
-                if raw_amount is not None:
-                    try:
-                        amount_val = float(raw_amount)
-                    except Exception:
-                        pass
+                    amount_val = 0.0
+                    if raw_amount is not None:
+                        try:
+                            amount_val = float(raw_amount)
+                        except Exception:
+                            pass
 
-                value_val = 0.0
-                if raw_value is not None:
-                    try:
-                        value_val = float(raw_value)
-                    except Exception:
-                        pass
+                    value_val = 0.0
+                    if raw_value is not None:
+                        try:
+                            value_val = float(raw_value)
+                        except Exception:
+                            pass
 
-                revenue = amount_val if amount_val > 0 else (value_val if value_val > 0 else 0.0)
+                    revenue = amount_val if amount_val > 0 else (value_val if value_val > 0 else 0.0)
 
-                data.append(
-                    {
+                    data.append({
                         "distinct_id": props.get("distinct_id"),
                         "date": ds,
                         "utm_term": ut or "",
@@ -509,16 +510,17 @@ def fetch_mixpanel_data(from_date, to_date):
                         "value_raw": value_val,
                         "revenue": revenue,
                         "서비스": props.get("서비스", ""),
-                    }
-                )
-            except Exception:
-                pass
+                    })
+                except Exception:
+                    pass
 
-        log.info(f"  ✅ 파싱: {len(data)}건")
-        return data
-    except Exception as e:
-        log.error(f"  ❌ Mixpanel 오류: {e}")
-        return []
+            log.info(f"  ✅ 파싱: {len(data)}건")
+            return data
+        except Exception as e:
+            log.error(f"  ❌ Mixpanel 오류: {e}")
+            return []
+    log.error(f"  ❌ Mixpanel 재시도 소진: {from_date}~{to_date}")
+    return []
 
 
 # =========================================================
