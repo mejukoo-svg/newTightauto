@@ -528,15 +528,31 @@ class SupabaseClient:
     """supabase-py 없이 REST API 직접 호출 (의존성 최소화)"""
 
     def __init__(self, url, key):
-        self.base_url = url.strip().rstrip("/")
-        if not self.base_url.startswith("http"):
-            self.base_url = f"https://{self.base_url}"
+        # 보이지 않는 문자 제거 (BOM, zero-width space, 줄바꿈 등)
+        clean_url = re.sub(r'[^\x20-\x7E]', '', url).strip().rstrip("/")
+        if not clean_url.startswith("http"):
+            clean_url = f"https://{clean_url}"
+        self.base_url = clean_url
+        self.key = key.strip()
         self.headers = {
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}",
             "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates",  # upsert
+            "Prefer": "resolution=merge-duplicates",
         }
+        log.info(f"  🔗 Supabase URL length={len(self.base_url)}, repr={repr(self.base_url[:50])}")
+
+    def _test_connection(self):
+        """연결 테스트 (빈 SELECT)"""
+        url = f"{self.base_url}/rest/v1/ad_performance_daily?limit=1"
+        log.info(f"  🧪 연결 테스트: {url[:60]}...")
+        try:
+            resp = req_lib.get(url, headers={**self.headers, "Prefer": ""}, timeout=15)
+            log.info(f"  🧪 응답: {resp.status_code} {resp.text[:200]}")
+            return resp.status_code in [200, 406]
+        except Exception as e:
+            log.error(f"  ❌ 연결 테스트 실패: {e}")
+            return False
 
     def _sanitize(self, records):
         """numpy/pandas 타입 → Python 기본 타입 변환"""
@@ -544,7 +560,7 @@ class SupabaseClient:
         for rec in records:
             row = {}
             for k, v in rec.items():
-                if hasattr(v, 'item'):  # numpy int64, float64 등
+                if hasattr(v, 'item'):
                     v = v.item()
                 if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
                     v = 0
@@ -558,25 +574,34 @@ class SupabaseClient:
         total = len(records)
         success = 0
 
+        # 첫 번째 레코드 디버깅
+        if records:
+            sample = self._sanitize(records[:1])[0]
+            log.info(f"  🔍 샘플 레코드 키: {list(sample.keys())}")
+            log.info(f"  🔍 샘플 date={sample.get('date')}, adset_id={sample.get('adset_id','')[:10]}...")
+
         for i in range(0, total, chunk_size):
             chunk = self._sanitize(records[i : i + chunk_size])
             try:
-                resp = req_lib.post(
-                    url,
-                    headers=self.headers,
-                    json=chunk,
-                    timeout=60,
-                )
+                resp = req_lib.post(url, headers=self.headers, json=chunk, timeout=60)
                 if resp.status_code in [200, 201]:
                     success += len(chunk)
                     log.info(f"  ✅ upsert {success}/{total}")
                 else:
                     log.error(
                         f"  ❌ upsert 실패 (행 {i}~{i+len(chunk)}): "
-                        f"{resp.status_code} {resp.text[:500]}"
+                        f"HTTP {resp.status_code} | {resp.text[:500]}"
                     )
+                    # 첫 실패 시 단건 테스트
+                    if i == 0:
+                        log.info("  🧪 단건 테스트...")
+                        try:
+                            test_resp = req_lib.post(url, headers=self.headers, json=[chunk[0]], timeout=15)
+                            log.info(f"  🧪 단건 결과: HTTP {test_resp.status_code} | {test_resp.text[:500]}")
+                        except Exception as te:
+                            log.error(f"  🧪 단건 예외: {te}")
             except Exception as e:
-                log.error(f"  ❌ upsert 오류 (행 {i}~{i+len(chunk)}): {e}")
+                log.error(f"  ❌ upsert 예외 (행 {i}~{i+len(chunk)}): {type(e).__name__}: {e}")
             time.sleep(0.5)
 
         return success
@@ -606,6 +631,10 @@ def main():
     log.info(f"🔑 Mixpanel: {'✅' if MIXPANEL_USERNAME else '❌'} | Supabase: {'✅' if SUPABASE_KEY else '❌'}")
 
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
+    if not sb._test_connection():
+        log.error("❌ Supabase 연결 실패 — URL/KEY 확인 필요")
+        log.error(f"   URL repr: {repr(SUPABASE_URL[:50])}")
+        log.error(f"   KEY length: {len(SUPABASE_KEY)}")
 
     # =======================================================
     # 1) 통화 감지 + 환율
@@ -684,6 +713,10 @@ def main():
 
     total_meta = sum(len(v) for v in meta_date_data.values())
     log.info(f"✅ Meta 완료: {len(meta_date_data)}일, {total_meta}건")
+
+    # Meta rate limit 쿨다운
+    log.info("⏳ Meta rate limit 쿨다운 60초...")
+    time.sleep(60)
 
     # =======================================================
     # 3) 예산 조회 (병렬)
