@@ -528,13 +528,29 @@ class SupabaseClient:
     """supabase-py 없이 REST API 직접 호출 (의존성 최소화)"""
 
     def __init__(self, url, key):
-        self.base_url = url.rstrip("/")
+        self.base_url = url.strip().rstrip("/")
+        if not self.base_url.startswith("http"):
+            self.base_url = f"https://{self.base_url}"
         self.headers = {
             "apikey": key,
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",  # upsert
         }
+
+    def _sanitize(self, records):
+        """numpy/pandas 타입 → Python 기본 타입 변환"""
+        clean = []
+        for rec in records:
+            row = {}
+            for k, v in rec.items():
+                if hasattr(v, 'item'):  # numpy int64, float64 등
+                    v = v.item()
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    v = 0
+                row[k] = v
+            clean.append(row)
+        return clean
 
     def upsert(self, table, records, chunk_size=500):
         """records를 chunk_size씩 나눠 upsert"""
@@ -543,12 +559,12 @@ class SupabaseClient:
         success = 0
 
         for i in range(0, total, chunk_size):
-            chunk = records[i : i + chunk_size]
+            chunk = self._sanitize(records[i : i + chunk_size])
             try:
                 resp = req_lib.post(
                     url,
                     headers=self.headers,
-                    data=json.dumps(chunk, default=str, ensure_ascii=False),
+                    json=chunk,
                     timeout=60,
                 )
                 if resp.status_code in [200, 201]:
@@ -557,7 +573,7 @@ class SupabaseClient:
                 else:
                     log.error(
                         f"  ❌ upsert 실패 (행 {i}~{i+len(chunk)}): "
-                        f"{resp.status_code} {resp.text[:300]}"
+                        f"{resp.status_code} {resp.text[:500]}"
                     )
             except Exception as e:
                 log.error(f"  ❌ upsert 오류 (행 {i}~{i+len(chunk)}): {e}")
