@@ -1,507 +1,973 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>비즈니스리뷰 데이터 조사 세트별</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:11px}
-.tab-bar{display:flex;gap:0;border-bottom:2px solid #4285f4;background:#f8f9fa;padding:0 8px;overflow-x:auto;position:sticky;top:0;z-index:100}
-.tab-bar::-webkit-scrollbar{height:3px}
-.tab{padding:8px 16px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid #ddd;border-bottom:none;background:#e8eaed;color:#555;margin-right:1px;border-radius:4px 4px 0 0;white-space:nowrap}
-.tab:hover{background:#fff;color:#222}
-.tab.active{background:#fff;color:#1a73e8;font-weight:700;border-color:#ccc;border-bottom:2px solid #fff;margin-bottom:-2px}
-.panel{display:none;padding:0}
-.panel.active{display:block}
-.sheet-wrap{overflow:auto;max-height:calc(100vh - 50px)}
-table{border-collapse:collapse;font-size:11px;width:max-content}
-th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
-th{background:#efefef;font-weight:600;font-size:10px;color:#333;white-space:nowrap;position:sticky;top:0;z-index:10}
-th.sun{background:#ffe0e0;color:#c00}
-td.mc{vertical-align:top;white-space:pre-line;line-height:1.35;font-size:10px;min-width:90px;padding:3px 4px}
-td.mc .r{font-weight:700;color:#000}
-td.mc .p{color:#1a6b1a}
-td.mc .p.neg{color:#d00}
-td.mc .s{color:#d00;font-size:9px}
-td.mc .rv{color:#0000dd;font-size:9px}
-td.mc .cv{color:#000;font-size:9px}
-td.mc .ch{font-weight:600}
-td.mc .ch.pos{color:#1a6b1a}
-td.mc .ch.neg{color:#d00}
-.bg-r300{background:#00ffff!important}
-.bg-r200{background:#b3ffb3!important}
-.bg-r100{background:#ffff99!important}
-.bg-r50{background:#ffcccc!important}
-.bg-r0{background:#ff9999!important}
-td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;font-size:10px;cursor:pointer}
-td.fx0{left:0}
-td.fx1{left:200px}
-tr.sr{background:#e8e8e8;font-weight:700}
-tr.sr td.fx{background:#e8e8e8;cursor:default}
-.prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
-th.h-meta{background:#eee}
-th.h-mp{background:#999;color:#fff}
-th.h-budget{background:#d9d2e9}
-th.h-rate{background:#b4a7d5;color:#fff}
-th.h-result{background:#9900ff;color:#fff}
-th.h-memo{background:#ff9900;color:#fff}
-.ws-block{border-bottom:2px solid #ccc}
-.ws-header{padding:8px 12px;font-weight:700;font-size:12px}
-.ws-header.month{background:#2d3a5c;color:#fff}
-.ws-header.week{background:#666;color:#fff;font-size:11px;font-weight:500}
-.ws-metrics{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid #ccc}
-.ws-metrics>div{padding:6px 8px;border-right:1px solid #ddd;text-align:center}
-.ws-metrics .lbl{font-size:9px;color:#777}
-.ws-metrics .val{font-size:13px;font-weight:700}
-.budget-table td{font-size:10px;text-align:right;padding:3px 6px}
-.budget-table .rh{text-align:left;font-weight:600;background:#f8f8f8;position:sticky;left:0;z-index:5;min-width:100px}
-.budget-table .sh{background:#ddd;font-weight:700;text-align:left;font-size:11px;padding:6px 8px}
-.filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px}
-.filter select{padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px}
-td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
-/* Highlight colors */
-.hl-off{background:#ff4444!important;color:#fff!important}
-.hl-down20{background:#ff7777!important;color:#fff!important}
-.hl-down10{background:#ffcccc!important}
-.hl-up10{background:#88dd88!important}
-.hl-up20{background:#66eecc!important;color:#000!important;font-weight:600}
-/* Color picker popover */
-.color-picker{position:absolute;background:#fff;border:1px solid #888;border-radius:6px;padding:6px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1000;display:none;gap:4px}
-.color-picker.show{display:flex}
-.color-picker .cp-btn{width:28px;height:28px;border-radius:4px;cursor:pointer;border:2px solid transparent;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600}
-.color-picker .cp-btn:hover{border-color:#333}
-.cp-off{background:#ff4444;color:#fff}
-.cp-d20{background:#ff7777;color:#fff}
-.cp-d10{background:#ffcccc;color:#333}
-.cp-u10{background:#88dd88;color:#333}
-.cp-u20{background:#66eecc;color:#333}
-.cp-clear{background:#fff;color:#333;border:1px solid #ccc}
-.memo-input{width:120px;padding:2px 4px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:'Noto Sans KR',sans-serif}
-.memo-input:focus{border-color:#4285f4;outline:none;background:#f0f7ff}
-.memo-saved{color:#1a73e8;font-size:9px;opacity:0;transition:opacity 0.3s;margin-left:4px}
-.memo-saved.show{opacity:1}
-</style>
-</head>
-<body>
-<div class="tab-bar" id="tabBar">
-<div class="tab active" data-t="trend">추이차트</div>
-<div class="tab" data-t="product">추이차트_상품별</div>
-<div class="tab" data-t="change">증감액</div>
-<div class="tab" data-t="weekly">주간종합</div>
-<div class="tab" data-t="weekly2">주간종합_2</div>
-<div class="tab" data-t="weekly3">주간종합_3</div>
-<div class="tab" data-t="budget">예산</div>
-<div class="tab" data-t="datetab">날짜탭</div>
-<div class="tab" data-t="dateproduct">날짜별탭_상품</div>
-</div>
-<div class="panel active" id="p-trend"><div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
-<div class="panel" id="p-product"><div class="filter"><label>상품 선택</label><select id="pSel"><option value="">(상품을 선택하세요)</option></select></div><div class="sheet-wrap"><table id="pTbl"></table></div></div>
-<div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
-<div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all" selected>전체 (월+주)</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh - 90px);overflow:auto"></div></div>
-<div class="panel" id="p-weekly2"><div class="sheet-wrap"><table id="w2Tbl"></table></div></div>
-<div class="panel" id="p-weekly3"><div class="sheet-wrap"><table id="w3Tbl"></table></div></div>
-<div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
-<div class="panel" id="p-datetab"><div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
-<div class="panel" id="p-dateproduct"><div class="filter"><label>날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><table id="dpTbl"></table></div></div>
+# -*- coding: utf-8 -*-
+"""
+국내_세트별_supabase.py
+======================
+Meta Ads + Mixpanel → Supabase 직통 파이프라인
 
-<!-- Color picker popover -->
-<div class="color-picker" id="colorPicker">
-<div class="cp-btn cp-u20" data-c="up20" title="+20%">+20</div>
-<div class="cp-btn cp-u10" data-c="up10" title="+10%">+10</div>
-<div class="cp-btn cp-d10" data-c="down10" title="-10%">-10</div>
-<div class="cp-btn cp-d20" data-c="down20" title="-20%">-20</div>
-<div class="cp-btn cp-off" data-c="off" title="OFF">OFF</div>
-<div class="cp-btn cp-clear" data-c="" title="지우기">✕</div>
-</div>
+기존 국내_세트별.py의 스프레드시트 마스터탭 구조를 그대로 따르되,
+Google Sheets 의존 없이 API → Supabase로 바로 적재.
 
-<script>
-const SB_URL='https://qkvqiorazdrhtuicnpec.supabase.co';
-const SB_KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
-const H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+GitHub Actions cron으로 하루 2회 실행.
 
-// Highlight config: class name + percentage
-const HL_CONFIG={
-  'up20':{cls:'hl-up20',pct:20,label:'+20%'},
-  'up10':{cls:'hl-up10',pct:10,label:'+10%'},
-  'down10':{cls:'hl-down10',pct:-10,label:'-10%'},
-  'down20':{cls:'hl-down20',pct:-20,label:'-20%'},
-  'off':{cls:'hl-off',pct:null,label:'OFF'},
-};
+환경변수:
+  - META_TOKEN_1 / META_TOKEN_2  (Meta 광고 토큰)
+  - MIXPANEL_PROJECT_ID / MIXPANEL_USERNAME / MIXPANEL_SECRET
+  - SUPABASE_URL / SUPABASE_SERVICE_KEY
+  - REFRESH_DAYS (기본 10)
+  - FULL_REFRESH (true면 전체 기간)
+"""
 
-async function sb(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:H});return r.json()}
-async function sbAll(t){let p=0,a=[];while(true){const r=await sb(t,'select=*&order=date.desc,spend.desc&limit=1000&offset='+p*1000);a=a.concat(r);if(r.length<1000)break;p++}return a}
+import os
+import json
+import time
+import re
+import math
+import logging
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from decimal import Decimal
 
-const F=n=>n==null?'':Math.round(n).toLocaleString('ko-KR');
-const W=n=>n==null||n===0?'':'₩'+F(n);
-const P=(n,d)=>n==null?'':n.toFixed(d||1)+'%';
-const WD=d=>['일','월','화','수','목','금','토'][new Date(d).getDay()];
-const WM=d=>{const x=new Date(d),dd=x.getDay(),df=x.getDate()-dd+(dd===0?-6:1);return new Date(x.setDate(df)).toISOString().split('T')[0]};
-const DK=d=>{const p=d.split('-');return p[0].slice(2)+'/'+p[1]+'/'+p[2]};
+import requests as req_lib
 
-function RC(r){if(r>=300)return'bg-r300';if(r>=200)return'bg-r200';if(r>=100)return'bg-r100';if(r>0)return'bg-r50';return'bg-r0'}
+# =========================================================
+# 로깅 설정
+# =========================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger(__name__)
 
-function MC(roas,profit,spend,revenue,cvr){
-if(!spend)return'';
-const pc=profit>=0?'p':'p neg';
-return'<div class="r">'+roas.toFixed(0)+'</div><div class="'+pc+'">'+W(profit)+'</div><div class="s">-'+W(spend)+'</div><div class="rv">'+W(revenue)+'</div><div class="cv">'+P(cvr)+'</div>';
-}
-function MCC(roas,chg,spend,revenue,cvr){
-if(!spend)return'';
-const cc=chg>0?'ch pos':(chg<0?'ch neg':'ch');
-const sg=chg>0?'+':'';
-return'<div class="r">'+roas.toFixed(0)+'</div><div class="'+cc+'">'+sg+chg.toFixed(1)+'%</div><div class="s">-'+W(spend)+'</div><div class="rv">'+W(revenue)+'</div><div class="cv">'+P(cvr)+'</div>';
-}
+# =========================================================
+# 환경변수 로드
+# =========================================================
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 
-let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
+META_TOKEN_A = os.environ.get("META_TOKEN_1", "")
+META_TOKEN_B = os.environ.get("META_TOKEN_2", "")
 
-async function loadHighlights(){
-try{
-const r=await sb('adset_highlights','select=*');
-HIGHLIGHTS={};
-r.forEach(x=>{HIGHLIGHTS[x.adset_id]=x.highlight});
-}catch(e){console.error('highlight load err',e)}
+META_TOKENS = {
+    "act_1270614404675034": META_TOKEN_A,
+    "act_707835224206178": META_TOKEN_A,
+    "act_1808141386564262": META_TOKEN_B,
 }
+META_TOKEN_DEFAULT = META_TOKEN_A
+META_API_VERSION = "v21.0"
+META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
+ALL_AD_ACCOUNTS = list(META_TOKENS.keys())
 
-async function saveHighlight(adsetId,highlight){
-try{
-const body={adset_id:adsetId,highlight:highlight||null,updated_at:new Date().toISOString()};
-const resp=await fetch(SB_URL+'/rest/v1/adset_highlights',{method:'POST',headers:{...H,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-if(resp.ok){HIGHLIGHTS[adsetId]=highlight||null;return true}
-console.error('highlight save fail',resp.status,await resp.text());
-return false;
-}catch(e){console.error('highlight save err',e);return false}
-}
+MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
+MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
+MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
+MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
-async function saveMemo(date,adsetId,memo,el){
-try{
-const url=SB_URL+'/rest/v1/ad_performance_daily?date=eq.'+date+'&adset_id=eq.'+adsetId;
-const resp=await fetch(url,{method:'PATCH',headers:{...H,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo:memo})});
-if(resp.ok){
-const ind=el.parentNode.querySelector('.memo-saved');
-if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
-const rec=AD.find(r=>r.date===date&&r.adset_id===adsetId);
-if(rec)rec.memo=memo;
-}else{console.error('memo save',resp.status)}
-}catch(e){console.error('memo err',e)}
-}
+# 실행 설정
+KST = timezone(timedelta(hours=9))
+TODAY = datetime.now(KST).replace(tzinfo=None)
+FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
+FULL_REFRESH_START = datetime(2025, 1, 1)
+REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
 
-async function init(){
-document.querySelectorAll('.panel').forEach(p=>{p.innerHTML='<div style="padding:40px;text-align:center;color:#999">Supabase 데이터 로딩 중...</div>'});
-await Promise.all([loadHighlights(),(async()=>{AD=await sbAll('ad_performance_daily')})()]);
-const bd={};
-AD.forEach(r=>{if(!bd[r.date])bd[r.date]={s:0,r:0,p:0,mp:0,uc:0,n:0};bd[r.date].s+=r.spend;bd[r.date].r+=r.revenue;bd[r.date].p+=r.profit;bd[r.date].mp+=r.results_mp;bd[r.date].uc+=r.unique_clicks;bd[r.date].n++});
-DAILY=bd;DATES=Object.keys(bd).sort().reverse();
-const bp={};AD.forEach(r=>{if(!bp[r.product])bp[r.product]=0;bp[r.product]+=r.spend});
-PRODS=Object.keys(bp).sort((a,b)=>bp[b]-bp[a]);
-document.getElementById('p-trend').innerHTML='<div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><span style="color:#888;margin-left:12px">💡 캠페인/세트/ID 클릭해서 하이라이트 설정</span></div><div class="sheet-wrap"><table id="tTbl"></table></div>';
-document.getElementById('p-product').innerHTML='<div class="filter"><label>상품 선택</label><select id="pSel"><option value="">(상품을 선택하세요)</option></select></div><div class="sheet-wrap"><table id="pTbl"></table></div>';
-document.getElementById('p-change').innerHTML='<div class="sheet-wrap"><table id="cTbl"></table></div>';
-document.getElementById('p-weekly').innerHTML='<div class="filter"><label>보기</label><select id="wMode"><option value="all" selected>전체 (월+주)</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh - 90px);overflow:auto"></div>';
-document.getElementById('p-weekly2').innerHTML='<div class="sheet-wrap"><table id="w2Tbl"></table></div>';
-document.getElementById('p-weekly3').innerHTML='<div class="sheet-wrap"><table id="w3Tbl"></table></div>';
-document.getElementById('p-budget').innerHTML='<div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div>';
-document.getElementById('p-datetab').innerHTML='<div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div>';
-document.getElementById('p-dateproduct').innerHTML='<div class="filter"><label>날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><table id="dpTbl"></table></div>';
-document.getElementById('tDays').addEventListener('change',renderTrend);
-document.getElementById('dtSel').addEventListener('change',renderDateTab);
-document.getElementById('dpSel').addEventListener('change',renderDateProduct);
-attachTabs();
-setupColorPicker();
-renderTrend();
-}
-function attachTabs(){
-document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
-document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-t.classList.add('active');document.getElementById('p-'+t.dataset.t).classList.add('active');
-const id=t.dataset.t;
-if(id==='trend')renderTrend();
-if(id==='product')renderProduct();
-if(id==='change'&&!document.getElementById('cTbl').innerHTML)renderChange();
-if(id==='weekly'){renderWeekly();const wm=document.getElementById('wMode');if(wm&&!wm._bound){wm._bound=true;wm.addEventListener('change',renderWeekly)}}
-if(id==='weekly2'&&!document.getElementById('w2Tbl').innerHTML)renderWeekly2();
-if(id==='weekly3'&&!document.getElementById('w3Tbl').innerHTML)renderWeekly3();
-if(id==='budget'&&!document.getElementById('bTbl').innerHTML)renderBudget();
-if(id==='datetab')renderDateTab();
-if(id==='dateproduct')renderDateProduct();
-})});
-}
+if FULL_REFRESH:
+    REFRESH_DAYS = (TODAY - FULL_REFRESH_START).days + 1
+    log.info(f"🔥 FULL_REFRESH: {FULL_REFRESH_START:%Y-%m-%d} ~ 오늘 ({REFRESH_DAYS}일)")
+else:
+    log.info(f"🔄 일반 모드: 최근 {REFRESH_DAYS}일 갱신")
 
-// ========= Color Picker =========
-let currentAdsetId=null;
-function setupColorPicker(){
-const cp=document.getElementById('colorPicker');
-cp.querySelectorAll('.cp-btn').forEach(btn=>{
-btn.addEventListener('click',async e=>{
-e.stopPropagation();
-if(!currentAdsetId)return;
-const c=btn.dataset.c;
-await saveHighlight(currentAdsetId,c);
-cp.classList.remove('show');
-renderTrend();
-});
-});
-document.addEventListener('click',e=>{
-if(!e.target.closest('.color-picker')&&!e.target.closest('.fx.clickable')){
-cp.classList.remove('show');
-}
-});
-}
-function showColorPicker(adsetId,el){
-currentAdsetId=adsetId;
-const cp=document.getElementById('colorPicker');
-const rect=el.getBoundingClientRect();
-cp.style.left=(rect.left+window.scrollX)+'px';
-cp.style.top=(rect.bottom+window.scrollY+4)+'px';
-cp.classList.add('show');
-}
+DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
+FALLBACK_USD_KRW = 1450
 
-function hlClass(adsetId){
-const h=HIGHLIGHTS[adsetId];
-if(h&&HL_CONFIG[h])return HL_CONFIG[h].cls;
-return'';
-}
+# 병렬 워커 수
+META_DATE_WORKERS = 3
+META_ACCOUNT_WORKERS = 3
+MIXPANEL_CHUNK_WORKERS = 1  # sequential to avoid 429
+BUDGET_WORKERS = 3
 
-function buildTD(days){
-const dd=DATES.slice(0,days);const byA={};
-AD.forEach(r=>{if(!dd.includes(r.date))return;if(!byA[r.adset_id])byA[r.adset_id]={cn:r.campaign_name,an:r.adset_name,id:r.adset_id,d:{}};byA[r.adset_id].d[r.date]=r});
-const d7=dd.slice(0,7);
-const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;return a}).sort((a,b)=>b._s-a._s);
-return{dd,d7,list};
-}
-function renderTrend(){
-const days=parseInt(document.getElementById('tDays').value);
-const{dd,d7,list}=buildTD(days);
-const ths=dd.map(d=>{const w=WD(d);return'<th class="'+(w==='일'?'sun':'')+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
-const c2='<td class="c2"><span style="color:#000;font-weight:600">ROAS</span>\n<span style="color:#1a6b1a">순이익</span>\n<span style="color:#d00">지출</span>\n<span style="color:#0000dd">매출</span>\n<span style="color:#000">전환율</span></td>';
-const ts=d7.reduce((a,d)=>a+(DAILY[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(DAILY[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
-const sc=dd.map(d=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,x.p,x.s,x.r,cvr)+'</td>'}).join('');
-let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인 이름</th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th style="min-width:130px">광고 세트 ID</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
-h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td>'+c2+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>'+sc+'</tr>';
-list.forEach(a=>{
-const cells=dd.map(d=>{const r=a.d[d];if(!r||!r.spend)return'<td></td>';return'<td class="mc '+RC(r.roas)+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
-const hl=hlClass(a.id);
-const clickable=' clickable" data-id="'+a.id+'" onclick="showColorPicker(\''+a.id+'\',this)"';
-h+='<tr><td class="fx fx0 '+hl+clickable+' title="'+a.cn+'">'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+clickable+' title="'+a.an+'">'+((a.an||'').slice(0,25))+'</td><td class="'+hl+clickable+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
-});
-h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
-}
-function renderChange(){
-const{dd,d7,list}=buildTD(30);
-const ths=dd.map(d=>'<th style="min-width:90px">'+DK(d)+'</th>').join('');
-const ts=d7.reduce((a,d)=>a+(DAILY[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(DAILY[d]?.r||0),0),troas=ts>0?tr/ts*100:0;
-const sc=dd.map((d,i)=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<dd.length-1){const pr=DAILY[dd[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}return'<td class="mc '+RC(roas)+'">'+MCC(roas,chg,x.s,x.r,0)+'</td>'}).join('');
-let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인 이름</th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th>광고 세트 ID</th><th>7일 평균</th>'+ths+'</tr></thead><tbody>';
-h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc">'+MCC(troas,0,ts,tr,0)+'</td>'+sc+'</tr>';
-list.forEach(a=>{
-const cells=dd.map((d,i)=>{const r=a.d[d];if(!r||!r.spend)return'<td></td>';let chg=0;if(i<dd.length-1){const pr=a.d[dd[i+1]];if(pr&&pr.spend>0)chg=(r.spend-pr.spend)/pr.spend*100}return'<td class="mc '+RC(r.roas)+'">'+MCC(r.roas,chg,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
-h+='<tr><td class="fx fx0">'+(a.cn||'').slice(0,25)+'</td><td class="fx fx1">'+(a.an||'').slice(0,25)+'</td><td style="font-size:9px">'+a.id+'</td><td class="mc">'+MCC(a._roas,0,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
-});
-h+='</tbody>';document.getElementById('cTbl').innerHTML=h;
-}
-function renderProduct(){
-const dd=DATES.slice(0,30),d7=dd.slice(0,7);
-// 전날 = 2번째 날짜 (오늘은 미완)
-const yesterday=DATES[1]||DATES[0];
-const byP={};AD.forEach(r=>{if(!dd.includes(r.date))return;if(!byP[r.product])byP[r.product]={};if(!byP[r.product][r.adset_id])byP[r.product][r.adset_id]={an:r.adset_name,cn:r.campaign_name,d:{}};byP[r.product][r.adset_id].d[r.date]=r});
 
-// Populate dropdown
-const sel=document.getElementById('pSel');
-if(sel&&sel.options.length<=1){
-PRODS.forEach(p=>{if(byP[p]){const o=document.createElement('option');o.value=p;o.textContent=p;sel.appendChild(o)}});
-sel.addEventListener('change',renderProduct);
-}
-const selectedProduct=sel?sel.value:'';
+# =========================================================
+# 유틸리티
+# =========================================================
+def clean_id(val):
+    """광고 세트 ID 정규화 (float→int 변환, 불필요 문자 제거)"""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if not s:
+        return ""
+    if re.match(r"^\d+$", s):
+        return s
+    try:
+        if ("E" in s or "e" in s) and re.match(r"^[\d.]+[eE][+\-]?\d+$", s):
+            return str(int(Decimal(s)))
+    except Exception:
+        pass
+    try:
+        if re.match(r"^\d+\.\d+$", s):
+            return str(int(Decimal(s)))
+    except Exception:
+        pass
+    numeric_only = re.sub(r"[^0-9]", "", s)
+    return numeric_only if numeric_only else s
 
-const ths=dd.map(d=>{const w=WD(d);return'<th class="'+(w==='일'?'sun':'')+'" style="min-width:85px">'+DK(d)+'('+w+')</th>'}).join('');
-let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인 이름</th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th>광고 세트 ID</th><th>7일 평균</th>'+ths+'</tr></thead><tbody>';
 
-// ===== 상단: 상품별 종합 성과 =====
-h+='<tr><td colspan="'+(dd.length+4)+'" class="prod-header">📊 상품별 종합 성과</td></tr>';
-PRODS.forEach(p=>{
-if(!byP[p])return;
-const as=Object.values(byP[p]);
-// 전날 기준으로 활성 세트 개수 (전날에 지출 발생한 세트만)
-const activeCount=as.filter(a=>a.d[yesterday]&&a.d[yesterday].spend>0).length;
-const dt={};dd.forEach(d=>{let s=0,r=0;as.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});dt[d]={s,r,p:r-s,roas:s>0?r/s*100:0}});
-let s7=0,r7=0;d7.forEach(d=>{s7+=dt[d]?.s||0;r7+=dt[d]?.r||0});
-const roas7=s7>0?r7/s7*100:0;
-const cells=dd.map(d=>{const t=dt[d];return t&&t.s?'<td class="mc '+RC(t.roas)+'">'+MC(t.roas,t.p,t.s,t.r,0)+'</td>':'<td></td>'}).join('');
-h+='<tr style="font-weight:600"><td class="fx fx0">'+p+'</td><td class="fx fx1">('+activeCount+'개 세트)</td><td></td><td class="mc '+RC(roas7)+'">'+MC(roas7,r7-s7,s7,r7,0)+'</td>'+cells+'</tr>';
-});
+def _strip_leading_emojis(text):
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if (
+            "\uAC00" <= c <= "\uD7A3"
+            or "\u3131" <= c <= "\u3163"
+            or c.isalnum()
+            or c in ".%"
+        ):
+            break
+        i += 1
+    return text[i:].strip()
 
-// ===== 하단: 선택된 상품 상세 =====
-if(selectedProduct&&byP[selectedProduct]){
-const p=selectedProduct;
-const as=Object.values(byP[p]);
-const activeCount=as.filter(a=>a.d[yesterday]&&a.d[yesterday].spend>0).length;
-let ts=0,tr=0;d7.forEach(d=>as.forEach(a=>{if(a.d[d]){ts+=a.d[d].spend;tr+=a.d[d].revenue}}));
-h+='<tr><td colspan="'+(dd.length+4)+'" style="height:10px"></td></tr>';
-h+='<tr><td colspan="'+(dd.length+4)+'" class="prod-header">📦 '+p+' | 매출 '+W(tr)+' | 활성 '+activeCount+'개 / 전체 '+as.length+'개 세트</td></tr>';
-const dt={};dd.forEach(d=>{let s=0,r=0,mp=0,uc=0;as.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks}});dt[d]={s,r,p:r-s,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0}});
-let s7=0,r7=0;d7.forEach(d=>{s7+=dt[d]?.s||0;r7+=dt[d]?.r||0});
-const roas7=s7>0?r7/s7*100:0;
-const tc=dd.map(d=>{const t=dt[d];return t&&t.s?'<td class="mc '+RC(t.roas)+'">'+MC(t.roas,t.p,t.s,t.r,t.cvr)+'</td>':'<td></td>'}).join('');
-h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+p+' 종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(roas7)+'">'+MC(roas7,r7-s7,s7,r7,0)+'</td>'+tc+'</tr>';
-as.sort((a,b)=>{let sa=0,sb=0;d7.forEach(d=>{if(a.d[d])sa+=a.d[d].spend;if(b.d[d])sb+=b.d[d].spend});return sb-sa});
-as.forEach(a=>{
-let s=0,r=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});
-const roas=s>0?r/s*100:0;
-const cells=dd.map(d=>{const x=a.d[d];return x&&x.spend?'<td class="mc '+RC(x.roas)+'">'+MC(x.roas,x.profit,x.spend,x.revenue,x.cvr)+'</td>':'<td></td>'}).join('');
-h+='<tr><td class="fx fx0">'+(a.cn||'').slice(0,25)+'</td><td class="fx fx1">'+(a.an||'').slice(0,25)+'</td><td style="font-size:9px">'+a.id+'</td><td class="mc '+RC(roas)+'">'+MC(roas,r-s,s,r,0)+'</td>'+cells+'</tr>';
-});
-}else{
-h+='<tr><td colspan="'+(dd.length+4)+'" style="padding:20px;text-align:center;color:#888">위에서 상품을 선택하면 세부 데이터가 표시됩니다.</td></tr>';
-}
 
-h+='</tbody>';document.getElementById('pTbl').innerHTML=h;
-}
-function renderWeekly(){
-const byW={},byM={};
-AD.forEach(r=>{const wk=WM(r.date),mk=r.date.slice(0,7);
-if(!byW[wk])byW[wk]={s:0,r:0,p:0,mp:0,prods:{}};byW[wk].s+=r.spend;byW[wk].r+=r.revenue;byW[wk].p+=r.profit;byW[wk].mp+=r.results_mp;if(!byW[wk].prods[r.product])byW[wk].prods[r.product]={s:0,r:0,p:0};byW[wk].prods[r.product].s+=r.spend;byW[wk].prods[r.product].r+=r.revenue;byW[wk].prods[r.product].p+=r.profit;
-if(!byM[mk])byM[mk]={s:0,r:0,p:0,mp:0,prods:{}};byM[mk].s+=r.spend;byM[mk].r+=r.revenue;byM[mk].p+=r.profit;byM[mk].mp+=r.results_mp;if(!byM[mk].prods[r.product])byM[mk].prods[r.product]={s:0,r:0,p:0};byM[mk].prods[r.product].s+=r.spend;byM[mk].prods[r.product].r+=r.revenue;byM[mk].prods[r.product].p+=r.profit;
-});
-const months=Object.keys(byM).sort().reverse(),weeks=Object.keys(byW).sort().reverse(),tp=PRODS.slice(0,15);
-function blk(label,cls,d,prods){
-const roas=d.s>0?d.r/d.s*100:0;
-let h='<div class="ws-block"><div class="ws-header '+cls+'">'+label+' &nbsp; ROAS '+roas.toFixed(0)+'% · 이익 '+W(d.p)+'</div>';
-h+='<div class="ws-metrics"><div><div class="lbl">지출 금액</div><div class="val" style="color:#d00">'+W(d.s)+'</div></div><div><div class="lbl">매출</div><div class="val" style="color:#00d">'+W(d.r)+'</div></div><div><div class="lbl">이익</div><div class="val" style="color:'+(d.p>=0?'green':'red')+'">'+W(d.p)+'</div></div><div><div class="lbl">ROAS</div><div class="val">'+roas.toFixed(1)+'%</div></div><div><div class="lbl">구매</div><div class="val">'+F(d.mp)+'</div></div></div>';
-const tps=tp.reduce((a,p)=>a+(prods[p]?.s||0),0),tpr=tp.reduce((a,p)=>a+(prods[p]?.r||0),0);
-h+='<table style="width:100%;font-size:10px;border-collapse:collapse"><tr style="background:#444;color:#fff"><td style="padding:3px 6px;border:1px solid #555"></td>';
-tp.forEach(p=>h+='<td style="text-align:center;padding:3px;border:1px solid #555">'+p+'</td>');
-h+='<td style="text-align:center;border:1px solid #555">합</td></tr>';
-[['제품별 ROAS','roas'],['제품별 순이익','profit'],['제품별 매출','revenue'],['제품별 예산','spend'],['제품별 예산 비중','ratio']].forEach(([lbl,dk])=>{
-h+='<tr><td style="background:#f5f5f5;font-weight:600;padding:3px 6px;border:1px solid #ddd">'+lbl+'</td>';
-tp.forEach(p=>{const pd=prods[p];let v='';
-if(dk==='roas')v=pd&&pd.s>0?(pd.r/pd.s*100).toFixed(0)+'%':'';
-else if(dk==='profit')v=pd?W(pd.p):'';
-else if(dk==='revenue')v=pd?W(pd.r):'';
-else if(dk==='spend')v=pd?W(pd.s):'';
-else if(dk==='ratio')v=pd&&tps>0?(pd.s/tps*100).toFixed(1)+'%':'';
-h+='<td style="text-align:center;border:1px solid #ddd;padding:2px 4px">'+v+'</td>'});
-let sv='';if(dk==='roas')sv=tps>0?(tpr/tps*100).toFixed(0)+'%':'';else if(dk==='profit')sv=W(tpr-tps);else if(dk==='revenue')sv=W(tpr);else if(dk==='spend')sv=W(tps);else sv='';
-h+='<td style="text-align:center;background:#fffde7;font-weight:600;border:1px solid #ddd">'+sv+'</td></tr>';
-});
-h+='</table></div>';return h;
-}
-let html='';
-const wmEl=document.getElementById('wMode');
-const mode=wmEl?wmEl.value:'all';
-if(mode==='month'){
-months.forEach(mk=>{const m=byM[mk];html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',m,m.prods)});
-}else if(mode==='week'){
-weeks.forEach(wk=>{const w=byW[wk];const we=new Date(new Date(wk).getTime()+6*864e5);const wl=(new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'('+WD(wk)+')~'+(we.getMonth()+1)+'/'+we.getDate()+'('+WD(we.toISOString().split('T')[0])+')';html+=blk(wl,'week',w,w.prods)});
-}else{
-months.forEach(mk=>{const m=byM[mk];html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',m,m.prods);
-weeks.filter(w=>w.slice(0,7)===mk).forEach(wk=>{const w=byW[wk];const we=new Date(new Date(wk).getTime()+6*864e5);const wl=(new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'('+WD(wk)+')~'+(we.getMonth()+1)+'/'+we.getDate()+'('+WD(we.toISOString().split('T')[0])+')';html+=blk(wl,'week',w,w.prods)});
-});
-}
-document.getElementById('wBlocks').innerHTML=html;
-}
-function renderWeekly2(){
-const byW={},byM={};
-AD.forEach(r=>{const wk=WM(r.date),mk=r.date.slice(0,7);if(!byW[wk])byW[wk]={s:0,r:0,p:0};byW[wk].s+=r.spend;byW[wk].r+=r.revenue;byW[wk].p+=r.profit;if(!byM[mk])byM[mk]={s:0,r:0,p:0};byM[mk].s+=r.spend;byM[mk].r+=r.revenue;byM[mk].p+=r.profit});
-const periods=[];
-Object.keys(byM).sort().reverse().forEach(mk=>{periods.push({l:mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월',t:'월별',...byM[mk],im:true});
-Object.keys(byW).sort().reverse().filter(w=>w.slice(0,7)===mk).forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);periods.push({l:(new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),t:'주간',...byW[wk],im:false})})});
-let h='<thead><tr><th colspan="7" style="text-align:left;background:#1a2744;color:#fff;font-size:12px">📊 기간별 전체 요약</th></tr><tr><th>기간</th><th>유형</th><th>지출금액</th><th>매출</th><th>이익</th><th>ROAS</th><th>CVR</th></tr></thead><tbody>';
-periods.forEach(p=>{const roas=p.s>0?p.r/p.s:0;const bg=p.im?'background:#d6eaf8':'background:#f2f2f2';
-h+='<tr style="'+bg+'"><td style="text-align:left;font-weight:'+(p.im?700:400)+'">'+p.l+'</td><td>'+p.t+'</td><td style="text-align:right">'+F(p.s)+'</td><td style="text-align:right">'+F(p.r)+'</td><td style="text-align:right;color:'+(p.p>=0?'green':'red')+'">'+F(p.p)+'</td><td>'+(roas*100).toFixed(1)+'%</td><td></td></tr>'});
-h+='</tbody>';document.getElementById('w2Tbl').innerHTML=h;
-}
-function renderWeekly3(){
-let h='<thead><tr><th colspan="8" style="text-align:left;background:#1a2744;color:#fff;font-size:12px">📊 일별 전체 요약</th></tr><tr><th>날짜</th><th>요일</th><th>지출금액</th><th>매출</th><th>이익</th><th>ROAS</th><th>CVR</th><th></th></tr></thead><tbody>';
-DATES.forEach(d=>{const x=DAILY[d];const wd=WD(d);const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const bg=wd==='토'||wd==='일'?'background:#d6eaf8':'background:#f2f2f2';
-h+='<tr style="'+bg+'"><td>'+d.slice(5).replace('-','.')+'('+wd+')</td><td>'+wd+'</td><td style="text-align:right">'+F(x.s)+'</td><td style="text-align:right">'+F(x.r)+'</td><td style="text-align:right;color:'+(x.p>=0?'green':'red')+'">'+F(x.p)+'</td><td>'+roas.toFixed(1)+'%</td><td>'+cvr.toFixed(2)+'%</td><td></td></tr>'});
-h+='</tbody>';document.getElementById('w3Tbl').innerHTML=h;
-}
-function renderBudget(){
-const dd=DATES.slice(0,30);const dpd={};
-AD.forEach(r=>{if(!dd.includes(r.date))return;const k=r.date+'|'+r.product;if(!dpd[k])dpd[k]={s:0,r:0};dpd[k].s+=r.spend;dpd[k].r+=r.revenue});
-const ths=dd.map(d=>'<th>'+DK(d)+'</th>').join('');
-let h='<thead><tr><th class="rh"></th>'+ths+'</tr></thead><tbody>';
-h+='<tr><td class="rh">전체 쓴돈</td>'+dd.map(d=>'<td style="color:#d00">'+F(DAILY[d]?.s)+'</td>').join('')+'</tr>';
-h+='<tr><td class="rh">전체 번돈</td>'+dd.map(d=>'<td style="color:#00d">'+F(DAILY[d]?.r)+'</td>').join('')+'</tr>';
-h+='<tr><td class="rh">전체 순이익</td>'+dd.map(d=>{const p=(DAILY[d]?.r||0)-(DAILY[d]?.s||0);return'<td style="color:'+(p>=0?'green':'red')+'">'+F(p)+'</td>'}).join('')+'</tr>';
-h+='<tr><td class="rh">ROAS</td>'+dd.map(d=>{const x=DAILY[d];const r=x&&x.s>0?x.r/x.s*100:0;return'<td class="'+RC(r)+'">'+r.toFixed(1)+'</td>'}).join('')+'</tr>';
-h+='<tr><td colspan="'+(dd.length+1)+'" class="sh">쓴돈 - 제품별</td></tr>';
-PRODS.forEach(p=>{h+='<tr><td class="rh">'+p+'</td>'+dd.map(d=>{const k=d+'|'+p;return'<td>'+(dpd[k]?F(dpd[k].s):'')+'</td>'}).join('')+'</tr>'});
-h+='<tr><td colspan="'+(dd.length+1)+'" class="sh">번돈 - 제품별</td></tr>';
-PRODS.forEach(p=>{h+='<tr><td class="rh">'+p+'</td>'+dd.map(d=>{const k=d+'|'+p;return'<td style="color:#00d">'+(dpd[k]?F(dpd[k].r):'')+'</td>'}).join('')+'</tr>'});
-h+='<tr><td colspan="'+(dd.length+1)+'" class="sh">순이익 - 제품별</td></tr>';
-PRODS.forEach(p=>{h+='<tr><td class="rh">'+p+'</td>'+dd.map(d=>{const k=d+'|'+p;if(!dpd[k])return'<td></td>';const pr=dpd[k].r-dpd[k].s;return'<td style="color:'+(pr>=0?'green':'red')+'">'+F(pr)+'</td>'}).join('')+'</tr>'});
-h+='</tbody>';document.getElementById('bTbl').innerHTML=h;
-}
+def extract_product(adset_name, campaign_name=""):
+    """캠페인 이름에서 상품명 추출. 순수 숫자(날짜)는 건너뛰기."""
+    for source in [campaign_name, adset_name]:
+        if not source:
+            continue
+        cleaned = _strip_leading_emojis(str(source).strip())
+        if not cleaned:
+            continue
+        tokens = re.split(r"[_\s\-/|,()\[\]]+", cleaned)
+        for token in tokens:
+            token = token.strip()
+            if not token:
+                continue
+            # 순수 숫자(0626, 1003, 260213 등 날짜)는 건너뛰기
+            if re.match(r"^\d+$", token):
+                continue
+            return token
+    return "기타"
 
-// ========= 날짜탭 (증액률 + 결과비용 + 메모) =========
-// ========= 날짜별탭_상품 (선택한 날짜의 상품별 요약) =========
-function renderDateProduct(){
-const sel=document.getElementById('dpSel');
-if(!sel.options.length){
-const today=new Date();const y=new Date(today.getTime()-864e5);const def=y.toISOString().split('T')[0];
-DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';if(d===def)o.selected=true;sel.appendChild(o)});
-}
-const dt=sel.value||DATES[0];
-const rows=AD.filter(r=>r.date===dt);
-// 상품별 집계
-const byP={};
-rows.forEach(r=>{
-if(!byP[r.product])byP[r.product]={product:r.product,spend:0,revenue:0,profit:0,mp:0,uc:0,cnt:0};
-byP[r.product].spend+=r.spend;byP[r.product].revenue+=r.revenue;byP[r.product].profit+=r.profit;
-byP[r.product].mp+=r.results_mp;byP[r.product].uc+=r.unique_clicks;byP[r.product].cnt++;
-});
-const list=Object.values(byP).sort((a,b)=>b.spend-a.spend);
-// 전체 합계
-const totS=rows.reduce((a,b)=>a+b.spend,0);
-const totR=rows.reduce((a,b)=>a+b.revenue,0);
-const totP=totR-totS;
-const totMp=rows.reduce((a,b)=>a+b.results_mp,0);
-const totUc=rows.reduce((a,b)=>a+b.unique_clicks,0);
-const totRoas=totS>0?totR/totS*100:0;
-const totCvr=totUc>0&&totMp>0?totMp/totUc*100:0;
 
-let h='<thead><tr><th style="text-align:left;min-width:140px">상품</th><th>세트 수</th><th>지출금액</th><th>매출</th><th>이익</th><th>ROAS</th><th>구매(MP)</th><th>클릭</th><th>CVR</th><th>지출 비중</th></tr></thead><tbody>';
-// 합계 행
-h+='<tr style="background:#e8e8e8;font-weight:700"><td style="text-align:left">📊 전체 합계</td><td>'+rows.length+'</td><td style="text-align:right;color:#d00">'+F(totS)+'</td><td style="text-align:right;color:#00d">'+F(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+F(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td style="text-align:right">'+F(totMp)+'</td><td style="text-align:right">'+F(totUc)+'</td><td>'+totCvr.toFixed(2)+'%</td><td>100%</td></tr>';
-list.forEach(p=>{
-const roas=p.spend>0?p.revenue/p.spend*100:0;
-const cvr=p.uc>0&&p.mp>0?p.mp/p.uc*100:0;
-const ratio=totS>0?p.spend/totS*100:0;
-h+='<tr><td style="text-align:left;font-weight:600;color:#1a73e8">'+p.product+'</td><td>'+p.cnt+'</td><td style="text-align:right;color:#d00">'+F(p.spend)+'</td><td style="text-align:right;color:#00d">'+F(p.revenue)+'</td><td style="text-align:right;color:'+(p.profit>=0?'green':'red')+'">'+F(p.profit)+'</td><td class="'+RC(roas)+'">'+roas.toFixed(1)+'%</td><td style="text-align:right">'+F(p.mp)+'</td><td style="text-align:right">'+F(p.uc)+'</td><td>'+cvr.toFixed(2)+'%</td><td>'+ratio.toFixed(1)+'%</td></tr>';
-});
-h+='</tbody>';document.getElementById('dpTbl').innerHTML=h;
-}
+def get_token(acc_id):
+    return META_TOKENS.get(acc_id, META_TOKEN_DEFAULT)
 
-function renderDateTab(){
-const sel=document.getElementById('dtSel');
-if(!sel.options.length){
-// 오늘 기준 전날이 있으면 기본 선택
-const today=new Date();const y=new Date(today.getTime()-864e5);const defaultDate=y.toISOString().split('T')[0];
-DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';if(d===defaultDate)o.selected=true;sel.appendChild(o)});
-}
-const dt=sel.value||DATES[0];
-const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit-a.profit);
-let h='<thead><tr><th style="text-align:left">캠페인 이름</th><th style="text-align:left">광고 세트 이름</th><th>광고 세트 ID</th><th class="h-meta">지출 금액 (KRW)</th><th class="h-meta">결과당 비용</th><th class="h-meta">구매 ROAS</th><th class="h-meta">CPM</th><th class="h-meta">도달</th><th class="h-meta">노출</th><th class="h-meta">고유 클릭</th><th class="h-meta">CTR</th><th class="h-meta">클릭당비용</th><th class="h-meta">빈도</th><th class="h-meta">결과</th><th class="h-mp">결과(MP)</th><th class="h-mp">매출</th><th class="h-mp">이익</th><th class="h-mp">ROAS</th><th class="h-mp">CVR</th><th class="h-budget">기존 예산</th><th class="h-rate">증액률</th><th class="h-result">변동 예산</th><th class="h-memo">메모</th></tr></thead><tbody>';
-rows.forEach(r=>{
-const hl=HIGHLIGHTS[r.adset_id];
-const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
-const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';
-const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
-let resultBudget='';
-if(r.budget&&hlPct!==null){
-if(hl==='off')resultBudget='OFF';
-else resultBudget=F(Math.round(r.budget*(1+hlPct/100)));
-}
-const memoVal=(r.memo||'').replace(/"/g,'&quot;');
-const nameBg=hlCls?'class="'+hlCls+'"':'';
-h+='<tr><td style="text-align:left" '+nameBg+'>'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left" '+nameBg+'>'+(r.adset_name||'').slice(0,30)+'</td><td style="font-size:9px" '+nameBg+'>'+r.adset_id+'</td><td style="text-align:right">'+F(r.spend)+'</td><td style="text-align:right">'+(r.cost_per_result?F(r.cost_per_result):'')+'</td><td>'+(r.purchase_roas_meta||'')+'</td><td style="text-align:right">'+F(r.cpm)+'</td><td style="text-align:right">'+F(r.reach)+'</td><td style="text-align:right">'+F(r.impressions)+'</td><td style="text-align:right">'+F(r.unique_clicks)+'</td><td>'+(r.unique_ctr?r.unique_ctr.toFixed(2):'')+'</td><td style="text-align:right">'+F(r.cost_per_click)+'</td><td>'+(r.frequency?r.frequency.toFixed(2):'')+'</td><td style="text-align:right">'+F(r.results_meta)+'</td><td style="text-align:right;font-weight:600">'+(r.results_mp||'')+'</td><td style="text-align:right;font-weight:600;color:#00d">'+(r.revenue?F(r.revenue):'')+'</td><td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+(r.profit?F(r.profit):'')+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+(r.roas?r.roas.toFixed(1):'')+'</td><td>'+(r.cvr?r.cvr.toFixed(2):'')+'</td><td style="text-align:right">'+(r.budget?F(r.budget):'')+'</td><td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td><td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultBudget+'</td><td><input class="memo-input" value="'+memoVal+'" data-date="'+r.date+'" data-id="'+r.adset_id+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td></tr>';
-});
-h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
-}
-attachTabs();init();
-</script>
-</body>
-</html>
+
+def make_date_key(dt):
+    """datetime → 'YY/MM/DD' 형식"""
+    return f"{dt.year % 100:02d}/{dt.month:02d}/{dt.day:02d}"
+
+
+def make_iso_date(dt):
+    """datetime → 'YYYY-MM-DD'"""
+    return dt.strftime("%Y-%m-%d")
+
+
+# =========================================================
+# 환율
+# =========================================================
+def fetch_exchange_rates(start_date, end_date, currency="USD"):
+    rates = {}
+    try:
+        import yfinance as yf
+
+        pair = f"{currency}KRW=X"
+        ticker = yf.Ticker(pair)
+        hist = ticker.history(
+            start=start_date.strftime("%Y-%m-%d"),
+            end=(end_date + timedelta(days=3)).strftime("%Y-%m-%d"),
+        )
+        if not hist.empty:
+            for idx, row in hist.iterrows():
+                dt = idx.to_pydatetime().replace(tzinfo=None)
+                dk = make_date_key(dt)
+                rates[dk] = round(float(row["Close"]), 2)
+            log.info(f"  ✅ yfinance {currency}/KRW: {len(rates)}일")
+    except Exception as e:
+        log.warning(f"  ⚠️ yfinance 실패: {e}")
+
+    if not rates:
+        try:
+            resp = req_lib.get(
+                f"https://open.er-api.com/v6/latest/{currency}", timeout=10
+            )
+            if resp.status_code == 200:
+                current_rate = resp.json().get("rates", {}).get("KRW", FALLBACK_USD_KRW)
+                d = start_date
+                while d <= end_date:
+                    rates[make_date_key(d)] = round(float(current_rate), 2)
+                    d += timedelta(days=1)
+                log.info(f"  ✅ API 환율: ₩{current_rate:,.0f}")
+        except Exception as e:
+            log.warning(f"  ⚠️ 환율 API 실패: {e}")
+
+    if not rates:
+        log.warning(f"  ⚠️ 환율 조회 모두 실패 → 폴백 ₩{FALLBACK_USD_KRW:,}")
+    return rates
+
+
+def get_rate_for_date(rates, dk):
+    if dk in rates:
+        return rates[dk]
+    if rates:
+        sorted_keys = sorted(rates.keys())
+        prev = [k for k in sorted_keys if k <= dk]
+        if prev:
+            return rates[prev[-1]]
+        return rates[sorted_keys[0]]
+    return FALLBACK_USD_KRW
+
+
+# =========================================================
+# 통화 감지
+# =========================================================
+def detect_account_currency(ad_account_id):
+    url = f"{META_BASE_URL}/{ad_account_id}"
+    data = meta_api_get(url, {"fields": "currency,name"}, token=get_token(ad_account_id))
+    if data:
+        return data.get("currency", "USD"), data.get("name", ad_account_id)
+    return "USD", ad_account_id
+
+
+# =========================================================
+# Meta Ads API
+# =========================================================
+def meta_api_get(url, params=None, token=None):
+    if params is None:
+        params = {}
+    params["access_token"] = token or META_TOKEN_DEFAULT
+
+    for attempt in range(5):
+        try:
+            resp = req_lib.get(url, params=params, timeout=120)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 400:
+                err = resp.json().get("error", {})
+                log.error(f"  ❌ Meta 400: {err.get('message', resp.text[:200])}")
+                return None
+            if resp.status_code in [429, 500, 502, 503]:
+                wait = 30 + attempt * 30
+                log.warning(f"  ⏳ Meta {resp.status_code}, {wait}초 대기 ({attempt+1}/5)")
+                time.sleep(wait)
+            else:
+                log.error(f"  ❌ Meta {resp.status_code}: {resp.text[:200]}")
+                if attempt < 4:
+                    time.sleep(15)
+                else:
+                    return None
+        except Exception as e:
+            log.error(f"  ❌ Meta 요청 오류: {e}")
+            if attempt < 4:
+                time.sleep(15)
+            else:
+                return None
+    return None
+
+
+def _extract_action_value(action_list, types):
+    if not action_list:
+        return 0
+    for a in action_list:
+        if a.get("action_type", "") in types:
+            try:
+                return float(a.get("value", 0))
+            except Exception:
+                return 0
+    return 0
+
+
+def fetch_meta_insights_daily(ad_account_id, single_date):
+    """단일 계정/단일 날짜의 adset-level 인사이트"""
+    url = f"{META_BASE_URL}/{ad_account_id}/insights"
+    fields = (
+        "campaign_name,adset_name,adset_id,spend,cpm,reach,impressions,frequency,"
+        "actions,cost_per_action_type,purchase_roas,"
+        "unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click"
+    )
+    params = {
+        "fields": fields,
+        "level": "adset",
+        "time_increment": 1,
+        "time_range": json.dumps({"since": single_date, "until": single_date}),
+        "limit": 500,
+        "filtering": json.dumps(
+            [{"field": "spend", "operator": "GREATER_THAN", "value": "0"}]
+        ),
+    }
+
+    all_results = []
+    data = meta_api_get(url, params, token=get_token(ad_account_id))
+    while data:
+        all_results.extend(data.get("data", []))
+        next_url = data.get("paging", {}).get("next")
+        if next_url:
+            time.sleep(1)
+            try:
+                resp = req_lib.get(next_url, timeout=120)
+                data = resp.json() if resp.status_code == 200 else None
+            except Exception:
+                data = None
+        else:
+            break
+    return all_results
+
+
+def parse_insights(rows, date_str, date_obj, ad_account_id=""):
+    """Meta API 응답 → 정규화된 dict 리스트"""
+    purchase_types = [
+        "purchase",
+        "omni_purchase",
+        "offsite_conversion.fb_pixel_purchase",
+    ]
+    outbound_types = ["outbound_click"]
+    parsed = []
+
+    for row in rows:
+        spend = float(row.get("spend", 0))
+        cpm = float(row.get("cpm", 0))
+        reach = int(float(row.get("reach", 0)))
+        impressions = int(float(row.get("impressions", 0)))
+        frequency = float(row.get("frequency", 0))
+
+        actions = row.get("actions", [])
+        results = _extract_action_value(actions, purchase_types)
+
+        cost_per_action = row.get("cost_per_action_type", [])
+        cost_per_result = _extract_action_value(cost_per_action, purchase_types)
+
+        uo = row.get("unique_outbound_clicks", [])
+        unique_clicks = _extract_action_value(uo, outbound_types)
+
+        uc = row.get("unique_outbound_clicks_ctr", [])
+        unique_ctr = _extract_action_value(uc, outbound_types)
+
+        cpu = row.get("cost_per_unique_outbound_click", [])
+        cost_per_click = _extract_action_value(cpu, outbound_types)
+
+        # purchase_roas from Meta
+        roas_list = row.get("purchase_roas", [])
+        meta_roas = _extract_action_value(roas_list, purchase_types)
+
+        parsed.append(
+            {
+                "campaign_name": row.get("campaign_name", ""),
+                "adset_name": row.get("adset_name", ""),
+                "adset_id": row.get("adset_id", ""),
+                "ad_account_id": ad_account_id,
+                "spend": spend,
+                "cost_per_result": cost_per_result,
+                "meta_roas": meta_roas,
+                "cpm": cpm,
+                "reach": reach,
+                "impressions": impressions,
+                "unique_clicks": unique_clicks,
+                "unique_ctr": unique_ctr,
+                "cost_per_click": cost_per_click,
+                "frequency": frequency,
+                "results_meta": results,
+                "date_obj": date_obj,
+                "date_key": date_str,
+            }
+        )
+    return parsed
+
+
+def fetch_adset_budgets(ad_account_id):
+    """광고 세트별 일 예산 조회 (ASC 캠페인 예산 폴백 포함)"""
+    url = f"{META_BASE_URL}/{ad_account_id}/adsets"
+    params = {
+        "fields": "id,daily_budget,campaign_id",
+        "limit": 500,
+        "filtering": json.dumps(
+            [{"field": "effective_status", "operator": "IN", "value": ["ACTIVE"]}]
+        ),
+    }
+
+    adset_results = {}
+    needs_campaign = {}
+
+    data = meta_api_get(url, params, token=get_token(ad_account_id))
+    while data:
+        for row in data.get("data", []):
+            asid = row.get("id", "")
+            budget = row.get("daily_budget", "0")
+            campaign_id = row.get("campaign_id", "")
+            if not asid:
+                continue
+            try:
+                budget_int = int(float(budget)) if budget else 0
+            except Exception:
+                budget_int = 0
+            if budget_int > 0:
+                adset_results[asid] = budget_int
+            else:
+                adset_results[asid] = 0
+                if campaign_id:
+                    needs_campaign[asid] = campaign_id
+        next_url = data.get("paging", {}).get("next")
+        if next_url:
+            time.sleep(1)
+            try:
+                resp = req_lib.get(next_url, timeout=120)
+                data = resp.json() if resp.status_code == 200 else None
+            except Exception:
+                data = None
+        else:
+            break
+
+    # ASC 캠페인 예산 폴백
+    if needs_campaign:
+        unique_campaigns = set(needs_campaign.values())
+        campaign_budgets = {}
+        for cid in unique_campaigns:
+            try:
+                camp_data = meta_api_get(
+                    f"{META_BASE_URL}/{cid}",
+                    {"fields": "id,daily_budget"},
+                    token=get_token(ad_account_id),
+                )
+                if camp_data:
+                    cb = camp_data.get("daily_budget", "0")
+                    campaign_budgets[cid] = int(float(cb)) if cb else 0
+                time.sleep(0.5)
+            except Exception:
+                pass
+        for asid, cid in needs_campaign.items():
+            camp_budget = campaign_budgets.get(cid, 0)
+            if camp_budget > 0:
+                adset_results[asid] = camp_budget
+
+    return adset_results
+
+
+# =========================================================
+# Mixpanel
+# =========================================================
+def fetch_mixpanel_data(from_date, to_date):
+    url = "https://data.mixpanel.com/api/2.0/export"
+    params = {
+        "from_date": from_date,
+        "to_date": to_date,
+        "event": json.dumps(MIXPANEL_EVENT_NAMES),
+        "project_id": MIXPANEL_PROJECT_ID,
+    }
+    log.info(f"  📡 Mixpanel: {from_date} ~ {to_date}")
+
+    for attempt in range(4):
+        try:
+            resp = req_lib.get(
+                url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300
+            )
+            if resp.status_code == 429:
+                wait = 30 + attempt * 30
+                log.warning(f"  ⏳ Mixpanel 429 rate limit → {wait}초 대기 ({attempt+1}/4)")
+                time.sleep(wait)
+                continue
+            if resp.status_code != 200:
+                log.error(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:300]}")
+                return []
+
+            lines = [l for l in resp.text.split("\n") if l.strip()]
+            log.info(f"  📊 이벤트: {len(lines)}건")
+
+            data = []
+            for line in lines:
+                try:
+                    ev = json.loads(line)
+                    props = ev.get("properties", {})
+                    ts = props.get("time", 0)
+
+                    if ts:
+                        dt_kst = datetime.fromtimestamp(ts, tz=timezone.utc) + timedelta(hours=9)
+                        ds = f"{dt_kst.year % 100:02d}/{dt_kst.month:02d}/{dt_kst.day:02d}"
+                    else:
+                        ds = None
+
+                    ut = None
+                    for k in ["utm_term", "UTM_Term", "UTM Term"]:
+                        if k in props and props[k]:
+                            ut = clean_id(str(props[k]).strip())
+                            break
+
+                    raw_amount = props.get("amount") or props.get("결제금액")
+                    raw_value = props.get("value")
+
+                    amount_val = 0.0
+                    if raw_amount is not None:
+                        try:
+                            amount_val = float(raw_amount)
+                        except Exception:
+                            pass
+
+                    value_val = 0.0
+                    if raw_value is not None:
+                        try:
+                            value_val = float(raw_value)
+                        except Exception:
+                            pass
+
+                    revenue = amount_val if amount_val > 0 else (value_val if value_val > 0 else 0.0)
+
+                    data.append({
+                        "distinct_id": props.get("distinct_id"),
+                        "date": ds,
+                        "utm_term": ut or "",
+                        "amount": amount_val,
+                        "value_raw": value_val,
+                        "revenue": revenue,
+                        "서비스": props.get("서비스", ""),
+                    })
+                except Exception:
+                    pass
+
+            log.info(f"  ✅ 파싱: {len(data)}건")
+            return data
+        except Exception as e:
+            log.error(f"  ❌ Mixpanel 오류: {e}")
+            return []
+    log.error(f"  ❌ Mixpanel 재시도 소진: {from_date}~{to_date}")
+    return []
+
+
+# =========================================================
+# Supabase 클라이언트
+# =========================================================
+class SupabaseClient:
+    """supabase-py 없이 REST API 직접 호출 (의존성 최소화)"""
+
+    def __init__(self, url, key):
+        # 보이지 않는 문자 제거 (BOM, zero-width space, 줄바꿈 등)
+        clean_url = re.sub(r'[^\x20-\x7E]', '', url).strip().rstrip("/")
+        if not clean_url.startswith("http"):
+            clean_url = f"https://{clean_url}"
+        self.base_url = clean_url
+        self.key = key.strip()
+        self.headers = {
+            "apikey": self.key,
+            "Authorization": f"Bearer {self.key}",
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates",
+        }
+        log.info(f"  🔗 Supabase URL length={len(self.base_url)}, repr={repr(self.base_url[:50])}")
+
+    def _test_connection(self):
+        """연결 테스트 (빈 SELECT)"""
+        url = f"{self.base_url}/rest/v1/ad_performance_daily?limit=1"
+        log.info(f"  🧪 연결 테스트: {url[:60]}...")
+        try:
+            resp = req_lib.get(url, headers={**self.headers, "Prefer": ""}, timeout=15)
+            log.info(f"  🧪 응답: {resp.status_code} {resp.text[:200]}")
+            return resp.status_code in [200, 406]
+        except Exception as e:
+            log.error(f"  ❌ 연결 테스트 실패: {e}")
+            return False
+
+    def _sanitize(self, records):
+        """numpy/pandas 타입 → Python 기본 타입 변환"""
+        clean = []
+        for rec in records:
+            row = {}
+            for k, v in rec.items():
+                if hasattr(v, 'item'):
+                    v = v.item()
+                if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                    v = 0
+                row[k] = v
+            clean.append(row)
+        return clean
+
+    def upsert(self, table, records, chunk_size=500):
+        """records를 chunk_size씩 나눠 upsert"""
+        url = f"{self.base_url}/rest/v1/{table}"
+        total = len(records)
+        success = 0
+
+        # 첫 번째 레코드 디버깅
+        if records:
+            sample = self._sanitize(records[:1])[0]
+            log.info(f"  🔍 샘플 레코드 키: {list(sample.keys())}")
+            log.info(f"  🔍 샘플 date={sample.get('date')}, adset_id={sample.get('adset_id','')[:10]}...")
+
+        for i in range(0, total, chunk_size):
+            chunk = self._sanitize(records[i : i + chunk_size])
+            try:
+                resp = req_lib.post(url, headers=self.headers, json=chunk, timeout=60)
+                if resp.status_code in [200, 201]:
+                    success += len(chunk)
+                    log.info(f"  ✅ upsert {success}/{total}")
+                else:
+                    log.error(
+                        f"  ❌ upsert 실패 (행 {i}~{i+len(chunk)}): "
+                        f"HTTP {resp.status_code} | {resp.text[:500]}"
+                    )
+                    # 첫 실패 시 단건 테스트
+                    if i == 0:
+                        log.info("  🧪 단건 테스트...")
+                        try:
+                            test_resp = req_lib.post(url, headers=self.headers, json=[chunk[0]], timeout=15)
+                            log.info(f"  🧪 단건 결과: HTTP {test_resp.status_code} | {test_resp.text[:500]}")
+                        except Exception as te:
+                            log.error(f"  🧪 단건 예외: {te}")
+            except Exception as e:
+                log.error(f"  ❌ upsert 예외 (행 {i}~{i+len(chunk)}): {type(e).__name__}: {e}")
+            time.sleep(0.5)
+
+        return success
+
+    def query(self, table, params=None):
+        """간단한 SELECT 쿼리"""
+        url = f"{self.base_url}/rest/v1/{table}"
+        headers = {**self.headers, "Prefer": ""}
+        try:
+            resp = req_lib.get(url, headers=headers, params=params or {}, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+        except Exception as e:
+            log.error(f"  ❌ 쿼리 오류: {e}")
+        return []
+
+
+# =========================================================
+# 메인 파이프라인
+# =========================================================
+def main():
+    log.info("=" * 60)
+    log.info("🚀 Meta + Mixpanel → Supabase 직통 파이프라인")
+    log.info("=" * 60)
+    log.info(f"📅 오늘: {TODAY:%Y-%m-%d} | 갱신: {DATA_REFRESH_START:%Y-%m-%d} ~ 오늘 ({REFRESH_DAYS}일)")
+    log.info(f"🔑 Meta TOKEN_1: {'✅' if META_TOKEN_A else '❌'} | TOKEN_2: {'✅' if META_TOKEN_B else '❌'}")
+    log.info(f"🔑 Mixpanel: {'✅' if MIXPANEL_USERNAME else '❌'} | Supabase: {'✅' if SUPABASE_KEY else '❌'}")
+
+    sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
+    if not sb._test_connection():
+        log.error("❌ Supabase 연결 실패 — URL/KEY 확인 필요")
+        log.error(f"   URL repr: {repr(SUPABASE_URL[:50])}")
+        log.error(f"   KEY length: {len(SUPABASE_KEY)}")
+
+    # =======================================================
+    # 1) 통화 감지 + 환율
+    # =======================================================
+    log.info("\n1단계: 통화 감지 + 환율")
+    account_currency = {}
+    has_usd = False
+    for acc_id in ALL_AD_ACCOUNTS:
+        currency, acc_name = detect_account_currency(acc_id)
+        account_currency[acc_id] = currency
+        if currency != "KRW":
+            has_usd = True
+        log.info(f"  💱 {acc_id[-6:]}: {currency} ({acc_name})")
+        time.sleep(0.5)
+
+    usd_krw_rates = {}
+    if has_usd:
+        usd_krw_rates = fetch_exchange_rates(
+            DATA_REFRESH_START - timedelta(days=7), TODAY
+        )
+
+    def get_fx(acc_id, dk):
+        if account_currency.get(acc_id, "KRW") == "KRW":
+            return 1.0
+        return get_rate_for_date(usd_krw_rates, dk)
+
+    def get_budget_divisor(acc_id):
+        return 100 if account_currency.get(acc_id, "KRW") != "KRW" else 1
+
+    # =======================================================
+    # 2) Meta Ads 수집 (병렬: 날짜 × 계정)
+    # =======================================================
+    log.info(f"\n2단계: Meta Insights 수집 ({REFRESH_DAYS}일 × {len(ALL_AD_ACCOUNTS)}계정)")
+
+    def _fetch_account(acc_id, target_str, dk, target_date):
+        rows = fetch_meta_insights_daily(acc_id, target_str)
+        if rows:
+            return parse_insights(rows, dk, target_date, ad_account_id=acc_id)
+        return []
+
+    def _fetch_date(day_offset):
+        td = TODAY - timedelta(days=day_offset)
+        target_str = td.strftime("%Y-%m-%d")
+        dk = make_date_key(td)
+        day_rows = []
+        with ThreadPoolExecutor(max_workers=META_ACCOUNT_WORKERS) as pool:
+            futs = {
+                pool.submit(_fetch_account, acc, target_str, dk, td): acc
+                for acc in ALL_AD_ACCOUNTS
+            }
+            for f in as_completed(futs):
+                try:
+                    day_rows.extend(f.result())
+                except Exception as e:
+                    log.error(f"  ❌ {dk} 계정 오류: {e}")
+        return dk, td, day_rows
+
+    meta_date_data = defaultdict(list)
+    adset_to_account = {}
+
+    with ThreadPoolExecutor(max_workers=META_DATE_WORKERS) as pool:
+        futs = {
+            pool.submit(_fetch_date, d): d for d in range(REFRESH_DAYS)
+        }
+        for f in as_completed(futs):
+            try:
+                dk, td, day_rows = f.result()
+                if day_rows:
+                    meta_date_data[dk] = day_rows
+                    log.info(f"  📊 {dk}: {len(day_rows)}건")
+                    for mr in day_rows:
+                        if mr["adset_id"] and mr["ad_account_id"]:
+                            adset_to_account[mr["adset_id"]] = mr["ad_account_id"]
+            except Exception as e:
+                log.error(f"  ❌ 날짜 오류: {e}")
+
+    total_meta = sum(len(v) for v in meta_date_data.values())
+    log.info(f"✅ Meta 완료: {len(meta_date_data)}일, {total_meta}건")
+
+    # Meta rate limit 쿨다운
+    log.info("⏳ Meta rate limit 쿨다운 60초...")
+    time.sleep(60)
+
+    # =======================================================
+    # 3) 예산 조회 (병렬)
+    # =======================================================
+    log.info(f"\n3단계: 예산 조회")
+    budget_map = {}
+
+    with ThreadPoolExecutor(max_workers=BUDGET_WORKERS) as pool:
+        futs = {
+            pool.submit(fetch_adset_budgets, acc): acc for acc in ALL_AD_ACCOUNTS
+        }
+        for f in as_completed(futs):
+            try:
+                budget_map.update(f.result())
+            except Exception as e:
+                log.error(f"  ❌ 예산 오류: {e}")
+
+    log.info(f"✅ 예산: {len(budget_map)}개 세트")
+
+    # =======================================================
+    # 4) Mixpanel 수집
+    # =======================================================
+    log.info(f"\n4단계: Mixpanel 수집 ({REFRESH_DAYS}일)")
+    YESTERDAY = TODAY - timedelta(days=1)
+    mp_raw = []
+
+    if REFRESH_DAYS > 14:
+        # 7일 단위 청크
+        chunks = []
+        chunk_start = DATA_REFRESH_START
+        while chunk_start <= YESTERDAY:
+            chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
+            chunks.append((chunk_start.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")))
+            chunk_start = chunk_end + timedelta(days=1)
+
+        with ThreadPoolExecutor(max_workers=MIXPANEL_CHUNK_WORKERS) as pool:
+            futs = {
+                pool.submit(fetch_mixpanel_data, c_from, c_to): (c_from, c_to)
+                for c_from, c_to in chunks
+            }
+            for f in as_completed(futs):
+                try:
+                    mp_raw.extend(f.result())
+                except Exception as e:
+                    log.error(f"  ❌ 청크 오류: {e}")
+    else:
+        if DATA_REFRESH_START <= YESTERDAY:
+            mp_raw.extend(
+                fetch_mixpanel_data(
+                    DATA_REFRESH_START.strftime("%Y-%m-%d"),
+                    YESTERDAY.strftime("%Y-%m-%d"),
+                )
+            )
+            time.sleep(2)
+
+    # 오늘 데이터 별도 호출
+    utc_today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    mp_today_str = TODAY.strftime("%Y-%m-%d")
+    if mp_today_str <= utc_today:
+        log.info(f"  ── 오늘({mp_today_str}) 별도 호출 ──")
+        today_data = fetch_mixpanel_data(mp_today_str, mp_today_str)
+        if today_data:
+            mp_raw.extend(today_data)
+
+    log.info(f"✅ Mixpanel 총: {len(mp_raw)}건")
+
+    # Mixpanel 집계: (date, adset_id) → revenue, count
+    import pandas as pd
+
+    mp_value_map = {}
+    mp_count_map = {}
+
+    if mp_raw:
+        df = pd.DataFrame(mp_raw)
+        df = df[df["utm_term"].notna() & (df["utm_term"] != "") & (df["utm_term"] != "None")]
+
+        # utm_term 있는 이벤트 우선, 중복 제거
+        df["_has_utm"] = df["utm_term"].apply(
+            lambda x: 0 if (x and str(x).strip() and str(x).strip() != "None") else 1
+        )
+        df = df.sort_values(["_has_utm", "revenue"], ascending=[True, False])
+        df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
+
+        total_revenue = df_d["revenue"].sum()
+        log.info(f"  📊 매출 합계: ₩{int(total_revenue):,}")
+
+        for (d, ut), v in df_d.groupby(["date", "utm_term"])["revenue"].sum().items():
+            if d and ut:
+                mp_value_map[(d, str(ut))] = v
+        for (d, ut), c in df_d.groupby(["date", "utm_term"]).size().items():
+            if d and ut:
+                mp_count_map[(d, str(ut))] = c
+
+    # =======================================================
+    # 5) 병합 → Supabase 레코드 생성
+    # =======================================================
+    log.info(f"\n5단계: Meta + Mixpanel + 예산 병합")
+
+    records = []
+    product_stats = defaultdict(lambda: {"spend": 0, "revenue": 0, "count": 0})
+
+    for dk, rows in meta_date_data.items():
+        # dk → ISO date
+        parts = dk.split("/")
+        iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
+
+        for mr in rows:
+            asid = mr["adset_id"]
+            if not asid:
+                continue
+
+            acc_id = mr["ad_account_id"]
+            fx = get_fx(acc_id, dk)
+            bdiv = get_budget_divisor(acc_id)
+
+            # FX 적용
+            spend = mr["spend"] * fx
+            cpm = mr["cpm"] * fx
+            cost_per_result = mr["cost_per_result"] * fx
+            cost_per_click = mr["cost_per_click"] * fx
+
+            # Mixpanel 매칭
+            mpc = mp_count_map.get((dk, asid), 0)
+            mpv = mp_value_map.get((dk, asid), 0.0)
+            revenue = float(mpv)
+
+            # 파생 지표
+            profit = revenue - spend
+            roas = (revenue / spend * 100) if spend > 0 else 0
+            cvr = (mpc / mr["unique_clicks"] * 100) if mr["unique_clicks"] > 0 and mpc > 0 else 0
+
+            # 예산
+            budget_raw = budget_map.get(asid, 0)
+            budget_val = round(budget_raw / bdiv * fx) if budget_raw > 0 else 0
+
+            # 상품 추출
+            product = extract_product(mr["adset_name"], mr["campaign_name"])
+            product_stats[product]["spend"] += spend
+            product_stats[product]["revenue"] += revenue
+            product_stats[product]["count"] += 1
+
+            records.append(
+                {
+                    "date": iso_date,
+                    "adset_id": asid,
+                    "campaign_name": mr["campaign_name"],
+                    "adset_name": mr["adset_name"],
+                    "ad_account_id": acc_id,
+                    "product": product,
+                    "spend": round(spend, 2),
+                    "cost_per_result": round(cost_per_result, 2),
+                    "purchase_roas_meta": round(mr["meta_roas"], 4),
+                    "cpm": round(cpm, 2),
+                    "reach": mr["reach"],
+                    "impressions": mr["impressions"],
+                    "unique_clicks": int(mr["unique_clicks"]),
+                    "unique_ctr": round(mr["unique_ctr"], 4),
+                    "cost_per_click": round(cost_per_click, 2),
+                    "frequency": round(mr["frequency"], 4),
+                    "results_meta": int(mr["results_meta"]),
+                    "results_mp": mpc,
+                    "revenue": round(revenue, 2),
+                    "profit": round(profit, 2),
+                    "roas": round(roas, 2),
+                    "cvr": round(cvr, 4),
+                    "budget": budget_val,
+                }
+            )
+
+    log.info(f"✅ 레코드: {len(records)}개")
+    log.info(f"📦 상품별:")
+    for p in sorted(product_stats, key=lambda x: product_stats[x]["spend"], reverse=True):
+        s = product_stats[p]
+        r = (s["revenue"] / s["spend"] * 100) if s["spend"] > 0 else 0
+        log.info(f"  {p}: {s['count']}건 | 지출 ₩{int(s['spend']):,} | 매출 ₩{int(s['revenue']):,} | ROAS {r:.0f}%")
+
+    # =======================================================
+    # 6) Supabase Upsert
+    # =======================================================
+    log.info(f"\n6단계: Supabase upsert ({len(records)}행)")
+    if records:
+        success = sb.upsert("ad_performance_daily", records, chunk_size=500)
+        log.info(f"✅ Supabase 완료: {success}/{len(records)}행")
+    else:
+        log.warning("⚠️ upsert할 레코드 없음")
+
+    # =======================================================
+    # 7) 일별 집계 테이블
+    # =======================================================
+    log.info(f"\n7단계: 일별/상품별 집계 테이블")
+
+    daily_agg = defaultdict(lambda: defaultdict(lambda: {
+        "spend": 0, "revenue": 0, "profit": 0, "results_mp": 0, "unique_clicks": 0,
+    }))
+
+    for rec in records:
+        d = rec["date"]
+        p = rec["product"]
+        daily_agg[d][p]["spend"] += rec["spend"]
+        daily_agg[d][p]["revenue"] += rec["revenue"]
+        daily_agg[d][p]["profit"] += rec["profit"]
+        daily_agg[d][p]["results_mp"] += rec["results_mp"]
+        daily_agg[d][p]["unique_clicks"] += rec["unique_clicks"]
+
+    agg_records = []
+    for d, products in daily_agg.items():
+        for p, vals in products.items():
+            roas = (vals["revenue"] / vals["spend"] * 100) if vals["spend"] > 0 else 0
+            cvr = (
+                (vals["results_mp"] / vals["unique_clicks"] * 100)
+                if vals["unique_clicks"] > 0 and vals["results_mp"] > 0
+                else 0
+            )
+            agg_records.append(
+                {
+                    "date": d,
+                    "product": p,
+                    "spend": round(vals["spend"], 2),
+                    "revenue": round(vals["revenue"], 2),
+                    "profit": round(vals["profit"], 2),
+                    "roas": round(roas, 2),
+                    "cvr": round(cvr, 4),
+                    "results_mp": vals["results_mp"],
+                    "unique_clicks": vals["unique_clicks"],
+                }
+            )
+
+    if agg_records:
+        agg_success = sb.upsert("ad_daily_product_summary", agg_records, chunk_size=500)
+        log.info(f"✅ 일별 집계: {agg_success}/{len(agg_records)}행")
+
+    # =======================================================
+    # 완료
+    # =======================================================
+    log.info("\n" + "=" * 60)
+    log.info("✅ 파이프라인 완료!")
+    log.info("=" * 60)
+    log.info(f"  Meta: {len(meta_date_data)}일, {total_meta}건")
+    log.info(f"  Mixpanel: {len(mp_raw)}건")
+    log.info(f"  예산: {len(budget_map)}개 세트")
+    log.info(f"  → Supabase ad_performance_daily: {len(records)}행")
+    log.info(f"  → Supabase ad_daily_product_summary: {len(agg_records)}행")
+
+
+if __name__ == "__main__":
+    main()
