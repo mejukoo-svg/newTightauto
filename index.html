@@ -35,15 +35,18 @@ td.mc .ch.neg{color:#d00}
 .bg-r100{background:#ffff99!important}
 .bg-r50{background:#ffcccc!important}
 .bg-r0{background:#ff9999!important}
-td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;font-size:10px}
+td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;font-size:10px;cursor:pointer}
 td.fx0{left:0}
 td.fx1{left:200px}
 tr.sr{background:#e8e8e8;font-weight:700}
-tr.sr td.fx{background:#e8e8e8}
+tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
 th.h-meta{background:#eee}
 th.h-mp{background:#999;color:#fff}
 th.h-budget{background:#d9d2e9}
+th.h-rate{background:#b4a7d5;color:#fff}
+th.h-result{background:#9900ff;color:#fff}
+th.h-memo{background:#ff9900;color:#fff}
 .ws-block{border-bottom:2px solid #ccc}
 .ws-header{padding:8px 12px;font-weight:700;font-size:12px}
 .ws-header.month{background:#2d3a5c;color:#fff}
@@ -58,6 +61,27 @@ th.h-budget{background:#d9d2e9}
 .filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px}
 .filter select{padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px}
 td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
+/* Highlight colors */
+.hl-off{background:#ff4444!important;color:#fff!important}
+.hl-down20{background:#ff7777!important;color:#fff!important}
+.hl-down10{background:#ffcccc!important}
+.hl-up10{background:#88dd88!important}
+.hl-up20{background:#66eecc!important;color:#000!important;font-weight:600}
+/* Color picker popover */
+.color-picker{position:absolute;background:#fff;border:1px solid #888;border-radius:6px;padding:6px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1000;display:none;gap:4px}
+.color-picker.show{display:flex}
+.color-picker .cp-btn{width:28px;height:28px;border-radius:4px;cursor:pointer;border:2px solid transparent;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600}
+.color-picker .cp-btn:hover{border-color:#333}
+.cp-off{background:#ff4444;color:#fff}
+.cp-d20{background:#ff7777;color:#fff}
+.cp-d10{background:#ffcccc;color:#333}
+.cp-u10{background:#88dd88;color:#333}
+.cp-u20{background:#66eecc;color:#333}
+.cp-clear{background:#fff;color:#333;border:1px solid #ccc}
+.memo-input{width:120px;padding:2px 4px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:'Noto Sans KR',sans-serif}
+.memo-input:focus{border-color:#4285f4;outline:none;background:#f0f7ff}
+.memo-saved{color:#1a73e8;font-size:9px;opacity:0;transition:opacity 0.3s;margin-left:4px}
+.memo-saved.show{opacity:1}
 </style>
 </head>
 <body>
@@ -79,19 +103,43 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 <div class="panel" id="p-weekly3"><div class="sheet-wrap"><table id="w3Tbl"></table></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
+
+<!-- Color picker popover -->
+<div class="color-picker" id="colorPicker">
+<div class="cp-btn cp-u20" data-c="up20" title="+20%">+20</div>
+<div class="cp-btn cp-u10" data-c="up10" title="+10%">+10</div>
+<div class="cp-btn cp-d10" data-c="down10" title="-10%">-10</div>
+<div class="cp-btn cp-d20" data-c="down20" title="-20%">-20</div>
+<div class="cp-btn cp-off" data-c="off" title="OFF">OFF</div>
+<div class="cp-btn cp-clear" data-c="" title="지우기">✕</div>
+</div>
+
 <script>
 const SB_URL='https://qkvqiorazdrhtuicnpec.supabase.co';
 const SB_KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
 const H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+
+// Highlight config: class name + percentage
+const HL_CONFIG={
+  'up20':{cls:'hl-up20',pct:20,label:'+20%'},
+  'up10':{cls:'hl-up10',pct:10,label:'+10%'},
+  'down10':{cls:'hl-down10',pct:-10,label:'-10%'},
+  'down20':{cls:'hl-down20',pct:-20,label:'-20%'},
+  'off':{cls:'hl-off',pct:null,label:'OFF'},
+};
+
 async function sb(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:H});return r.json()}
 async function sbAll(t){let p=0,a=[];while(true){const r=await sb(t,'select=*&order=date.desc,spend.desc&limit=1000&offset='+p*1000);a=a.concat(r);if(r.length<1000)break;p++}return a}
+
 const F=n=>n==null?'':Math.round(n).toLocaleString('ko-KR');
 const W=n=>n==null||n===0?'':'₩'+F(n);
 const P=(n,d)=>n==null?'':n.toFixed(d||1)+'%';
 const WD=d=>['일','월','화','수','목','금','토'][new Date(d).getDay()];
 const WM=d=>{const x=new Date(d),dd=x.getDay(),df=x.getDate()-dd+(dd===0?-6:1);return new Date(x.setDate(df)).toISOString().split('T')[0]};
 const DK=d=>{const p=d.split('-');return p[0].slice(2)+'/'+p[1]+'/'+p[2]};
+
 function RC(r){if(r>=300)return'bg-r300';if(r>=200)return'bg-r200';if(r>=100)return'bg-r100';if(r>0)return'bg-r50';return'bg-r0'}
+
 function MC(roas,profit,spend,revenue,cvr){
 if(!spend)return'';
 const pc=profit>=0?'p':'p neg';
@@ -103,17 +151,49 @@ const cc=chg>0?'ch pos':(chg<0?'ch neg':'ch');
 const sg=chg>0?'+':'';
 return'<div class="r">'+roas.toFixed(0)+'</div><div class="'+cc+'">'+sg+chg.toFixed(1)+'%</div><div class="s">-'+W(spend)+'</div><div class="rv">'+W(revenue)+'</div><div class="cv">'+P(cvr)+'</div>';
 }
-let AD=[],DATES=[],DAILY={},PRODS=[];
+
+let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
+
+async function loadHighlights(){
+try{
+const r=await sb('adset_highlights','select=*');
+HIGHLIGHTS={};
+r.forEach(x=>{HIGHLIGHTS[x.adset_id]=x.highlight});
+}catch(e){console.error('highlight load err',e)}
+}
+
+async function saveHighlight(adsetId,highlight){
+try{
+const body={adset_id:adsetId,highlight:highlight||null,updated_at:new Date().toISOString()};
+const resp=await fetch(SB_URL+'/rest/v1/adset_highlights',{method:'POST',headers:{...H,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
+if(resp.ok){HIGHLIGHTS[adsetId]=highlight||null;return true}
+console.error('highlight save fail',resp.status,await resp.text());
+return false;
+}catch(e){console.error('highlight save err',e);return false}
+}
+
+async function saveMemo(date,adsetId,memo,el){
+try{
+const url=SB_URL+'/rest/v1/ad_performance_daily?date=eq.'+date+'&adset_id=eq.'+adsetId;
+const resp=await fetch(url,{method:'PATCH',headers:{...H,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo:memo})});
+if(resp.ok){
+const ind=el.parentNode.querySelector('.memo-saved');
+if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
+const rec=AD.find(r=>r.date===date&&r.adset_id===adsetId);
+if(rec)rec.memo=memo;
+}else{console.error('memo save',resp.status)}
+}catch(e){console.error('memo err',e)}
+}
+
 async function init(){
 document.querySelectorAll('.panel').forEach(p=>{p.innerHTML='<div style="padding:40px;text-align:center;color:#999">Supabase 데이터 로딩 중...</div>'});
-AD=await sbAll('ad_performance_daily');
+await Promise.all([loadHighlights(),(async()=>{AD=await sbAll('ad_performance_daily')})()]);
 const bd={};
 AD.forEach(r=>{if(!bd[r.date])bd[r.date]={s:0,r:0,p:0,mp:0,uc:0,n:0};bd[r.date].s+=r.spend;bd[r.date].r+=r.revenue;bd[r.date].p+=r.profit;bd[r.date].mp+=r.results_mp;bd[r.date].uc+=r.unique_clicks;bd[r.date].n++});
 DAILY=bd;DATES=Object.keys(bd).sort().reverse();
 const bp={};AD.forEach(r=>{if(!bp[r.product])bp[r.product]=0;bp[r.product]+=r.spend});
 PRODS=Object.keys(bp).sort((a,b)=>bp[b]-bp[a]);
-// Restore panels
-document.getElementById('p-trend').innerHTML='<div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tTbl"></table></div>';
+document.getElementById('p-trend').innerHTML='<div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><span style="color:#888;margin-left:12px">💡 캠페인/세트/ID 클릭해서 하이라이트 설정</span></div><div class="sheet-wrap"><table id="tTbl"></table></div>';
 document.getElementById('p-product').innerHTML='<div class="sheet-wrap"><table id="pTbl"></table></div>';
 document.getElementById('p-change').innerHTML='<div class="sheet-wrap"><table id="cTbl"></table></div>';
 document.getElementById('p-weekly').innerHTML='<div id="wBlocks" style="max-height:calc(100vh - 50px);overflow:auto"></div>';
@@ -124,6 +204,7 @@ document.getElementById('p-datetab').innerHTML='<div class="filter"><label>날�
 document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('dtSel').addEventListener('change',renderDateTab);
 attachTabs();
+setupColorPicker();
 renderTrend();
 }
 function attachTabs(){
@@ -142,6 +223,42 @@ if(id==='budget'&&!document.getElementById('bTbl').innerHTML)renderBudget();
 if(id==='datetab')renderDateTab();
 })});
 }
+
+// ========= Color Picker =========
+let currentAdsetId=null;
+function setupColorPicker(){
+const cp=document.getElementById('colorPicker');
+cp.querySelectorAll('.cp-btn').forEach(btn=>{
+btn.addEventListener('click',async e=>{
+e.stopPropagation();
+if(!currentAdsetId)return;
+const c=btn.dataset.c;
+await saveHighlight(currentAdsetId,c);
+cp.classList.remove('show');
+renderTrend();
+});
+});
+document.addEventListener('click',e=>{
+if(!e.target.closest('.color-picker')&&!e.target.closest('.fx.clickable')){
+cp.classList.remove('show');
+}
+});
+}
+function showColorPicker(adsetId,el){
+currentAdsetId=adsetId;
+const cp=document.getElementById('colorPicker');
+const rect=el.getBoundingClientRect();
+cp.style.left=(rect.left+window.scrollX)+'px';
+cp.style.top=(rect.bottom+window.scrollY+4)+'px';
+cp.classList.add('show');
+}
+
+function hlClass(adsetId){
+const h=HIGHLIGHTS[adsetId];
+if(h&&HL_CONFIG[h])return HL_CONFIG[h].cls;
+return'';
+}
+
 function buildTD(days){
 const dd=DATES.slice(0,days);const byA={};
 AD.forEach(r=>{if(!dd.includes(r.date))return;if(!byA[r.adset_id])byA[r.adset_id]={cn:r.campaign_name,an:r.adset_name,id:r.adset_id,d:{}};byA[r.adset_id].d[r.date]=r});
@@ -156,11 +273,13 @@ const ths=dd.map(d=>{const w=WD(d);return'<th class="'+(w==='일'?'sun':'')+'" s
 const c2='<td class="c2"><span style="color:#000;font-weight:600">ROAS</span>\n<span style="color:#1a6b1a">순이익</span>\n<span style="color:#d00">지출</span>\n<span style="color:#0000dd">매출</span>\n<span style="color:#000">전환율</span></td>';
 const ts=d7.reduce((a,d)=>a+(DAILY[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(DAILY[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
 const sc=dd.map(d=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,x.p,x.s,x.r,cvr)+'</td>'}).join('');
-let h='<thead><tr><th style="min-width:200px;text-align:left"></th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th style="min-width:130px">광고 세트 ID</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
+let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인 이름</th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th style="min-width:130px">광고 세트 ID</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
 h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td>'+c2+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>'+sc+'</tr>';
 list.forEach(a=>{
 const cells=dd.map(d=>{const r=a.d[d];if(!r||!r.spend)return'<td></td>';return'<td class="mc '+RC(r.roas)+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
-h+='<tr><td class="fx fx0" title="'+a.cn+'">'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1" title="'+a.an+'">'+((a.an||'').slice(0,25))+'</td><td style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+const hl=hlClass(a.id);
+const clickable=' clickable" data-id="'+a.id+'" onclick="showColorPicker(\''+a.id+'\',this)"';
+h+='<tr><td class="fx fx0 '+hl+clickable+' title="'+a.cn+'">'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+clickable+' title="'+a.an+'">'+((a.an||'').slice(0,25))+'</td><td class="'+hl+clickable+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
 });
 h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
 }
@@ -271,14 +390,31 @@ h+='<tr><td colspan="'+(dd.length+1)+'" class="sh">순이익 - 제품별</td></t
 PRODS.forEach(p=>{h+='<tr><td class="rh">'+p+'</td>'+dd.map(d=>{const k=d+'|'+p;if(!dpd[k])return'<td></td>';const pr=dpd[k].r-dpd[k].s;return'<td style="color:'+(pr>=0?'green':'red')+'">'+F(pr)+'</td>'}).join('')+'</tr>'});
 h+='</tbody>';document.getElementById('bTbl').innerHTML=h;
 }
+
+// ========= 날짜탭 (증액률 + 결과비용 + 메모) =========
 function renderDateTab(){
 const sel=document.getElementById('dtSel');
-if(!sel.options.length){DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)})}
+if(!sel.options.length){
+// 오늘 기준 전날이 있으면 기본 선택
+const today=new Date();const y=new Date(today.getTime()-864e5);const defaultDate=y.toISOString().split('T')[0];
+DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';if(d===defaultDate)o.selected=true;sel.appendChild(o)});
+}
 const dt=sel.value||DATES[0];
 const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit-a.profit);
-let h='<thead><tr><th style="text-align:left">캠페인 이름</th><th style="text-align:left">광고 세트 이름</th><th>광고 세트 ID</th><th class="h-meta">지출 금액 (KRW)</th><th class="h-meta">결과당 비용</th><th class="h-meta">구매 ROAS</th><th class="h-meta">CPM</th><th class="h-meta">도달</th><th class="h-meta">노출</th><th class="h-meta">고유 클릭</th><th class="h-meta">CTR</th><th class="h-meta">클릭당비용</th><th class="h-meta">빈도</th><th class="h-meta">결과</th><th class="h-mp">결과(MP)</th><th class="h-mp">매출</th><th class="h-mp">이익</th><th class="h-mp">ROAS</th><th class="h-mp">CVR</th><th class="h-budget">기존 예산</th></tr></thead><tbody>';
+let h='<thead><tr><th style="text-align:left">캠페인 이름</th><th style="text-align:left">광고 세트 이름</th><th>광고 세트 ID</th><th class="h-meta">지출 금액 (KRW)</th><th class="h-meta">결과당 비용</th><th class="h-meta">구매 ROAS</th><th class="h-meta">CPM</th><th class="h-meta">도달</th><th class="h-meta">노출</th><th class="h-meta">고유 클릭</th><th class="h-meta">CTR</th><th class="h-meta">클릭당비용</th><th class="h-meta">빈도</th><th class="h-meta">결과</th><th class="h-mp">결과(MP)</th><th class="h-mp">매출</th><th class="h-mp">이익</th><th class="h-mp">ROAS</th><th class="h-mp">CVR</th><th class="h-budget">기존 예산</th><th class="h-rate">증액률</th><th class="h-result">변동 예산</th><th class="h-memo">메모</th></tr></thead><tbody>';
 rows.forEach(r=>{
-h+='<tr><td style="text-align:left">'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left">'+(r.adset_name||'').slice(0,30)+'</td><td style="font-size:9px">'+r.adset_id+'</td><td style="text-align:right">'+F(r.spend)+'</td><td style="text-align:right">'+(r.cost_per_result?F(r.cost_per_result):'')+'</td><td>'+(r.purchase_roas_meta||'')+'</td><td style="text-align:right">'+F(r.cpm)+'</td><td style="text-align:right">'+F(r.reach)+'</td><td style="text-align:right">'+F(r.impressions)+'</td><td style="text-align:right">'+F(r.unique_clicks)+'</td><td>'+(r.unique_ctr?r.unique_ctr.toFixed(2):'')+'</td><td style="text-align:right">'+F(r.cost_per_click)+'</td><td>'+(r.frequency?r.frequency.toFixed(2):'')+'</td><td style="text-align:right">'+F(r.results_meta)+'</td><td style="text-align:right;font-weight:600">'+(r.results_mp||'')+'</td><td style="text-align:right;font-weight:600;color:#00d">'+(r.revenue?F(r.revenue):'')+'</td><td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+(r.profit?F(r.profit):'')+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+(r.roas?r.roas.toFixed(1):'')+'</td><td>'+(r.cvr?r.cvr.toFixed(2):'')+'</td><td style="text-align:right">'+(r.budget?F(r.budget):'')+'</td></tr>';
+const hl=HIGHLIGHTS[r.adset_id];
+const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
+const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';
+const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
+let resultBudget='';
+if(r.budget&&hlPct!==null){
+if(hl==='off')resultBudget='OFF';
+else resultBudget=F(Math.round(r.budget*(1+hlPct/100)));
+}
+const memoVal=(r.memo||'').replace(/"/g,'&quot;');
+const nameBg=hlCls?'class="'+hlCls+'"':'';
+h+='<tr><td style="text-align:left" '+nameBg+'>'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left" '+nameBg+'>'+(r.adset_name||'').slice(0,30)+'</td><td style="font-size:9px" '+nameBg+'>'+r.adset_id+'</td><td style="text-align:right">'+F(r.spend)+'</td><td style="text-align:right">'+(r.cost_per_result?F(r.cost_per_result):'')+'</td><td>'+(r.purchase_roas_meta||'')+'</td><td style="text-align:right">'+F(r.cpm)+'</td><td style="text-align:right">'+F(r.reach)+'</td><td style="text-align:right">'+F(r.impressions)+'</td><td style="text-align:right">'+F(r.unique_clicks)+'</td><td>'+(r.unique_ctr?r.unique_ctr.toFixed(2):'')+'</td><td style="text-align:right">'+F(r.cost_per_click)+'</td><td>'+(r.frequency?r.frequency.toFixed(2):'')+'</td><td style="text-align:right">'+F(r.results_meta)+'</td><td style="text-align:right;font-weight:600">'+(r.results_mp||'')+'</td><td style="text-align:right;font-weight:600;color:#00d">'+(r.revenue?F(r.revenue):'')+'</td><td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+(r.profit?F(r.profit):'')+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+(r.roas?r.roas.toFixed(1):'')+'</td><td>'+(r.cvr?r.cvr.toFixed(2):'')+'</td><td style="text-align:right">'+(r.budget?F(r.budget):'')+'</td><td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td><td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultBudget+'</td><td><input class="memo-input" value="'+memoVal+'" data-date="'+r.date+'" data-id="'+r.adset_id+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td></tr>';
 });
 h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
 }
