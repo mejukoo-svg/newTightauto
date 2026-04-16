@@ -553,77 +553,110 @@ h+='<tr><td style="text-align:left" '+nameBg+'>'+(r.campaign_name||'').slice(0,3
 });
 h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
 }
-// ========= 대시보드 (상품별 비교 중심) =========
-let dashState={period:'7',metric:'profit',lineMetric:'profit'};
+// ========= 대시보드 (날짜 A vs B 비교) =========
+let dashState={dateA:null,dateB:null,metric:'profit'};
 let dashCharts={};
 
-function getPeriodData(period){
-let days=parseInt(period);
-const dd=DATES.slice(0,days);
-return AD.filter(r=>dd.includes(r.date));
+function aggregateDay(date){
+const rows=AD.filter(r=>r.date===date);
+const s=rows.reduce((a,b)=>a+b.spend,0);
+const r=rows.reduce((a,b)=>a+b.revenue,0);
+const p=r-s;
+const mp=rows.reduce((a,b)=>a+b.results_mp,0);
+const uc=rows.reduce((a,b)=>a+b.unique_clicks,0);
+return{s,r,p,mp,uc,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,rows};
+}
+
+function diffPct(a,b){
+if(!b||b===0)return null;
+return (a-b)/Math.abs(b)*100;
+}
+
+function fmtDiff(diff,isPercent){
+if(diff==null)return '<span style="color:#999">—</span>';
+const sign=diff>0?'▲':(diff<0?'▼':'');
+const color=diff>0?'#16a34a':(diff<0?'#dc2626':'#999');
+return '<span style="color:'+color+';font-weight:600">'+sign+' '+Math.abs(diff).toFixed(1)+'%'+'</span>';
 }
 
 function renderDashboard(){
 const el=document.getElementById('dashContent');
-const pd=getPeriodData(dashState.period);
-const totS=pd.reduce((a,b)=>a+b.spend,0);
-const totR=pd.reduce((a,b)=>a+b.revenue,0);
-const totP=totR-totS;
-const totMp=pd.reduce((a,b)=>a+b.results_mp,0);
-const totUc=pd.reduce((a,b)=>a+b.unique_clicks,0);
-const roas=totS>0?totR/totS*100:0;
-const cvr=totUc>0&&totMp>0?totMp/totUc*100:0;
+// Default: A=어제, B=그제
+if(!dashState.dateA&&DATES.length){
+dashState.dateA=DATES[0];
+dashState.dateB=DATES[1]||DATES[0];
+}
+// Build date dropdown options
+const dateOpts=DATES.map(d=>'<option value="'+d+'">'+DK(d)+' ('+WD(d)+')</option>').join('');
 
-const periodLabel={7:'최근 7일',30:'최근 30일',90:'최근 90일',180:'최근 180일'}[dashState.period]||dashState.period+'일';
+let h='<div class="dash-filter"><label>날짜 A (최근)</label><select id="dA">'+dateOpts+'</select><label style="margin-left:14px">날짜 B (비교)</label><select id="dB">'+dateOpts+'</select><span id="dPeriodInfo" style="color:#888;margin-left:12px;font-size:11px"></span></div>';
 
-let h='<div class="dash-filter"><label>기간</label><select id="dPeriod"><option value="7">최근 7일</option><option value="30">최근 30일</option><option value="90">최근 90일</option><option value="180">최근 180일</option></select><span style="color:#888;margin-left:12px;font-size:11px">※ '+periodLabel+' 기준</span></div>';
+const A=aggregateDay(dashState.dateA);
+const B=aggregateDay(dashState.dateB);
 
-// KPI cards (이익, ROAS, 지출, CVR 4개)
+// KPI comparison cards (4개: 이익, ROAS, 지출, CVR)
 h+='<div class="kpi-grid">';
-h+='<div class="kpi-card accent"><div class="k-label">💰 순이익</div><div class="k-value '+(totP>=0?'pos':'neg')+'">'+W(totP)+'</div><div class="k-sub">매출 '+W(totR)+'</div></div>';
-h+='<div class="kpi-card accent"><div class="k-label">🎯 ROAS</div><div class="k-value">'+roas.toFixed(1)+'%</div><div class="k-sub">'+(roas>=100?'수익 중':'손실 중')+'</div></div>';
-h+='<div class="kpi-card accent"><div class="k-label">💸 지출</div><div class="k-value" style="color:#d00">'+W(totS)+'</div><div class="k-sub">일평균 '+W(Math.round(totS/parseInt(dashState.period)))+'</div></div>';
-h+='<div class="kpi-card accent"><div class="k-label">🛒 CVR</div><div class="k-value">'+cvr.toFixed(2)+'%</div><div class="k-sub">구매 '+F(totMp)+'건 / 클릭 '+F(totUc)+'</div></div>';
+const kpiData=[
+{label:'💰 순이익',a:A.p,b:B.p,isMoney:true,isPct:false,colorByValue:true},
+{label:'🎯 ROAS',a:A.roas,b:B.roas,isMoney:false,isPct:true,colorByValue:false},
+{label:'💸 지출',a:A.s,b:B.s,isMoney:true,isPct:false,colorByValue:false,invert:true,color:'#d00'},
+{label:'🛒 CVR',a:A.cvr,b:B.cvr,isMoney:false,isPct:true,colorByValue:false},
+];
+kpiData.forEach(k=>{
+const d=diffPct(k.a,k.b);
+let valueCls='';let valueColor='';
+if(k.colorByValue)valueCls=k.a>=0?'pos':'neg';
+if(k.color)valueColor='style="color:'+k.color+'"';
+const valA=k.isMoney?W(k.a):(k.a.toFixed(2)+'%');
+const valB=k.isMoney?W(k.b):(k.b.toFixed(2)+'%');
+// invert direction meaning for 지출 (증가가 나쁨)
+let dText=fmtDiff(d,k.isPct);
+if(k.invert&&d!=null){
+const sign=d>0?'▲':(d<0?'▼':'');
+const color=d>0?'#dc2626':(d<0?'#16a34a':'#999');
+dText='<span style="color:'+color+';font-weight:600">'+sign+' '+Math.abs(d).toFixed(1)+'%'+'</span>';
+}
+h+='<div class="kpi-card accent"><div class="k-label">'+k.label+'</div><div class="k-value '+valueCls+'" '+valueColor+'>'+valA+'</div><div class="k-sub">vs B: '+valB+' &nbsp;&nbsp;'+dText+'</div></div>';
+});
 h+='</div>';
 
 // Charts
 h+='<div class="chart-grid">';
-h+='<div class="chart-card"><h3>🥧 상품별 지출 비중</h3><div class="chart-wrap"><canvas id="chPie"></canvas></div></div>';
-h+='<div class="chart-card"><h3>📊 상품별 비교 <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option></select></h3><div class="chart-wrap"><canvas id="chBar"></canvas></div></div>';
-h+='<div class="chart-card wide"><h3>📈 일별 추이 <select id="dLineMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option></select></h3><div class="chart-wrap tall"><canvas id="chLine"></canvas></div></div>';
-h+='<div class="chart-card"><h3>🏆 Top 5 광고 세트 (ROAS 기준)</h3><ul class="top-list" id="topList"></ul></div>';
-h+='<div class="chart-card"><h3>⚠️ 주의 광고 세트 (지출 많고 ROAS 낮음)</h3><ul class="top-list" id="warnList"></ul></div>';
+h+='<div class="chart-card"><h3>📊 상품별 비교 (A vs B) <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option><option value="revenue">매출</option></select></h3><div class="chart-wrap tall"><canvas id="chBar"></canvas></div></div>';
+h+='<div class="chart-card"><h3>🥧 지출 비중 — 날짜 A</h3><div class="chart-wrap"><canvas id="chPieA"></canvas></div></div>';
+h+='<div class="chart-card"><h3>🥧 지출 비중 — 날짜 B</h3><div class="chart-wrap"><canvas id="chPieB"></canvas></div></div>';
+h+='<div class="chart-card"><h3>🏆 Top 5 광고 세트 — 날짜 A (ROAS)</h3><ul class="top-list" id="topListA"></ul></div>';
+h+='<div class="chart-card"><h3>⚠️ 주의 광고 세트 — 날짜 A</h3><ul class="top-list" id="warnListA"></ul></div>';
 h+='</div>';
 
 el.innerHTML=h;
 
-// Wire up period dropdown
-const pSel=document.getElementById('dPeriod');
-pSel.value=dashState.period;
-pSel.addEventListener('change',e=>{dashState.period=e.target.value;renderDashboard()});
+// Set dropdown values
+document.getElementById('dA').value=dashState.dateA;
+document.getElementById('dB').value=dashState.dateB;
+document.getElementById('dBarMetric').value=dashState.metric;
 
-// Bar metric dropdown
-const bSel=document.getElementById('dBarMetric');
-bSel.value=dashState.metric;
-bSel.addEventListener('change',e=>{dashState.metric=e.target.value;drawBarChart(pd)});
+// Period info text
+const dA=new Date(dashState.dateA),dB=new Date(dashState.dateB);
+const dayDiff=Math.round((dA-dB)/864e5);
+document.getElementById('dPeriodInfo').textContent=`※ A는 B보다 ${dayDiff>=0?dayDiff+'일 후':Math.abs(dayDiff)+'일 전'}`;
 
-// Line metric dropdown
-const lSel=document.getElementById('dLineMetric');
-lSel.value=dashState.lineMetric;
-lSel.addEventListener('change',e=>{dashState.lineMetric=e.target.value;drawLineChart()});
+// Listeners
+document.getElementById('dA').addEventListener('change',e=>{dashState.dateA=e.target.value;renderDashboard()});
+document.getElementById('dB').addEventListener('change',e=>{dashState.dateB=e.target.value;renderDashboard()});
+document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawBarChart(A,B)});
 
-// Draw charts
 setTimeout(()=>{
-drawPieChart(pd);
-drawBarChart(pd);
-drawLineChart();
-drawTopLists(pd);
+drawBarChart(A,B);
+drawPieChart('chPieA',A);
+drawPieChart('chPieB',B);
+drawTopLists('topListA','warnListA',A);
 },50);
 }
 
-function aggByProduct(pd){
+function aggByProduct(rows){
 const by={};
-pd.forEach(r=>{
+rows.forEach(r=>{
 if(!by[r.product])by[r.product]={product:r.product,spend:0,revenue:0,profit:0,mp:0,uc:0};
 by[r.product].spend+=r.spend;by[r.product].revenue+=r.revenue;by[r.product].profit+=r.profit;
 by[r.product].mp+=r.results_mp;by[r.product].uc+=r.unique_clicks;
@@ -633,72 +666,61 @@ return Object.values(by).filter(x=>x.spend>0);
 
 const BRAND_COLORS=['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0','#ff6d01','#00acc1','#e91e63','#795548','#607d8b','#f59e0b','#10b981','#6366f1','#ef4444','#14b8a6'];
 
-function drawPieChart(pd){
-const agg=aggByProduct(pd).sort((a,b)=>b.spend-a.spend).slice(0,10);
+function drawPieChart(canvasId,data){
+const agg=aggByProduct(data.rows).sort((a,b)=>b.spend-a.spend).slice(0,10);
 const labels=agg.map(x=>x.product);
-const data=agg.map(x=>x.spend);
-if(dashCharts.pie)dashCharts.pie.destroy();
-const ctx=document.getElementById('chPie');
+const values=agg.map(x=>x.spend);
+if(dashCharts[canvasId])dashCharts[canvasId].destroy();
+const ctx=document.getElementById(canvasId);
 if(!ctx)return;
-dashCharts.pie=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:BRAND_COLORS,borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},padding:8,boxWidth:12}},tooltip:{callbacks:{label:ctx=>{const v=ctx.parsed;const t=data.reduce((a,b)=>a+b,0);return ctx.label+': '+W(v)+' ('+(v/t*100).toFixed(1)+'%)'}}}}}});
+dashCharts[canvasId]=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data:values,backgroundColor:BRAND_COLORS,borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},padding:6,boxWidth:12}},tooltip:{callbacks:{label:ctx=>{const v=ctx.parsed;const t=values.reduce((a,b)=>a+b,0);return ctx.label+': '+W(v)+' ('+(v/t*100).toFixed(1)+'%)'}}}}}});
 }
 
-function drawBarChart(pd){
+function drawBarChart(A,B){
 const metric=dashState.metric;
-const agg=aggByProduct(pd);
-// Compute metric value per product
-agg.forEach(p=>{
-p._roas=p.spend>0?p.revenue/p.spend*100:0;
-p._cvr=p.uc>0&&p.mp>0?p.mp/p.uc*100:0;
-});
-const sortKey={profit:'profit',roas:'_roas',spend:'spend',cvr:'_cvr'}[metric];
-agg.sort((a,b)=>b[sortKey]-a[sortKey]);
-const labels=agg.map(x=>x.product);
-const values=agg.map(x=>x[sortKey]);
-const colors=values.map(v=>{
-if(metric==='profit')return v>=0?'#16a34a':'#dc2626';
-if(metric==='roas')return v>=100?'#16a34a':(v>=50?'#fbbc04':'#dc2626');
-if(metric==='spend')return '#4285f4';
-return '#9c27b0';
-});
+const aggA=aggByProduct(A.rows);
+const aggB=aggByProduct(B.rows);
+// 두 날짜에 등장한 모든 상품
+const allProducts=new Set([...aggA.map(x=>x.product),...aggB.map(x=>x.product)]);
+const mapA={};aggA.forEach(x=>{mapA[x.product]=x});
+const mapB={};aggB.forEach(x=>{mapB[x.product]=x});
+const products=[...allProducts];
+// Value extractor
+const getVal=(p,side)=>{
+const m=side==='A'?mapA[p]:mapB[p];
+if(!m)return 0;
+if(metric==='profit')return m.profit;
+if(metric==='spend')return m.spend;
+if(metric==='revenue')return m.revenue;
+if(metric==='roas')return m.spend>0?m.revenue/m.spend*100:0;
+if(metric==='cvr')return m.uc>0&&m.mp>0?m.mp/m.uc*100:0;
+return 0;
+};
+// Sort by A's value desc
+products.sort((a,b)=>getVal(b,'A')-getVal(a,'A'));
+const top=products.slice(0,12);
+const valuesA=top.map(p=>getVal(p,'A'));
+const valuesB=top.map(p=>getVal(p,'B'));
 if(dashCharts.bar)dashCharts.bar.destroy();
 const ctx=document.getElementById('chBar');
 if(!ctx)return;
-const labelMap={profit:'이익',roas:'ROAS (%)',spend:'지출',cvr:'CVR (%)'};
-dashCharts.bar=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:labelMap[metric],data:values,backgroundColor:colors,borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const v=ctx.parsed.x;if(metric==='roas'||metric==='cvr')return v.toFixed(2)+'%';return W(Math.round(v))}}}},scales:{x:{ticks:{font:{size:10},callback:v=>{if(metric==='roas'||metric==='cvr')return v.toFixed(0)+'%';if(Math.abs(v)>=1e6)return (v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return (v/1e3).toFixed(0)+'K';return v}}},y:{ticks:{font:{size:10}}}}}});
+const labelMap={profit:'이익',roas:'ROAS (%)',spend:'지출',cvr:'CVR (%)',revenue:'매출'};
+const dA=DK(dashState.dateA),dB=DK(dashState.dateB);
+dashCharts.bar=new Chart(ctx,{type:'bar',data:{labels:top,datasets:[{label:'A: '+dA,data:valuesA,backgroundColor:'#4285f4',borderWidth:0},{label:'B: '+dB,data:valuesB,backgroundColor:'#aaaaaa',borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}},tooltip:{callbacks:{label:ctx=>{const v=ctx.parsed.y;if(metric==='roas'||metric==='cvr')return ctx.dataset.label+': '+v.toFixed(2)+'%';return ctx.dataset.label+': '+W(Math.round(v))}}}},scales:{x:{ticks:{font:{size:10}}},y:{ticks:{font:{size:10},callback:v=>{if(metric==='roas'||metric==='cvr')return v.toFixed(0)+'%';if(Math.abs(v)>=1e6)return (v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return (v/1e3).toFixed(0)+'K';return v}}}}}});
 }
 
-function drawLineChart(){
-const metric=dashState.lineMetric;
-const days=parseInt(dashState.period);
-const dd=DATES.slice(0,days).reverse();
-const byDate={};
-AD.forEach(r=>{if(!dd.includes(r.date))return;if(!byDate[r.date])byDate[r.date]={s:0,r:0,p:0,mp:0,uc:0};byDate[r.date].s+=r.spend;byDate[r.date].r+=r.revenue;byDate[r.date].p+=r.profit;byDate[r.date].mp+=r.results_mp;byDate[r.date].uc+=r.unique_clicks});
-const values=dd.map(d=>{const x=byDate[d];if(!x)return 0;if(metric==='profit')return x.p;if(metric==='roas')return x.s>0?x.r/x.s*100:0;if(metric==='spend')return x.s;if(metric==='cvr')return x.uc>0&&x.mp>0?x.mp/x.uc*100:0;return 0});
-const labels=dd.map(d=>DK(d).slice(3));
-if(dashCharts.line)dashCharts.line.destroy();
-const ctx=document.getElementById('chLine');
-if(!ctx)return;
-const color={profit:'#16a34a',roas:'#4285f4',spend:'#dc2626',cvr:'#9c27b0'}[metric];
-const labelMap={profit:'이익',roas:'ROAS (%)',spend:'지출',cvr:'CVR (%)'};
-dashCharts.line=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:labelMap[metric],data:values,borderColor:color,backgroundColor:color+'22',borderWidth:2.5,tension:0.25,fill:true,pointRadius:3,pointHoverRadius:6}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const v=ctx.parsed.y;if(metric==='roas'||metric==='cvr')return labelMap[metric]+': '+v.toFixed(2)+'%';return labelMap[metric]+': '+W(Math.round(v))}}}},scales:{x:{ticks:{font:{size:9},maxRotation:45}},y:{ticks:{font:{size:10},callback:v=>{if(metric==='roas'||metric==='cvr')return v.toFixed(0)+'%';if(Math.abs(v)>=1e6)return (v/1e6).toFixed(1)+'M';if(Math.abs(v)>=1e3)return (v/1e3).toFixed(0)+'K';return v}}}}}});
-}
-
-function drawTopLists(pd){
-// Aggregate per adset
+function drawTopLists(topId,warnId,data){
 const byA={};
-pd.forEach(r=>{
+data.rows.forEach(r=>{
 if(!byA[r.adset_id])byA[r.adset_id]={name:r.adset_name,product:r.product,spend:0,revenue:0,profit:0};
 byA[r.adset_id].spend+=r.spend;byA[r.adset_id].revenue+=r.revenue;byA[r.adset_id].profit+=r.profit;
 });
 const list=Object.values(byA).filter(x=>x.spend>=10000).map(x=>({...x,roas:x.spend>0?x.revenue/x.spend*100:0}));
-// Top 5 by ROAS
 const top=list.sort((a,b)=>b.roas-a.roas).slice(0,5);
-const topEl=document.getElementById('topList');
+const topEl=document.getElementById(topId);
 if(topEl)topEl.innerHTML=top.map((x,i)=>'<li><span><span class="rank">#'+(i+1)+'</span>'+(x.name||'').slice(0,22)+' <span style="color:#888;font-size:9px">('+x.product+')</span></span><span class="val" style="color:#16a34a">'+x.roas.toFixed(0)+'%</span></li>').join('')||'<li style="color:#888">데이터 없음</li>';
-// Warning: high spend + low ROAS
 const warn=list.filter(x=>x.spend>=100000&&x.roas<80).sort((a,b)=>b.spend-a.spend).slice(0,5);
-const wEl=document.getElementById('warnList');
+const wEl=document.getElementById(warnId);
 if(wEl)wEl.innerHTML=warn.map((x,i)=>'<li><span><span class="rank" style="color:#dc2626">!</span>'+(x.name||'').slice(0,22)+' <span style="color:#888;font-size:9px">('+x.product+')</span></span><span class="val" style="color:#dc2626">'+x.roas.toFixed(0)+'% / '+W(x.spend)+'</span></li>').join('')||'<li style="color:#888">양호한 상태</li>';
 }
 
