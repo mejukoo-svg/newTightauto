@@ -108,9 +108,31 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 .top-list .rank{font-weight:700;color:#4285f4;margin-right:8px}
 .top-list .val{font-weight:600}
 @media(max-width:900px){.chart-grid{grid-template-columns:1fr}}
+/* Login */
+#loginScreen{position:fixed;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;z-index:9999}
+.login-box{background:#fff;padding:36px 32px;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.2);width:320px;text-align:center}
+.login-box h1{font-size:16px;color:#333;margin-bottom:6px}
+.login-box .sub{font-size:11px;color:#888;margin-bottom:20px}
+.login-box input{width:100%;padding:11px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;font-family:inherit;margin-bottom:10px;box-sizing:border-box}
+.login-box input:focus{outline:none;border-color:#4285f4}
+.login-box button{width:100%;padding:11px;background:#4285f4;color:#fff;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.login-box button:hover{background:#3367d6}
+.login-box .err{color:#dc2626;font-size:11px;margin-top:8px;min-height:14px}
+#appContent{display:none}
+#appContent.ready{display:block}
 </style>
 </head>
 <body>
+<div id="loginScreen">
+<div class="login-box">
+<h1>🔒 비즈니스리뷰 대시보드</h1>
+<div class="sub">접근하려면 비밀번호를 입력하세요</div>
+<input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password">
+<button onclick="tryLogin()">로그인</button>
+<div class="err" id="loginErr"></div>
+</div>
+</div>
+<div id="appContent">
 <div class="tab-bar" id="tabBar">
 <div class="tab active" data-t="dashboard">📊 대시보드</div>
 <div class="tab" data-t="trend">추이차트</div>
@@ -680,7 +702,40 @@ const wEl=document.getElementById('warnList');
 if(wEl)wEl.innerHTML=warn.map((x,i)=>'<li><span><span class="rank" style="color:#dc2626">!</span>'+(x.name||'').slice(0,22)+' <span style="color:#888;font-size:9px">('+x.product+')</span></span><span class="val" style="color:#dc2626">'+x.roas.toFixed(0)+'% / '+W(x.spend)+'</span></li>').join('')||'<li style="color:#888">양호한 상태</li>';
 }
 
-attachTabs();init();
+// ========= AUTH =========
+const AUTH_PW='tkwnrndgkq!';
+const AUTH_KEY='tight_dash_auth_v1';
+
+function tryLogin(){
+const pw=document.getElementById('loginPw').value;
+const err=document.getElementById('loginErr');
+if(pw===AUTH_PW){
+try{localStorage.setItem(AUTH_KEY,'ok')}catch(e){}
+showApp();
+}else{
+err.textContent='비밀번호가 맞지 않습니다.';
+document.getElementById('loginPw').value='';
+}
+}
+
+function showApp(){
+document.getElementById('loginScreen').style.display='none';
+document.getElementById('appContent').classList.add('ready');
+attachTabs();
+init();
+}
+
+// Enter key on login input
+document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin()});
+
+// Auto-login if previously authenticated
+try{
+if(localStorage.getItem(AUTH_KEY)==='ok'){
+showApp();
+}else{
+document.getElementById('loginPw').focus();
+}
+}catch(e){document.getElementById('loginPw').focus()}
 </script>
-</body>
+</div></body>
 </html>
