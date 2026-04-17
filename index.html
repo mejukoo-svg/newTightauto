@@ -120,6 +120,15 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 .login-box .err{color:#dc2626;font-size:11px;margin-top:8px;min-height:14px}
 #appContent{display:none}
 #appContent.ready{display:block}
+/* Zoom controls */
+.zoom-bar{position:sticky;top:35px;z-index:99;display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:3px 10px;background:#f0f0f0;border-bottom:1px solid #ddd;font-size:11px}
+.zoom-bar button{width:26px;height:22px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;font-size:13px;font-weight:700;color:#555;display:flex;align-items:center;justify-content:center;padding:0}
+.zoom-bar button:hover{background:#e8e8e8}
+.zoom-bar .zoom-pct{min-width:36px;text-align:center;font-weight:600;color:#333}
+/* Yesterday column highlight */
+th.col-yday{border:3px solid #222!important;border-bottom:3px solid #222!important;background:#e0e7ff!important;font-weight:700!important}
+td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!important}
+tr:last-child td.col-yday{border-bottom:3px solid #222!important}
 </style>
 </head>
 <body>
@@ -145,6 +154,7 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 <div class="tab" data-t="datetab">날짜탭</div>
 <div class="tab" data-t="dateproduct">날짜별탭_상품</div>
 </div>
+<div class="zoom-bar"><button onclick="zoomChange(-10)">−</button><span class="zoom-pct" id="zoomPct">100%</span><button onclick="zoomChange(10)">+</button><button onclick="zoomReset()" style="width:auto;padding:0 6px;font-size:10px;font-weight:500">초기화</button></div>
 <div class="panel active" id="p-dashboard"><div id="dashContent" style="padding:16px"></div></div>
 <div class="panel" id="p-trend"><div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-product"><div class="filter"><label>상품 선택</label><select id="pSel"><option value="">(상품을 선택하세요)</option></select></div><div class="sheet-wrap"><table id="pTbl"></table></div></div>
@@ -326,14 +336,16 @@ return{dd,d7,list};
 function renderTrend(){
 const days=parseInt(document.getElementById('tDays').value);
 const{dd,d7,list}=buildTD(days);
-const ths=dd.map(d=>{const w=WD(d);return'<th class="'+(w==='일'?'sun':'')+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+// Yesterday date
+const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
 const c2='<td class="c2"><span style="color:#000;font-weight:600">ROAS</span>\n<span style="color:#1a6b1a">순이익</span>\n<span style="color:#d00">지출</span>\n<span style="color:#0000dd">매출</span>\n<span style="color:#000">전환율</span></td>';
 const ts=d7.reduce((a,d)=>a+(DAILY[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(DAILY[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
-const sc=dd.map(d=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,x.p,x.s,x.r,cvr)+'</td>'}).join('');
+const sc=dd.map(d=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const yd=d===yDay?' col-yday':'';return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,cvr)+'</td>'}).join('');
 let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인 이름</th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th style="min-width:130px">광고 세트 ID</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
 h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td>'+c2+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>'+sc+'</tr>';
 list.forEach(a=>{
-const cells=dd.map(d=>{const r=a.d[d];if(!r||!r.spend)return'<td></td>';return'<td class="mc '+RC(r.roas)+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
+const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
 const hl=hlClass(a.id);
 const clickable=' clickable" data-id="'+a.id+'" onclick="showColorPicker(\''+a.id+'\',this)"';
 h+='<tr><td class="fx fx0 '+hl+clickable+' title="'+a.cn+'">'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+clickable+' title="'+a.an+'">'+((a.an||'').slice(0,25))+'</td><td class="'+hl+clickable+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
@@ -342,13 +354,14 @@ h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
 }
 function renderChange(){
 const{dd,d7,list}=buildTD(30);
-const ths=dd.map(d=>'<th style="min-width:90px">'+DK(d)+'</th>').join('');
+const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
 const ts=d7.reduce((a,d)=>a+(DAILY[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(DAILY[d]?.r||0),0),troas=ts>0?tr/ts*100:0;
-const sc=dd.map((d,i)=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<dd.length-1){const pr=DAILY[dd[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}return'<td class="mc '+RC(roas)+'">'+MCC(roas,chg,x.s,x.r,0)+'</td>'}).join('');
+const sc=dd.map((d,i)=>{const x=DAILY[d];if(!x)return'<td></td>';const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<dd.length-1){const pr=DAILY[dd[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}const yd=d===yDay?' col-yday':'';return'<td class="mc '+RC(roas)+yd+'">'+MCC(roas,chg,x.s,x.r,0)+'</td>'}).join('');
 let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인 이름</th><th style="min-width:200px;text-align:left">광고 세트 이름</th><th>광고 세트 ID</th><th>7일 평균</th>'+ths+'</tr></thead><tbody>';
 h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc">'+MCC(troas,0,ts,tr,0)+'</td>'+sc+'</tr>';
 list.forEach(a=>{
-const cells=dd.map((d,i)=>{const r=a.d[d];if(!r||!r.spend)return'<td></td>';let chg=0;if(i<dd.length-1){const pr=a.d[dd[i+1]];if(pr&&pr.spend>0)chg=(r.spend-pr.spend)/pr.spend*100}return'<td class="mc '+RC(r.roas)+'">'+MCC(r.roas,chg,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
+const cells=dd.map((d,i)=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';let chg=0;if(i<dd.length-1){const pr=a.d[dd[i+1]];if(pr&&pr.spend>0)chg=(r.spend-pr.spend)/pr.spend*100}return'<td class="mc '+RC(r.roas)+yd+'">'+MCC(r.roas,chg,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
 h+='<tr><td class="fx fx0">'+(a.cn||'').slice(0,25)+'</td><td class="fx fx1">'+(a.an||'').slice(0,25)+'</td><td style="font-size:9px">'+a.id+'</td><td class="mc">'+MCC(a._roas,0,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
 });
 h+='</tbody>';document.getElementById('cTbl').innerHTML=h;
@@ -564,7 +577,9 @@ const r=rows.reduce((a,b)=>a+b.revenue,0);
 const p=r-s;
 const mp=rows.reduce((a,b)=>a+b.results_mp,0);
 const uc=rows.reduce((a,b)=>a+b.unique_clicks,0);
-return{s,r,p,mp,uc,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,rows};
+const imp=rows.reduce((a,b)=>a+(b.impressions||0),0);
+const cpm=imp>0?s/imp*1000:0;
+return{s,r,p,mp,uc,imp,cpm,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,rows};
 }
 
 function diffPct(a,b){
@@ -594,13 +609,14 @@ let h='<div class="dash-filter"><label>날짜 A (최근)</label><select id="dA">
 const A=aggregateDay(dashState.dateA);
 const B=aggregateDay(dashState.dateB);
 
-// KPI comparison cards (4개: 이익, ROAS, 지출, CVR)
+// KPI comparison cards (5개: 이익, ROAS, 지출, CVR, CPM)
 h+='<div class="kpi-grid">';
 const kpiData=[
 {label:'💰 순이익',a:A.p,b:B.p,isMoney:true,isPct:false,colorByValue:true},
 {label:'🎯 ROAS',a:A.roas,b:B.roas,isMoney:false,isPct:true,colorByValue:false},
 {label:'💸 지출',a:A.s,b:B.s,isMoney:true,isPct:false,colorByValue:false,invert:true,color:'#d00'},
 {label:'🛒 CVR',a:A.cvr,b:B.cvr,isMoney:false,isPct:true,colorByValue:false},
+{label:'📢 CPM',a:A.cpm,b:B.cpm,isMoney:true,isPct:false,colorByValue:false,invert:true,color:'#795548'},
 ];
 kpiData.forEach(k=>{
 const d=diffPct(k.a,k.b);
@@ -723,6 +739,15 @@ const warn=list.filter(x=>x.spend>=100000&&x.roas<80).sort((a,b)=>b.spend-a.spen
 const wEl=document.getElementById(warnId);
 if(wEl)wEl.innerHTML=warn.map((x,i)=>'<li><span><span class="rank" style="color:#dc2626">!</span>'+(x.name||'').slice(0,22)+' <span style="color:#888;font-size:9px">('+x.product+')</span></span><span class="val" style="color:#dc2626">'+x.roas.toFixed(0)+'% / '+W(x.spend)+'</span></li>').join('')||'<li style="color:#888">양호한 상태</li>';
 }
+
+// ========= ZOOM =========
+let zoomLevel=100;
+function applyZoom(){
+document.querySelectorAll('.panel').forEach(p=>{p.style.transformOrigin='top left';p.style.transform='scale('+(zoomLevel/100)+')';p.style.width=(10000/zoomLevel)+'%'});
+document.getElementById('zoomPct').textContent=zoomLevel+'%';
+}
+function zoomChange(delta){zoomLevel=Math.max(50,Math.min(200,zoomLevel+delta));applyZoom()}
+function zoomReset(){zoomLevel=100;applyZoom()}
 
 // ========= AUTH =========
 const AUTH_PW='tkwnrndgkq!';
