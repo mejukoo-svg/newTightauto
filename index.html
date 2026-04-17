@@ -202,7 +202,7 @@ function switchMode(m){
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
   document.getElementById('modeLabel').textContent=m==='kr'?'국내 · KRW':'글로벌 · USD';
   // Toggle global-only tabs
-  document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'':'none');
+  document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
   // Switch data
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else{AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
