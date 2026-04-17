@@ -1,9 +1,9 @@
 name: Meta+Mixpanel → Supabase
-
 on:
   schedule:
-    - cron: '0 0 * * *'
-    - cron: '0 9 * * *'
+    - cron: '0 15 * * *'   # KST 00:00
+    - cron: '0 21 * * *'   # KST 06:00
+    - cron: '0 9 * * *'    # KST 18:00
   workflow_dispatch:
     inputs:
       full_refresh:
@@ -25,23 +25,18 @@ on:
           - '30'
           - '180'
           - '365'
-
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install requests pandas yfinance
-
       - name: Run pipeline
         env:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
