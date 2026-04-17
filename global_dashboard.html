@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>글로벌 비즈니스리뷰 (USD)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:11px}
+.tab-bar{display:flex;gap:0;border-bottom:2px solid #1a73e8;background:#f8f9fa;padding:0 8px;overflow-x:auto;position:sticky;top:0;z-index:100}
+.tab{padding:8px 16px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid #ddd;border-bottom:none;background:#e8eaed;color:#555;margin-right:1px;border-radius:4px 4px 0 0;white-space:nowrap}
+.tab:hover{background:#fff;color:#222}
+.tab.active{background:#fff;color:#1a73e8;font-weight:700;border-bottom:2px solid #fff;margin-bottom:-2px}
+.panel{display:none;padding:0}
+.panel.active{display:block}
+.sheet-wrap{overflow:auto;max-height:calc(100vh - 80px)}
+table{border-collapse:collapse;font-size:11px;width:max-content}
+th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
+th{background:#efefef;font-weight:600;font-size:10px;position:sticky;top:0;z-index:10}
+td.mc{vertical-align:top;white-space:pre-line;line-height:1.35;font-size:10px;min-width:90px;padding:3px 4px}
+td.mc .r{font-weight:700;color:#000}
+td.mc .p{color:#1a6b1a}
+td.mc .p.neg{color:#d00}
+td.mc .s{color:#d00;font-size:9px}
+td.mc .rv{color:#0000dd;font-size:9px}
+td.mc .cv{color:#000;font-size:9px}
+.bg-r300{background:#00ffff!important}
+.bg-r200{background:#b3ffb3!important}
+.bg-r100{background:#ffff99!important}
+.bg-r50{background:#ffcccc!important}
+.bg-r0{background:#ff9999!important}
+td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;font-size:10px}
+td.fx0{left:0}td.fx1{left:200px}
+tr.sr{background:#e8e8e8;font-weight:700}
+tr.sr td.fx{background:#e8e8e8}
+.prod-header{background:#1a4d66!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
+.filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px;flex-wrap:wrap}
+.filter select{padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px}
+th.col-yday{border:3px solid #222!important;background:#e0e7ff!important;font-weight:700!important}
+td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!important}
+.kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}
+.kpi-card{background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:14px;border-top:3px solid #1a73e8}
+.kpi-card .k-label{font-size:10px;color:#888;margin-bottom:4px}
+.kpi-card .k-value{font-size:18px;font-weight:700}
+.kpi-card .k-sub{font-size:9px;color:#888;margin-top:3px}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.chart-card{background:#fff;border:1px solid #e0e0e0;border-radius:10px;padding:14px}
+.chart-card h3{font-size:12px;font-weight:700;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.chart-card h3 select{padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:10px}
+.chart-wrap{position:relative;height:240px}
+#dashContent{max-width:1200px;margin:0 auto;padding:16px}
+.top-list{list-style:none;padding:0}
+.top-list li{display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:10px}
+.top-list .rank{font-weight:700;color:#1a73e8;margin-right:6px}
+#loginScreen{position:fixed;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,#1a4d66 0%,#0d2b3e 100%);display:flex;align-items:center;justify-content:center;z-index:9999}
+.login-box{background:#fff;padding:36px 32px;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.2);width:320px;text-align:center}
+.login-box h1{font-size:16px;color:#333;margin-bottom:6px}
+.login-box .sub{font-size:11px;color:#888;margin-bottom:20px}
+.login-box input{width:100%;padding:11px 12px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-bottom:10px}
+.login-box input:focus{outline:none;border-color:#1a73e8}
+.login-box button{width:100%;padding:11px;background:#1a73e8;color:#fff;border:0;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer}
+.login-box .err{color:#dc2626;font-size:11px;margin-top:8px;min-height:14px}
+#appContent{display:none}
+#appContent.ready{display:block}
+@media(max-width:900px){.chart-grid{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div id="loginScreen">
+<div class="login-box">
+<h1>🌏 글로벌 비즈니스리뷰</h1>
+<div class="sub">접근하려면 비밀번호를 입력하세요</div>
+<input type="password" id="loginPw" placeholder="비밀번호" autocomplete="current-password">
+<button onclick="tryLogin()">로그인</button>
+<div class="err" id="loginErr"></div>
+</div>
+</div>
+<div id="appContent">
+<div class="tab-bar">
+<div class="tab active" data-t="dashboard">📊 대시보드</div>
+<div class="tab" data-t="trend">추이차트</div>
+<div class="tab" data-t="stripe">💳 Stripe 매출</div>
+<div class="tab" data-t="datetab">날짜탭</div>
+</div>
+<div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
+<div class="panel" id="p-trend"><div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><label style="margin-left:12px">국가</label><select id="tCountry"><option value="">전체</option><option value="대만">대만</option><option value="홍콩">홍콩</option><option value="일본">일본</option></select></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
+<div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
+<div class="panel" id="p-datetab"><div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
+</div>
+<script>
+const SB_URL='https://qkvqiorazdrhtuicnpec.supabase.co';
+const SB_KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
+const H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+const USD=n=>n==null||n===0?'':'$'+Math.round(n).toLocaleString('en-US');
+const KRW=n=>n==null||n===0?'':'₩'+Math.round(n).toLocaleString('ko-KR');
+const P=(n,d)=>n==null?'':n.toFixed(d||1)+'%';
+const WD=d=>['일','월','화','수','목','금','토'][new Date(d).getDay()];
+const DK=d=>{const p=d.split('-');return p[0].slice(2)+'/'+p[1]+'/'+p[2]};
+function RC(r){if(r>=300)return'bg-r300';if(r>=200)return'bg-r200';if(r>=100)return'bg-r100';if(r>0)return'bg-r50';return'bg-r0'}
+function MC(roas,profit,spend,revenue,cvr){
+if(!spend)return'';const pc=profit>=0?'p':'p neg';
+return'<div class="r">'+roas.toFixed(0)+'</div><div class="'+pc+'">'+USD(profit)+'</div><div class="s">-'+USD(spend)+'</div><div class="rv">'+USD(revenue)+'</div><div class="cv">'+P(cvr)+'</div>';
+}
+
+async function sb(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:H});return r.json()}
+async function sbAll(t){let p=0,a=[];while(true){const r=await sb(t,'select=*&order=date.desc,spend_usd.desc&limit=1000&offset='+p*1000);a=a.concat(r);if(r.length<1000)break;p++}return a}
+
+let AD=[],STRIPE=[],DATES=[],DAILY={};
+async function init(){
+const [adData,stripeData]=await Promise.all([sbAll('global_ad_performance_daily'),sb('global_stripe_daily','select=*&order=date.desc')]);
+AD=adData;STRIPE=stripeData;
+const bd={};
+AD.forEach(r=>{if(!bd[r.date])bd[r.date]={s:0,r:0,p:0,mp:0,uc:0};bd[r.date].s+=r.spend_usd;bd[r.date].r+=r.revenue_usd;bd[r.date].p+=r.profit_usd;bd[r.date].mp+=r.results_mp;bd[r.date].uc+=r.unique_clicks});
+DAILY=bd;DATES=Object.keys(bd).sort().reverse();
+document.getElementById('tDays').addEventListener('change',renderTrend);
+document.getElementById('tCountry').addEventListener('change',renderTrend);
+document.getElementById('dtSel').addEventListener('change',renderDateTab);
+attachTabs();renderDashboard();
+}
+
+function attachTabs(){
+document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
+document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+t.classList.add('active');document.getElementById('p-'+t.dataset.t).classList.add('active');
+const id=t.dataset.t;
+if(id==='dashboard')renderDashboard();
+if(id==='trend')renderTrend();
+if(id==='stripe')renderStripe();
+if(id==='datetab')renderDateTab();
+})});
+}
+
+// ===== Dashboard =====
+let dashCharts={};
+function renderDashboard(){
+const el=document.getElementById('dashContent');
+const dd=DATES.slice(0,30);
+const pd=AD.filter(r=>dd.includes(r.date));
+const totS=pd.reduce((a,b)=>a+b.spend_usd,0);
+const totR=pd.reduce((a,b)=>a+b.revenue_usd,0);
+const totP=totR-totS;
+const totMp=pd.reduce((a,b)=>a+b.results_mp,0);
+const totUc=pd.reduce((a,b)=>a+b.unique_clicks,0);
+const roas=totS>0?totR/totS*100:0;
+const cvr=totUc>0&&totMp>0?totMp/totUc*100:0;
+const imp=pd.reduce((a,b)=>a+(b.impressions||0),0);
+const cpm=imp>0?totS/imp*1000:0;
+
+let h='<div style="margin-bottom:12px;font-size:13px;font-weight:700;color:#1a4d66">🌏 글로벌 대시보드 (최근 30일, USD)</div>';
+h+='<div class="kpi-grid">';
+h+='<div class="kpi-card"><div class="k-label">💰 순이익</div><div class="k-value" style="color:'+(totP>=0?'#16a34a':'#dc2626')+'">'+USD(totP)+'</div><div class="k-sub">매출 '+USD(totR)+'</div></div>';
+h+='<div class="kpi-card"><div class="k-label">🎯 ROAS</div><div class="k-value">'+roas.toFixed(1)+'%</div></div>';
+h+='<div class="kpi-card"><div class="k-label">💸 지출</div><div class="k-value" style="color:#d00">'+USD(totS)+'</div></div>';
+h+='<div class="kpi-card"><div class="k-label">🛒 CVR</div><div class="k-value">'+cvr.toFixed(2)+'%</div></div>';
+h+='<div class="kpi-card"><div class="k-label">📢 CPM</div><div class="k-value" style="color:#795548">'+USD(cpm)+'</div></div>';
+h+='</div>';
+
+// Country breakdown
+const byCountry={};pd.forEach(r=>{const c=r.country||'기타';if(!byCountry[c])byCountry[c]={s:0,r:0,p:0};byCountry[c].s+=r.spend_usd;byCountry[c].r+=r.revenue_usd;byCountry[c].p+=r.profit_usd});
+h+='<div style="margin-bottom:16px"><table style="width:100%;max-width:600px"><thead><tr><th>국가</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th></tr></thead><tbody>';
+Object.entries(byCountry).sort((a,b)=>b[1].s-a[1].s).forEach(([c,v])=>{
+const rr=v.s>0?v.r/v.s*100:0;
+h+='<tr><td style="font-weight:600">'+c+'</td><td style="text-align:right;color:#d00">'+USD(v.s)+'</td><td style="text-align:right;color:#00d">'+USD(v.r)+'</td><td style="text-align:right;color:'+(v.p>=0?'green':'red')+'">'+USD(v.p)+'</td><td class="'+RC(rr)+'">'+rr.toFixed(1)+'%</td></tr>';
+});
+h+='</tbody></table></div>';
+
+// Charts
+h+='<div class="chart-grid">';
+h+='<div class="chart-card"><h3>📊 상품별 이익 (Top 10)</h3><div class="chart-wrap"><canvas id="gchBar"></canvas></div></div>';
+h+='<div class="chart-card"><h3>🥧 국가별 지출 비중</h3><div class="chart-wrap"><canvas id="gchPie"></canvas></div></div>';
+h+='</div>';
+
+// Stripe summary
+if(STRIPE.length){
+h+='<div style="margin-top:16px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">💳 Stripe 매출 (KRW) — 최근 7일</div>';
+h+='<table style="width:100%;max-width:800px"><thead><tr><th>날짜</th><th>대만</th><th>홍콩</th><th>일본</th><th>합계</th></tr></thead><tbody>';
+const sDates=[...new Set(STRIPE.map(r=>r.date))].sort().reverse().slice(0,7);
+sDates.forEach(d=>{
+const tw=STRIPE.find(r=>r.date===d&&r.country==='대만');
+const hk=STRIPE.find(r=>r.date===d&&r.country==='홍콩');
+const jp=STRIPE.find(r=>r.date===d&&r.country==='일본');
+const t=(tw?.revenue_krw||0)+(hk?.revenue_krw||0)+(jp?.revenue_krw||0);
+h+='<tr><td>'+DK(d)+'('+WD(d)+')</td><td style="text-align:right">'+KRW(tw?.revenue_krw)+'</td><td style="text-align:right">'+KRW(hk?.revenue_krw)+'</td><td style="text-align:right">'+KRW(jp?.revenue_krw)+'</td><td style="text-align:right;font-weight:700">'+KRW(t)+'</td></tr>';
+});
+h+='</tbody></table></div>';
+}
+
+el.innerHTML=h;
+
+// Draw charts
+setTimeout(()=>{
+// Bar chart — product profit
+const byP={};pd.forEach(r=>{if(!byP[r.product])byP[r.product]={s:0,r:0,p:0};byP[r.product].s+=r.spend_usd;byP[r.product].p+=r.profit_usd});
+const prods=Object.entries(byP).sort((a,b)=>b[1].p-a[1].p).slice(0,10);
+if(dashCharts.bar)dashCharts.bar.destroy();
+const ctx1=document.getElementById('gchBar');
+if(ctx1)dashCharts.bar=new Chart(ctx1,{type:'bar',data:{labels:prods.map(x=>x[0]),datasets:[{label:'이익(USD)',data:prods.map(x=>x[1].p),backgroundColor:prods.map(x=>x[1].p>=0?'#16a34a':'#dc2626')}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}}}});
+// Pie chart — country spend
+if(dashCharts.pie)dashCharts.pie.destroy();
+const ctx2=document.getElementById('gchPie');
+const cEntries=Object.entries(byCountry).sort((a,b)=>b[1].s-a[1].s);
+if(ctx2)dashCharts.pie=new Chart(ctx2,{type:'doughnut',data:{labels:cEntries.map(x=>x[0]),datasets:[{data:cEntries.map(x=>x[1].s),backgroundColor:['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
+},50);
+}
+
+// ===== Trend =====
+function renderTrend(){
+const days=parseInt(document.getElementById('tDays').value);
+const countryFilter=document.getElementById('tCountry').value;
+const dd=DATES.slice(0,days);
+const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+const filtered=countryFilter?AD.filter(r=>r.country===countryFilter):AD;
+const byA={};
+filtered.forEach(r=>{if(!dd.includes(r.date))return;if(!byA[r.adset_id])byA[r.adset_id]={cn:r.campaign_name,an:r.adset_name,id:r.adset_id,product:r.product,country:r.country,d:{}};byA[r.adset_id].d[r.date]=r});
+const d7=dd.slice(0,7);
+const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend_usd;rv+=a.d[d].revenue_usd;p+=a.d[d].profit_usd}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._ySpend=a.d[yDay]?a.d[yDay].spend_usd:0;return a});
+// Group by product
+const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],ySpend:0};byProd[p].adsets.push(a);byProd[p].ySpend+=a._ySpend});
+const sortedProds=Object.keys(byProd).sort((a,b)=>byProd[b].ySpend-byProd[a].ySpend);
+sortedProds.forEach(p=>byProd[p].adsets.sort((a,b)=>b._ySpend-a._ySpend));
+
+const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+const colSpan=dd.length+4;
+let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">세트</th><th>세트 ID</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+// Summary
+const totD={};dd.forEach(d=>{let s=0,r=0,p=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend_usd;r+=a.d[d].revenue_usd;p+=a.d[d].profit_usd}});totD[d]={s,r,p,roas:s>0?r/s*100:0}});
+const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0);
+h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합'+(countryFilter?' ('+countryFilter+')':'')+'</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(ts>0?tr/ts*100:0)+'">'+MC(ts>0?tr/ts*100:0,tr-ts,ts,tr,0)+'</td>';
+dd.forEach(d=>{const t=totD[d];const yd=d===yDay?' col-yday':'';h+=t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+MC(t.roas,t.r-t.s,t.s,t.r,0)+'</td>':'<td class="'+yd+'"></td>'});
+h+='</tr>';
+sortedProds.forEach(prod=>{
+const g=byProd[prod];
+h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.adsets.length+'개) 전날 $'+Math.round(g.ySpend).toLocaleString()+'</td></tr>';
+g.adsets.forEach(a=>{
+const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend_usd)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit_usd,r.spend_usd,r.revenue_usd,r.cvr)+'</td>'}).join('');
+h+='<tr><td class="fx fx0">'+(a.cn||'').slice(0,25)+'</td><td class="fx fx1">'+(a.an||'').slice(0,25)+'</td><td style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,0)+'</td>'+cells+'</tr>';
+});
+});
+h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
+}
+
+// ===== Stripe =====
+function renderStripe(){
+const byDate={};
+STRIPE.forEach(r=>{if(!byDate[r.date])byDate[r.date]={};byDate[r.date][r.country]=r});
+const dates=[...new Set(STRIPE.map(r=>r.date))].sort().reverse();
+let h='<thead><tr><th>날짜</th><th>요일</th><th>대만 (KRW)</th><th>홍콩 (KRW)</th><th>일본 (KRW)</th><th>합계 (KRW)</th><th>USD/KRW</th></tr></thead><tbody>';
+dates.forEach(d=>{
+const bd=byDate[d]||{};
+const tw=bd['대만']?.revenue_krw||0;
+const hk=bd['홍콩']?.revenue_krw||0;
+const jp=bd['일본']?.revenue_krw||0;
+const tot=tw+hk+jp;
+const rate=bd['대만']?.usd_krw_rate||bd['홍콩']?.usd_krw_rate||bd['일본']?.usd_krw_rate||0;
+h+='<tr><td>'+DK(d)+'</td><td>'+WD(d)+'</td><td style="text-align:right">'+KRW(tw)+'</td><td style="text-align:right">'+KRW(hk)+'</td><td style="text-align:right">'+KRW(jp)+'</td><td style="text-align:right;font-weight:700">'+KRW(tot)+'</td><td>'+rate.toFixed(2)+'</td></tr>';
+});
+h+='</tbody>';document.getElementById('sTbl').innerHTML=h;
+}
+
+// ===== DateTab =====
+function renderDateTab(){
+const sel=document.getElementById('dtSel');
+if(!sel.options.length){DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)})}
+const dt=sel.value||DATES[0];
+const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit_usd-a.profit_usd);
+let h='<thead><tr><th style="text-align:left">캠페인</th><th style="text-align:left">세트</th><th>세트 ID</th><th>국가</th><th>지출(USD)</th><th>매출(USD)</th><th>이익(USD)</th><th>ROAS</th><th>CVR</th><th>CPM</th><th>클릭</th></tr></thead><tbody>';
+rows.forEach(r=>{
+h+='<tr><td style="text-align:left">'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left">'+(r.adset_name||'').slice(0,30)+'</td><td style="font-size:9px">'+r.adset_id+'</td><td>'+r.country+'</td><td style="text-align:right;color:#d00">'+USD(r.spend_usd)+'</td><td style="text-align:right;color:#00d">'+USD(r.revenue_usd)+'</td><td style="text-align:right;color:'+(r.profit_usd>=0?'green':'red')+'">'+USD(r.profit_usd)+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td><td>'+P(r.cvr,2)+'</td><td>'+USD(r.cpm)+'</td><td>'+r.unique_clicks+'</td></tr>';
+});
+h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
+}
+
+// ===== Auth =====
+const AUTH_PW='tkwnrndgkq!';
+const AUTH_KEY='tight_global_auth_v1';
+function tryLogin(){
+const pw=document.getElementById('loginPw').value;
+if(pw===AUTH_PW){try{localStorage.setItem(AUTH_KEY,'ok')}catch(e){}showApp()}
+else{document.getElementById('loginErr').textContent='비밀번호가 맞지 않습니다.'}}
+function showApp(){document.getElementById('loginScreen').style.display='none';document.getElementById('appContent').classList.add('ready');init()}
+document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin()});
+try{if(localStorage.getItem(AUTH_KEY)==='ok')showApp();else document.getElementById('loginPw').focus()}catch(e){document.getElementById('loginPw').focus()}
+</script>
+</div>
+</body>
+</html>
