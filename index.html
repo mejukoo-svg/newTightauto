@@ -127,6 +127,8 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab" data-t="datetab">날짜탭</div>
 <div class="tab" data-t="dateproduct">날짜별_상품</div>
 <div class="tab global-only" data-t="stripe">💳 Stripe</div>
+<div class="tab global-only" data-t="grev">💰 글로벌_매출</div>
+<div class="tab global-only" data-t="gweek">📅 글로벌_주간매출</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -142,6 +144,8 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-datetab"><div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><table id="dpTbl"></table></div></div>
 <div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
+<div class="panel" id="p-grev"><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
+<div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -244,6 +248,8 @@ function renderTab(id){
   if(id==='datetab')renderDateTab();
   if(id==='dateproduct')renderDateProduct();
   if(id==='stripe')renderStripe();
+  if(id==='grev')renderGlobalRevenue();
+  if(id==='gweek')renderGlobalWeekly();
 }
 
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
@@ -441,6 +447,123 @@ function renderStripe(){
   dates.forEach(d=>{const bd=byDate[d]||{};const tw=bd['대만']?.revenue_krw||0;const hk=bd['홍콩']?.revenue_krw||0;const jp=bd['일본']?.revenue_krw||0;
   h+='<tr><td>'+DK(d)+'</td><td>'+WD(d)+'</td><td style="text-align:right">₩'+F(tw)+'</td><td style="text-align:right">₩'+F(hk)+'</td><td style="text-align:right">₩'+F(jp)+'</td><td style="text-align:right;font-weight:700">₩'+F(tw+hk+jp)+'</td><td>'+(bd['대만']?.usd_krw_rate||0).toFixed(2)+'</td></tr>'});
   h+='</tbody>';document.getElementById('sTbl').innerHTML=h;
+}
+
+// ===== 글로벌_매출 (일별 국가별 KRW) =====
+function renderGlobalRevenue(){
+  if(!STRIPE_DATA.length){document.getElementById('grevTbl').innerHTML='<tr><td>Stripe 데이터 없음</td></tr>';return}
+  const byDate={};STRIPE_DATA.forEach(r=>{if(!byDate[r.date])byDate[r.date]={};byDate[r.date][r.country]=r});
+  const dates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort().reverse();
+  const DAYS=['일','월','화','수','목','금','토'];
+  // 광고 지출 집계 (USD → KRW)
+  const spendByDate={};
+  GL_AD.forEach(r=>{if(!spendByDate[r.date])spendByDate[r.date]=0;spendByDate[r.date]+=r.spend_usd});
+  // 헤더
+  let h='<thead><tr><th style="min-width:80px;text-align:left;background:#4476b8;color:#fff">국가</th>';
+  dates.forEach(d=>{const dt=new Date(d);const wd=DAYS[dt.getDay()];
+    const isSun=dt.getDay()===0;
+    h+='<th style="min-width:85px;'+(isSun?'background:#ffe0e0;color:#c00':'background:#4476b8;color:#fff')+'">'+DK(d).slice(3)+'('+wd+')</th>'});
+  h+='<th style="background:#4476b8;color:#fff">합계</th></tr></thead><tbody>';
+  // 국가별 행
+  const countries=['대만','홍콩','일본'];
+  countries.forEach(c=>{
+    let total=0;
+    h+='<tr><td style="text-align:left;font-weight:600">'+c+'</td>';
+    dates.forEach(d=>{const v=byDate[d]?.[c]?.revenue_krw||0;total+=v;h+='<td style="text-align:right">'+F(v)+'</td>'});
+    h+='<td style="text-align:right;font-weight:700">'+F(total)+'</td></tr>';
+  });
+  // USD/KRW 환율 행
+  h+='<tr style="background:#f5f5f5"><td style="text-align:left;font-weight:600">USD/KRW</td>';
+  dates.forEach(d=>{const bd=byDate[d]||{};const rate=bd['대만']?.usd_krw_rate||bd['홍콩']?.usd_krw_rate||bd['일본']?.usd_krw_rate||0;
+    h+='<td style="text-align:right">'+(rate?rate.toFixed(2):'')+'</td>'});
+  h+='<td></td></tr>';
+  // 종합 행
+  h+='<tr style="border-top:2px solid #000;font-weight:700"><td style="text-align:left">종합</td>';
+  let grandTotal=0;const dailyTotals={};
+  dates.forEach(d=>{const bd=byDate[d]||{};const t=(bd['대만']?.revenue_krw||0)+(bd['홍콩']?.revenue_krw||0)+(bd['일본']?.revenue_krw||0);dailyTotals[d]=t;grandTotal+=t;
+    h+='<td style="text-align:right">'+F(t)+'</td>'});
+  h+='<td style="text-align:right">'+F(grandTotal)+'</td></tr>';
+  // 순이익 행 (종합매출 - 광고지출 KRW환산)
+  h+='<tr style="background:#d9ead3;font-weight:700"><td style="text-align:left">순이익</td>';
+  let npTotal=0;
+  dates.forEach(d=>{const rev=dailyTotals[d]||0;
+    const bd=byDate[d]||{};const rate=bd['대만']?.usd_krw_rate||bd['홍콩']?.usd_krw_rate||bd['일본']?.usd_krw_rate||1450;
+    const spendKrw=Math.round((spendByDate[d]||0)*rate);
+    const np=rev-spendKrw;npTotal+=np;
+    h+='<td style="text-align:right;color:'+(np>=0?'green':'red')+'">'+F(np)+'</td>'});
+  h+='<td style="text-align:right;color:'+(npTotal>=0?'green':'red')+'">'+F(npTotal)+'</td></tr>';
+  // 주간합계 행
+  h+='<tr style="background:#fef3cd;font-weight:700"><td style="text-align:left">주간합계</td>';
+  const weekTotals={};const weekShowAt={};
+  dates.forEach((d,i)=>{const dt=new Date(d);const wd=dt.getDay();const diff=dt.getDate()-wd+(wd===0?-6:1);const mon=new Date(dt);mon.setDate(diff);const mk=mon.toISOString().split('T')[0];
+    if(!weekTotals[mk])weekTotals[mk]=0;weekTotals[mk]+=dailyTotals[d]||0;
+    if(wd===0)weekShowAt[mk]=i; // Sunday
+    if(!weekShowAt[mk]&&weekShowAt[mk]!==0)weekShowAt[mk]=i; // first occurrence
+  });
+  dates.forEach((d,i)=>{const dt=new Date(d);const wd=dt.getDay();const diff=dt.getDate()-wd+(wd===0?-6:1);const mon=new Date(dt);mon.setDate(diff);const mk=mon.toISOString().split('T')[0];
+    if(weekShowAt[mk]===i)h+='<td style="text-align:right">'+F(weekTotals[mk])+'</td>';
+    else h+='<td></td>';
+  });
+  h+='<td></td></tr>';
+  h+='</tbody>';document.getElementById('grevTbl').innerHTML=h;
+}
+
+// ===== 글로벌_주간매출 (월별+주별 USD/KRW) =====
+function renderGlobalWeekly(){
+  if(!STRIPE_DATA.length){document.getElementById('gweekTbl').innerHTML='<tr><td>Stripe 데이터 없음</td></tr>';return}
+  // 일별 USD/KRW 집계
+  const dailyUSD={},dailyKRW={};
+  STRIPE_DATA.forEach(r=>{
+    if(!dailyKRW[r.date])dailyKRW[r.date]=0;
+    if(!dailyUSD[r.date])dailyUSD[r.date]=0;
+    dailyKRW[r.date]+=r.revenue_krw||0;
+    dailyUSD[r.date]+=r.revenue_usd||0;
+  });
+  const allDates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort();
+  if(!allDates.length){document.getElementById('gweekTbl').innerHTML='<tr><td>데이터 없음</td></tr>';return}
+  // 월 그룹
+  const monthGroups={};
+  allDates.forEach(d=>{const mk=d.slice(0,7);if(!monthGroups[mk])monthGroups[mk]=[];monthGroups[mk].push(d)});
+  const DAYS_EN=['MON','TUE','WED','THU','FRI','SAT','SUN'];
+  let h='<thead></thead><tbody>';
+  Object.keys(monthGroups).sort().reverse().forEach(mk=>{
+    const yr=parseInt(mk.slice(0,4)),mn=parseInt(mk.slice(5));
+    const mDates=monthGroups[mk];
+    const mKRW=mDates.reduce((a,d)=>a+(dailyKRW[d]||0),0);
+    const mUSD=mDates.reduce((a,d)=>a+(dailyUSD[d]||0),0);
+    // 월 헤더
+    h+='<tr style="background:#4476b8;color:#fff;font-weight:700"><td colspan="10" style="padding:8px">'+yr+'년 '+mn+'월 — 실제매출 ₩'+F(mKRW)+' ($'+Math.round(mUSD).toLocaleString()+')</td></tr>';
+    h+='<tr style="background:#e8e8e8;font-weight:600"><td></td><td></td>';
+    DAYS_EN.forEach(d=>h+='<td style="text-align:center">'+d+'</td>');
+    h+='<td style="text-align:center;font-weight:700">주간매출</td></tr>';
+    // 주차별
+    const firstDay=new Date(mDates[0]);const lastDay=new Date(mDates[mDates.length-1]);
+    let mon=new Date(firstDay);mon.setDate(mon.getDate()-mon.getDay()+(mon.getDay()===0?-6:1));
+    let weekNum=1;
+    while(mon<=lastDay){
+      const sun=new Date(mon.getTime()+6*864e5);
+      // 날짜 행
+      h+='<tr style="background:#dce6f0;font-weight:500"><td colspan="2" style="text-align:left">'+mn+'월 '+weekNum+'주차</td>';
+      let weekUSD=0,weekKRW=0;
+      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];
+        h+='<td style="text-align:center;font-size:9px">'+ds.slice(5)+'</td>';
+        weekUSD+=dailyUSD[ds]||0;weekKRW+=dailyKRW[ds]||0;}
+      h+='<td style="text-align:center;font-weight:600">'+mn+'월 '+weekNum+'주차</td></tr>';
+      // 달러 행
+      h+='<tr><td style="text-align:right;font-weight:600">$'+Math.round(weekUSD).toLocaleString()+'</td><td style="color:#888">달러</td>';
+      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];const v=dailyUSD[ds]||0;
+        h+='<td style="text-align:right">'+(v?'$'+Math.round(v).toLocaleString():'')+'</td>'}
+      h+='<td style="text-align:right;font-weight:700">$'+Math.round(weekUSD).toLocaleString()+'</td></tr>';
+      // 원화 행
+      h+='<tr><td></td><td style="color:#888">원화</td>';
+      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];const v=dailyKRW[ds]||0;
+        h+='<td style="text-align:right">'+(v?'₩'+F(v):'')+'</td>'}
+      h+='<td style="text-align:right;font-weight:700">₩'+F(weekKRW)+'</td></tr>';
+      mon=new Date(sun.getTime()+864e5);weekNum++;
+    }
+    h+='<tr><td colspan="10" style="height:10px"></td></tr>';
+  });
+  h+='</tbody>';document.getElementById('gweekTbl').innerHTML=h;
 }
 
 // ===== SEARCH =====
