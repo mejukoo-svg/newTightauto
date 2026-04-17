@@ -1,0 +1,57 @@
+name: 글로벌 Meta+Stripe → Supabase
+
+on:
+  schedule:
+    - cron: '30 0 * * *'
+    - cron: '30 9 * * *'
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: '전체 기간 갱신 (2025-12-01~오늘)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      refresh_days:
+        description: '갱신 기간'
+        required: false
+        default: '10'
+        type: choice
+        options:
+          - '7'
+          - '10'
+          - '30'
+          - '180'
+          - '365'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pandas yfinance stripe
+
+      - name: Run pipeline
+        env:
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GlobalTT }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 글로벌_세트별_supabase.py
