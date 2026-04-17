@@ -68,6 +68,7 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 .hl-down10{background:#ffcccc!important}
 .hl-up10{background:#88dd88!important}
 .hl-up20{background:#66eecc!important;color:#000!important;font-weight:600}
+.hl-watch{background:#ff9900!important;color:#fff!important;font-weight:600}
 /* Color picker popover */
 .color-picker{position:absolute;background:#fff;border:1px solid #888;border-radius:6px;padding:6px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1000;display:none;gap:4px}
 .color-picker.show{display:flex}
@@ -78,6 +79,7 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 .cp-d10{background:#ffcccc;color:#333}
 .cp-u10{background:#88dd88;color:#333}
 .cp-u20{background:#66eecc;color:#333}
+.cp-watch{background:#ff9900;color:#fff}
 .cp-clear{background:#fff;color:#333;border:1px solid #ccc}
 .memo-input{width:120px;padding:2px 4px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:'Noto Sans KR',sans-serif}
 .memo-input:focus{border-color:#4285f4;outline:none;background:#f0f7ff}
@@ -125,6 +127,15 @@ td.c2{font-size:9px;text-align:left;white-space:pre-line;line-height:1.4}
 .zoom-bar button{width:26px;height:22px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;font-size:13px;font-weight:700;color:#555;display:flex;align-items:center;justify-content:center;padding:0}
 .zoom-bar button:hover{background:#e8e8e8}
 .zoom-bar .zoom-pct{min-width:36px;text-align:center;font-weight:600;color:#333}
+/* Search */
+.search-box{display:flex;align-items:center;gap:4px;margin-right:auto}
+.search-box input{width:160px;padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px;font-family:inherit}
+.search-box input:focus{outline:none;border-color:#4285f4}
+.search-box .s-info{font-size:10px;color:#666;min-width:50px}
+.search-box button{width:22px;height:22px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0}
+.search-box button:hover{background:#e8e8e8}
+mark.sh{background:#fff200;color:#000;padding:0 1px;border-radius:2px}
+mark.sh.active{background:#ff6d01;color:#fff}
 /* Yesterday column highlight */
 th.col-yday{border:3px solid #222!important;border-bottom:3px solid #222!important;background:#e0e7ff!important;font-weight:700!important}
 td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!important}
@@ -154,7 +165,7 @@ tr:last-child td.col-yday{border-bottom:3px solid #222!important}
 <div class="tab" data-t="datetab">날짜탭</div>
 <div class="tab" data-t="dateproduct">날짜별탭_상품</div>
 </div>
-<div class="zoom-bar"><button onclick="zoomChange(-10)">−</button><span class="zoom-pct" id="zoomPct">100%</span><button onclick="zoomChange(10)">+</button><button onclick="zoomReset()" style="width:auto;padding:0 6px;font-size:10px;font-weight:500">초기화</button></div>
+<div class="zoom-bar"><div class="search-box"><input type="text" id="searchInput" placeholder="🔍 검색 (Ctrl+F)" autocomplete="off"><span class="s-info" id="searchInfo"></span><button onclick="searchNav(-1)" title="이전">▲</button><button onclick="searchNav(1)" title="다음">▼</button><button onclick="searchClear()" title="지우기" style="font-size:10px">✕</button></div><button onclick="zoomChange(-10)">−</button><span class="zoom-pct" id="zoomPct">100%</span><button onclick="zoomChange(10)">+</button><button onclick="zoomReset()" style="width:auto;padding:0 6px;font-size:10px;font-weight:500">초기화</button></div>
 <div class="panel active" id="p-dashboard"><div id="dashContent" style="padding:16px"></div></div>
 <div class="panel" id="p-trend"><div class="filter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-product"><div class="filter"><label>상품 선택</label><select id="pSel"><option value="">(상품을 선택하세요)</option></select></div><div class="sheet-wrap"><table id="pTbl"></table></div></div>
@@ -173,6 +184,7 @@ tr:last-child td.col-yday{border-bottom:3px solid #222!important}
 <div class="cp-btn cp-d10" data-c="down10" title="-10%">-10</div>
 <div class="cp-btn cp-d20" data-c="down20" title="-20%">-20</div>
 <div class="cp-btn cp-off" data-c="off" title="OFF">OFF</div>
+<div class="cp-btn cp-watch" data-c="watch" title="주의">주의</div>
 <div class="cp-btn cp-clear" data-c="" title="지우기">✕</div>
 </div>
 
@@ -188,6 +200,7 @@ const HL_CONFIG={
   'down10':{cls:'hl-down10',pct:-10,label:'-10%'},
   'down20':{cls:'hl-down20',pct:-20,label:'-20%'},
   'off':{cls:'hl-off',pct:null,label:'OFF'},
+  'watch':{cls:'hl-watch',pct:0,label:'주의'},
 };
 
 async function sb(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:H});return r.json()}
@@ -761,6 +774,105 @@ const warn=list.filter(x=>x.spend>=100000&&x.roas<80).sort((a,b)=>b.spend-a.spen
 const wEl=document.getElementById(warnId);
 if(wEl)wEl.innerHTML=warn.map((x,i)=>'<li><span><span class="rank" style="color:#dc2626">!</span>'+(x.name||'').slice(0,22)+' <span style="color:#888;font-size:9px">('+x.product+')</span></span><span class="val" style="color:#dc2626">'+x.roas.toFixed(0)+'% / '+W(x.spend)+'</span></li>').join('')||'<li style="color:#888">양호한 상태</li>';
 }
+
+// ========= SEARCH =========
+let searchMatches=[];
+let searchIdx=-1;
+
+function searchRun(){
+const q=document.getElementById('searchInput').value.trim();
+const info=document.getElementById('searchInfo');
+// Clear previous highlights
+searchClearMarks();
+searchMatches=[];
+searchIdx=-1;
+if(!q){info.textContent='';return}
+// Find active panel
+const panel=document.querySelector('.panel.active');
+if(!panel)return;
+// Walk text nodes inside the panel
+const walker=document.createTreeWalker(panel,NodeFilter.SHOW_TEXT,null,false);
+const nodes=[];
+while(walker.nextNode()){
+const n=walker.currentNode;
+if(n.parentNode.tagName==='SCRIPT'||n.parentNode.tagName==='STYLE'||n.parentNode.tagName==='TEXTAREA'||n.parentNode.tagName==='INPUT')continue;
+if(n.textContent.toLowerCase().includes(q.toLowerCase()))nodes.push(n);
+}
+// Wrap matches with <mark>
+const re=new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');
+nodes.forEach(n=>{
+const span=document.createElement('span');
+span.innerHTML=n.textContent.replace(re,'<mark class="sh">$1</mark>');
+n.parentNode.replaceChild(span,n);
+});
+searchMatches=panel.querySelectorAll('mark.sh');
+info.textContent=searchMatches.length>0?'1/'+searchMatches.length:'0건';
+if(searchMatches.length>0){searchIdx=0;searchHighlight()}
+}
+
+function searchClearMarks(){
+document.querySelectorAll('mark.sh').forEach(m=>{
+const parent=m.parentNode;
+parent.replaceChild(document.createTextNode(m.textContent),m);
+parent.normalize();
+});
+// Clean up wrapper spans (from previous search)
+document.querySelectorAll('.panel span').forEach(sp=>{
+if(sp.childNodes.length===1&&sp.childNodes[0].nodeType===3&&!sp.className&&!sp.id){
+sp.parentNode.replaceChild(sp.childNodes[0],sp);
+sp.parentNode?.normalize?.();
+}
+});
+}
+
+function searchHighlight(){
+searchMatches.forEach((m,i)=>{m.classList.toggle('active',i===searchIdx)});
+if(searchMatches[searchIdx]){
+searchMatches[searchIdx].scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+}
+document.getElementById('searchInfo').textContent=(searchIdx+1)+'/'+searchMatches.length;
+}
+
+function searchNav(dir){
+if(!searchMatches.length)return;
+searchIdx=(searchIdx+dir+searchMatches.length)%searchMatches.length;
+searchHighlight();
+}
+
+function searchClear(){
+document.getElementById('searchInput').value='';
+searchClearMarks();
+searchMatches=[];searchIdx=-1;
+document.getElementById('searchInfo').textContent='';
+}
+
+// Debounced input
+let searchTimer=null;
+document.addEventListener('DOMContentLoaded',()=>{
+const si=document.getElementById('searchInput');
+if(si){
+si.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(searchRun,300)});
+si.addEventListener('keydown',e=>{
+if(e.key==='Enter'){e.preventDefault();searchNav(e.shiftKey?-1:1)}
+if(e.key==='Escape'){searchClear();si.blur()}
+});
+}
+});
+// Ctrl+F override
+document.addEventListener('keydown',e=>{
+if((e.ctrlKey||e.metaKey)&&e.key==='f'){
+e.preventDefault();
+const si=document.getElementById('searchInput');
+if(si){si.focus();si.select()}
+}
+});
+// Clear search on tab switch
+const origAttachTabs_search=()=>{
+document.querySelectorAll('.tab').forEach(t=>{
+t.addEventListener('click',()=>{setTimeout(()=>{if(document.getElementById('searchInput').value)searchRun()},100)})
+});
+};
+origAttachTabs_search();
 
 // ========= ZOOM =========
 let zoomLevel=100;
