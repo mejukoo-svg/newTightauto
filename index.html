@@ -294,23 +294,34 @@ document.getElementById('crDays').addEventListener('change',renderCreativeRankin
 document.getElementById('crSort').addEventListener('change',renderCreativeRanking);
 
 // ===== HIGHLIGHT =====
+// HIGHLIGHTS: 추이차트용 (adset_highlights 테이블, 전체삭제 가능)
+// r.highlight: 날짜탭용 (ad_performance_daily.highlight 컬럼, 영구저장)
 let currentHlId=null;
 const hlTbl=()=>MODE==='kr'?'adset_highlights':MODE==='gl'?'global_adset_highlights':'ad_creative_highlights';
 const hlIdCol=()=>MODE==='cr'?'ad_id':'adset_id';
+const perfTbl=()=>MODE==='kr'?'ad_performance_daily':MODE==='gl'?'global_ad_performance_daily':'ad_creative_daily';
 function hlClass(id){const h=HIGHLIGHTS[id];return h&&HL_CONFIG[h]?HL_CONFIG[h].cls:''}
 async function saveHL(id,c){
+  // 1) 추이차트용 저장 (adset_highlights)
   const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-  HIGHLIGHTS[id]=c||null;renderTrend();
+  HIGHLIGHTS[id]=c||null;
+  // 2) ★ 날짜탭용 영구저장 (performance 테이블의 highlight 컬럼)
+  const col=hlIdCol();
+  await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
+  // 메모리의 AD 데이터도 갱신
+  AD.forEach(r=>{if(rowId(r)===id)r.highlight=c||null});
+  renderTrend();
 }
 function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
-  if(!confirm('모든 하이라이트를 삭제할까요?'))return;
+  if(!confirm('추이차트 하이라이트만 삭제됩니다.\n날짜탭에 저장된 기록은 유지됩니다.\n\n계속할까요?'))return;
   const tbl=hlTbl();const col=hlIdCol();const ids=Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]);
   if(!ids.length){alert('하이라이트가 없습니다.');return}
   for(const id of ids){
     await fetch(SB_URL+'/rest/v1/'+tbl+'?'+col+'=eq.'+id,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
     delete HIGHLIGHTS[id];
+    // ★ perfTbl의 highlight 컬럼은 건드리지 않음 → 날짜탭 영구 유지
   }
   renderTrend();
 }
@@ -587,7 +598,7 @@ function renderDateTab(){
   h+='<th class="h-memo">메모</th>';
   h+='</tr></thead><tbody>';
   rows.forEach(r=>{
-    const rid=rowId(r);const hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
+    const rid=rowId(r);const hl=r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':F(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/"/g,'&quot;');
