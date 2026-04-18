@@ -482,12 +482,26 @@ function renderWeekly(){
   if(!byW[wk])byW[wk]={s:0,r:0,p:0,mp:0};byW[wk].s+=r.spend;byW[wk].r+=r.revenue;byW[wk].p+=r.profit;byW[wk].mp+=r.results_mp;
   if(!byM[mk])byM[mk]={s:0,r:0,p:0,mp:0};byM[mk].s+=r.spend;byM[mk].r+=r.revenue;byM[mk].p+=r.profit;byM[mk].mp+=r.results_mp});
   const months=Object.keys(byM).sort().reverse(),weeks=Object.keys(byW).sort().reverse();
-  function blk(label,cls,d){const roas=d.s>0?d.r/d.s*100:0;
-  return'<div style="border-bottom:2px solid #ccc"><div class="'+(cls==='month'?'prod-header':'filter')+'" style="'+(cls==='month'?'':'background:#666;color:#fff;font-weight:600')+'">'+label+' · ROAS '+roas.toFixed(0)+'% · 이익 '+money(d.p)+'</div><div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #ccc"><div style="padding:6px 8px;text-align:center"><div style="font-size:9px;color:#777">지출</div><div style="font-weight:700;color:#d00">'+money(d.s)+'</div></div><div style="padding:6px 8px;text-align:center"><div style="font-size:9px;color:#777">매출</div><div style="font-weight:700;color:#00d">'+money(d.r)+'</div></div><div style="padding:6px 8px;text-align:center"><div style="font-size:9px;color:#777">이익</div><div style="font-weight:700;color:'+(d.p>=0?'green':'red')+'">'+money(d.p)+'</div></div><div style="padding:6px 8px;text-align:center"><div style="font-size:9px;color:#777">ROAS</div><div style="font-weight:700">'+roas.toFixed(1)+'%</div></div></div></div>'}
-  let html='';
+  function blk(label,cls,d){
+    const roas=d.s>0?d.r/d.s*100:0;
+    const isMonth=cls==='month';
+    const hdrBg=isMonth?'background:#1a2744;color:#fff':'background:#555;color:#fff';
+    const roasColor=roas>=100?'#4ade80':'#f87171';
+    return'<div style="border-bottom:1px solid #ddd;margin-bottom:2px">'+
+      '<div style="'+hdrBg+';padding:8px 14px;font-weight:700;font-size:'+(isMonth?'13px':'11px')+';display:flex;justify-content:space-between;align-items:center"><span>'+label+'</span><span style="font-size:11px">ROAS <span style="color:'+roasColor+'">'+roas.toFixed(0)+'%</span> · 이익 '+money(d.p)+'</span></div>'+
+      '<div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid #eee">'+
+        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">지출</div><div style="font-weight:700;color:#d00;font-size:13px">'+money(d.s)+'</div></div>'+
+        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">매출</div><div style="font-weight:700;color:#00d;font-size:13px">'+money(d.r)+'</div></div>'+
+        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">이익</div><div style="font-weight:700;color:'+(d.p>=0?'#16a34a':'#dc2626')+';font-size:13px">'+money(d.p)+'</div></div>'+
+        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">ROAS</div><div style="font-weight:700;font-size:13px">'+roas.toFixed(1)+'%</div></div>'+
+        '<div style="padding:8px 6px;text-align:center"><div style="font-size:9px;color:#999;margin-bottom:2px">구매</div><div style="font-weight:700;font-size:13px">'+F(d.mp)+'</div></div>'+
+      '</div></div>';
+  }
+  let html='<div style="max-width:700px;margin:0 auto">';
   if(mode==='month'){months.forEach(mk=>{html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',byM[mk])})}
   else if(mode==='week'){weeks.forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);html+=blk((new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),'week',byW[wk])})}
   else{months.forEach(mk=>{html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',byM[mk]);weeks.filter(w=>w.slice(0,7)===mk).forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);html+=blk((new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),'week',byW[wk])})})}
+  html+='</div>';
   document.getElementById('wBlocks').innerHTML=html;
 }
 
