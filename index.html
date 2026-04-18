@@ -137,7 +137,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 <!-- Panels -->
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
-<div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
+<div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
@@ -272,6 +272,16 @@ async function saveHL(id,c){
   HIGHLIGHTS[id]=c||null;renderTrend();
 }
 function showCP(id,el){currentAdsetId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
+async function clearAllHighlights(){
+  if(!confirm('모든 하이라이트를 삭제할까요?'))return;
+  const tbl=hlTbl();const ids=Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]);
+  if(!ids.length){alert('하이라이트가 없습니다.');return}
+  for(const id of ids){
+    await fetch(SB_URL+'/rest/v1/'+tbl+'?adset_id=eq.'+id,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
+    delete HIGHLIGHTS[id];
+  }
+  renderTrend();
+}
 document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();if(currentAdsetId)saveHL(currentAdsetId,b.dataset.c);document.getElementById('colorPicker').classList.remove('show')})});
 document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.target.closest('.fx.clickable'))document.getElementById('colorPicker').classList.remove('show')});
 
@@ -427,8 +437,13 @@ function renderTrend(){
   const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0};byProd[p].adsets.push(a);byProd[p].yS+=a._yS});
   Object.keys(byProd).sort((a,b)=>byProd[b].yS-byProd[a].yS).forEach(prod=>{
     const g=byProd[prod];g.adsets.sort((a,b)=>b._yS-a._yS);
-    const pS=g.adsets.reduce((a,x)=>a+x._s,0),pR=g.adsets.reduce((a,x)=>a+x._r,0);
-    h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.adsets.length+'개) 전날 '+money(g.yS)+'</td></tr>';
+    const pS=g.adsets.reduce((a,x)=>a+x._s,0),pR=g.adsets.reduce((a,x)=>a+x._r,0),pRoas=pS>0?pR/pS*100:0;
+    h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.adsets.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+pRoas.toFixed(0)+'%</td></tr>';
+    // Product subtotal row
+    const pDaily={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0;g.adsets.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks}});pDaily[d]={s,r,p,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0}});
+    const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+MC(t.roas,t.p,t.s,t.r,t.cvr)+'</td>':'<td class="'+yd+'"></td>'}).join('');
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,0)+'</td>'+pCells+'</tr>';
+    // Individual adsets
     g.adsets.forEach(a=>{
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
