@@ -557,18 +557,66 @@ function renderDateTab(){
   const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
   if(!sel.options.length){
     DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)});
-    // 기본값: 어제 (직전날)
     if(DATES.includes(yDay))sel.value=yDay;
   }
   const dt=sel.value||DATES[0];
   const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit-a.profit);
-  let h='<thead><tr><th style="text-align:left">캠페인</th><th style="text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th><th>CVR</th><th>클릭</th><th>예산</th><th class="h-rate">증액률</th><th class="h-result">변동예산</th><th class="h-memo">메모</th></tr></thead><tbody>';
+  let h='<thead><tr>';
+  h+='<th style="text-align:left">캠페인</th>';
+  h+='<th style="text-align:left">'+rowNameLabel()+'</th>';
+  h+='<th>'+rowIdLabel()+'</th>';
+  h+='<th class="h-meta">지출</th>';
+  h+='<th class="h-meta">결과당비용</th>';
+  h+='<th class="h-meta">구매ROAS(메타)</th>';
+  h+='<th class="h-meta">CPM</th>';
+  h+='<th class="h-meta">도달</th>';
+  h+='<th class="h-meta">노출</th>';
+  h+='<th class="h-meta">고유클릭</th>';
+  h+='<th class="h-meta">고유CTR</th>';
+  h+='<th class="h-meta">클릭당비용</th>';
+  h+='<th class="h-meta">빈도</th>';
+  h+='<th class="h-meta">결과(메타)</th>';
+  h+='<th class="h-mp">결과(MP)</th>';
+  h+='<th class="h-mp">매출</th>';
+  h+='<th class="h-mp">이익</th>';
+  h+='<th class="h-mp">ROAS</th>';
+  h+='<th class="h-mp">CVR</th>';
+  h+='<th class="h-budget">예산</th>';
+  h+='<th class="h-rate">증액률</th>';
+  h+='<th class="h-result">변동예산</th>';
+  h+='<th class="h-memo">메모</th>';
+  h+='</tr></thead><tbody>';
   rows.forEach(r=>{
     const rid=rowId(r);const hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':F(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/"/g,'&quot;');
-    h+='<tr><td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left" class="'+hlCls+'">'+(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30)+'</td><td class="'+hlCls+'" style="font-size:9px">'+rid+'</td><td style="text-align:right;color:#d00">'+money(r.spend)+'</td><td style="text-align:right;color:#00d">'+money(r.revenue)+'</td><td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+money(r.profit)+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td><td>'+P(r.cvr,2)+'</td><td>'+F(r.unique_clicks)+'</td><td style="text-align:right">'+money(r.budget)+'</td><td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td><td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td><td><input class="memo-input" value="'+mv+'" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td></tr>';
+    const name2=(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
+    h+='<tr>';
+    h+='<td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td>';
+    h+='<td style="text-align:left" class="'+hlCls+'">'+name2+'</td>';
+    h+='<td class="'+hlCls+'" style="font-size:9px">'+rid+'</td>';
+    h+='<td style="text-align:right;color:#d00">'+money(r.spend)+'</td>';
+    h+='<td style="text-align:right">'+money(r.cost_per_result)+'</td>';
+    h+='<td style="text-align:right">'+(r.purchase_roas_meta?r.purchase_roas_meta.toFixed(2):'')+'</td>';
+    h+='<td style="text-align:right">'+money(r.cpm)+'</td>';
+    h+='<td style="text-align:right">'+F(r.reach)+'</td>';
+    h+='<td style="text-align:right">'+F(r.impressions)+'</td>';
+    h+='<td style="text-align:right">'+F(r.unique_clicks)+'</td>';
+    h+='<td style="text-align:right">'+(r.unique_ctr?r.unique_ctr.toFixed(2)+'%':'')+'</td>';
+    h+='<td style="text-align:right">'+money(r.cost_per_click)+'</td>';
+    h+='<td style="text-align:right">'+(r.frequency?r.frequency.toFixed(2):'')+'</td>';
+    h+='<td style="text-align:right">'+F(r.results_meta)+'</td>';
+    h+='<td style="text-align:right;font-weight:600">'+F(r.results_mp)+'</td>';
+    h+='<td style="text-align:right;color:#00d">'+money(r.revenue)+'</td>';
+    h+='<td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+money(r.profit)+'</td>';
+    h+='<td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td>';
+    h+='<td>'+P(r.cvr,2)+'</td>';
+    h+='<td style="text-align:right">'+money(r.budget)+'</td>';
+    h+='<td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td>';
+    h+='<td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td>';
+    h+='<td><input class="memo-input" value="'+mv+'" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td>';
+    h+='</tr>';
   });
   h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
 }
