@@ -115,6 +115,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-bar">
 <div class="mode-btn active" data-mode="kr" onclick="switchMode('kr')">🇰🇷 국내</div>
 <div class="mode-btn" data-mode="gl" onclick="switchMode('gl')">🌏 글로벌</div>
+<div class="mode-btn" data-mode="cr" onclick="switchMode('cr')">🎨 국내소재</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
 </div>
 <!-- Tabs -->
@@ -167,9 +168,9 @@ const HL_CONFIG={
 };
 
 // ===== STATE =====
-let MODE='kr'; // 'kr' or 'gl'
-let KR_AD=[],GL_AD=[],STRIPE_DATA=[];
-let KR_HL={},GL_HL={};
+let MODE='kr'; // 'kr', 'gl', or 'cr'
+let KR_AD=[],GL_AD=[],CR_AD=[],STRIPE_DATA=[];
+let KR_HL={},GL_HL={},CR_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
 // ===== HELPERS =====
@@ -178,7 +179,7 @@ async function sbAll(t,orderCol){let p=0,a=[];while(true){const r=await sbQ(t,'s
 
 function money(n){
   if(n==null||n===0)return'';
-  return MODE==='kr'?'₩'+Math.round(n).toLocaleString('ko-KR'):'$'+Math.round(n).toLocaleString('en-US');
+  return MODE==='gl'?'$'+Math.round(n).toLocaleString('en-US'):'₩'+Math.round(n).toLocaleString('ko-KR');
 }
 const F=n=>n==null?'':Math.round(n).toLocaleString('ko-KR');
 const P=(n,d)=>n==null?'':n.toFixed(d||1)+'%';
@@ -190,22 +191,28 @@ function MC(roas,profit,spend,revenue,cvr){
   if(!spend)return'';const pc=profit>=0?'p':'p neg';
   return'<div class="r">'+roas.toFixed(0)+'</div><div class="'+pc+'">'+money(profit)+'</div><div class="s">-'+money(spend)+'</div><div class="rv">'+money(revenue)+'</div><div class="cv">'+P(cvr)+'</div>';
 }
-// Normalize row: global columns → common names
+// Normalize row: global→common, creative→common (ad_id as key)
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
   return r;
 }
+// Row ID: adset_id for kr/gl, ad_id for creative
+function rowId(r){return MODE==='cr'?(r.ad_id||''):(r.adset_id||'')}
+function rowName1(r){return MODE==='cr'?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
+function rowIdLabel(){return MODE==='cr'?'소재 ID':'세트 ID'}
+function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
 
 // ===== MODE SWITCH =====
 function switchMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  document.getElementById('modeLabel').textContent=m==='kr'?'국내 · KRW':'글로벌 · USD';
+  document.getElementById('modeLabel').textContent=m==='kr'?'국내 · KRW':m==='gl'?'글로벌 · USD':'국내소재 · KRW';
   // Toggle global-only tabs
   document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
   // Switch data
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
-  else{AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
+  else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
+  else{AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -226,16 +233,19 @@ function rebuildLookups(){
 
 // ===== INIT =====
 async function initData(){
-  const [kr,gl,krhl,glhl,stripe]=await Promise.all([
+  const [kr,gl,cr,krhl,glhl,crhl,stripe]=await Promise.all([
     sbAll('ad_performance_daily','spend'),
     sbAll('global_ad_performance_daily','spend_usd').catch(()=>[]),
+    sbAll('ad_creative_daily','spend').catch(()=>[]),
     sbQ('adset_highlights','select=*').catch(()=>[]),
     sbQ('global_adset_highlights','select=*').catch(()=>[]),
+    sbQ('ad_creative_highlights','select=*').catch(()=>[]),
     sbQ('global_stripe_daily','select=*&order=date.desc').catch(()=>[]),
   ]);
-  KR_AD=kr;GL_AD=gl;STRIPE_DATA=stripe;
+  KR_AD=kr;GL_AD=gl;CR_AD=cr;STRIPE_DATA=stripe;
   KR_HL={};krhl.forEach(x=>{KR_HL[x.adset_id]=x.highlight});
   GL_HL={};glhl.forEach(x=>{GL_HL[x.adset_id]=x.highlight});
+  CR_HL={};crhl.forEach(x=>{CR_HL[x.ad_id]=x.highlight});
   switchMode('kr');
 }
 
@@ -265,32 +275,34 @@ document.getElementById('dtSel').addEventListener('change',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
 
 // ===== HIGHLIGHT =====
-let currentAdsetId=null;
-const hlTbl=()=>MODE==='kr'?'adset_highlights':'global_adset_highlights';
+let currentHlId=null;
+const hlTbl=()=>MODE==='kr'?'adset_highlights':MODE==='gl'?'global_adset_highlights':'ad_creative_highlights';
+const hlIdCol=()=>MODE==='cr'?'ad_id':'adset_id';
 function hlClass(id){const h=HIGHLIGHTS[id];return h&&HL_CONFIG[h]?HL_CONFIG[h].cls:''}
 async function saveHL(id,c){
-  const body={adset_id:id,highlight:c||null,updated_at:new Date().toISOString()};
+  const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
   HIGHLIGHTS[id]=c||null;renderTrend();
 }
-function showCP(id,el){currentAdsetId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
+function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
   if(!confirm('모든 하이라이트를 삭제할까요?'))return;
-  const tbl=hlTbl();const ids=Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]);
+  const tbl=hlTbl();const col=hlIdCol();const ids=Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]);
   if(!ids.length){alert('하이라이트가 없습니다.');return}
   for(const id of ids){
-    await fetch(SB_URL+'/rest/v1/'+tbl+'?adset_id=eq.'+id,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
+    await fetch(SB_URL+'/rest/v1/'+tbl+'?'+col+'=eq.'+id,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
     delete HIGHLIGHTS[id];
   }
   renderTrend();
 }
-document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();if(currentAdsetId)saveHL(currentAdsetId,b.dataset.c);document.getElementById('colorPicker').classList.remove('show')})});
+document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();if(currentHlId)saveHL(currentHlId,b.dataset.c);document.getElementById('colorPicker').classList.remove('show')})});
 document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.target.closest('.fx.clickable'))document.getElementById('colorPicker').classList.remove('show')});
 
 // ===== MEMO =====
 async function saveMemo(date,id,memo,el){
-  const tbl=MODE==='kr'?'ad_performance_daily':'global_ad_performance_daily';
-  await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&adset_id=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo})});
+  const tbl=MODE==='kr'?'ad_performance_daily':MODE==='gl'?'global_ad_performance_daily':'ad_creative_daily';
+  const idCol=MODE==='cr'?'ad_id':'adset_id';
+  await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&'+idCol+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo})});
   const ind=el.parentNode.querySelector('.memo-saved');if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
 }
 
@@ -408,7 +420,7 @@ function drawDashPie(A){
 }
 
 function drawDashTopLists(A){
-  const byA={};A.rows.forEach(r=>{if(!byA[r.adset_id])byA[r.adset_id]={name:r.adset_name,product:r.product,spend:0,revenue:0};byA[r.adset_id].spend+=r.spend;byA[r.adset_id].revenue+=r.revenue});
+  const byA={};A.rows.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={name:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),product:r.product,spend:0,revenue:0};byA[rid].spend+=r.spend;byA[rid].revenue+=r.revenue});
   const list=Object.values(byA).filter(x=>x.spend>=100).map(x=>({...x,roas:x.spend>0?x.revenue/x.spend*100:0}));
   const top=list.sort((a,b)=>b.roas-a.roas).slice(0,5);
   const topEl=document.getElementById('topListA');
@@ -424,14 +436,14 @@ function renderTrend(){
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
   const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;if(!byA[r.adset_id])byA[r.adset_id]={cn:r.campaign_name,an:r.adset_name,id:r.adset_id,product:r.product,d:{}};byA[r.adset_id].d[r.date]=r});
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4;
   // Summary
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks}});totD[d]={s,r,p,mp,uc}});
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
-  let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">세트</th><th style="min-width:130px">세트 ID</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,0)+'</td>'});
   h+='</tr>';
@@ -458,11 +470,11 @@ function renderTrend(){
 // ===== CHANGE =====
 function renderChange(){
   const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
-  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;if(!byA[r.adset_id])byA[r.adset_id]={cn:r.campaign_name,an:r.adset_name,id:r.adset_id,d:{}};byA[r.adset_id].d[r.date]=r});
+  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
   const totD={};dd.forEach(d=>{let s=0,r=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});totD[d]={s,r}});
-  let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">세트</th><th>세트 ID</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0);
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc">'+MC(ts>0?tr/ts*100:0,tr-ts,ts,tr,0)+'</td>';
   dd.forEach((d,i)=>{const x=totD[d];const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<dd.length-1){const pr=totD[dd[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}const yd=d===yDay?' col-yday':'';
@@ -531,13 +543,13 @@ function renderDateTab(){
   }
   const dt=sel.value||DATES[0];
   const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit-a.profit);
-  let h='<thead><tr><th style="text-align:left">캠페인</th><th style="text-align:left">세트</th><th>세트 ID</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th><th>CVR</th><th>클릭</th><th>예산</th><th class="h-rate">증액률</th><th class="h-result">변동예산</th><th class="h-memo">메모</th></tr></thead><tbody>';
+  let h='<thead><tr><th style="text-align:left">캠페인</th><th style="text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th><th>CVR</th><th>클릭</th><th>예산</th><th class="h-rate">증액률</th><th class="h-result">변동예산</th><th class="h-memo">메모</th></tr></thead><tbody>';
   rows.forEach(r=>{
-    const hl=HIGHLIGHTS[r.adset_id];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
+    const rid=rowId(r);const hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':F(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/"/g,'&quot;');
-    h+='<tr><td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left" class="'+hlCls+'">'+(r.adset_name||'').slice(0,30)+'</td><td class="'+hlCls+'" style="font-size:9px">'+r.adset_id+'</td><td style="text-align:right;color:#d00">'+money(r.spend)+'</td><td style="text-align:right;color:#00d">'+money(r.revenue)+'</td><td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+money(r.profit)+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td><td>'+P(r.cvr,2)+'</td><td>'+F(r.unique_clicks)+'</td><td style="text-align:right">'+money(r.budget)+'</td><td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td><td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td><td><input class="memo-input" value="'+mv+'" data-date="'+r.date+'" data-id="'+r.adset_id+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td></tr>';
+    h+='<tr><td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td><td style="text-align:left" class="'+hlCls+'">'+(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30)+'</td><td class="'+hlCls+'" style="font-size:9px">'+rid+'</td><td style="text-align:right;color:#d00">'+money(r.spend)+'</td><td style="text-align:right;color:#00d">'+money(r.revenue)+'</td><td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+money(r.profit)+'</td><td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td><td>'+P(r.cvr,2)+'</td><td>'+F(r.unique_clicks)+'</td><td style="text-align:right">'+money(r.budget)+'</td><td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td><td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td><td><input class="memo-input" value="'+mv+'" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td></tr>';
   });
   h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
 }
