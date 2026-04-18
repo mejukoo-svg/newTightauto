@@ -22,6 +22,19 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:
 .tab:hover{background:#fff;color:#222}
 .tab.active{background:#fff;color:#1a73e8;font-weight:700;border-bottom:2px solid #fff;margin-bottom:-2px}
 .tab.global-only{display:none}
+.tab.creative-only{display:none}
+/* Column filters */
+th.filterable{cursor:pointer;position:relative}
+th.filterable:hover{background:#d0d8e8!important}
+th.filterable.filtered{background:#ffeb3b!important;color:#000!important}
+th.filterable::after{content:'▼';font-size:7px;margin-left:3px;opacity:0.5}
+th.filterable.filtered::after{content:'✕';font-size:9px;opacity:1;color:#d00}
+.col-filter{position:absolute;top:100%;left:0;min-width:160px;max-height:250px;overflow-y:auto;background:#fff;border:1px solid #888;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1000;display:none;text-align:left;padding:4px 0}
+.col-filter.show{display:block}
+.col-filter label{display:block;padding:3px 10px;font-size:10px;cursor:pointer;font-weight:400;white-space:nowrap}
+.col-filter label:hover{background:#e8f0fe}
+.col-filter input[type="checkbox"]{margin-right:5px}
+.col-filter .cf-all{border-bottom:1px solid #ddd;font-weight:600;padding:4px 10px}
 .panel{display:none;padding:0}
 .panel.active{display:block}
 .sheet-wrap{overflow:auto;max-height:calc(100vh - 80px)}
@@ -130,6 +143,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab global-only" data-t="stripe">💳 Stripe</div>
 <div class="tab global-only" data-t="grev">💰 글로벌_매출</div>
 <div class="tab global-only" data-t="gweek">📅 글로벌_주간매출</div>
+<div class="tab creative-only" data-t="crank">🏆 소재랭킹</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -147,6 +161,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
+<div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -209,6 +224,7 @@ function switchMode(m){
   document.getElementById('modeLabel').textContent=m==='kr'?'국내 · KRW':m==='gl'?'글로벌 · USD':'국내소재 · KRW';
   // Toggle global-only tabs
   document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
+  document.querySelectorAll('.tab.creative-only').forEach(t=>t.style.display=m==='cr'?'inline-block':'none');
   // Switch data
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
@@ -261,6 +277,7 @@ function renderTab(id){
   if(id==='stripe')renderStripe();
   if(id==='grev')renderGlobalRevenue();
   if(id==='gweek')renderGlobalWeekly();
+  if(id==='crank')renderCreativeRanking();
 }
 
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
@@ -273,6 +290,8 @@ document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
 document.getElementById('dtSel').addEventListener('change',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
+document.getElementById('crDays').addEventListener('change',renderCreativeRanking);
+document.getElementById('crSort').addEventListener('change',renderCreativeRanking);
 
 // ===== HIGHLIGHT =====
 let currentHlId=null;
@@ -697,6 +716,155 @@ function renderGlobalWeekly(){
   });
   h+='</tbody>';document.getElementById('gweekTbl').innerHTML=h;
 }
+
+// ===== CREATIVE RANKING (소재랭킹) =====
+let crankFilters={};
+function clearCrankFilters(){crankFilters={};renderCreativeRanking()}
+
+function renderCreativeRanking(){
+  if(MODE!=='cr'){document.getElementById('crTbl').innerHTML='<tr><td>국내소재 모드에서만 사용</td></tr>';return}
+  const days=parseInt(document.getElementById('crDays').value);
+  const sortKey=document.getElementById('crSort').value;
+  const dd=DATES.slice(0,days);
+  // Aggregate by ad_id
+  const byAd={};
+  AD.forEach(r=>{
+    if(!dd.includes(r.date))return;
+    const aid=r.ad_id;if(!aid)return;
+    if(!byAd[aid])byAd[aid]={ad_id:aid,ad_name:r.ad_name||'',campaign_name:r.campaign_name||'',adset_name:r.adset_name||'',product:r.product||'',spend:0,revenue:0,profit:0,mp:0,uc:0,imp:0,days:0};
+    byAd[aid].spend+=r.spend;byAd[aid].revenue+=r.revenue;byAd[aid].profit+=r.profit;
+    byAd[aid].mp+=r.results_mp;byAd[aid].uc+=r.unique_clicks;byAd[aid].imp+=(r.impressions||0);
+    if(r.spend>0)byAd[aid].days++;
+  });
+  let list=Object.values(byAd).map(a=>{
+    a.roas=a.spend>0?a.revenue/a.spend*100:0;
+    a.cvr=a.uc>0&&a.mp>0?a.mp/a.uc*100:0;
+    a.cpm=a.imp>0?a.spend/a.imp*1000:0;
+    a.cpa=a.mp>0?a.spend/a.mp:0;
+    return a;
+  });
+  // Apply column filters
+  Object.entries(crankFilters).forEach(([col,vals])=>{
+    if(vals.size>0)list=list.filter(r=>vals.has(r[col]||''));
+  });
+  // Sort
+  if(sortKey==='roas')list.sort((a,b)=>b.roas-a.roas);
+  else if(sortKey==='profit')list.sort((a,b)=>b.profit-a.profit);
+  else if(sortKey==='revenue')list.sort((a,b)=>b.revenue-a.revenue);
+  else if(sortKey==='cvr')list.sort((a,b)=>b.cvr-a.cvr);
+  else list.sort((a,b)=>b.spend-a.spend);
+  // Totals
+  const totS=list.reduce((a,b)=>a+b.spend,0),totR=list.reduce((a,b)=>a+b.revenue,0),totP=totR-totS;
+  const totRoas=totS>0?totR/totS*100:0;
+  // Collect unique values for filterable columns
+  const filterCols={product:new Set(),campaign_name:new Set(),adset_name:new Set()};
+  list.forEach(r=>{filterCols.product.add(r.product);filterCols.campaign_name.add(r.campaign_name);filterCols.adset_name.add(r.adset_name)});
+  // Column definitions
+  const cols=[
+    {key:'product',label:'상품',filterable:true,fmt:v=>v},
+    {key:'campaign_name',label:'캠페인',filterable:true,fmt:v=>(v||'').slice(0,25)},
+    {key:'adset_name',label:'세트',filterable:true,fmt:v=>(v||'').slice(0,25)},
+    {key:'ad_name',label:'소재',filterable:false,fmt:v=>(v||'').slice(0,30)},
+    {key:'ad_id',label:'소재 ID',filterable:false,fmt:v=>v,style:'font-size:9px'},
+    {key:'days',label:'일수',filterable:false,fmt:v=>v},
+    {key:'spend',label:'지출',filterable:false,fmt:v=>money(v),style:'text-align:right;color:#d00'},
+    {key:'revenue',label:'매출',filterable:false,fmt:v=>money(v),style:'text-align:right;color:#00d'},
+    {key:'profit',label:'이익',filterable:false,fmt:(v)=>money(v),styleF:v=>'text-align:right;color:'+(v>=0?'green':'red')},
+    {key:'roas',label:'ROAS',filterable:false,fmt:v=>v.toFixed(1)+'%',clsF:v=>RC(v)},
+    {key:'cvr',label:'CVR',filterable:false,fmt:v=>v.toFixed(2)+'%'},
+    {key:'cpm',label:'CPM',filterable:false,fmt:v=>money(v),style:'text-align:right'},
+    {key:'cpa',label:'CPA',filterable:false,fmt:v=>money(v),style:'text-align:right'},
+    {key:'mp',label:'구매',filterable:false,fmt:v=>F(v)},
+  ];
+  // Header
+  let h='<thead><tr>';
+  cols.forEach((c,ci)=>{
+    const isFiltered=crankFilters[c.key]&&crankFilters[c.key].size>0;
+    if(c.filterable){
+      h+='<th class="filterable'+(isFiltered?' filtered':'')+'" data-col="'+c.key+'" onclick="toggleCrankFilter(event,\''+c.key+'\','+ci+')">'+c.label+'</th>';
+    }else{
+      h+='<th>'+c.label+'</th>';
+    }
+  });
+  h+='</tr></thead><tbody>';
+  // Summary row
+  h+='<tr class="sr"><td>종합 ('+list.length+'개)</td><td></td><td></td><td></td><td></td><td></td><td style="text-align:right;color:#d00">'+money(totS)+'</td><td style="text-align:right;color:#00d">'+money(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td></td><td></td><td></td><td></td></tr>';
+  // Data rows
+  list.forEach(r=>{
+    h+='<tr>';
+    cols.forEach(c=>{
+      const v=r[c.key];
+      const cls=c.clsF?c.clsF(v):'';
+      const sty=c.styleF?c.styleF(v):(c.style||'');
+      h+='<td class="'+cls+'" style="'+sty+'">'+c.fmt(v)+'</td>';
+    });
+    h+='</tr>';
+  });
+  h+='</tbody>';
+  document.getElementById('crTbl').innerHTML=h;
+}
+
+// Column filter dropdown
+let activeCrankFilter=null;
+function toggleCrankFilter(e,colKey,colIdx){
+  e.stopPropagation();
+  // Close existing
+  const existing=document.querySelector('.col-filter.show');
+  if(existing){existing.remove();if(activeCrankFilter===colKey){activeCrankFilter=null;return}}
+  activeCrankFilter=colKey;
+  // Get unique values
+  const days=parseInt(document.getElementById('crDays').value);
+  const dd=DATES.slice(0,days);
+  const vals=new Set();
+  AD.forEach(r=>{if(dd.includes(r.date)&&r[colKey])vals.add(r[colKey])});
+  const sorted=[...vals].sort();
+  const selected=crankFilters[colKey]||new Set();
+  // Build dropdown
+  const div=document.createElement('div');
+  div.className='col-filter show';
+  let dh='<label class="cf-all"><input type="checkbox" id="cfAll" '+(selected.size===0?'checked':'')+' onchange="crankFilterAll(\''+colKey+'\')"> 전체</label>';
+  sorted.forEach(v=>{
+    const esc=v.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    dh+='<label><input type="checkbox" value="'+esc+'" '+(selected.size===0||selected.has(v)?'checked':'')+' onchange="crankFilterItem(\''+colKey+'\')"> '+v.slice(0,30)+'</label>';
+  });
+  div.innerHTML=dh;
+  // Position
+  const th=e.target.closest('th');
+  th.style.position='relative';
+  th.appendChild(div);
+}
+function crankFilterAll(colKey){
+  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#cfAll)');
+  const allBox=document.getElementById('cfAll');
+  if(allBox.checked){
+    boxes.forEach(b=>b.checked=true);
+    delete crankFilters[colKey];
+  }else{
+    boxes.forEach(b=>b.checked=false);
+    crankFilters[colKey]=new Set();
+  }
+  renderCreativeRanking();
+}
+function crankFilterItem(colKey){
+  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#cfAll)');
+  const checked=new Set();
+  boxes.forEach(b=>{if(b.checked)checked.add(b.value)});
+  const allBox=document.getElementById('cfAll');
+  if(checked.size===boxes.length){
+    if(allBox)allBox.checked=true;
+    delete crankFilters[colKey];
+  }else{
+    if(allBox)allBox.checked=false;
+    crankFilters[colKey]=checked;
+  }
+  renderCreativeRanking();
+}
+document.addEventListener('click',e=>{
+  if(!e.target.closest('.col-filter')&&!e.target.closest('.filterable')){
+    document.querySelectorAll('.col-filter.show').forEach(d=>d.remove());
+    activeCrankFilter=null;
+  }
+});
 
 // ===== SEARCH =====
 let searchMatches=[],searchIdx=-1;
