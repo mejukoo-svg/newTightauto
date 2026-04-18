@@ -261,6 +261,8 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 })});
 document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
+document.getElementById('dtSel').addEventListener('change',renderDateTab);
+document.getElementById('dpSel').addEventListener('change',renderDateProduct);
 
 // ===== HIGHLIGHT =====
 let currentAdsetId=null;
@@ -521,7 +523,12 @@ function renderBudget(){
 // ===== DATE TAB =====
 function renderDateTab(){
   const sel=document.getElementById('dtSel');
-  if(!sel.options.length){DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)})}
+  const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+  if(!sel.options.length){
+    DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)});
+    // 기본값: 어제 (직전날)
+    if(DATES.includes(yDay))sel.value=yDay;
+  }
   const dt=sel.value||DATES[0];
   const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit-a.profit);
   let h='<thead><tr><th style="text-align:left">캠페인</th><th style="text-align:left">세트</th><th>세트 ID</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th><th>CVR</th><th>클릭</th><th>예산</th><th class="h-rate">증액률</th><th class="h-result">변동예산</th><th class="h-memo">메모</th></tr></thead><tbody>';
