@@ -208,6 +208,7 @@ function switchMode(m){
   else{AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
   rebuildLookups();
   // Reset selects
+  dashState.dateA=null;dashState.dateB=null;
   document.getElementById('dtSel').innerHTML='';
   document.getElementById('dpSel').innerHTML='';
   // Render active tab
@@ -283,25 +284,61 @@ async function saveMemo(date,id,memo,el){
 
 // ===== DASHBOARD =====
 let dashCharts={};
+let dashState={dateA:null,dateB:null,metric:'profit'};
+
+function aggregateDay(date){
+  const rows=AD.filter(r=>r.date===date);
+  const s=rows.reduce((a,b)=>a+b.spend,0),r=rows.reduce((a,b)=>a+b.revenue,0),p=r-s;
+  const mp=rows.reduce((a,b)=>a+b.results_mp,0),uc=rows.reduce((a,b)=>a+b.unique_clicks,0);
+  const imp=rows.reduce((a,b)=>a+(b.impressions||0),0),cpm=imp>0?s/imp*1000:0;
+  return{s,r,p,mp,uc,imp,cpm,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,rows};
+}
+function diffPct(a,b){if(!b||b===0)return null;return(a-b)/Math.abs(b)*100}
+function fmtDiff(d,inv){
+  if(d==null)return'<span style="color:#999">—</span>';
+  const sign=d>0?'▲':(d<0?'▼':'');
+  let color=d>0?'#16a34a':(d<0?'#dc2626':'#999');
+  if(inv){color=d>0?'#dc2626':(d<0?'#16a34a':'#999')}
+  return'<span style="color:'+color+';font-weight:600">'+sign+' '+Math.abs(d).toFixed(1)+'%</span>';
+}
+
 function renderDashboard(){
   const el=document.getElementById('dashContent');
-  const dd=DATES.slice(0,30);const pd=AD.filter(r=>dd.includes(r.date));
-  const totS=pd.reduce((a,b)=>a+b.spend,0),totR=pd.reduce((a,b)=>a+b.revenue,0),totP=totR-totS;
-  const totMp=pd.reduce((a,b)=>a+b.results_mp,0),totUc=pd.reduce((a,b)=>a+b.unique_clicks,0);
-  const roas=totS>0?totR/totS*100:0,cvr=totUc>0&&totMp>0?totMp/totUc*100:0;
-  const imp=pd.reduce((a,b)=>a+(b.impressions||0),0),cpm=imp>0?totS/imp*1000:0;
-  const modeLabel=MODE==='kr'?'국내 30일 · KRW':'글로벌 30일 · USD';
-  let h='<div style="font-size:13px;font-weight:700;margin-bottom:12px">'+(MODE==='kr'?'🇰🇷':'🌏')+' '+modeLabel+'</div>';
+  if(!dashState.dateA&&DATES.length){dashState.dateA=DATES[0];dashState.dateB=DATES[1]||DATES[0]}
+  const dateOpts=DATES.map(d=>'<option value="'+d+'">'+DK(d)+' ('+WD(d)+')</option>').join('');
+  const modeLabel=MODE==='kr'?'🇰🇷 국내':'🌏 글로벌';
+
+  let h='<div class="dash-filter"><span style="font-weight:700">'+modeLabel+'</span><label style="margin-left:14px">날짜 A</label><select id="dA">'+dateOpts+'</select><label style="margin-left:10px">날짜 B (비교)</label><select id="dB">'+dateOpts+'</select><span id="dPeriodInfo" style="color:#888;margin-left:12px;font-size:11px"></span></div>';
+
+  const A=aggregateDay(dashState.dateA),B=aggregateDay(dashState.dateB);
+
   h+='<div class="kpi-grid">';
-  h+='<div class="kpi-card"><div class="k-label">💰 순이익</div><div class="k-value" style="color:'+(totP>=0?'#16a34a':'#dc2626')+'">'+money(totP)+'</div><div class="k-sub">매출 '+money(totR)+'</div></div>';
-  h+='<div class="kpi-card"><div class="k-label">🎯 ROAS</div><div class="k-value">'+roas.toFixed(1)+'%</div></div>';
-  h+='<div class="kpi-card"><div class="k-label">💸 지출</div><div class="k-value" style="color:#d00">'+money(totS)+'</div></div>';
-  h+='<div class="kpi-card"><div class="k-label">🛒 CVR</div><div class="k-value">'+cvr.toFixed(2)+'%</div></div>';
-  h+='<div class="kpi-card"><div class="k-label">📢 CPM</div><div class="k-value" style="color:#795548">'+money(cpm)+'</div></div>';
+  const kpiData=[
+    {label:'💰 순이익',a:A.p,b:B.p,isMoney:true,colorByValue:true},
+    {label:'🎯 ROAS',a:A.roas,b:B.roas,isPct:true},
+    {label:'💸 지출',a:A.s,b:B.s,isMoney:true,invert:true,color:'#d00'},
+    {label:'🛒 CVR',a:A.cvr,b:B.cvr,isPct:true},
+    {label:'📢 CPM',a:A.cpm,b:B.cpm,isMoney:true,invert:true,color:'#795548'},
+  ];
+  kpiData.forEach(k=>{
+    const d=diffPct(k.a,k.b);
+    let valCls='';if(k.colorByValue)valCls=k.a>=0?'color:#16a34a':'color:#dc2626';
+    if(k.color)valCls='color:'+k.color;
+    const valA=k.isMoney?money(k.a):(k.a||0).toFixed(2)+'%';
+    const valB=k.isMoney?money(k.b):(k.b||0).toFixed(2)+'%';
+    h+='<div class="kpi-card"><div class="k-label">'+k.label+'</div><div class="k-value" style="'+valCls+'">'+valA+'</div><div class="k-sub">vs B: '+valB+' &nbsp;'+fmtDiff(d,k.invert)+'</div></div>';
+  });
   h+='</div>';
-  h+='<div class="chart-grid"><div class="chart-card"><h3>📊 상품별 이익 (Top 10)</h3><div class="chart-wrap"><canvas id="dBar"></canvas></div></div>';
-  h+='<div class="chart-card"><h3>🥧 지출 비중</h3><div class="chart-wrap"><canvas id="dPie"></canvas></div></div></div>';
-  // Stripe for global
+
+  // Charts
+  h+='<div class="chart-grid">';
+  h+='<div class="chart-card"><h3>📊 상품별 비교 (A vs B) <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option><option value="revenue">매출</option></select></h3><div class="chart-wrap" style="height:280px"><canvas id="chBar"></canvas></div></div>';
+  h+='<div class="chart-card"><h3>🥧 지출 비중 — 날짜 A</h3><div class="chart-wrap"><canvas id="chPieA"></canvas></div></div>';
+  h+='<div class="chart-card"><h3>🏆 Top 5 세트 — A (ROAS)</h3><ul class="top-list" id="topListA"></ul></div>';
+  h+='<div class="chart-card"><h3>⚠️ 주의 세트 — A (지출↑ ROAS↓)</h3><ul class="top-list" id="warnListA"></ul></div>';
+  h+='</div>';
+
+  // Stripe summary for global
   if(MODE==='gl'&&STRIPE_DATA.length){
     const sDates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort().reverse().slice(0,7);
     h+='<div style="margin-top:8px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">💳 Stripe 매출 (KRW) — 최근 7일</div><table style="width:100%;max-width:800px"><thead><tr><th>날짜</th><th>대만</th><th>홍콩</th><th>일본</th><th>합계</th></tr></thead><tbody>';
@@ -309,19 +346,64 @@ function renderDashboard(){
     h+='<tr><td>'+DK(d)+'('+WD(d)+')</td><td style="text-align:right">₩'+F(tw)+'</td><td style="text-align:right">₩'+F(hk)+'</td><td style="text-align:right">₩'+F(jp)+'</td><td style="text-align:right;font-weight:700">₩'+F(tw+hk+jp)+'</td></tr>'});
     h+='</tbody></table></div>';
   }
+
   el.innerHTML=h;
-  setTimeout(()=>{
-    const byP={};pd.forEach(r=>{if(!byP[r.product])byP[r.product]={s:0,p:0};byP[r.product].s+=r.spend;byP[r.product].p+=r.profit});
-    const prods=Object.entries(byP).sort((a,b)=>b[1].p-a[1].p).slice(0,10);
-    const COLORS=['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0','#ff6d01','#00acc1','#e91e63','#795548','#607d8b'];
-    if(dashCharts.bar)dashCharts.bar.destroy();
-    const c1=document.getElementById('dBar');
-    if(c1)dashCharts.bar=new Chart(c1,{type:'bar',data:{labels:prods.map(x=>x[0]),datasets:[{data:prods.map(x=>x[1].p),backgroundColor:prods.map(x=>x[1].p>=0?'#16a34a':'#dc2626')}]},options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',plugins:{legend:{display:false}}}});
-    if(dashCharts.pie)dashCharts.pie.destroy();
-    const c2=document.getElementById('dPie');
-    const spd=Object.entries(byP).sort((a,b)=>b[1].s-a[1].s).slice(0,10);
-    if(c2)dashCharts.pie=new Chart(c2,{type:'doughnut',data:{labels:spd.map(x=>x[0]),datasets:[{data:spd.map(x=>x[1].s),backgroundColor:COLORS}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
-  },50);
+
+  // Wire dropdowns
+  document.getElementById('dA').value=dashState.dateA;
+  document.getElementById('dB').value=dashState.dateB;
+  document.getElementById('dBarMetric').value=dashState.metric;
+  const dA=new Date(dashState.dateA),dB=new Date(dashState.dateB);
+  const dayDiff=Math.round((dA-dB)/864e5);
+  document.getElementById('dPeriodInfo').textContent='※ A는 B보다 '+(dayDiff>=0?dayDiff+'일 후':Math.abs(dayDiff)+'일 전');
+  document.getElementById('dA').addEventListener('change',e=>{dashState.dateA=e.target.value;renderDashboard()});
+  document.getElementById('dB').addEventListener('change',e=>{dashState.dateB=e.target.value;renderDashboard()});
+  document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawDashBar(A,B)});
+
+  setTimeout(()=>{drawDashBar(A,B);drawDashPie(A);drawDashTopLists(A)},50);
+}
+
+const BRAND_COLORS=['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0','#ff6d01','#00acc1','#e91e63','#795548','#607d8b','#f59e0b','#10b981'];
+
+function aggByProduct(rows){
+  const by={};rows.forEach(r=>{if(!by[r.product])by[r.product]={product:r.product,spend:0,revenue:0,profit:0,mp:0,uc:0};by[r.product].spend+=r.spend;by[r.product].revenue+=r.revenue;by[r.product].profit+=r.profit;by[r.product].mp+=r.results_mp;by[r.product].uc+=r.unique_clicks});
+  return Object.values(by).filter(x=>x.spend>0);
+}
+
+function drawDashBar(A,B){
+  const metric=dashState.metric;
+  const aggA=aggByProduct(A.rows),aggB=aggByProduct(B.rows);
+  const allP=new Set([...aggA.map(x=>x.product),...aggB.map(x=>x.product)]);
+  const mapA={};aggA.forEach(x=>{mapA[x.product]=x});const mapB={};aggB.forEach(x=>{mapB[x.product]=x});
+  const getVal=(p,side)=>{const m=side==='A'?mapA[p]:mapB[p];if(!m)return 0;
+    if(metric==='profit')return m.profit;if(metric==='spend')return m.spend;if(metric==='revenue')return m.revenue;
+    if(metric==='roas')return m.spend>0?m.revenue/m.spend*100:0;if(metric==='cvr')return m.uc>0&&m.mp>0?m.mp/m.uc*100:0;return 0};
+  const products=[...allP].sort((a,b)=>getVal(b,'A')-getVal(a,'A')).slice(0,12);
+  if(dashCharts.bar)dashCharts.bar.destroy();
+  const ctx=document.getElementById('chBar');if(!ctx)return;
+  const labelMap={profit:'이익',roas:'ROAS(%)',spend:'지출',cvr:'CVR(%)',revenue:'매출'};
+  dashCharts.bar=new Chart(ctx,{type:'bar',data:{labels:products,datasets:[
+    {label:'A: '+DK(dashState.dateA),data:products.map(p=>getVal(p,'A')),backgroundColor:'#4285f4'},
+    {label:'B: '+DK(dashState.dateB),data:products.map(p=>getVal(p,'B')),backgroundColor:'#aaa'}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},scales:{x:{ticks:{font:{size:10}}},y:{ticks:{font:{size:10}}}}}});
+}
+
+function drawDashPie(A){
+  const agg=aggByProduct(A.rows).sort((a,b)=>b.spend-a.spend).slice(0,10);
+  if(dashCharts.pie)dashCharts.pie.destroy();
+  const ctx=document.getElementById('chPieA');if(!ctx)return;
+  dashCharts.pie=new Chart(ctx,{type:'doughnut',data:{labels:agg.map(x=>x.product),datasets:[{data:agg.map(x=>x.spend),backgroundColor:BRAND_COLORS}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
+}
+
+function drawDashTopLists(A){
+  const byA={};A.rows.forEach(r=>{if(!byA[r.adset_id])byA[r.adset_id]={name:r.adset_name,product:r.product,spend:0,revenue:0};byA[r.adset_id].spend+=r.spend;byA[r.adset_id].revenue+=r.revenue});
+  const list=Object.values(byA).filter(x=>x.spend>=100).map(x=>({...x,roas:x.spend>0?x.revenue/x.spend*100:0}));
+  const top=list.sort((a,b)=>b.roas-a.roas).slice(0,5);
+  const topEl=document.getElementById('topListA');
+  if(topEl)topEl.innerHTML=top.map((x,i)=>'<li><span><span class="rank">#'+(i+1)+'</span>'+(x.name||'').slice(0,22)+' <span style="color:#888;font-size:9px">('+x.product+')</span></span><span class="val" style="color:#16a34a">'+x.roas.toFixed(0)+'%</span></li>').join('')||'<li style="color:#888">데이터 없음</li>';
+  const warn=list.filter(x=>x.spend>=500&&x.roas<80).sort((a,b)=>b.spend-a.spend).slice(0,5);
+  const wEl=document.getElementById('warnListA');
+  if(wEl)wEl.innerHTML=warn.map((x,i)=>'<li><span><span class="rank" style="color:#dc2626">!</span>'+(x.name||'').slice(0,22)+'</span><span class="val" style="color:#dc2626">'+x.roas.toFixed(0)+'% / '+money(x.spend)+'</span></li>').join('')||'<li style="color:#888">양호</li>';
 }
 
 // ===== TREND (상품별 그룹) =====
