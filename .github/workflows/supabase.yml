@@ -26,18 +26,17 @@ on:
           - '180'
           - '365'
 jobs:
-  sync:
+  adset:
+    name: 국내 세트별
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
-        run: pip install requests pandas yfinance
-      - name: Run pipeline
+      - run: pip install requests pandas yfinance
+      - name: Run 세트별
         env:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
           META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
@@ -49,3 +48,27 @@ jobs:
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 국내_세트별_supabase.py
+
+  creative:
+    name: 국내 소재별
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: adset
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pandas
+      - name: Run 소재별
+        env:
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 국내_소재별_supabase.py
