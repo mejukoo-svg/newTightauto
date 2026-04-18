@@ -464,7 +464,7 @@ function drawDashTopLists(A){
 function renderTrend(){
   const days=parseInt(document.getElementById('tDays').value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
-  const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
@@ -499,7 +499,7 @@ function renderTrend(){
 
 // ===== CHANGE =====
 function renderChange(){
-  const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+  const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
@@ -565,7 +565,7 @@ function renderBudget(){
 // ===== DATE TAB =====
 function renderDateTab(){
   const sel=document.getElementById('dtSel');
-  const yDay=new Date(new Date().getTime()-864e5).toISOString().split('T')[0];
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   if(!sel.options.length){
     DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)});
     if(DATES.includes(yDay))sel.value=yDay;
