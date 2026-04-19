@@ -491,7 +491,7 @@ function drawRevDaily(){
     daily[r.date].imp+=(r.impressions||0);
   });
   const labels=dd.map(d=>DK(d).slice(3));
-  const spendData=dd.map(d=>daily[d]?.spend||0);
+  const profitData=dd.map(d=>{const x=daily[d];return x?(x.revenue-x.spend):0});
   const revData=dd.map(d=>daily[d]?.revenue||0);
   const metaRevData=dd.map(d=>daily[d]?.metaRev||0);
   const roasData=dd.map(d=>{const x=daily[d];return x&&x.spend>0?x.revenue/x.spend*100:0});
@@ -503,7 +503,7 @@ function drawRevDaily(){
   dashCharts.revDaily=new Chart(ctx,{type:'bar',data:{
     labels,
     datasets:[
-      {type:'bar',label:'지출',data:spendData,backgroundColor:'rgba(220,38,38,0.3)',borderColor:'#dc2626',borderWidth:1,yAxisID:'y',order:3},
+      {type:'bar',label:'순이익',data:profitData,backgroundColor:profitData.map(v=>v>=0?'rgba(22,163,74,0.35)':'rgba(220,38,38,0.35)'),borderColor:profitData.map(v=>v>=0?'#16a34a':'#dc2626'),borderWidth:1,yAxisID:'y',order:3},
       {type:'bar',label:'매출(MP)',data:revData,backgroundColor:'rgba(37,99,235,0.3)',borderColor:'#2563eb',borderWidth:1,yAxisID:'y',order:2},
       {type:'line',label:'ROAS%',data:roasData,borderColor:'#16a34a',backgroundColor:'transparent',borderWidth:2,pointRadius:2,yAxisID:'y1',order:1},
       {type:'line',label:'메타비중%',data:ratioData,borderColor:'#f59e0b',backgroundColor:'transparent',borderWidth:2,pointRadius:2,borderDash:[4,4],yAxisID:'y1',order:0},
