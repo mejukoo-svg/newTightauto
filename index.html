@@ -23,6 +23,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:
 .tab.active{background:#fff;color:#1a73e8;font-weight:700;border-bottom:2px solid #fff;margin-bottom:-2px}
 .tab.global-only{display:none}
 .tab.creative-only{display:none}
+.tab.kr-only{display:none}
 /* Column filters */
 th.filterable{cursor:pointer;position:relative}
 th.filterable:hover{background:#d0d8e8!important}
@@ -144,6 +145,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab global-only" data-t="grev">💰 글로벌_매출</div>
 <div class="tab global-only" data-t="gweek">📅 글로벌_주간매출</div>
 <div class="tab creative-only" data-t="crank">🏆 소재랭킹</div>
+<div class="tab kr-only" data-t="krank">🏆 세트랭킹</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -162,11 +164,12 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-grev"><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
+<div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
 <div class="cp-btn cp-d10" data-c="down10">-10</div><div class="cp-btn cp-d20" data-c="down20">-20</div>
-<div class="cp-btn cp-off" data-c="off">OFF</div><div class="cp-btn cp-watch" data-c="watch">주의</div>
+<div class="cp-btn cp-off" data-c="off">OFF</div><div class="cp-btn cp-watch" data-c="watch">복증</div>
 <div class="cp-btn cp-clear" data-c="">✕</div>
 </div>
 
@@ -179,7 +182,7 @@ const SBH={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
 const HL_CONFIG={
   up20:{cls:'hl-up20',pct:20,label:'+20%'},up10:{cls:'hl-up10',pct:10,label:'+10%'},
   down10:{cls:'hl-down10',pct:-10,label:'-10%'},down20:{cls:'hl-down20',pct:-20,label:'-20%'},
-  off:{cls:'hl-off',pct:null,label:'OFF'},watch:{cls:'hl-watch',pct:0,label:'주의'},
+  off:{cls:'hl-off',pct:null,label:'OFF'},watch:{cls:'hl-watch',pct:0,label:'복증'},
 };
 
 // ===== STATE =====
@@ -225,6 +228,7 @@ function switchMode(m){
   // Toggle global-only tabs
   document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
   document.querySelectorAll('.tab.creative-only').forEach(t=>t.style.display=m==='cr'?'inline-block':'none');
+  document.querySelectorAll('.tab.kr-only').forEach(t=>t.style.display=m==='kr'?'inline-block':'none');
   // Switch data
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
@@ -278,6 +282,7 @@ function renderTab(id){
   if(id==='grev')renderGlobalRevenue();
   if(id==='gweek')renderGlobalWeekly();
   if(id==='crank')renderCreativeRanking();
+  if(id==='krank')renderAdsetRanking();
 }
 
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
@@ -292,6 +297,8 @@ document.getElementById('dtSel').addEventListener('change',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
 document.getElementById('crDays').addEventListener('change',renderCreativeRanking);
 document.getElementById('crSort').addEventListener('change',renderCreativeRanking);
+document.getElementById('krDays').addEventListener('change',renderAdsetRanking);
+document.getElementById('krSort').addEventListener('change',renderAdsetRanking);
 
 // ===== HIGHLIGHT =====
 // HIGHLIGHTS: 추이차트용 (adset_highlights 테이블, 전체삭제 가능)
@@ -474,7 +481,7 @@ function renderTrend(){
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks}});totD[d]={s,r,p,mp,uc}});
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
   let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,0)+'</td>'});
   h+='</tr>';
   // Group by product
@@ -506,7 +513,7 @@ function renderChange(){
   const totD={};dd.forEach(d=>{let s=0,r=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});totD[d]={s,r}});
   let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0);
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc">'+MC(ts>0?tr/ts*100:0,tr-ts,ts,tr,0)+'</td>';
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">증감률</div><div class="s">지출금액</div><div class="rv">매출</div></td><td class="mc">'+MC(ts>0?tr/ts*100:0,tr-ts,ts,tr,0)+'</td>';
   dd.forEach((d,i)=>{const x=totD[d];const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<dd.length-1){const pr=totD[dd[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}const yd=d===yDay?' col-yday':'';
   h+='<td class="mc '+RC(roas)+yd+'"><div class="r">'+roas.toFixed(0)+'</div><div class="'+(chg>0?'p':'p neg')+'">'+(chg>0?'+':'')+chg.toFixed(1)+'%</div><div class="s">-'+money(x.s)+'</div><div class="rv">'+money(x.r)+'</div></td>'});
   h+='</tr>';
@@ -921,9 +928,116 @@ function crankFilterItem(colKey){
 document.addEventListener('click',e=>{
   if(!e.target.closest('.col-filter')&&!e.target.closest('.filterable')){
     document.querySelectorAll('.col-filter.show').forEach(d=>d.remove());
-    activeCrankFilter=null;
+    activeCrankFilter=null;activeKrankFilter=null;
   }
 });
+
+// ===== ADSET RANKING (세트랭킹 — 국내용) =====
+let krankFilters={};
+function clearKrankFilters(){krankFilters={};renderAdsetRanking()}
+
+function renderAdsetRanking(){
+  if(MODE!=='kr'){document.getElementById('krTbl').innerHTML='<tr><td>국내 모드에서만 사용</td></tr>';return}
+  const days=parseInt(document.getElementById('krDays').value);
+  const sortKey=document.getElementById('krSort').value;
+  const dd=DATES.slice(0,days);
+  const byAs={};
+  AD.forEach(r=>{
+    if(!dd.includes(r.date))return;
+    const asid=r.adset_id;if(!asid)return;
+    if(!byAs[asid])byAs[asid]={adset_id:asid,adset_name:r.adset_name||'',campaign_name:r.campaign_name||'',product:r.product||'',spend:0,revenue:0,profit:0,mp:0,uc:0,imp:0,days:0};
+    byAs[asid].spend+=r.spend;byAs[asid].revenue+=r.revenue;byAs[asid].profit+=r.profit;
+    byAs[asid].mp+=r.results_mp;byAs[asid].uc+=r.unique_clicks;byAs[asid].imp+=(r.impressions||0);
+    if(r.spend>0)byAs[asid].days++;
+  });
+  let list=Object.values(byAs).map(a=>{
+    a.roas=a.spend>0?a.revenue/a.spend*100:0;
+    a.cvr=a.uc>0&&a.mp>0?a.mp/a.uc*100:0;
+    a.cpm=a.imp>0?a.spend/a.imp*1000:0;
+    a.cpa=a.mp>0?a.spend/a.mp:0;
+    return a;
+  });
+  Object.entries(krankFilters).forEach(([col,vals])=>{
+    if(vals.size>0)list=list.filter(r=>vals.has(r[col]||''));
+  });
+  if(sortKey==='roas')list.sort((a,b)=>b.roas-a.roas);
+  else if(sortKey==='profit')list.sort((a,b)=>b.profit-a.profit);
+  else if(sortKey==='revenue')list.sort((a,b)=>b.revenue-a.revenue);
+  else if(sortKey==='cvr')list.sort((a,b)=>b.cvr-a.cvr);
+  else list.sort((a,b)=>b.spend-a.spend);
+  const totS=list.reduce((a,b)=>a+b.spend,0),totR=list.reduce((a,b)=>a+b.revenue,0),totP=totR-totS;
+  const totRoas=totS>0?totR/totS*100:0;
+  const cols=[
+    {key:'product',label:'상품',filterable:true,fmt:v=>v},
+    {key:'campaign_name',label:'캠페인',filterable:true,fmt:v=>(v||'').slice(0,25)},
+    {key:'adset_name',label:'세트',filterable:false,fmt:v=>(v||'').slice(0,30)},
+    {key:'adset_id',label:'세트 ID',filterable:false,fmt:v=>v,style:'font-size:9px'},
+    {key:'days',label:'일수',filterable:false,fmt:v=>v},
+    {key:'spend',label:'지출',filterable:false,fmt:v=>money(v),style:'text-align:right;color:#d00'},
+    {key:'revenue',label:'매출',filterable:false,fmt:v=>money(v),style:'text-align:right;color:#00d'},
+    {key:'profit',label:'이익',filterable:false,fmt:v=>money(v),styleF:v=>'text-align:right;color:'+(v>=0?'green':'red')},
+    {key:'roas',label:'ROAS',filterable:false,fmt:v=>v.toFixed(1)+'%',clsF:v=>RC(v)},
+    {key:'cvr',label:'CVR',filterable:false,fmt:v=>v.toFixed(2)+'%'},
+    {key:'cpm',label:'CPM',filterable:false,fmt:v=>money(v),style:'text-align:right'},
+    {key:'cpa',label:'CPA',filterable:false,fmt:v=>money(v),style:'text-align:right'},
+    {key:'mp',label:'구매',filterable:false,fmt:v=>F(v)},
+  ];
+  let h='<thead><tr>';
+  cols.forEach(c=>{
+    const isFiltered=krankFilters[c.key]&&krankFilters[c.key].size>0;
+    if(c.filterable){
+      h+='<th class="filterable'+(isFiltered?' filtered':'')+'" data-col="'+c.key+'" onclick="toggleKrankFilter(event,\''+c.key+'\')">'+c.label+'</th>';
+    }else{h+='<th>'+c.label+'</th>'}
+  });
+  h+='</tr></thead><tbody>';
+  h+='<tr class="sr"><td>종합 ('+list.length+'개)</td><td></td><td></td><td></td><td></td><td style="text-align:right;color:#d00">'+money(totS)+'</td><td style="text-align:right;color:#00d">'+money(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td></td><td></td><td></td><td></td></tr>';
+  list.forEach(r=>{
+    h+='<tr>';
+    cols.forEach(c=>{
+      const v=r[c.key];const cls=c.clsF?c.clsF(v):'';const sty=c.styleF?c.styleF(v):(c.style||'');
+      h+='<td class="'+cls+'" style="'+sty+'">'+c.fmt(v)+'</td>';
+    });
+    h+='</tr>';
+  });
+  h+='</tbody>';document.getElementById('krTbl').innerHTML=h;
+}
+
+let activeKrankFilter=null;
+function toggleKrankFilter(e,colKey){
+  e.stopPropagation();
+  const existing=document.querySelector('.col-filter.show');
+  if(existing){existing.remove();if(activeKrankFilter===colKey){activeKrankFilter=null;return}}
+  activeKrankFilter=colKey;
+  const days=parseInt(document.getElementById('krDays').value);
+  const dd=DATES.slice(0,days);
+  const vals=new Set();
+  AD.forEach(r=>{if(dd.includes(r.date)&&r[colKey])vals.add(r[colKey])});
+  const sorted=[...vals].sort();
+  const selected=krankFilters[colKey]||new Set();
+  const div=document.createElement('div');div.className='col-filter show';
+  let dh='<label class="cf-all"><input type="checkbox" id="kfAll" '+(selected.size===0?'checked':'')+' onchange="krankFilterAll(\''+colKey+'\')"> 전체</label>';
+  sorted.forEach(v=>{
+    const esc=v.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+    dh+='<label><input type="checkbox" value="'+esc+'" '+(selected.size===0||selected.has(v)?'checked':'')+' onchange="krankFilterItem(\''+colKey+'\')"> '+v.slice(0,30)+'</label>';
+  });
+  div.innerHTML=dh;
+  const th=e.target.closest('th');th.style.position='relative';th.appendChild(div);
+}
+function krankFilterAll(colKey){
+  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#kfAll)');
+  const allBox=document.getElementById('kfAll');
+  if(allBox.checked){boxes.forEach(b=>b.checked=true);delete krankFilters[colKey]}
+  else{boxes.forEach(b=>b.checked=false);krankFilters[colKey]=new Set()}
+  renderAdsetRanking();
+}
+function krankFilterItem(colKey){
+  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#kfAll)');
+  const checked=new Set();boxes.forEach(b=>{if(b.checked)checked.add(b.value)});
+  const allBox=document.getElementById('kfAll');
+  if(checked.size===boxes.length){if(allBox)allBox.checked=true;delete krankFilters[colKey]}
+  else{if(allBox)allBox.checked=false;krankFilters[colKey]=checked}
+  renderAdsetRanking();
+}
 
 // ===== SEARCH =====
 let searchMatches=[],searchIdx=-1;
