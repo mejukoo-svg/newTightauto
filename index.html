@@ -987,63 +987,65 @@ function renderCreativeRanking(){
 
 // Column filter dropdown
 let activeCrankFilter=null;
+let pendingCrankRender=false;
 function toggleCrankFilter(e,colKey,colIdx){
   e.stopPropagation();
-  // Close existing
   const existing=document.querySelector('.col-filter.show');
-  if(existing){existing.remove();if(activeCrankFilter===colKey){activeCrankFilter=null;return}}
+  if(existing){
+    existing.remove();
+    if(activeCrankFilter===colKey){activeCrankFilter=null;if(pendingCrankRender){pendingCrankRender=false;renderCreativeRanking()}return}
+    if(pendingCrankRender){pendingCrankRender=false;renderCreativeRanking()}
+  }
   activeCrankFilter=colKey;
-  // Get unique values
   const days=parseInt(document.getElementById('crDays').value);
   const dd=DATES.slice(0,days);
   const vals=new Set();
   AD.forEach(r=>{if(dd.includes(r.date)&&r[colKey])vals.add(r[colKey])});
   const sorted=[...vals].sort();
   const selected=crankFilters[colKey]||new Set();
-  // Build dropdown
   const div=document.createElement('div');
   div.className='col-filter show';
-  let dh='<label class="cf-all"><input type="checkbox" id="cfAll" '+(selected.size===0?'checked':'')+' onchange="crankFilterAll(\''+colKey+'\')"> 전체</label>';
+  div.addEventListener('click',e=>e.stopPropagation());
+  let dh='<label class="cf-all"><input type="checkbox" data-role="all" data-col="'+colKey+'" '+(selected.size===0?'checked':'')+' onchange="crankToggleAll(this)"> 전체</label>';
   sorted.forEach(v=>{
     const esc=v.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    dh+='<label><input type="checkbox" value="'+esc+'" '+(selected.size===0||selected.has(v)?'checked':'')+' onchange="crankFilterItem(\''+colKey+'\')"> '+v.slice(0,30)+'</label>';
+    dh+='<label><input type="checkbox" data-col="'+colKey+'" value="'+esc+'" '+(selected.size===0||selected.has(v)?'checked':'')+' onchange="crankToggleItem(this)"> '+v.slice(0,30)+'</label>';
   });
+  dh+='<div style="border-top:1px solid #ddd;padding:4px 10px;text-align:center"><button onclick="applyCrankFilter()" style="padding:3px 16px;border:1px solid #4285f4;border-radius:3px;background:#4285f4;color:#fff;font-size:10px;cursor:pointer;font-family:inherit">적용</button></div>';
   div.innerHTML=dh;
-  // Position
   const th=e.target.closest('th');
   th.style.position='relative';
   th.appendChild(div);
 }
-function crankFilterAll(colKey){
-  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#cfAll)');
-  const allBox=document.getElementById('cfAll');
-  if(allBox.checked){
-    boxes.forEach(b=>b.checked=true);
-    delete crankFilters[colKey];
-  }else{
-    boxes.forEach(b=>b.checked=false);
-    crankFilters[colKey]=new Set();
-  }
-  renderCreativeRanking();
+function crankToggleAll(el){
+  const col=el.dataset.col;
+  const boxes=el.closest('.col-filter').querySelectorAll('input[type=checkbox]:not([data-role=all])');
+  boxes.forEach(b=>b.checked=el.checked);
+  if(el.checked){delete crankFilters[col]}else{crankFilters[col]=new Set()}
+  pendingCrankRender=true;
 }
-function crankFilterItem(colKey){
-  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#cfAll)');
-  const checked=new Set();
-  boxes.forEach(b=>{if(b.checked)checked.add(b.value)});
-  const allBox=document.getElementById('cfAll');
-  if(checked.size===boxes.length){
-    if(allBox)allBox.checked=true;
-    delete crankFilters[colKey];
-  }else{
-    if(allBox)allBox.checked=false;
-    crankFilters[colKey]=checked;
-  }
+function crankToggleItem(el){
+  const col=el.dataset.col;
+  const dd=el.closest('.col-filter');
+  const boxes=dd.querySelectorAll('input[type=checkbox]:not([data-role=all])');
+  const allBox=dd.querySelector('input[data-role=all]');
+  const checked=new Set();boxes.forEach(b=>{if(b.checked)checked.add(b.value)});
+  if(checked.size===boxes.length){if(allBox)allBox.checked=true;delete crankFilters[col]}
+  else{if(allBox)allBox.checked=false;crankFilters[col]=checked}
+  pendingCrankRender=true;
+}
+function applyCrankFilter(){
+  document.querySelectorAll('.col-filter.show').forEach(d=>d.remove());
+  activeCrankFilter=null;pendingCrankRender=false;
   renderCreativeRanking();
 }
 document.addEventListener('click',e=>{
   if(!e.target.closest('.col-filter')&&!e.target.closest('.filterable')){
+    const had=document.querySelectorAll('.col-filter.show').length>0;
     document.querySelectorAll('.col-filter.show').forEach(d=>d.remove());
     activeCrankFilter=null;activeKrankFilter=null;
+    if(had&&pendingCrankRender){pendingCrankRender=false;renderCreativeRanking()}
+    if(had&&pendingKrankRender){pendingKrankRender=false;renderAdsetRanking()}
   }
 });
 
@@ -1120,10 +1122,15 @@ function renderAdsetRanking(){
 }
 
 let activeKrankFilter=null;
+let pendingKrankRender=false;
 function toggleKrankFilter(e,colKey){
   e.stopPropagation();
   const existing=document.querySelector('.col-filter.show');
-  if(existing){existing.remove();if(activeKrankFilter===colKey){activeKrankFilter=null;return}}
+  if(existing){
+    existing.remove();
+    if(activeKrankFilter===colKey){activeKrankFilter=null;if(pendingKrankRender){pendingKrankRender=false;renderAdsetRanking()}return}
+    if(pendingKrankRender){pendingKrankRender=false;renderAdsetRanking()}
+  }
   activeKrankFilter=colKey;
   const days=parseInt(document.getElementById('krDays').value);
   const dd=DATES.slice(0,days);
@@ -1132,27 +1139,36 @@ function toggleKrankFilter(e,colKey){
   const sorted=[...vals].sort();
   const selected=krankFilters[colKey]||new Set();
   const div=document.createElement('div');div.className='col-filter show';
-  let dh='<label class="cf-all"><input type="checkbox" id="kfAll" '+(selected.size===0?'checked':'')+' onchange="krankFilterAll(\''+colKey+'\')"> 전체</label>';
+  div.addEventListener('click',e=>e.stopPropagation());
+  let dh='<label class="cf-all"><input type="checkbox" data-role="all" data-col="'+colKey+'" '+(selected.size===0?'checked':'')+' onchange="krankToggleAll(this)"> 전체</label>';
   sorted.forEach(v=>{
     const esc=v.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-    dh+='<label><input type="checkbox" value="'+esc+'" '+(selected.size===0||selected.has(v)?'checked':'')+' onchange="krankFilterItem(\''+colKey+'\')"> '+v.slice(0,30)+'</label>';
+    dh+='<label><input type="checkbox" data-col="'+colKey+'" value="'+esc+'" '+(selected.size===0||selected.has(v)?'checked':'')+' onchange="krankToggleItem(this)"> '+v.slice(0,30)+'</label>';
   });
+  dh+='<div style="border-top:1px solid #ddd;padding:4px 10px;text-align:center"><button onclick="applyKrankFilter()" style="padding:3px 16px;border:1px solid #4285f4;border-radius:3px;background:#4285f4;color:#fff;font-size:10px;cursor:pointer;font-family:inherit">적용</button></div>';
   div.innerHTML=dh;
   const th=e.target.closest('th');th.style.position='relative';th.appendChild(div);
 }
-function krankFilterAll(colKey){
-  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#kfAll)');
-  const allBox=document.getElementById('kfAll');
-  if(allBox.checked){boxes.forEach(b=>b.checked=true);delete krankFilters[colKey]}
-  else{boxes.forEach(b=>b.checked=false);krankFilters[colKey]=new Set()}
-  renderAdsetRanking();
+function krankToggleAll(el){
+  const col=el.dataset.col;
+  const boxes=el.closest('.col-filter').querySelectorAll('input[type=checkbox]:not([data-role=all])');
+  boxes.forEach(b=>b.checked=el.checked);
+  if(el.checked){delete krankFilters[col]}else{krankFilters[col]=new Set()}
+  pendingKrankRender=true;
 }
-function krankFilterItem(colKey){
-  const boxes=document.querySelectorAll('.col-filter input[type=checkbox]:not(#kfAll)');
+function krankToggleItem(el){
+  const col=el.dataset.col;
+  const dd=el.closest('.col-filter');
+  const boxes=dd.querySelectorAll('input[type=checkbox]:not([data-role=all])');
+  const allBox=dd.querySelector('input[data-role=all]');
   const checked=new Set();boxes.forEach(b=>{if(b.checked)checked.add(b.value)});
-  const allBox=document.getElementById('kfAll');
-  if(checked.size===boxes.length){if(allBox)allBox.checked=true;delete krankFilters[colKey]}
-  else{if(allBox)allBox.checked=false;krankFilters[colKey]=checked}
+  if(checked.size===boxes.length){if(allBox)allBox.checked=true;delete krankFilters[col]}
+  else{if(allBox)allBox.checked=false;krankFilters[col]=checked}
+  pendingKrankRender=true;
+}
+function applyKrankFilter(){
+  document.querySelectorAll('.col-filter.show').forEach(d=>d.remove());
+  activeKrankFilter=null;pendingKrankRender=false;
   renderAdsetRanking();
 }
 
