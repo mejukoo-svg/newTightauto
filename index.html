@@ -313,11 +313,13 @@ async function saveHL(id,c){
   const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
   HIGHLIGHTS[id]=c||null;
-  // 2) ★ 날짜탭용 영구저장 (performance 테이블의 highlight 컬럼)
+  // 2) ★ 날짜탭용 영구저장 — 직전날(어제)에만 저장
   const col=hlIdCol();
-  await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
-  // 메모리의 AD 데이터도 갱신
-  AD.forEach(r=>{if(rowId(r)===id)r.highlight=c||null});
+  const _y=new Date();_y.setDate(_y.getDate()-1);
+  const yDate=_y.getFullYear()+'-'+String(_y.getMonth()+1).padStart(2,'0')+'-'+String(_y.getDate()).padStart(2,'0');
+  await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+yDate+'&'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
+  // 메모리의 AD 데이터도 어제분만 갱신
+  AD.forEach(r=>{if(rowId(r)===id&&r.date===yDate)r.highlight=c||null});
   renderTrend();
 }
 function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
