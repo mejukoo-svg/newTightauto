@@ -401,6 +401,9 @@ function renderDashboard(){
   h+='<div class="chart-card"><h3>⚠️ 주의 세트 — A (지출↑ ROAS↓)</h3><ul class="top-list" id="warnListA"></ul></div>';
   h+='</div>';
 
+  // 메타 매출 비중 차트 (일별)
+  h+='<div class="chart-card" style="margin-bottom:16px"><h3>📈 메타 매출 비중 (일별) <select id="dRevDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></h3><div style="position:relative;height:300px"><canvas id="chRevDaily"></canvas></div></div>';
+
   // Stripe summary for global
   if(MODE==='gl'&&STRIPE_DATA.length){
     const sDates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort().reverse().slice(0,7);
@@ -422,8 +425,9 @@ function renderDashboard(){
   document.getElementById('dA').addEventListener('change',e=>{dashState.dateA=e.target.value;renderDashboard()});
   document.getElementById('dB').addEventListener('change',e=>{dashState.dateB=e.target.value;renderDashboard()});
   document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawDashBar(A,B)});
+  document.getElementById('dRevDays').addEventListener('change',()=>drawRevDaily());
 
-  setTimeout(()=>{drawDashBar(A,B);drawDashPie(A);drawDashTopLists(A)},50);
+  setTimeout(()=>{drawDashBar(A,B);drawDashPie(A);drawDashTopLists(A);drawRevDaily()},50);
 }
 
 const BRAND_COLORS=['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0','#ff6d01','#00acc1','#e91e63','#795548','#607d8b','#f59e0b','#10b981'];
@@ -467,6 +471,56 @@ function drawDashTopLists(A){
   const warn=list.filter(x=>x.spend>=500&&x.roas<80).sort((a,b)=>b.spend-a.spend).slice(0,5);
   const wEl=document.getElementById('warnListA');
   if(wEl)wEl.innerHTML=warn.map((x,i)=>'<li><span><span class="rank" style="color:#dc2626">!</span>'+(x.name||'').slice(0,22)+'</span><span class="val" style="color:#dc2626">'+x.roas.toFixed(0)+'% / '+money(x.spend)+'</span></li>').join('')||'<li style="color:#888">양호</li>';
+}
+
+// ===== META REVENUE DAILY CHART =====
+function drawRevDaily(){
+  const daysN=parseInt(document.getElementById('dRevDays')?.value||'30');
+  const dd=DATES.slice(0,daysN).reverse(); // oldest→newest
+  // Daily aggregation
+  const daily={};
+  AD.forEach(r=>{
+    if(!daily[r.date])daily[r.date]={spend:0,revenue:0,metaRev:0,mp:0,uc:0,imp:0};
+    daily[r.date].spend+=r.spend;
+    daily[r.date].revenue+=r.revenue;
+    // Meta's own tracked revenue = purchase_roas_meta × spend
+    const metaRev=(r.purchase_roas_meta||0)*r.spend;
+    daily[r.date].metaRev+=metaRev;
+    daily[r.date].mp+=r.results_mp;
+    daily[r.date].uc+=r.unique_clicks;
+    daily[r.date].imp+=(r.impressions||0);
+  });
+  const labels=dd.map(d=>DK(d).slice(3));
+  const spendData=dd.map(d=>daily[d]?.spend||0);
+  const revData=dd.map(d=>daily[d]?.revenue||0);
+  const metaRevData=dd.map(d=>daily[d]?.metaRev||0);
+  const roasData=dd.map(d=>{const x=daily[d];return x&&x.spend>0?x.revenue/x.spend*100:0});
+  // Meta 매출 비중 = metaRev / revenue (Meta가 추적한 매출 vs 실제 매출)
+  const ratioData=dd.map(d=>{const x=daily[d];return x&&x.revenue>0?x.metaRev/x.revenue*100:0});
+
+  if(dashCharts.revDaily)dashCharts.revDaily.destroy();
+  const ctx=document.getElementById('chRevDaily');if(!ctx)return;
+  dashCharts.revDaily=new Chart(ctx,{type:'bar',data:{
+    labels,
+    datasets:[
+      {type:'bar',label:'지출',data:spendData,backgroundColor:'rgba(220,38,38,0.3)',borderColor:'#dc2626',borderWidth:1,yAxisID:'y',order:3},
+      {type:'bar',label:'매출(MP)',data:revData,backgroundColor:'rgba(37,99,235,0.3)',borderColor:'#2563eb',borderWidth:1,yAxisID:'y',order:2},
+      {type:'line',label:'ROAS%',data:roasData,borderColor:'#16a34a',backgroundColor:'transparent',borderWidth:2,pointRadius:2,yAxisID:'y1',order:1},
+      {type:'line',label:'메타비중%',data:ratioData,borderColor:'#f59e0b',backgroundColor:'transparent',borderWidth:2,pointRadius:2,borderDash:[4,4],yAxisID:'y1',order:0},
+    ]
+  },options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{position:'top',labels:{font:{size:10}}},
+      tooltip:{callbacks:{label:function(ctx){
+        const v=ctx.raw;if(ctx.dataset.yAxisID==='y1')return ctx.dataset.label+': '+v.toFixed(1)+'%';
+        return ctx.dataset.label+': '+money(v);
+      }}}
+    },
+    scales:{
+      y:{position:'left',ticks:{font:{size:9},callback:v=>{if(MODE==='gl')return'$'+(v/1000).toFixed(0)+'k';return'₩'+(v/10000).toFixed(0)+'만'}},grid:{color:'#f0f0f0'}},
+      y1:{position:'right',min:0,max:Math.max(300,...roasData,...ratioData)+20,ticks:{font:{size:9},callback:v=>v+'%'},grid:{display:false}},
+      x:{ticks:{font:{size:9},maxRotation:45}}
+    }
+  }});
 }
 
 // ===== TREND (상품별 그룹) =====
@@ -866,6 +920,7 @@ function renderCreativeRanking(){
     a.cvr=a.uc>0&&a.mp>0?a.mp/a.uc*100:0;
     a.cpm=a.imp>0?a.spend/a.imp*1000:0;
     a.cpa=a.mp>0?a.spend/a.mp:0;
+    a.ctr=a.imp>0?a.uc/a.imp*100:0;
     return a;
   });
   // Apply column filters
@@ -899,6 +954,7 @@ function renderCreativeRanking(){
     {key:'cvr',label:'CVR',filterable:false,fmt:v=>v.toFixed(2)+'%'},
     {key:'cpm',label:'CPM',filterable:false,fmt:v=>money(v),style:'text-align:right'},
     {key:'cpa',label:'CPA',filterable:false,fmt:v=>money(v),style:'text-align:right'},
+    {key:'ctr',label:'CTR',filterable:false,fmt:v=>v.toFixed(2)+'%'},
     {key:'mp',label:'구매',filterable:false,fmt:v=>F(v)},
   ];
   // Header
@@ -913,7 +969,7 @@ function renderCreativeRanking(){
   });
   h+='</tr></thead><tbody>';
   // Summary row
-  h+='<tr class="sr"><td>종합 ('+list.length+'개)</td><td></td><td></td><td></td><td></td><td></td><td style="text-align:right;color:#d00">'+money(totS)+'</td><td style="text-align:right;color:#00d">'+money(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td></td><td></td><td></td><td></td></tr>';
+  h+='<tr class="sr"><td>종합 ('+list.length+'개)</td><td></td><td></td><td></td><td></td><td></td><td style="text-align:right;color:#d00">'+money(totS)+'</td><td style="text-align:right;color:#00d">'+money(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td></td><td></td><td></td><td></td><td></td></tr>';
   // Data rows
   list.forEach(r=>{
     h+='<tr>';
@@ -1014,6 +1070,7 @@ function renderAdsetRanking(){
     a.cvr=a.uc>0&&a.mp>0?a.mp/a.uc*100:0;
     a.cpm=a.imp>0?a.spend/a.imp*1000:0;
     a.cpa=a.mp>0?a.spend/a.mp:0;
+    a.ctr=a.imp>0?a.uc/a.imp*100:0;
     return a;
   });
   Object.entries(krankFilters).forEach(([col,vals])=>{
@@ -1039,6 +1096,7 @@ function renderAdsetRanking(){
     {key:'cvr',label:'CVR',filterable:false,fmt:v=>v.toFixed(2)+'%'},
     {key:'cpm',label:'CPM',filterable:false,fmt:v=>money(v),style:'text-align:right'},
     {key:'cpa',label:'CPA',filterable:false,fmt:v=>money(v),style:'text-align:right'},
+    {key:'ctr',label:'CTR',filterable:false,fmt:v=>v.toFixed(2)+'%'},
     {key:'mp',label:'구매',filterable:false,fmt:v=>F(v)},
   ];
   let h='<thead><tr>';
@@ -1049,7 +1107,7 @@ function renderAdsetRanking(){
     }else{h+='<th>'+c.label+'</th>'}
   });
   h+='</tr></thead><tbody>';
-  h+='<tr class="sr"><td>종합 ('+list.length+'개)</td><td></td><td></td><td></td><td></td><td style="text-align:right;color:#d00">'+money(totS)+'</td><td style="text-align:right;color:#00d">'+money(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td></td><td></td><td></td><td></td></tr>';
+  h+='<tr class="sr"><td>종합 ('+list.length+'개)</td><td></td><td></td><td></td><td></td><td style="text-align:right;color:#d00">'+money(totS)+'</td><td style="text-align:right;color:#00d">'+money(totR)+'</td><td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td><td class="'+RC(totRoas)+'">'+totRoas.toFixed(1)+'%</td><td></td><td></td><td></td><td></td><td></td></tr>';
   list.forEach(r=>{
     h+='<tr>';
     cols.forEach(c=>{
