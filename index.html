@@ -530,30 +530,87 @@ function renderChange(){
 // ===== WEEKLY =====
 function renderWeekly(){
   const mode=document.getElementById('wMode').value;
-  const byW={},byM={};
-  AD.forEach(r=>{const wk=WM(r.date),mk=r.date.slice(0,7);
-  if(!byW[wk])byW[wk]={s:0,r:0,p:0,mp:0};byW[wk].s+=r.spend;byW[wk].r+=r.revenue;byW[wk].p+=r.profit;byW[wk].mp+=r.results_mp;
-  if(!byM[mk])byM[mk]={s:0,r:0,p:0,mp:0};byM[mk].s+=r.spend;byM[mk].r+=r.revenue;byM[mk].p+=r.profit;byM[mk].mp+=r.results_mp});
+  // Aggregate by week, month, and also by product
+  const byW={},byM={},byWP={},byMP={};
+  AD.forEach(r=>{
+    const wk=WM(r.date),mk=r.date.slice(0,7),prod=r.product||'기타';
+    const uc=r.unique_clicks||0,imp=r.impressions||0,mp=r.results_mp||0;
+    // Week total
+    if(!byW[wk])byW[wk]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
+    byW[wk].s+=r.spend;byW[wk].r+=r.revenue;byW[wk].p+=r.profit;byW[wk].mp+=mp;byW[wk].uc+=uc;byW[wk].imp+=imp;
+    // Month total
+    if(!byM[mk])byM[mk]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
+    byM[mk].s+=r.spend;byM[mk].r+=r.revenue;byM[mk].p+=r.profit;byM[mk].mp+=mp;byM[mk].uc+=uc;byM[mk].imp+=imp;
+    // Week × product
+    const wpk=wk+'|'+prod;if(!byWP[wpk])byWP[wpk]={s:0,r:0,p:0,mp:0,uc:0,imp:0,prod};
+    byWP[wpk].s+=r.spend;byWP[wpk].r+=r.revenue;byWP[wpk].p+=r.profit;byWP[wpk].mp+=mp;byWP[wpk].uc+=uc;byWP[wpk].imp+=imp;
+    // Month × product
+    const mpk=mk+'|'+prod;if(!byMP[mpk])byMP[mpk]={s:0,r:0,p:0,mp:0,uc:0,imp:0,prod};
+    byMP[mpk].s+=r.spend;byMP[mpk].r+=r.revenue;byMP[mpk].p+=r.profit;byMP[mpk].mp+=mp;byMP[mpk].uc+=uc;byMP[mpk].imp+=imp;
+  });
   const months=Object.keys(byM).sort().reverse(),weeks=Object.keys(byW).sort().reverse();
-  function blk(label,cls,d){
+
+  function getProds(prefix,map){
+    return Object.entries(map).filter(([k])=>k.startsWith(prefix+'|')).map(([k,v])=>v).sort((a,b)=>b.s-a.s);
+  }
+
+  function kpiRow(d,bold,indent){
+    const roas=d.s>0?d.r/d.s*100:0;
+    const cvr=d.uc>0&&d.mp>0?d.mp/d.uc*100:0;
+    const ctr=d.imp>0?d.uc/d.imp*100:0;
+    const fw=bold?'font-weight:700;font-size:13px':'font-weight:400;font-size:12px';
+    const pl=indent?'padding-left:20px':'';
+    return'<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #eee">'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">지출</div><div style="'+fw+';color:#d00">'+money(d.s)+'</div></div>'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">매출</div><div style="'+fw+';color:#00d">'+money(d.r)+'</div></div>'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">이익</div><div style="'+fw+';color:'+(d.p>=0?'#16a34a':'#dc2626')+'">'+money(d.p)+'</div></div>'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">ROAS</div><div style="'+fw+'">'+roas.toFixed(1)+'%</div></div>'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">구매</div><div style="'+fw+'">'+F(d.mp)+'</div></div>'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">CVR</div><div style="'+fw+'">'+cvr.toFixed(2)+'%</div></div>'+
+      '<div style="padding:6px;text-align:center"><div style="font-size:9px;color:#999">CTR</div><div style="'+fw+'">'+ctr.toFixed(2)+'%</div></div>'+
+    '</div>';
+  }
+
+  function blk(label,cls,d,prods){
     const roas=d.s>0?d.r/d.s*100:0;
     const isMonth=cls==='month';
     const hdrBg=isMonth?'background:#1a2744;color:#fff':'background:#555;color:#fff';
     const roasColor=roas>=100?'#4ade80':'#f87171';
-    return'<div style="border-bottom:1px solid #ddd;margin-bottom:2px">'+
-      '<div style="'+hdrBg+';padding:8px 14px;font-weight:700;font-size:'+(isMonth?'13px':'11px')+';display:flex;justify-content:space-between;align-items:center"><span>'+label+'</span><span style="font-size:11px">ROAS <span style="color:'+roasColor+'">'+roas.toFixed(0)+'%</span> · 이익 '+money(d.p)+'</span></div>'+
-      '<div style="display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid #eee">'+
-        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">지출</div><div style="font-weight:700;color:#d00;font-size:13px">'+money(d.s)+'</div></div>'+
-        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">매출</div><div style="font-weight:700;color:#00d;font-size:13px">'+money(d.r)+'</div></div>'+
-        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">이익</div><div style="font-weight:700;color:'+(d.p>=0?'#16a34a':'#dc2626')+';font-size:13px">'+money(d.p)+'</div></div>'+
-        '<div style="padding:8px 6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999;margin-bottom:2px">ROAS</div><div style="font-weight:700;font-size:13px">'+roas.toFixed(1)+'%</div></div>'+
-        '<div style="padding:8px 6px;text-align:center"><div style="font-size:9px;color:#999;margin-bottom:2px">구매</div><div style="font-weight:700;font-size:13px">'+F(d.mp)+'</div></div>'+
-      '</div></div>';
+    let out='<div style="border-bottom:1px solid #ddd;margin-bottom:2px">';
+    out+='<div style="'+hdrBg+';padding:8px 14px;font-weight:700;font-size:'+(isMonth?'13px':'11px')+';display:flex;justify-content:space-between;align-items:center"><span>'+label+'</span><span style="font-size:11px">ROAS <span style="color:'+roasColor+'">'+roas.toFixed(0)+'%</span> · 이익 '+money(d.p)+'</span></div>';
+    // 종합 KPI row
+    out+=kpiRow(d,true,false);
+    // 상품별 rows
+    if(prods&&prods.length){
+      prods.forEach(pd=>{
+        const pRoas=pd.s>0?pd.r/pd.s*100:0;
+        const rc=pRoas>=100?'#16a34a':'#dc2626';
+        out+='<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #f0f0f0;background:#fafafa">'+
+          '<div style="padding:4px 6px;text-align:left;border-right:1px solid #eee;font-size:11px;font-weight:600;color:#333;padding-left:12px;display:flex;align-items:center">📦 '+pd.prod+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px;color:#00d">'+money(pd.r)+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px;color:'+(pd.p>=0?'#16a34a':'#dc2626')+'">'+money(pd.p)+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px;color:'+rc+'">'+pRoas.toFixed(0)+'%</div>'+
+          '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px">'+F(pd.mp)+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px">'+(pd.uc>0&&pd.mp>0?(pd.mp/pd.uc*100).toFixed(2)+'%':'')+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;font-size:11px">'+(pd.imp>0?(pd.uc/pd.imp*100).toFixed(2)+'%':'')+'</div>'+
+        '</div>';
+      });
+    }
+    out+='</div>';
+    return out;
   }
-  let html='<div style="max-width:700px;margin:0 auto">';
-  if(mode==='month'){months.forEach(mk=>{html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',byM[mk])})}
-  else if(mode==='week'){weeks.forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);html+=blk((new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),'week',byW[wk])})}
-  else{months.forEach(mk=>{html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',byM[mk]);weeks.filter(w=>w.slice(0,7)===mk).forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);html+=blk((new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),'week',byW[wk])})})}
+
+  let html='<div style="max-width:800px;margin:0 auto">';
+  if(mode==='month'){
+    months.forEach(mk=>{html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',byM[mk],getProds(mk,byMP))});
+  }else if(mode==='week'){
+    weeks.forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);html+=blk((new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),'week',byW[wk],getProds(wk,byWP))});
+  }else{
+    months.forEach(mk=>{
+      html+=blk(mk.slice(0,4)+'년 '+parseInt(mk.slice(5))+'월','month',byM[mk],getProds(mk,byMP));
+      weeks.filter(w=>w.slice(0,7)===mk).forEach(wk=>{const we=new Date(new Date(wk).getTime()+6*864e5);html+=blk((new Date(wk).getMonth()+1)+'/'+new Date(wk).getDate()+'~'+(we.getMonth()+1)+'/'+we.getDate(),'week',byW[wk],getProds(wk,byWP))});
+    });
+  }
   html+='</div>';
   document.getElementById('wBlocks').innerHTML=html;
 }
