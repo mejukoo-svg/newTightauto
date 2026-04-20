@@ -4,7 +4,7 @@
 ========================
 Vanced Meta Ads (adset level) + Mixpanel → Supabase
 
-계정: act_25183853061243175 (VANCED_TOKEN)
+계정: act_25183853061243175 (META_TOKEN_VANCED)
 Mixpanel 매칭: utm_term (adset_id)
 테이블: vanced_ad_performance_daily
 """
@@ -20,7 +20,7 @@ log = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
-META_TOKEN = os.environ.get("VANCED_TOKEN", "")
+META_TOKEN = os.environ.get("META_TOKEN_VANCED", "")
 META_AD_ACCOUNT = os.environ.get("META_AD_ACCOUNT_ID_VANCED", "") or "act_25183853061243175"
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
