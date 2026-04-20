@@ -117,8 +117,7 @@ jobs:
       - run: pip install requests pandas
       - name: Run 밴스드 세트별
         env:
-          META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
-          META_AD_ACCOUNT_ID_VANCED: ${{ secrets.META_AD_ACCOUNT_ID_VANCED }}
+          VANCED_TOKEN: ${{ secrets.VANCED_TOKEN }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
@@ -142,8 +141,7 @@ jobs:
       - run: pip install requests pandas
       - name: Run 밴스드 소재별
         env:
-          META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
-          META_AD_ACCOUNT_ID_VANCED: ${{ secrets.META_AD_ACCOUNT_ID_VANCED }}
+          VANCED_TOKEN: ${{ secrets.VANCED_TOKEN }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
