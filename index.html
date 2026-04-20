@@ -130,6 +130,8 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn active" data-mode="kr" onclick="switchMode('kr')">🇰🇷 국내</div>
 <div class="mode-btn" data-mode="gl" onclick="switchMode('gl')">🌏 글로벌</div>
 <div class="mode-btn" data-mode="cr" onclick="switchMode('cr')">🎨 국내소재</div>
+<div class="mode-btn" data-mode="vn" onclick="switchMode('vn')">🎯 밴스드</div>
+<div class="mode-btn" data-mode="vc" onclick="switchMode('vc')">🎨 밴스드소재</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
 </div>
 <!-- Tabs -->
@@ -189,8 +191,8 @@ const HL_CONFIG={
 
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
-let KR_AD=[],GL_AD=[],CR_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
-let KR_HL={},GL_HL={},CR_HL={};
+let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],VC_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
+let KR_HL={},GL_HL={},CR_HL={},VN_HL={},VC_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
 // ===== HELPERS =====
@@ -217,24 +219,27 @@ function norm(r){
   return r;
 }
 // Row ID: adset_id for kr/gl, ad_id for creative
-function rowId(r){return MODE==='cr'?(r.ad_id||''):(r.adset_id||'')}
-function rowName1(r){return MODE==='cr'?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
-function rowIdLabel(){return MODE==='cr'?'소재 ID':'세트 ID'}
-function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
+function rowId(r){return(MODE==='cr'||MODE==='vc')?(r.ad_id||''):(r.adset_id||'')}
+function rowName1(r){return(MODE==='cr'||MODE==='vc')?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
+function rowIdLabel(){return(MODE==='cr'||MODE==='vc')?'소재 ID':'세트 ID'}
+function rowNameLabel(){return(MODE==='cr'||MODE==='vc')?'소재':'세트'}
 
 // ===== MODE SWITCH =====
 function switchMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  document.getElementById('modeLabel').textContent=m==='kr'?'국내 · KRW':m==='gl'?'글로벌 · USD':'국내소재 · KRW';
+  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',vc:'밴스드소재 · KRW'};
+  document.getElementById('modeLabel').textContent=mLabels[m]||m;
   // Toggle global-only tabs
   document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
-  document.querySelectorAll('.tab.creative-only').forEach(t=>t.style.display=m==='cr'?'inline-block':'none');
-  document.querySelectorAll('.tab.kr-only').forEach(t=>t.style.display=m==='kr'?'inline-block':'none');
+  document.querySelectorAll('.tab.kr-only').forEach(t=>t.style.display=(m==='kr'||m==='vn')?'inline-block':'none');
+  document.querySelectorAll('.tab.creative-only').forEach(t2=>t2.style.display=(m==='cr'||m==='vc')?'inline-block':'none');
   // Switch data
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
-  else{AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
+  else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
+  else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
+  else if(m==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -255,20 +260,26 @@ function rebuildLookups(){
 
 // ===== INIT =====
 async function initData(){
-  const [kr,gl,cr,krhl,glhl,crhl,stripe,toss]=await Promise.all([
+  const [kr,gl,cr,vn,vc,krhl,glhl,crhl,vnhl,vchl,stripe,toss]=await Promise.all([
     sbAll('ad_performance_daily','spend'),
     sbAll('global_ad_performance_daily','spend_usd').catch(()=>[]),
     sbAll('ad_creative_daily','spend').catch(()=>[]),
+    sbAll('vanced_ad_performance_daily','spend').catch(()=>[]),
+    sbAll('vanced_ad_creative_daily','spend').catch(()=>[]),
     sbQ('adset_highlights','select=*').catch(()=>[]),
     sbQ('global_adset_highlights','select=*').catch(()=>[]),
     sbQ('ad_creative_highlights','select=*').catch(()=>[]),
+    sbQ('vanced_adset_highlights','select=*').catch(()=>[]),
+    sbQ('vanced_creative_highlights','select=*').catch(()=>[]),
     sbQ('global_stripe_daily','select=*&order=date.desc').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
   ]);
-  KR_AD=kr;GL_AD=gl;CR_AD=cr;STRIPE_DATA=stripe;TOSS_DATA=toss;
+  KR_AD=kr;GL_AD=gl;CR_AD=cr;VN_AD=vn;VC_AD=vc;STRIPE_DATA=stripe;TOSS_DATA=toss;
   KR_HL={};krhl.forEach(x=>{KR_HL[x.adset_id]=x.highlight});
   GL_HL={};glhl.forEach(x=>{GL_HL[x.adset_id]=x.highlight});
   CR_HL={};crhl.forEach(x=>{CR_HL[x.ad_id]=x.highlight});
+  VN_HL={};vnhl.forEach(x=>{VN_HL[x.adset_id]=x.highlight});
+  VC_HL={};vchl.forEach(x=>{VC_HL[x.ad_id]=x.highlight});
   switchMode('kr');
 }
 
@@ -309,9 +320,9 @@ document.getElementById('krSort').addEventListener('change',renderAdsetRanking);
 // HIGHLIGHTS: 추이차트용 (adset_highlights 테이블, 전체삭제 가능)
 // r.highlight: 날짜탭용 (ad_performance_daily.highlight 컬럼, 영구저장)
 let currentHlId=null;
-const hlTbl=()=>MODE==='kr'?'adset_highlights':MODE==='gl'?'global_adset_highlights':'ad_creative_highlights';
-const hlIdCol=()=>MODE==='cr'?'ad_id':'adset_id';
-const perfTbl=()=>MODE==='kr'?'ad_performance_daily':MODE==='gl'?'global_ad_performance_daily':'ad_creative_daily';
+const hlTbl=()=>{const m={kr:'adset_highlights',gl:'global_adset_highlights',cr:'ad_creative_highlights',vn:'vanced_adset_highlights',vc:'vanced_creative_highlights'};return m[MODE]||'adset_highlights'};
+const hlIdCol=()=>(MODE==='cr'||MODE==='vc')?'ad_id':'adset_id';
+const perfTbl=()=>{const m={kr:'ad_performance_daily',gl:'global_ad_performance_daily',cr:'ad_creative_daily',vn:'vanced_ad_performance_daily',vc:'vanced_ad_creative_daily'};return m[MODE]||'ad_performance_daily'};
 function hlClass(id){const h=HIGHLIGHTS[id];return h&&HL_CONFIG[h]?HL_CONFIG[h].cls:''}
 async function saveHL(id,c){
   // 1) 추이차트용 저장 (adset_highlights)
@@ -344,8 +355,8 @@ document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.
 
 // ===== MEMO =====
 async function saveMemo(date,id,memo,el){
-  const tbl=MODE==='kr'?'ad_performance_daily':MODE==='gl'?'global_ad_performance_daily':'ad_creative_daily';
-  const idCol=MODE==='cr'?'ad_id':'adset_id';
+  const tbl=perfTbl();
+  const idCol=hlIdCol();
   await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&'+idCol+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo})});
   const ind=el.parentNode.querySelector('.memo-saved');if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
 }
@@ -468,7 +479,7 @@ function drawDashPie(A){
 }
 
 function drawDashTopLists(A){
-  const byA={};A.rows.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={name:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),product:r.product,spend:0,revenue:0};byA[rid].spend+=r.spend;byA[rid].revenue+=r.revenue});
+  const byA={};A.rows.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={name:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),product:r.product,spend:0,revenue:0};byA[rid].spend+=r.spend;byA[rid].revenue+=r.revenue});
   const list=Object.values(byA).filter(x=>x.spend>=100).map(x=>({...x,roas:x.spend>0?x.revenue/x.spend*100:0}));
   const top=list.sort((a,b)=>b.roas-a.roas).slice(0,5);
   const topEl=document.getElementById('topListA');
@@ -536,7 +547,7 @@ function renderTrend(){
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4;
@@ -582,7 +593,7 @@ function renderTrendWeekly(){
   AD.forEach(r=>{
     const wk=WM(r.date);if(!weekKeys.includes(wk))return;
     const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,w:{}};
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,w:{}};
     if(!byA[rid].w[wk])byA[rid].w[wk]={spend:0,revenue:0,profit:0,mp:0,uc:0};
     byA[rid].w[wk].spend+=r.spend;byA[rid].w[wk].revenue+=r.revenue;byA[rid].w[wk].profit+=r.profit;
     byA[rid].w[wk].mp+=r.results_mp;byA[rid].w[wk].uc+=r.unique_clicks;
@@ -629,7 +640,7 @@ function renderTrendWeekly(){
 // ===== CHANGE =====
 function renderChange(){
   const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
+  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
   const totD={};dd.forEach(d=>{let s=0,r=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});totD[d]={s,r}});
@@ -788,7 +799,7 @@ function renderDateTab(){
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':F(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/"/g,'&quot;');
-    const name2=(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
+    const name2=((MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
     h+='<tr>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+name2+'</td>';
@@ -967,7 +978,7 @@ let crankFilters={};
 function clearCrankFilters(){crankFilters={};renderCreativeRanking()}
 
 function renderCreativeRanking(){
-  if(MODE!=='cr'){document.getElementById('crTbl').innerHTML='<tr><td>국내소재 모드에서만 사용</td></tr>';return}
+  if(MODE!=='cr'&&MODE!=='vc'){document.getElementById('crTbl').innerHTML='<tr><td>소재 모드에서만 사용</td></tr>';return}
   const days=parseInt(document.getElementById('crDays').value);
   const sortKey=document.getElementById('crSort').value;
   const dd=DATES.slice(0,days);
@@ -1120,7 +1131,7 @@ let krankFilters={};
 function clearKrankFilters(){krankFilters={};renderAdsetRanking()}
 
 function renderAdsetRanking(){
-  if(MODE!=='kr'){document.getElementById('krTbl').innerHTML='<tr><td>국내 모드에서만 사용</td></tr>';return}
+  if(MODE!=='kr'&&MODE!=='vn'){document.getElementById('krTbl').innerHTML='<tr><td>세트 모드에서만 사용</td></tr>';return}
   const days=parseInt(document.getElementById('krDays').value);
   const sortKey=document.getElementById('krSort').value;
   const dd=DATES.slice(0,days);
