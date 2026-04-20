@@ -47,6 +47,7 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 국내_세트별_supabase.py
@@ -102,25 +103,6 @@ jobs:
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 글로벌_세트별_supabase.py
-
-  # ─── 토스 매출 (독립 실행) ───
-  toss:
-    name: 💳 토스 매출
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests
-      - name: Run 토스
-        env:
-          TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
-        run: python 토스_매출_supabase.py
 
   # ─── 밴스드 세트별 (독립 실행) ───
   vn-adset:
