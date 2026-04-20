@@ -121,3 +121,52 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 토스_매출_supabase.py
+
+  # ─── 밴스드 세트별 (독립 실행) ───
+  vn-adset:
+    name: 🎯 밴스드 세트별
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pandas
+      - name: Run 밴스드 세트별
+        env:
+          META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
+          META_AD_ACCOUNT_ID_VANCED: ${{ secrets.META_AD_ACCOUNT_ID_VANCED }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 밴스드_세트별_supabase.py
+
+  # ─── 밴스드 소재별 (세트별 끝나면) ───
+  vn-creative:
+    name: 🎨 밴스드 소재별
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: vn-adset
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests pandas
+      - name: Run 밴스드 소재별
+        env:
+          META_TOKEN_VANCED: ${{ secrets.META_TOKEN_VANCED }}
+          META_AD_ACCOUNT_ID_VANCED: ${{ secrets.META_AD_ACCOUNT_ID_VANCED }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 밴스드_소재별_supabase.py
