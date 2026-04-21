@@ -139,6 +139,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab active" data-t="dashboard">📊 대시보드</div>
 <div class="tab" data-t="trend">추이차트</div>
 <div class="tab" data-t="trendw">추이차트(주간)</div>
+<div class="tab" data-t="trendp">추이차트_상품별</div>
 <div class="tab" data-t="change">증감액</div>
 <div class="tab" data-t="weekly">주간종합</div>
 <div class="tab" data-t="budget">예산</div>
@@ -159,6 +160,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
 <div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
+<div class="panel" id="p-trendp"><div class="filter"><label>최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
@@ -288,6 +290,7 @@ function renderTab(id){
   if(id==='dashboard')renderDashboard();
   if(id==='trend')renderTrend();
   if(id==='trendw')renderTrendWeekly();
+  if(id==='trendp')renderTrendProduct();
   if(id==='change')renderChange();
   if(id==='weekly')renderWeekly();
   if(id==='budget')renderBudget();
@@ -308,6 +311,7 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 })});
 document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
+document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
 document.getElementById('dtSel').addEventListener('change',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
@@ -635,6 +639,68 @@ function renderTrendWeekly(){
     });
   });
   h+='</tbody>';document.getElementById('twTbl').innerHTML=h;
+}
+
+// ===== TREND PRODUCT (추이차트_상품별) =====
+function renderTrendProduct(){
+  const days=parseInt(document.getElementById('tpDays').value);
+  const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // Aggregate by product per date
+  const prodDaily={};const prodAll={};
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const p=r.product||'기타';
+    if(!prodDaily[p])prodDaily[p]={};if(!prodDaily[p][r.date])prodDaily[p][r.date]={s:0,r:0,p:0,mp:0,uc:0};
+    prodDaily[p][r.date].s+=r.spend;prodDaily[p][r.date].r+=r.revenue;prodDaily[p][r.date].p+=r.profit;
+    prodDaily[p][r.date].mp+=r.results_mp;prodDaily[p][r.date].uc+=r.unique_clicks;
+    if(!prodAll[p])prodAll[p]={s:0,r:0,p:0,mp:0,uc:0,yS:0};
+    prodAll[p].s+=r.spend;prodAll[p].r+=r.revenue;prodAll[p].p+=r.profit;prodAll[p].mp+=r.results_mp;prodAll[p].uc+=r.unique_clicks;
+    if(r.date===yDay)prodAll[p].yS+=r.spend;
+  });
+  // Sort products by yesterday spend
+  const sortedProds=Object.keys(prodAll).sort((a,b)=>(prodAll[b].yS||0)-(prodAll[a].yS||0));
+  // Also aggregate by rowId for detail sections
+  const byA={};
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product||'기타',d:{}};
+    byA[rid].d[r.date]=r});
+  const allItems=Object.values(byA).map(a=>{
+    let s7=0,r7=0,p7=0,uc7=0,mp7=0;d7.forEach(d=>{if(a.d[d]){s7+=a.d[d].spend;r7+=a.d[d].revenue;p7+=a.d[d].profit;uc7+=a.d[d].unique_clicks;mp7+=a.d[d].results_mp}});
+    a._s=s7;a._r=r7;a._p=p7;a._roas=s7>0?r7/s7*100:0;a._cvr=uc7>0&&mp7>0?mp7/uc7*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  // Headers
+  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+  const colSpan=dd.length+4;
+  // Build table
+  let h='<thead><tr><th style="min-width:200px;text-align:left">상품</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  // ── 상단: 상품별 종합 성과 ──
+  h+='<tr><td colspan="'+colSpan+'" class="prod-header">📊 상품별 종합 성과</td></tr>';
+  sortedProds.forEach(prod=>{
+    const pa=prodAll[prod];const roas7=pa.s>0?pa.r/pa.s*100:0;const cvr7=pa.uc>0&&pa.mp>0?pa.mp/pa.uc*100:0;
+    const cells=dd.map(d=>{const t=prodDaily[prod]?.[d];const yd=d===yDay?' col-yday':'';
+      if(!t||!t.s)return'<td class="'+yd+'"></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;
+      return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,t.p,t.s,t.r,cvr)+'</td>'}).join('');
+    h+='<tr class="sr" style="background:#f0f4ff"><td class="fx fx0" style="background:#f0f4ff;font-weight:700">📦 '+prod+'</td><td class="fx fx1" style="background:#f0f4ff;font-size:10px;color:#888">'+(Object.keys(byA).filter(k=>byA[k].product===prod).length)+'개</td><td></td><td class="mc '+RC(roas7)+'">'+MC(roas7,pa.p,pa.s,pa.r,cvr7)+'</td>'+cells+'</tr>';
+  });
+  h+='<tr><td colspan="'+colSpan+'" style="height:12px"></td></tr>';
+  // ── 하단: 상품별 상세 ──
+  sortedProds.forEach(prod=>{
+    const items=allItems.filter(a=>a.product===prod).sort((a,b)=>b._yS-a._yS);
+    if(!items.length)return;
+    const pa=prodAll[prod];const roas7=pa.s>0?pa.r/pa.s*100:0;
+    h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+items.length+'개) 전날 '+money(pa.yS)+' · 7일 ROAS '+roas7.toFixed(0)+'%</td></tr>';
+    // Product subtotal
+    const pDaily={};dd.forEach(d=>{const t=prodDaily[prod]?.[d];if(t)pDaily[d]=t});
+    const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';
+      if(!t||!t.s)return'<td class="'+yd+'"></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;
+      return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,t.p,t.s,t.r,cvr)+'</td>'}).join('');
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(roas7)+'">'+MC(roas7,pa.p,pa.s,pa.r,0)+'</td>'+pCells+'</tr>';
+    // Individual rows
+    items.forEach(a=>{
+      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
+      const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
+      h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+ck+'>'+((a.an||'').slice(0,25))+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+    });
+  });
+  h+='</tbody>';document.getElementById('tpTbl').innerHTML=h;
 }
 
 // ===== CHANGE =====
