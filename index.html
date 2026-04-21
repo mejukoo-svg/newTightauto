@@ -8,15 +8,15 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:11px}
+body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:11px;padding:8px 12px}
 /* Mode toggle */
-.mode-bar{display:flex;align-items:center;gap:0;background:#1a2744;padding:4px 12px;position:sticky;top:0;z-index:200}
+.mode-bar{display:flex;align-items:center;gap:0;background:#1a2744;padding:6px 12px;position:sticky;top:0;z-index:200;border-radius:6px;margin-bottom:2px}
 .mode-btn{padding:6px 18px;font-size:12px;font-weight:600;cursor:pointer;border:none;border-radius:4px;color:#aab;background:transparent;font-family:inherit}
 .mode-btn.active{background:#fff;color:#1a2744}
 .mode-btn:hover:not(.active){background:rgba(255,255,255,0.1)}
 .mode-label{color:#fff;font-size:11px;margin-left:auto;opacity:0.7}
 /* Tabs */
-.tab-bar{display:flex;gap:0;border-bottom:2px solid #4285f4;background:#f8f9fa;padding:0 8px;overflow-x:auto;position:sticky;top:32px;z-index:100}
+.tab-bar{display:flex;gap:0;border-bottom:2px solid #4285f4;background:#f8f9fa;padding:0 8px;overflow-x:auto;position:sticky;top:38px;z-index:100;border-radius:4px 4px 0 0}
 .tab-bar::-webkit-scrollbar{height:3px}
 .tab{padding:7px 14px;font-size:11px;font-weight:500;cursor:pointer;border:1px solid #ddd;border-bottom:none;background:#e8eaed;color:#555;margin-right:1px;border-radius:4px 4px 0 0;white-space:nowrap}
 .tab:hover{background:#fff;color:#222}
@@ -36,9 +36,9 @@ th.filterable.filtered::after{content:'✕';font-size:9px;opacity:1;color:#d00}
 .col-filter label:hover{background:#e8f0fe}
 .col-filter input[type="checkbox"]{margin-right:5px}
 .col-filter .cf-all{border-bottom:1px solid #ddd;font-weight:600;padding:4px 10px}
-.panel{display:none;padding:0}
+.panel{display:none;padding:10px 8px}
 .panel.active{display:block}
-.sheet-wrap{overflow:auto;max-height:calc(100vh - 80px)}
+.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px}
 table{border-collapse:collapse;font-size:11px;width:max-content}
 th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
 th{background:#efefef;font-weight:600;font-size:10px;white-space:nowrap;position:sticky;top:0;z-index:10}
@@ -56,7 +56,7 @@ td.fx0{left:0}td.fx1{left:200px}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
-.filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px;flex-wrap:wrap}
+.filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px;flex-wrap:wrap;border-radius:4px;margin-bottom:4px}
 .filter select{padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px}
 th.h-meta{background:#eee}th.h-mp{background:#999;color:#fff}th.h-budget{background:#d9d2e9}
 th.h-rate{background:#b4a7d5;color:#fff}th.h-result{background:#9900ff;color:#fff}th.h-memo{background:#ff9900;color:#fff}
@@ -90,7 +90,7 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 #dashContent{max-width:1200px;margin:0 auto;padding:16px}
 .top-list{list-style:none;padding:0}.top-list li{display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:10px}.top-list .rank{font-weight:700;color:#4285f4;margin-right:6px}
 /* Zoom+Search */
-.zoom-bar{position:sticky;top:67px;z-index:99;display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:3px 10px;background:#f0f0f0;border-bottom:1px solid #ddd;font-size:11px}
+.zoom-bar{position:sticky;top:73px;z-index:99;display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:4px 10px;background:#f0f0f0;border-bottom:1px solid #ddd;font-size:11px;border-radius:0 0 4px 4px}
 .zoom-bar button{width:26px;height:22px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;font-size:13px;font-weight:700;color:#555;display:flex;align-items:center;justify-content:center;padding:0}
 .zoom-bar button:hover{background:#e8e8e8}
 .zoom-bar .zoom-pct{min-width:36px;text-align:center;font-weight:600;color:#333}
