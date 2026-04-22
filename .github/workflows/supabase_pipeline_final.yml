@@ -78,8 +78,7 @@ jobs:
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 국내_소재별_supabase.py
 
-  # ─── 🆕 국내 네이버SA + 믹스패널 (naver_sa_daily + google_ads_daily 에 upsert) ───
-  # ★ 국내_매출.py 의 내용이 naver_sa_supabase 스크립트로 교체되어 있어야 함!
+  # ─── 🆕 국내 네이버SA + 믹스패널 (naver_sa_daily 에 upsert) ───
   kr-naver-sa:
     name: 🔍 국내 네이버SA+믹스패널
     runs-on: ubuntu-latest
@@ -89,29 +88,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests pandas numpy supabase gspread
+      - run: pip install requests pandas numpy supabase
       - name: Run 국내 매출 (네이버SA + 믹스패널)
         env:
-          # ── 네이버 검색광고 API ──
           NAVER_API_KEY: ${{ secrets.NAVER_API_KEY }}
           NAVER_SECRET_KEY: ${{ secrets.NAVER_SECRET_KEY }}
           NAVER_CUSTOMER_ID: ${{ secrets.NAVER_CUSTOMER_ID }}
-          # ── 믹스패널 ──
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
-          # ── Supabase (기존 SUPABASE_SERVICE_KEY 시크릿을 스크립트가 기대하는 이름으로 매핑) ──
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          # ── 구글Ads 집계 동기화 (옵션, 네이버/구글 Daily 시트에서 구글만 읽기) ──
-          SYNC_GOOGLE_ADS: 'true'
-          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-          URL_NAV_GOO: ${{ secrets.URL_NAV_GOO }}
-          # ── 기간 ──
+          SYNC_GOOGLE_ADS: 'false'
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
-          # ── 드라이런 (true 로 바꾸면 Supabase 쓰기 스킵, 로그만) ──
           DRY_RUN: 'false'
         run: python 국내_매출.py
+
+  # ─── 🆕 토스 매출 (toss_daily_revenue 에 upsert) ───
+  # ★ 업로드 파일명: 토스_매출.py
+  # ★ 채널별 추이차트의 "전체" 행 원천 데이터
+  kr-toss:
+    name: 💳 토스 일별 매출
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests supabase
+      - name: Run 토스 매출
+        env:
+          TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+          DRY_RUN: 'false'
+        run: python 토스_매출.py
 
   # ─── 글로벌 (국내와 동시 실행) ───
   global:
