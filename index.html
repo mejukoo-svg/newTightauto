@@ -164,7 +164,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
-<div class="panel" id="p-datetab"><div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
+<div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><table id="dpTbl"></table></div></div>
 <div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
@@ -245,7 +245,8 @@ function switchMode(m){
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
-  document.getElementById('dtSel').innerHTML='';
+  document.getElementById('dtStart').innerHTML='';
+  document.getElementById('dtEnd').innerHTML='';
   document.getElementById('dpSel').innerHTML='';
   // Render active tab
   const activeTab=document.querySelector('.tab.active');
@@ -313,7 +314,8 @@ document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
 document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
-document.getElementById('dtSel').addEventListener('change',renderDateTab);
+document.getElementById('dtStart').addEventListener('change',renderDateTab);
+document.getElementById('dtEnd').addEventListener('change',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
 document.getElementById('crDays').addEventListener('change',renderCreativeRanking);
 document.getElementById('crSort').addEventListener('change',renderCreativeRanking);
@@ -510,7 +512,7 @@ function drawRevDaily(){
   // Toss 전체 매출 lookup
   const tossMap={};
   TOSS_DATA.forEach(r=>{tossMap[r.date]=r.net_amount||0});
-  
+
   const labels=dd.map(d=>DK(d).slice(3));
   const profitData=dd.map(d=>{const x=daily[d];return x?(x.revenue-x.spend):0});
   const metaRevData=dd.map(d=>daily[d]?.revenue||0);
@@ -825,16 +827,126 @@ function renderBudget(){
   h+='</tbody>';document.getElementById('bTbl').innerHTML=h;
 }
 
-// ===== DATE TAB =====
+// ===== DATE TAB (날짜 구간 합산 지원) =====
+// 헬퍼: "어제 하루" 버튼 — 시작/종료 모두 어제로 설정
+function dtSetToday(){
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  const selStart=document.getElementById('dtStart');const selEnd=document.getElementById('dtEnd');
+  if(DATES.includes(yDay)){selStart.value=yDay;selEnd.value=yDay}
+  else if(DATES.length){selStart.value=DATES[0];selEnd.value=DATES[0]}
+  renderDateTab();
+}
+
 function renderDateTab(){
-  const sel=document.getElementById('dtSel');
-  const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  if(!sel.options.length){
-    DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)});
-    if(DATES.includes(yDay))sel.value=yDay;
+  const selStart=document.getElementById('dtStart');
+  const selEnd=document.getElementById('dtEnd');
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // 옵션 초기화 (최초 1회)
+  if(!selStart.options.length){
+    DATES.forEach(d=>{
+      const o1=document.createElement('option');o1.value=d;o1.textContent=DK(d)+' ('+WD(d)+')';selStart.appendChild(o1);
+      const o2=document.createElement('option');o2.value=d;o2.textContent=DK(d)+' ('+WD(d)+')';selEnd.appendChild(o2);
+    });
+    // 기본값: 시작/종료 모두 어제
+    if(DATES.includes(yDay)){selStart.value=yDay;selEnd.value=yDay}
+    else{selStart.value=DATES[0];selEnd.value=DATES[0]}
   }
-  const dt=sel.value||DATES[0];
-  const rows=AD.filter(r=>r.date===dt).sort((a,b)=>b.profit-a.profit);
+  let sd=selStart.value||DATES[0];
+  let ed=selEnd.value||DATES[0];
+  // 시작일이 종료일보다 크면 자동으로 swap
+  if(sd>ed){[sd,ed]=[ed,sd];selStart.value=sd;selEnd.value=ed}
+  // 안내 문구
+  const dayCount=Math.round((new Date(ed)-new Date(sd))/864e5)+1;
+  const dtInfo=document.getElementById('dtInfo');
+  if(sd===ed){dtInfo.textContent='단일일자: '+DK(sd)+' ('+WD(sd)+')'}
+  else{dtInfo.textContent=DK(sd)+' ~ '+DK(ed)+' ('+dayCount+'일 통합)'}
+
+  // 구간 내 row 필터링
+  const inRangeRows=AD.filter(r=>r.date>=sd&&r.date<=ed);
+
+  let rows;
+  let isRange=(sd!==ed);
+  if(!isRange){
+    // 단일 일자 — 원본 row 그대로
+    rows=inRangeRows.sort((a,b)=>b.profit-a.profit);
+  }else{
+    // 구간 합산 (rowId 기준)
+    const byId={};
+    inRangeRows.forEach(r=>{
+      const rid=rowId(r);if(!rid)return;
+      if(!byId[rid]){
+        byId[rid]={
+          // 저장/링크용: 구간 내 가장 최근 날짜
+          date:r.date,
+          adset_id:r.adset_id,ad_id:r.ad_id,
+          campaign_name:r.campaign_name,adset_name:r.adset_name,ad_name:r.ad_name,
+          product:r.product,
+          // 합산 지표
+          spend:0,revenue:0,profit:0,
+          impressions:0,reach:0,unique_clicks:0,
+          results_meta:0,results_mp:0,
+          // 최근값 유지
+          budget:r.budget||0,
+          highlight:r.highlight||null,
+          memo:r.memo||null,
+          _latestDate:r.date
+        };
+      }
+      const a=byId[rid];
+      a.spend+=(r.spend||0);
+      a.revenue+=(r.revenue||0);
+      a.profit+=(r.profit||0);
+      a.impressions+=(r.impressions||0);
+      a.reach+=(r.reach||0);
+      a.unique_clicks+=(r.unique_clicks||0);
+      a.results_meta+=(r.results_meta||0);
+      a.results_mp+=(r.results_mp||0);
+      // 가장 최근 날짜의 값으로 예산/하이라이트/메모/이름 갱신
+      if(r.date>=a._latestDate){
+        a._latestDate=r.date;a.date=r.date;
+        a.budget=r.budget||0;
+        a.highlight=r.highlight||null;
+        a.memo=r.memo||null;
+        a.campaign_name=r.campaign_name;
+        a.adset_name=r.adset_name;
+        a.ad_name=r.ad_name;
+        a.product=r.product;
+      }
+    });
+    // 파생 지표 재계산 (합산 후)
+    rows=Object.values(byId).map(a=>{
+      a.cpm=a.impressions>0?a.spend/a.impressions*1000:0;
+      a.cost_per_result=a.results_mp>0?a.spend/a.results_mp:0;
+      a.cost_per_click=a.unique_clicks>0?a.spend/a.unique_clicks:0;
+      a.unique_ctr=a.impressions>0?a.unique_clicks/a.impressions*100:0;
+      a.frequency=a.reach>0?a.impressions/a.reach:0;
+      a.roas=a.spend>0?a.revenue/a.spend*100:0;
+      a.cvr=a.unique_clicks>0&&a.results_mp>0?a.results_mp/a.unique_clicks*100:0;
+      // 메타 보고 구매ROAS는 구간 합산 불가 (원본에 meta revenue 없음) → null
+      a.purchase_roas_meta=null;
+      return a;
+    }).sort((a,b)=>b.profit-a.profit);
+  }
+
+  // 종합 row 계산
+  const totS=rows.reduce((a,b)=>a+(b.spend||0),0);
+  const totR=rows.reduce((a,b)=>a+(b.revenue||0),0);
+  const totP=totR-totS;
+  const totImp=rows.reduce((a,b)=>a+(b.impressions||0),0);
+  const totReach=rows.reduce((a,b)=>a+(b.reach||0),0);
+  const totUC=rows.reduce((a,b)=>a+(b.unique_clicks||0),0);
+  const totMP=rows.reduce((a,b)=>a+(b.results_mp||0),0);
+  const totMeta=rows.reduce((a,b)=>a+(b.results_meta||0),0);
+  const totRoas=totS>0?totR/totS*100:0;
+  const totCvr=totUC>0&&totMP>0?totMP/totUC*100:0;
+  const totCpm=totImp>0?totS/totImp*1000:0;
+  const totCpa=totMP>0?totS/totMP:0;
+  const totCpc=totUC>0?totS/totUC:0;
+  const totCtr=totImp>0?totUC/totImp*100:0;
+  const totFreq=totReach>0?totImp/totReach:0;
+
   let h='<thead><tr>';
   h+='<th style="text-align:left">캠페인</th>';
   h+='<th style="text-align:left">'+rowNameLabel()+'</th>';
@@ -860,6 +972,31 @@ function renderDateTab(){
   h+='<th class="h-result">변동예산</th>';
   h+='<th class="h-memo">메모</th>';
   h+='</tr></thead><tbody>';
+
+  // 종합 row (맨 위)
+  h+='<tr class="sr">';
+  h+='<td style="text-align:left">종합 ('+rows.length+'개'+(isRange?' · '+dayCount+'일':'')+')</td>';
+  h+='<td></td><td></td>';
+  h+='<td style="text-align:right;color:#d00">'+money(totS)+'</td>';
+  h+='<td style="text-align:right">'+money(totCpa)+'</td>';
+  h+='<td></td>';
+  h+='<td style="text-align:right">'+money(totCpm)+'</td>';
+  h+='<td style="text-align:right">'+F(totReach)+'</td>';
+  h+='<td style="text-align:right">'+F(totImp)+'</td>';
+  h+='<td style="text-align:right">'+F(totUC)+'</td>';
+  h+='<td style="text-align:right">'+(totCtr?totCtr.toFixed(2)+'%':'')+'</td>';
+  h+='<td style="text-align:right">'+money(totCpc)+'</td>';
+  h+='<td style="text-align:right">'+(totFreq?totFreq.toFixed(2):'')+'</td>';
+  h+='<td style="text-align:right">'+F(totMeta)+'</td>';
+  h+='<td style="text-align:right;font-weight:700">'+F(totMP)+'</td>';
+  h+='<td style="text-align:right;color:#00d">'+money(totR)+'</td>';
+  h+='<td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td>';
+  h+='<td class="'+RC(totRoas)+'">'+P(totRoas)+'</td>';
+  h+='<td>'+P(totCvr,2)+'</td>';
+  h+='<td></td><td></td><td></td><td></td>';
+  h+='</tr>';
+
+  // 데이터 rows
   rows.forEach(r=>{
     const rid=rowId(r);const hl=r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
@@ -889,6 +1026,7 @@ function renderDateTab(){
     h+='<td style="text-align:right">'+money(r.budget)+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td>';
+    // 메모는 가장 최근 날짜(r.date)에 저장됨
     h+='<td><input class="memo-input" value="'+mv+'" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td>';
     h+='</tr>';
   });
