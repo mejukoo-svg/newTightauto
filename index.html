@@ -1103,6 +1103,18 @@ function renderGlobalRevenue(){
     h+='<td style="text-align:right;color:'+(np>=0?'green':'red')+'">'+sign+absVal+'</td>'});
   const npSign=npTotal<0?'-₩':'₩';
   h+='<td style="text-align:right;color:'+(npTotal>=0?'green':'red')+'">'+npSign+F(Math.abs(npTotal))+'</td></tr>';
+  // ROAS 행 (Stripe총매출 / 광고지출 KRW환산)
+  h+='<tr style="background:#cfe2f3;font-weight:700"><td style="text-align:left">ROAS</td>';
+  let totalSpendKrw=0;
+  dates.forEach(d=>{const rev=dailyTotals[d]||0;
+    const bd=byDate[d]||{};const rate=bd['대만']?.usd_krw_rate||bd['홍콩']?.usd_krw_rate||bd['일본']?.usd_krw_rate||1450;
+    const spendKrw=Math.round((spendByDate[d]||0)*rate);totalSpendKrw+=spendKrw;
+    const roas=spendKrw>0?rev/spendKrw*100:0;
+    const c=spendKrw>0?(roas>=100?'green':'red'):'#999';
+    h+='<td style="text-align:right;color:'+c+'">'+(spendKrw>0?roas.toFixed(0)+'%':'')+'</td>'});
+  const totalRoas=totalSpendKrw>0?grandTotal/totalSpendKrw*100:0;
+  const trc=totalSpendKrw>0?(totalRoas>=100?'green':'red'):'#999';
+  h+='<td style="text-align:right;color:'+trc+'">'+(totalSpendKrw>0?totalRoas.toFixed(0)+'%':'')+'</td></tr>';
   // 주간합계 행
   h+='<tr style="background:#fef3cd;font-weight:700"><td style="text-align:left">주간합계</td>';
   const weekTotals={};const weekShowAt={};
