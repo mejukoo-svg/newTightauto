@@ -192,3 +192,45 @@ jobs:
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 구글_supabase.py
+
+  # ─── Toss Payments (독립 실행) ───
+  toss:
+    name: 💳 Toss Payments
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Run Toss
+        env:
+          TOSS_SECRET_KEY: ${{ secrets.TOSS_SECRET_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 토스_supabase.py
+
+  # ─── 네이버 Mixpanel 매출 (독립 실행) ───
+  naver-mp:
+    name: 📊 네이버 Mixpanel 매출
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Run Naver Mixpanel
+        env:
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 네이버_mp_supabase.py

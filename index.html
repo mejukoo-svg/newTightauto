@@ -200,7 +200,7 @@ const HL_CONFIG={
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],VC_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
-let NSA_DAILY=[],GOOGLE_ADS=[];
+let NSA_DAILY=[],GOOGLE_ADS=[],NAVER_MP=[],TOSS_DAILY=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={},VC_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
@@ -270,7 +270,7 @@ function rebuildLookups(){
 
 // ===== INIT =====
 async function initData(){
-  const [kr,gl,cr,vn,vc,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google]=await Promise.all([
+  const [kr,gl,cr,vn,vc,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=await Promise.all([
     sbAll('ad_performance_daily','spend'),
     sbAll('global_ad_performance_daily','spend_usd').catch(()=>[]),
     sbAll('ad_creative_daily','spend').catch(()=>[]),
@@ -285,9 +285,11 @@ async function initData(){
     sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
     sbAll('naver_sa_daily','cost_vat').catch(()=>[]),
     sbQ('google_ads_daily','select=*&order=date.desc').catch(()=>[]),
+    sbQ('naver_daily_mp','select=*&order=date.desc').catch(()=>[]),
+    sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
   ]);
   KR_AD=kr;GL_AD=gl;CR_AD=cr;VN_AD=vn;VC_AD=vc;STRIPE_DATA=stripe;TOSS_DATA=toss;
-  NSA_DAILY=nsa;GOOGLE_ADS=google;
+  NSA_DAILY=nsa;GOOGLE_ADS=google;NAVER_MP=naver_mp;TOSS_DAILY=toss_kr;
   KR_HL={};krhl.forEach(x=>{KR_HL[x.adset_id]=x.highlight});
   GL_HL={};glhl.forEach(x=>{GL_HL[x.adset_id]=x.highlight});
   CR_HL={};crhl.forEach(x=>{CR_HL[x.ad_id]=x.highlight});
@@ -1503,31 +1505,45 @@ let sTimer;document.addEventListener('DOMContentLoaded',()=>{const si=document.g
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();document.getElementById('searchInput')?.focus()}});
 
 // ===== CHANNEL REVENUE (매출 탭 - 채널별 추이차트) =====
-// 국내모드(KR)에서만 의미 — 전체/메타/밴스드/네이버/구글 5채널 × 날짜별 ROAS/순이익/매출/지출
+// 국내모드(KR)에서만 의미. 채널별 데이터 소스:
+//   전체 매출:  toss_daily_revenue.net_amount    (Toss Payments — 실제 결제)
+//   전체 지출:  메타+밴스드+네이버+구글 광고비 합산
+//   메타:       ad_performance_daily              (KR_AD)
+//   밴스드:     vanced_ad_performance_daily       (VN_AD)
+//   네이버:     naver_sa_daily.cost_vat (지출) + naver_daily_mp.revenue (매출: Mixpanel attribution)
+//   구글:       google_ads_daily                  (GOOGLE_ADS)
 function renderChannelRevenue(){
   const days=parseInt(document.getElementById('chrDays').value);
-  // 최근 N일 (KST 기준 오늘부터 역순)
   const today=new Date();
   const dates=[];
   for(let i=0;i<days;i++){
     const d=new Date(today);d.setDate(today.getDate()-i);
     dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
-  // 데이터 소스별 일자 합산
-  const byDateKR={},byDateVN={},byDateNSA={},byDateGG={};
+  // 채널별 일자 합산
+  const byDateKR={},byDateVN={},byDateNSA_cost={},byDateNAVER_rev={},byDateGG={},byDateTOSS={};
   KR_AD.forEach(r=>{if(!byDateKR[r.date])byDateKR[r.date]={s:0,r:0};byDateKR[r.date].s+=(r.spend||0);byDateKR[r.date].r+=(r.revenue||0)});
   VN_AD.forEach(r=>{if(!byDateVN[r.date])byDateVN[r.date]={s:0,r:0};byDateVN[r.date].s+=(r.spend||0);byDateVN[r.date].r+=(r.revenue||0)});
-  NSA_DAILY.forEach(r=>{if(!byDateNSA[r.date])byDateNSA[r.date]={s:0,r:0};byDateNSA[r.date].s+=(r.cost_vat||0);byDateNSA[r.date].r+=(r.revenue||0)});
+  // 네이버 지출 (Naver SA API cost_vat 합)
+  NSA_DAILY.forEach(r=>{byDateNSA_cost[r.date]=(byDateNSA_cost[r.date]||0)+(r.cost_vat||0)});
+  // 네이버 매출 (Mixpanel attribution)
+  NAVER_MP.forEach(r=>{byDateNAVER_rev[r.date]=(r.revenue||0)});
+  // 구글
   GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
+  // Toss 전체 매출
+  TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
+
+  function getNaver(d){ return {s:(byDateNSA_cost[d]||0), r:(byDateNAVER_rev[d]||0)}; }
+  function getTotalSpend(d){
+    const k=byDateKR[d]||{s:0}, v=byDateVN[d]||{s:0}, n=byDateNSA_cost[d]||0, g=byDateGG[d]||{s:0};
+    return k.s + v.s + n + g.s;
+  }
   const channels=[
-    {name:'전체',get:d=>{
-      const k=byDateKR[d]||{s:0,r:0},v=byDateVN[d]||{s:0,r:0},n=byDateNSA[d]||{s:0,r:0},g=byDateGG[d]||{s:0,r:0};
-      return {s:k.s+v.s+n.s+g.s, r:k.r+v.r+n.r+g.r};
-    }},
-    {name:'메타',     get:d=>byDateKR[d]||{s:0,r:0}},
-    {name:'밴스드',   get:d=>byDateVN[d]||{s:0,r:0}},
-    {name:'네이버',   get:d=>byDateNSA[d]||{s:0,r:0}},
-    {name:'구글',     get:d=>byDateGG[d]||{s:0,r:0}},
+    {name:'전체',  get:d=>({s:getTotalSpend(d), r:(byDateTOSS[d]||0)})},  // rev=Toss, spend=합산
+    {name:'메타',  get:d=>byDateKR[d]||{s:0,r:0}},
+    {name:'밴스드',get:d=>byDateVN[d]||{s:0,r:0}},
+    {name:'네이버',get:d=>getNaver(d)},
+    {name:'구글',  get:d=>byDateGG[d]||{s:0,r:0}},
   ];
   const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
