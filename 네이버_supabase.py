@@ -110,7 +110,7 @@ def build_report(stat_dt: date) -> dict | None:
     body = {"reportTp": REPORT_TP, "statDt": stat_dt.strftime("%Y%m%d")}
     return naver_request("POST", "/stat-reports", body=body)
 
-def wait_report(job_id: str, max_wait: int = 180) -> dict | None:
+def wait_report(job_id: str, max_wait: int = 300) -> dict | None:
     """polling until BUILT or FAIL"""
     deadline = time.time() + max_wait
     while time.time() < deadline:
@@ -128,29 +128,36 @@ def wait_report(job_id: str, max_wait: int = 180) -> dict | None:
     return None
 
 def download_tsv(download_url: str) -> str | None:
-    """downloadUrl은 Naver API 경로(상대) — 헤더 서명 필요"""
-    # downloadUrl 은 풀 URL일 수도, 상대경로일 수도 있음
-    if download_url.startswith("http"):
-        # 풀 URL — 경로 부분만 발췌해서 서명
-        from urllib.parse import urlparse
-        uri = urlparse(download_url).path
-        if urlparse(download_url).query:
-            uri += "?" + urlparse(download_url).query
-        url = download_url
-    else:
-        uri = download_url
-        url = NAVER_BASE + uri
+    """
+    StatReport downloadUrl 다운로드. Naver는 2가지 형태로 응답:
+      (A) 쿼리에 auth 토큰 포함된 pre-signed URL → 헤더 서명 없이 plain GET
+      (B) API 경로 상대(또는 절대) → HMAC 서명 필요 (path only, 쿼리 제외)
+    두 가지 순차 시도.
+    """
+    from urllib.parse import urlparse
+    url = download_url if download_url.startswith("http") else NAVER_BASE + download_url
+    parsed = urlparse(url)
+    path_only = parsed.path  # 서명용 URI (쿼리 제외)
+
+    # Try 1: plain GET (pre-signed URL 케이스)
     try:
-        # 다운로드는 HMAC 서명한 헤더로 직접 GET
-        method = "GET"
-        # 서명용 uri는 경로+쿼리 전체
-        signing_uri = uri if uri.startswith("/") else "/" + uri
-        resp = req_lib.get(url, headers=_headers(method, signing_uri), timeout=60)
+        resp = req_lib.get(url, timeout=60)
         if resp.status_code == 200:
             return resp.text
-        log.error(f"  ❌ download HTTP {resp.status_code}: {resp.text[:200]}")
+        if resp.status_code != 403:
+            log.error(f"  ❌ download(plain) HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
-        log.error(f"  ❌ download 예외: {e}")
+        log.error(f"  ❌ download(plain) 예외: {e}")
+
+    # Try 2: HMAC 서명 (path-only URI)
+    try:
+        resp = req_lib.get(url, headers=_headers("GET", path_only), timeout=60)
+        if resp.status_code == 200:
+            return resp.text
+        log.error(f"  ❌ download(signed) HTTP {resp.status_code}: {resp.text[:200]}")
+        log.error(f"     downloadUrl sample: {download_url[:150]}")
+    except Exception as e:
+        log.error(f"  ❌ download(signed) 예외: {e}")
     return None
 
 def parse_tsv(tsv: str, stat_dt: date):
