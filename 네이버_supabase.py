@@ -104,10 +104,11 @@ def list_adgroups(campaign_id: str):
 # ============================================================
 # StatReport: per-date report, polling, TSV download, parse
 # ============================================================
-REPORT_TP = "AD_CONVERSION_DETAIL"    # 광고그룹×키워드 단위 일별 전환포함
+REPORT_TP_STAT = "AD"                     # cost/imp/click
+REPORT_TP_CONV = "AD_CONVERSION_DETAIL"   # conversions/revenue
 
-def build_report(stat_dt: date) -> dict | None:
-    body = {"reportTp": REPORT_TP, "statDt": stat_dt.strftime("%Y%m%d")}
+def build_report(stat_dt: date, report_tp: str) -> dict | None:
+    body = {"reportTp": report_tp, "statDt": stat_dt.strftime("%Y%m%d")}
     return naver_request("POST", "/stat-reports", body=body)
 
 def wait_report(job_id: str, max_wait: int = 300) -> dict | None:
@@ -160,65 +161,68 @@ def download_tsv(download_url: str) -> str | None:
         log.error(f"  ❌ download(signed) 예외: {e}")
     return None
 
-def parse_tsv(tsv: str, stat_dt: date):
+def parse_tsv_stat(tsv: str, label: str = "AD"):
     """
-    AD_CONVERSION_DETAIL 컬럼 레이아웃 (Naver SA 실제 출력 — 2024 기준):
-      0: 일자(YYYYMMDD)
-      1: 광고주 ID (고객ID)
-      2: 캠페인 ID
-      3: 광고그룹 ID
-      4: 키워드 ID (없으면 '-')
-      5: 광고 ID
-      6: PC/Mobile 구분 (P/M)
-      7: 매체 구분
-      8: 비즈채널 ID
-      9: 노출수(impCnt)
-      10: 클릭수(clkCnt)
-      11: 비용 VAT포함(salesAmt)
-      12: 전환수(ccnt)
-      13: 전환금액(convAmt)
-      (이하 전환유형, 기기 등은 reportTp에 따라)
-
-    처음 3줄을 디버그 로그로 출력해서 실제 구조 검증.
+    AD 리포트 컬럼 (예상 — 실제 로그로 검증 중):
+      0: statDt(YYYYMMDD)  1: customerId  2: campaignId  3: adgroupId
+      4: keywordId  5: adId  6: bizChannelId  7: pcMobile
+      8: impCnt  9: clkCnt  10: cost(VAT포함)  (11+: ctr/cpc/avgRnk)
+    adgroup_id 기준 집계.
     """
     lines = [l for l in tsv.splitlines() if l.strip()]
-    if not lines:
-        return {}
-
-    # 디버그: 첫 3줄 raw dump (컬럼 개수 + 각 컬럼 값 앞부분)
-    log.info(f"    🔍 TSV sample ({len(lines)} lines total):")
+    if not lines: return {}
+    log.info(f"    🔍 {label} TSV sample ({len(lines)} lines):")
     for i, line in enumerate(lines[:3]):
         cols = line.split("\t")
-        log.info(f"      line{i}: {len(cols)} cols = {[c[:15] for c in cols]}")
+        log.info(f"      line{i} ({len(cols)} cols): {[c[:15] for c in cols]}")
 
-    # 컬럼 개수 기반 파싱 (가장 빈번한 col count를 기준으로)
-    from collections import Counter
-    col_counts = Counter(len(l.split("\t")) for l in lines)
-    mode_cols = col_counts.most_common(1)[0][0]
-    log.info(f"    → mode col count = {mode_cols} ({col_counts.most_common(3)})")
-
-    # 자동 탐지: 가장 오른쪽에서 순서대로 convAmt, ccnt 찾기 (숫자 분포)
-    # 또는 naver 공식 레이아웃 가정:
-    #   adgroup_id @ col 3
-    #   impCnt @ col 9, clkCnt @ col 10, salesAmt @ col 11, ccnt @ col 12, convAmt @ col 13
-    # (이전 가정 col[4]=adgroup, col[10-14]=metrics 였음 — 한 칸씩 왼쪽으로)
     AG_IDX = 3
-    IMP_IDX, CLK_IDX, COST_IDX, CONV_CNT_IDX, CONV_AMT_IDX = 9, 10, 11, 12, 13
+    IMP_IDX, CLK_IDX, COST_IDX = 8, 9, 10
 
-    agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0,"ccnt":0,"convAmt":0.0})
+    agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
     for line in lines:
         cols = line.split("\t")
-        if len(cols) <= CONV_AMT_IDX: continue
+        if len(cols) <= COST_IDX: continue
         ag_id = cols[AG_IDX].strip()
-        if not ag_id:
-            continue
+        if not ag_id: continue
         a = agg[ag_id]
         try:
             a["impCnt"]   += int(float(cols[IMP_IDX] or 0))
             a["clkCnt"]   += int(float(cols[CLK_IDX] or 0))
             a["salesAmt"] += float(cols[COST_IDX] or 0)
-            a["ccnt"]     += int(float(cols[CONV_CNT_IDX] or 0))
-            a["convAmt"]  += float(cols[CONV_AMT_IDX] or 0)
+        except (ValueError, IndexError):
+            continue
+    return dict(agg)
+
+def parse_tsv_conv(tsv: str, label: str = "CONV"):
+    """
+    AD_CONVERSION_DETAIL 실제 컬럼 (run #80 로그로 확인):
+      0: statDt  1: customerId  2: campaignId  3: adgroupId
+      4: keywordId  5: adId  6: bizChannelId  7: hour(00~23)
+      8: ?  9: ?  10: pcMobile(P/M)  11: ?
+      12: conversionType(purchase/etc)  13: convCnt  14: convAmt
+    각 행 = 1개 전환이벤트. adgroupId 기준 합산.
+    """
+    lines = [l for l in tsv.splitlines() if l.strip()]
+    if not lines: return {}
+    log.info(f"    🔍 {label} TSV sample ({len(lines)} lines):")
+    for i, line in enumerate(lines[:3]):
+        cols = line.split("\t")
+        log.info(f"      line{i} ({len(cols)} cols): {[c[:15] for c in cols]}")
+
+    AG_IDX = 3
+    CONV_CNT_IDX, CONV_AMT_IDX = 13, 14
+
+    agg = defaultdict(lambda: {"ccnt":0, "convAmt":0.0})
+    for line in lines:
+        cols = line.split("\t")
+        if len(cols) <= CONV_AMT_IDX: continue
+        ag_id = cols[AG_IDX].strip()
+        if not ag_id: continue
+        a = agg[ag_id]
+        try:
+            a["ccnt"]    += int(float(cols[CONV_CNT_IDX] or 0))
+            a["convAmt"] += float(cols[CONV_AMT_IDX] or 0)
         except (ValueError, IndexError):
             continue
     return dict(agg)
@@ -285,41 +289,45 @@ def main():
     adgroup_meta = {ag["nccAdgroupId"]: ag for ag in all_adgroups}
     log.info(f"📋 광고그룹 {len(adgroup_meta)}개")
 
-    # 2. 날짜별 StatReport 빌드 + 다운로드
+    # 2. 날짜별 StatReport 빌드 + 다운로드 (AD + AD_CONVERSION_DETAIL 병행)
+    def fetch_and_parse(d, report_tp, parser, label):
+        rpt = build_report(d, report_tp)
+        if not rpt or "reportJobId" not in rpt:
+            log.warning(f"    {label} 빌드 실패")
+            return {}
+        if rpt.get("status") != "BUILT":
+            rpt = wait_report(rpt["reportJobId"])
+        if not rpt: return {}
+        dl = rpt.get("downloadUrl")
+        if not dl:
+            log.warning(f"    {label} downloadUrl 없음")
+            return {}
+        tsv = download_tsv(dl)
+        if not tsv: return {}
+        return parser(tsv, label)
+
     all_records = []
     d = START
     while d <= END:
-        log.info(f"  📊 StatReport {d}...")
-        rpt = build_report(d)
-        if not rpt or "reportJobId" not in rpt:
-            log.warning(f"    빌드 실패 — 스킵")
-            d += timedelta(days=1); continue
-        job_id = rpt["reportJobId"]
-        status = rpt.get("status")
-        # 상태에 따라 폴링
-        if status != "BUILT":
-            rpt = wait_report(job_id)
-        if not rpt:
-            d += timedelta(days=1); continue
-        dl = rpt.get("downloadUrl")
-        if not dl:
-            log.warning(f"    downloadUrl 없음 — 스킵")
-            d += timedelta(days=1); continue
-        tsv = download_tsv(dl)
-        if not tsv:
-            d += timedelta(days=1); continue
-        agg = parse_tsv(tsv, d)
-        log.info(f"    {d}: adgroups={len(agg)}, lines={tsv.count(chr(10))}")
+        log.info(f"  📊 StatReport {d} (AD + CONV)...")
+        stat_agg = fetch_and_parse(d, REPORT_TP_STAT, parse_tsv_stat, "AD")
+        conv_agg = fetch_and_parse(d, REPORT_TP_CONV, parse_tsv_conv, "CONV")
+        log.info(f"    {d}: AD adgroups={len(stat_agg)}, CONV adgroups={len(conv_agg)}")
 
-        for ag_id, a in agg.items():
+        # Merge by adgroup_id (union of both reports)
+        all_ag_ids = set(stat_agg.keys()) | set(conv_agg.keys())
+        for ag_id in all_ag_ids:
             meta = adgroup_meta.get(ag_id, {})
-            cost = a["salesAmt"]
-            rev  = a["convAmt"]
-            clk  = a["clkCnt"]
-            conv = a["ccnt"]
+            s = stat_agg.get(ag_id, {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
+            c = conv_agg.get(ag_id, {"ccnt":0,"convAmt":0.0})
+            cost = s["salesAmt"]
+            rev  = c["convAmt"]
+            clk  = s["clkCnt"]
+            imp  = s["impCnt"]
+            conv = c["ccnt"]
             roas = (rev / cost * 100) if cost > 0 else 0
             cvr  = (conv / clk * 100) if clk > 0 else 0
-            ctr  = (clk / a["impCnt"] * 100) if a["impCnt"] > 0 else 0
+            ctr  = (clk / imp * 100) if imp > 0 else 0
             cpc  = (cost / clk) if clk > 0 else 0
             all_records.append({
                 "date": d.isoformat(),
@@ -329,7 +337,7 @@ def main():
                 "adgroup_name": meta.get("name", ""),
                 "product": extract_product(meta.get("name", "")),
                 "cost_vat": round(cost, 2),
-                "impressions": a["impCnt"],
+                "impressions": imp,
                 "clicks": clk,
                 "ctr": round(ctr, 4),
                 "cpc": round(cpc, 2),
