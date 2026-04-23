@@ -98,11 +98,15 @@ def authenticate():
 # ============================================================
 def load_google_section(gc):
     """
-    구글 섹션 컬럼 탐색 규칙:
-      - 'cost_brand'   : 헤더에 '구글' AND '브랜드' AND '지출'
-      - 'cost_general' : cost_brand 컬럼 바로 오른쪽 + 헤더에 '일반' AND '지출'
-      - 'revenue_total': 헤더가 '구매전환값' 이면서 cost_brand보다 오른쪽의 첫 매치
-                         + '브랜드' 미포함 + '일반' 미포함 (= 총액)
+    시트 구조 (gspread 기준 — 병합셀은 top-left만 값 채워짐):
+      Row 0: 그룹헤더 — col3='네이버 파워링크' (col3~11 병합), col12='구글 검색광고' (col12~20 병합)
+      Row 1: 컬럼헤더 — '일','주차','요일','브랜드 지출','일반 지출','총 구매전환값',...
+      Row 2+: 데이터
+
+    구글 섹션 컬럼 매칭 (Row1 기준, col >= google_start):
+      - cost_brand  : '브랜드 지출'
+      - cost_general: '일반 지출'
+      - revenue     : '구매전환값' 또는 '총 구매전환값'
     """
     ss = gc.open_by_url(NAV_GOO_SHEET_URL)
     ws = None
@@ -118,44 +122,45 @@ def load_google_section(gc):
     log.info(f"  📖 시트: {ws.title}")
     vals = ws.get_all_values()
     time.sleep(0.5)
-    if not vals or len(vals) < 2:
+    if not vals or len(vals) < 3:
         return []
 
-    hdr = [str(v).strip() for v in vals[0]]
-    log.info(f"  → 헤더 {len(hdr)}개")
+    gh = [str(v).strip() for v in vals[0]]   # 그룹헤더
+    ch = [str(v).strip() for v in vals[1]]   # 컬럼헤더
 
-    cost_brand_ci = None
-    for ci, h in enumerate(hdr):
-        if "구글" in h and "브랜드" in h and "지출" in h:
-            cost_brand_ci = ci; break
-    if cost_brand_ci is None:
-        log.error("  ❌ 구글 브랜드지출 컬럼 못 찾음")
-        log.error(f"  헤더 전체: {hdr}")
+    # 1) 그룹헤더에서 구글 섹션 시작 컬럼
+    google_start = None
+    for ci, v in enumerate(gh):
+        if v and "구글" in v:
+            google_start = ci; break
+    if google_start is None:
+        log.error(f"  ❌ '구글' 그룹헤더 못 찾음. Row0={gh}")
         return []
+    # 다음 그룹(네이버 재등장/기타)까지가 구글 범위
+    google_end = len(ch)
+    for ci in range(google_start + 1, len(gh)):
+        v = gh[ci]
+        if v and "구글" not in v:
+            google_end = ci; break
+    log.info(f"  → 구글 섹션 col{google_start}~{google_end-1}: Row0[{google_start}]={gh[google_start]!r}")
 
-    # 일반 지출 = 브랜드지출 바로 오른쪽 (일반적으로)
-    cost_general_ci = None
-    for ci in range(cost_brand_ci + 1, min(cost_brand_ci + 4, len(hdr))):
-        h = hdr[ci]
-        if "일반" in h and "지출" in h:
-            cost_general_ci = ci; break
-    # revenue: 구글 섹션 안에서 '구매전환값' (총액) 찾기 — 브랜드/일반 suffix 없는 것
-    revenue_ci = None
-    for ci in range(cost_brand_ci + 1, len(hdr)):
-        h = hdr[ci].strip()
-        if h == "구매전환값" or h == "총 구매전환값":
-            revenue_ci = ci; break
-        # 다음 섹션 만나면 중단 (구글 섹션 끝)
-        if "네이버" in h: break
-
-    log.info(f"  → 구글 컬럼: cost_brand={cost_brand_ci}({hdr[cost_brand_ci]!r}), "
-             f"cost_general={cost_general_ci}"
-             + (f"({hdr[cost_general_ci]!r})" if cost_general_ci is not None else "")
-             + f", revenue={revenue_ci}"
-             + (f"({hdr[revenue_ci]!r})" if revenue_ci is not None else ""))
+    cost_brand_ci = cost_general_ci = revenue_ci = None
+    for ci in range(google_start, min(google_end, len(ch))):
+        h = ch[ci]
+        if cost_brand_ci is None and ("브랜드" in h and "지출" in h):
+            cost_brand_ci = ci
+        elif cost_general_ci is None and ("일반" in h and "지출" in h):
+            cost_general_ci = ci
+        elif revenue_ci is None and (h == "구매전환값" or h == "총 구매전환값"):
+            revenue_ci = ci
+    log.info(f"  → 컬럼: cost_brand={cost_brand_ci}, cost_general={cost_general_ci}, revenue={revenue_ci}")
+    log.info(f"  → Row1(컬럼헤더): {ch}")
+    if cost_brand_ci is None or revenue_ci is None:
+        log.error("  ❌ 필수 컬럼 못 찾음")
+        return []
 
     records = []
-    for ri in range(1, len(vals)):   # Row 1부터 데이터
+    for ri in range(2, len(vals)):   # Row 2부터 데이터
         row = vals[ri]
         if not row:
             continue
