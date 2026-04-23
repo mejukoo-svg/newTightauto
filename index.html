@@ -1521,22 +1521,31 @@ function renderChannelRevenue(){
     dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
   // 채널별 일자 합산
-  const byDateKR={},byDateVN={},byDateNSA_cost={},byDateNAVER_rev={},byDateGG={},byDateTOSS={};
+  const byDateKR={},byDateVN={},byDateNSA={},byDateNAVER_MP={},byDateGG={},byDateTOSS={};
   KR_AD.forEach(r=>{if(!byDateKR[r.date])byDateKR[r.date]={s:0,r:0};byDateKR[r.date].s+=(r.spend||0);byDateKR[r.date].r+=(r.revenue||0)});
   VN_AD.forEach(r=>{if(!byDateVN[r.date])byDateVN[r.date]={s:0,r:0};byDateVN[r.date].s+=(r.spend||0);byDateVN[r.date].r+=(r.revenue||0)});
-  // 네이버 지출 (Naver SA API cost_vat 합)
-  NSA_DAILY.forEach(r=>{byDateNSA_cost[r.date]=(byDateNSA_cost[r.date]||0)+(r.cost_vat||0)});
-  // 네이버 매출 (Mixpanel attribution)
-  NAVER_MP.forEach(r=>{byDateNAVER_rev[r.date]=(r.revenue||0)});
+  // 네이버 — 네이버SA_추이차트와 동일하게 naver_sa_daily로 집계 (cost_vat+revenue)
+  NSA_DAILY.forEach(r=>{
+    if(!byDateNSA[r.date])byDateNSA[r.date]={s:0,r:0};
+    byDateNSA[r.date].s+=(r.cost_vat||0);
+    byDateNSA[r.date].r+=(r.revenue||0);
+  });
+  // Mixpanel 매출 (UTM 태깅 되면 우선 사용할 수 있는 future hook)
+  NAVER_MP.forEach(r=>{byDateNAVER_MP[r.date]=(r.revenue||0)});
   // 구글
   GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
   // Toss 전체 매출
   TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
 
-  function getNaver(d){ return {s:(byDateNSA_cost[d]||0), r:(byDateNAVER_rev[d]||0)}; }
+  // 네이버: Mixpanel revenue > 0 이면 우선 사용 (UTM 태깅 후), 아니면 Naver API convAmt
+  function getNaver(d){
+    const n=byDateNSA[d]||{s:0,r:0};
+    const mpRev=byDateNAVER_MP[d]||0;
+    return {s:n.s, r: mpRev>0 ? mpRev : n.r};
+  }
   function getTotalSpend(d){
-    const k=byDateKR[d]||{s:0}, v=byDateVN[d]||{s:0}, n=byDateNSA_cost[d]||0, g=byDateGG[d]||{s:0};
-    return k.s + v.s + n + g.s;
+    const k=byDateKR[d]||{s:0}, v=byDateVN[d]||{s:0}, n=byDateNSA[d]||{s:0}, g=byDateGG[d]||{s:0};
+    return k.s + v.s + n.s + g.s;
   }
   const channels=[
     {name:'전체',  get:d=>({s:getTotalSpend(d), r:(byDateTOSS[d]||0)})},  // rev=Toss, spend=합산
