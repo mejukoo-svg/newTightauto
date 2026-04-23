@@ -176,8 +176,11 @@ def parse_tsv_stat(tsv: str, label: str = "AD"):
         cols = line.split("\t")
         log.info(f"      line{i} ({len(cols)} cols): {[c[:15] for c in cols]}")
 
+    # 실제 레이아웃 (run #81 로그):
+    #   0:statDt 1:customerId 2:campaignId 3:adgroupId 4:keywordId 5:adId 6:bizChannelId
+    #   7:hourOrRank 8:pcMobile 9:impCnt 10:clkCnt 11:salesAmt 12:? 13:?
     AG_IDX = 3
-    IMP_IDX, CLK_IDX, COST_IDX = 8, 9, 10
+    IMP_IDX, CLK_IDX, COST_IDX = 9, 10, 11
 
     agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
     for line in lines:
