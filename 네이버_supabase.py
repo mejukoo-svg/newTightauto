@@ -162,26 +162,63 @@ def download_tsv(download_url: str) -> str | None:
 
 def parse_tsv(tsv: str, stat_dt: date):
     """
-    AD_CONVERSION_DETAIL 컬럼 인덱스:
-      0:statDt 1:advertiserId 2:campaignId 3:bizmoneyId 4:adgroupId 5:keywordId
-      6:adId 7:bizChannelId 8:media 9:pcMobile 10:impCnt 11:clkCnt 12:salesAmt
-      13:ccnt 14:convAmt 15:crtoCnt 16:crtoSalesAmt
+    AD_CONVERSION_DETAIL 컬럼 레이아웃 (Naver SA 실제 출력 — 2024 기준):
+      0: 일자(YYYYMMDD)
+      1: 광고주 ID (고객ID)
+      2: 캠페인 ID
+      3: 광고그룹 ID
+      4: 키워드 ID (없으면 '-')
+      5: 광고 ID
+      6: PC/Mobile 구분 (P/M)
+      7: 매체 구분
+      8: 비즈채널 ID
+      9: 노출수(impCnt)
+      10: 클릭수(clkCnt)
+      11: 비용 VAT포함(salesAmt)
+      12: 전환수(ccnt)
+      13: 전환금액(convAmt)
+      (이하 전환유형, 기기 등은 reportTp에 따라)
+
+    처음 3줄을 디버그 로그로 출력해서 실제 구조 검증.
     """
-    agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0,"ccnt":0,"convAmt":0.0})
-    for line in tsv.splitlines():
+    lines = [l for l in tsv.splitlines() if l.strip()]
+    if not lines:
+        return {}
+
+    # 디버그: 첫 3줄 raw dump (컬럼 개수 + 각 컬럼 값 앞부분)
+    log.info(f"    🔍 TSV sample ({len(lines)} lines total):")
+    for i, line in enumerate(lines[:3]):
         cols = line.split("\t")
-        if len(cols) < 15: continue
-        ag_id = cols[4].strip()
-        if not ag_id or not ag_id.isdigit() and not ag_id.startswith("grp-"):
-            # 네이버 adgroup_id는 "grp-..." 형태
-            pass
+        log.info(f"      line{i}: {len(cols)} cols = {[c[:15] for c in cols]}")
+
+    # 컬럼 개수 기반 파싱 (가장 빈번한 col count를 기준으로)
+    from collections import Counter
+    col_counts = Counter(len(l.split("\t")) for l in lines)
+    mode_cols = col_counts.most_common(1)[0][0]
+    log.info(f"    → mode col count = {mode_cols} ({col_counts.most_common(3)})")
+
+    # 자동 탐지: 가장 오른쪽에서 순서대로 convAmt, ccnt 찾기 (숫자 분포)
+    # 또는 naver 공식 레이아웃 가정:
+    #   adgroup_id @ col 3
+    #   impCnt @ col 9, clkCnt @ col 10, salesAmt @ col 11, ccnt @ col 12, convAmt @ col 13
+    # (이전 가정 col[4]=adgroup, col[10-14]=metrics 였음 — 한 칸씩 왼쪽으로)
+    AG_IDX = 3
+    IMP_IDX, CLK_IDX, COST_IDX, CONV_CNT_IDX, CONV_AMT_IDX = 9, 10, 11, 12, 13
+
+    agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0,"ccnt":0,"convAmt":0.0})
+    for line in lines:
+        cols = line.split("\t")
+        if len(cols) <= CONV_AMT_IDX: continue
+        ag_id = cols[AG_IDX].strip()
+        if not ag_id:
+            continue
         a = agg[ag_id]
         try:
-            a["impCnt"]   += int(cols[10] or 0)
-            a["clkCnt"]   += int(cols[11] or 0)
-            a["salesAmt"] += float(cols[12] or 0)
-            a["ccnt"]     += int(float(cols[13] or 0))
-            a["convAmt"]  += float(cols[14] or 0)
+            a["impCnt"]   += int(float(cols[IMP_IDX] or 0))
+            a["clkCnt"]   += int(float(cols[CLK_IDX] or 0))
+            a["salesAmt"] += float(cols[COST_IDX] or 0)
+            a["ccnt"]     += int(float(cols[CONV_CNT_IDX] or 0))
+            a["convAmt"]  += float(cols[CONV_AMT_IDX] or 0)
         except (ValueError, IndexError):
             continue
     return dict(agg)
