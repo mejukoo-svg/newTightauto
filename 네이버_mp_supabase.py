@@ -86,20 +86,49 @@ def aggregate(lines):
     """events → daily aggregate (date, revenue, count) for naver-attributed only"""
     agg = defaultdict(lambda: {"revenue":0.0, "count":0})
     sample_seen = 0
-    utm_source_seen = set()
+    debug_keys_logged = False
+    utm_source_seen = defaultdict(int)
+    referrer_seen = defaultdict(int)
+    initial_referrer_seen = defaultdict(int)
+    first_event_props = None
+
     for line in lines:
         try:
             ev = json.loads(line)
         except:
             continue
         props = ev.get("properties", {})
-        # 디버그: utm_source 값 수집
-        for k in ("utm_source", "$initial_utm_source"):
-            v = props.get(k)
-            if v and len(utm_source_seen) < 20:
-                utm_source_seen.add(str(v)[:30])
-        # 네이버 필터
-        if not is_naver_event(props):
+
+        # 첫 이벤트의 전체 properties 키 덤프
+        if first_event_props is None:
+            first_event_props = list(props.keys())
+
+        # 분포 수집
+        v = props.get("utm_source");
+        if v: utm_source_seen[str(v)[:30]] += 1
+        v = props.get("$initial_utm_source")
+        if v: utm_source_seen[str(v)[:30]] += 1
+        v = props.get("$initial_referring_domain")
+        if v: initial_referrer_seen[str(v)[:50]] += 1
+        v = props.get("$referrer") or props.get("referrer")
+        if v: referrer_seen[str(v)[:50]] += 1
+
+        # 네이버 필터 - 기존 + 확장된 매칭
+        is_naver = is_naver_event(props)
+        # 보조 매칭: referring_domain 에 naver.com 포함
+        if not is_naver:
+            for k in ("$initial_referring_domain", "referring_domain"):
+                rd = props.get(k)
+                if rd and "naver" in str(rd).lower():
+                    is_naver = True; break
+        # 보조 매칭: $initial_referrer 에 naver 포함
+        if not is_naver:
+            for k in ("$initial_referrer", "referrer", "$referrer"):
+                rf = props.get(k)
+                if rf and "naver.com" in str(rf).lower():
+                    is_naver = True; break
+
+        if not is_naver:
             continue
         # 일자 (KST)
         ts = props.get("time", 0)
@@ -117,10 +146,23 @@ def aggregate(lines):
         agg[d_iso]["revenue"] += amt
         agg[d_iso]["count"]   += 1
         if sample_seen < 3:
-            log.info(f"    📍 sample: date={d_iso} amt=₩{amt:,.0f} utm_source={props.get('utm_source')!r}")
+            log.info(f"    📍 sample: date={d_iso} amt=₩{amt:,.0f} "
+                     f"utm_source={props.get('utm_source')!r} "
+                     f"init_ref_dom={props.get('$initial_referring_domain')!r}")
             sample_seen += 1
 
-    log.info(f"  🔍 utm_source 분포 (상위 20): {sorted(utm_source_seen)}")
+    log.info(f"  🔍 첫 이벤트 properties keys ({len(first_event_props or [])}개):")
+    if first_event_props:
+        # 네이버 관련일 것 같은 키만 출력
+        for k in first_event_props:
+            if any(tok in k.lower() for tok in ("utm","ref","source","camp","medium","네이버","naver")):
+                log.info(f"    - {k}")
+        # 전체 키 일부 출력 (처음 30개)
+        log.info(f"    (전체: {first_event_props[:30]})")
+
+    log.info(f"  🔍 utm_source 분포: {dict(sorted(utm_source_seen.items(), key=lambda x:-x[1])[:15])}")
+    log.info(f"  🔍 initial_referring_domain 분포: {dict(sorted(initial_referrer_seen.items(), key=lambda x:-x[1])[:15])}")
+    log.info(f"  🔍 referrer 분포: {dict(sorted(referrer_seen.items(), key=lambda x:-x[1])[:15])}")
     return dict(agg)
 
 class SupabaseClient:
