@@ -1,25 +1,35 @@
 # -*- coding: utf-8 -*-
 """
-구글_supabase.py
-================
-구글 검색광고 일별 집계 → Supabase(google_ads_daily) 직통
+구글_supabase.py (v2)
+=====================
+"00. 네이버/구글 Daily" 시트의 **구글 섹션**만 파싱 → google_ads_daily upsert
 
-Colab 참고 스크립트와 동일한 출처 사용:
-  "00. 네이버/구글 Daily" 시트의 구글 섹션만 (키워드 단 행은 제외,
-  일별 '총 지출' / '총 구매전환값' 집계 한 행만 사용)
+실제 시트 구조 (2026-04 확인):
+  Row 0: 단일 헤더 (그룹헤더 없음)
+    col0: 일                         → 날짜 (YY-MM-DD)
+    col1: 주차                       → 주차
+    col2: 요일
+    col3: 네이버 파워링크 브랜드 지출
+    col4: 일반 지출                    ← 네이버 일반지출
+    col5: 총 구매전환값                 ← 네이버 revenue
+    col6: 브랜드 구매전환값
+    col7: 일반 구매전환값
+    col8~11: 네이버 ROAS/D3 COST
+    col12: 구글 검색광고 브랜드 지출
+    col13: 일반 지출                    ← 구글 일반지출
+    col14: 구매전환값                   ← 구글 revenue
+    col15~20: 구글 ROAS/D3 COST
+
+  Row 1부터 데이터 (한 행 = 하루)
 
 환경변수:
-  GCP_SERVICE_ACCOUNT_KEY : 서비스 계정 JSON (문자열)
-  NAV_GOO_SHEET_URL       : 입력 스프레드시트 URL (기본값 내장)
-  NAV_GOO_TAB             : "00. 네이버/구글 Daily"
-  SUPABASE_URL / SUPABASE_SERVICE_KEY
-  REFRESH_DAYS            : 기본 10
-  FULL_REFRESH            : "true" 시 2025-01-01부터
+  GCP_SERVICE_ACCOUNT_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+  NAV_GOO_SHEET_URL, NAV_GOO_TAB (기본값 내장)
+  REFRESH_DAYS, FULL_REFRESH
 """
 
 import os, re, sys, json, time, math, logging
 from datetime import datetime, timedelta, timezone, date
-from collections import defaultdict
 
 import gspread
 import requests as req_lib
@@ -29,9 +39,6 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
-# ============================================================
-# 환경변수
-# ============================================================
 NAV_GOO_SHEET_URL = os.environ.get(
     "NAV_GOO_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/1tJ1iv6oi7y-tOmrsXY7pk-chYDBQV__j6gaRNhsGW-Q/edit"
@@ -51,19 +58,6 @@ END = TODAY
 log.info(f"📅 구글 Ads 수집: {START} ~ {END}")
 
 # ============================================================
-# Google Sheets 인증
-# ============================================================
-def authenticate():
-    gcp_key = json.loads(os.environ["GCP_SERVICE_ACCOUNT_KEY"])
-    creds = Credentials.from_service_account_info(gcp_key, scopes=[
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
-    ])
-    return gspread.authorize(creds)
-
-# ============================================================
-# 파서
-# ============================================================
 def _num(x):
     try:
         s = str(x).replace(",", "").replace("₩", "").replace("%", "") \
@@ -77,23 +71,39 @@ def _parse_date(raw):
     raw = str(raw).strip().split("\n")[0].strip()
     if not raw or raw in ["", "nan", "None"]:
         return None
+    # YY-MM-DD (e.g. 26-04-22)
+    m = re.match(r"^(\d{2})-(\d{1,2})-(\d{1,2})$", raw)
+    if m:
+        try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except: return None
+    # YY/M/D(요일)
     m = re.match(r"^(\d{2})/(\d{1,2})/(\d{1,2})", raw)
     if m:
         try: return date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
         except: pass
-    m = re.match(r"^(\d{1,2})/(\d{1,2})", raw)
-    if m:
-        month, day = int(m.group(1)), int(m.group(2))
-        year = 2026 if month <= 3 else 2025
-        try: return date(year, month, day)
-        except: return None
     for fmt in ["%Y-%m-%d", "%Y/%m/%d"]:
         try: return datetime.strptime(raw[:10], fmt).date()
         except: continue
     return None
 
+# ============================================================
+def authenticate():
+    gcp_key = json.loads(os.environ["GCP_SERVICE_ACCOUNT_KEY"])
+    creds = Credentials.from_service_account_info(gcp_key, scopes=[
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ])
+    return gspread.authorize(creds)
+
+# ============================================================
 def load_google_section(gc):
-    """구글 섹션의 일자별 총 지출·총 구매전환값·노출·클릭·전환수를 추출"""
+    """
+    구글 섹션 컬럼 탐색 규칙:
+      - 'cost_brand'   : 헤더에 '구글' AND '브랜드' AND '지출'
+      - 'cost_general' : cost_brand 컬럼 바로 오른쪽 + 헤더에 '일반' AND '지출'
+      - 'revenue_total': 헤더가 '구매전환값' 이면서 cost_brand보다 오른쪽의 첫 매치
+                         + '브랜드' 미포함 + '일반' 미포함 (= 총액)
+    """
     ss = gc.open_by_url(NAV_GOO_SHEET_URL)
     ws = None
     for s in ss.worksheets():
@@ -108,85 +118,70 @@ def load_google_section(gc):
     log.info(f"  📖 시트: {ws.title}")
     vals = ws.get_all_values()
     time.sleep(0.5)
-    if not vals or len(vals) < 3:
+    if not vals or len(vals) < 2:
         return []
 
-    gh = [str(v).strip() for v in vals[0]]
-    ch = [str(v).strip() for v in vals[1]]
+    hdr = [str(v).strip() for v in vals[0]]
+    log.info(f"  → 헤더 {len(hdr)}개")
 
-    # 그룹(1행) 범위 산출
-    groups = {}; current = None
-    for ci, val in enumerate(gh):
-        if val and val not in ["", "nan"]:
-            current = val
-            groups[current] = {"start": ci, "end": len(ch)}
-    sg = sorted(groups.items(), key=lambda x: x[1]["start"])
-    for i, (name, g) in enumerate(sg):
-        if i + 1 < len(sg):
-            g["end"] = sg[i + 1][1]["start"]
+    cost_brand_ci = None
+    for ci, h in enumerate(hdr):
+        if "구글" in h and "브랜드" in h and "지출" in h:
+            cost_brand_ci = ci; break
+    if cost_brand_ci is None:
+        log.error("  ❌ 구글 브랜드지출 컬럼 못 찾음")
+        log.error(f"  헤더 전체: {hdr}")
+        return []
 
-    # 구글 섹션 컬럼 탐색
-    cols = {"cost_vat": None, "revenue": None, "impressions": None,
-            "clicks": None, "conversions": None}
-    label_map = {
-        "cost_vat":    ["총 지출", "지출"],
-        "revenue":     ["구매전환값", "총 구매전환값"],
-        "impressions": ["노출수", "총 노출"],
-        "clicks":      ["클릭수", "총 클릭"],
-        "conversions": ["전환수", "구매전환수"],
-    }
-    for name, g in groups.items():
-        if not ("구글" in name or "검색" in name):
-            continue
-        for ci in range(g["start"], min(g["end"], len(ch))):
-            h = ch[ci]
-            for key, labels in label_map.items():
-                if cols[key] is None and h in labels:
-                    cols[key] = ci
-    log.info(f"  → 구글 컬럼: {cols}")
+    # 일반 지출 = 브랜드지출 바로 오른쪽 (일반적으로)
+    cost_general_ci = None
+    for ci in range(cost_brand_ci + 1, min(cost_brand_ci + 4, len(hdr))):
+        h = hdr[ci]
+        if "일반" in h and "지출" in h:
+            cost_general_ci = ci; break
+    # revenue: 구글 섹션 안에서 '구매전환값' (총액) 찾기 — 브랜드/일반 suffix 없는 것
+    revenue_ci = None
+    for ci in range(cost_brand_ci + 1, len(hdr)):
+        h = hdr[ci].strip()
+        if h == "구매전환값" or h == "총 구매전환값":
+            revenue_ci = ci; break
+        # 다음 섹션 만나면 중단 (구글 섹션 끝)
+        if "네이버" in h: break
 
-    # 일자별 합산 (같은 날짜 중복 행이 있을 수 있음)
-    agg = defaultdict(lambda: defaultdict(float))
-    for ri in range(2, len(vals)):
-        row = vals[ri]
-        if not row: continue
-        dt = _parse_date(row[0])
-        if dt is None or dt < START or dt > END: continue
-        for key, ci in cols.items():
-            if ci is None or ci >= len(row): continue
-            agg[dt][key] += _num(row[ci])
+    log.info(f"  → 구글 컬럼: cost_brand={cost_brand_ci}({hdr[cost_brand_ci]!r}), "
+             f"cost_general={cost_general_ci}"
+             + (f"({hdr[cost_general_ci]!r})" if cost_general_ci is not None else "")
+             + f", revenue={revenue_ci}"
+             + (f"({hdr[revenue_ci]!r})" if revenue_ci is not None else ""))
 
     records = []
-    for dt, d in sorted(agg.items()):
-        cost = d.get("cost_vat", 0)
-        rev  = d.get("revenue", 0)
-        imp  = int(d.get("impressions", 0))
-        clk  = int(d.get("clicks", 0))
-        conv = int(d.get("conversions", 0))
-        profit = rev - cost
-        roas = (rev / cost * 100) if cost > 0 else 0
-        ctr  = (clk / imp * 100) if imp > 0 else 0
-        cpc  = (cost / clk) if clk > 0 else 0
-        cvr  = (conv / clk * 100) if clk > 0 else 0
-        if cost == 0 and rev == 0 and imp == 0:
+    for ri in range(1, len(vals)):   # Row 1부터 데이터
+        row = vals[ri]
+        if not row:
             continue
+        dt = _parse_date(row[0])
+        if dt is None or dt < START or dt > END:
+            continue
+        cost_brand = _num(row[cost_brand_ci]) if cost_brand_ci < len(row) else 0
+        cost_general = _num(row[cost_general_ci]) if (cost_general_ci is not None and cost_general_ci < len(row)) else 0
+        revenue = _num(row[revenue_ci]) if (revenue_ci is not None and revenue_ci < len(row)) else 0
+        cost = cost_brand + cost_general
+        if cost == 0 and revenue == 0:
+            continue
+        profit = revenue - cost
+        roas = (revenue / cost * 100) if cost > 0 else 0
         records.append({
             "date": dt.isoformat(),
             "cost_vat": round(cost, 2),
-            "impressions": imp,
-            "clicks": clk,
-            "ctr": round(ctr, 4),
-            "cpc": round(cpc, 2),
-            "conversions": conv,
-            "revenue": round(rev, 2),
+            "revenue": round(revenue, 2),
             "profit": round(profit, 2),
             "roas": round(roas, 2),
-            "cvr": round(cvr, 4),
+            # 시트에 impressions/clicks/conversions 없음 → 0
+            "impressions": 0, "clicks": 0, "ctr": 0, "cpc": 0,
+            "conversions": 0, "cvr": 0,
         })
     return records
 
-# ============================================================
-# Supabase
 # ============================================================
 class SupabaseClient:
     def __init__(self, url, key):
@@ -216,9 +211,6 @@ class SupabaseClient:
             time.sleep(0.3)
         return ok
 
-# ============================================================
-# 메인
-# ============================================================
 def main():
     log.info("=" * 60)
     log.info("🚀 구글Ads(시트) → Supabase")
@@ -229,6 +221,9 @@ def main():
     if not records:
         log.warning("  ⚠️ 빈 결과")
         return
+    # 샘플 출력
+    for r in records[:3]:
+        log.info(f"   {r['date']}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
     sb.upsert("google_ads_daily", records)
     log.info("✅ 완료")

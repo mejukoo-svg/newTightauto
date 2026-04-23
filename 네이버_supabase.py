@@ -1,27 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-네이버_supabase.py
-==================
-네이버 검색광고 API → Supabase(naver_sa_daily) 직통 파이프라인
+네이버_supabase.py (v2 - StatReport)
+====================================
+네이버 검색광고 StatReport API → naver_sa_daily upsert
 
-구조:
-  1) Campaign 목록 조회
-  2) Campaign → AdGroup 목록 수집
-  3) /stats API로 adgroup별 일자별 성과 조회 (배치)
-  4) naver_sa_daily UPSERT
+v1의 /stats 엔드포인트가 "지원하지 않는 기능" 에러 (code=11001) 로 실패.
+StatReport는 폴링 기반이지만 지원 필드가 더 많고 (conversion 포함) 안정적.
+
+흐름:
+  1) GET  /ncc/campaigns, /ncc/adgroups  ← 메타데이터
+  2) POST /stat-reports { reportTp: AD_CONVERSION_DETAIL, statDt: YYYYMMDD } (날짜마다)
+  3) GET  /stat-reports/{id} 폴링 (status=BUILT 될 때까지)
+  4) GET  downloadUrl (TSV) → 파싱
+  5) 광고그룹 단위로 집계 후 upsert
+
+reportTp=AD_CONVERSION_DETAIL 컬럼:
+  0: 일자(YYYYMMDD)   1: 광고주 ID   2: 캠페인 ID   3: 비즈머니 ID
+  4: 광고그룹 ID      5: 키워드 ID   6: 광고 ID     7: 비즈채널 ID
+  8: 매체 9: PC/모바일구분 10: 노출수 11: 클릭수 12: 비용(VAT포함)
+  13: 전환수(클릭+간접) 14: 전환금액 15: 이월전환수 16: 이월전환금액
+  (네이버 SA API StatReport 공식 스키마)
 
 환경변수:
-  NAVER_API_KEY        : 네이버 검색광고 API 액세스 라이선스
-  NAVER_SECRET_KEY     : 네이버 검색광고 API 시크릿키
-  NAVER_CUSTOMER_ID    : 광고주 고객번호
-  SUPABASE_URL         : https://xxx.supabase.co
-  SUPABASE_SERVICE_KEY : service role key
-  REFRESH_DAYS         : 기본 10일
-  FULL_REFRESH         : "true" 시 2025-01-01부터 전체 갱신
+  NAVER_API_KEY, NAVER_SECRET_KEY, NAVER_CUSTOMER_ID
+  SUPABASE_URL, SUPABASE_SERVICE_KEY
+  REFRESH_DAYS (기본 10), FULL_REFRESH
 """
 
-import os, sys, time, hmac, hashlib, base64, json, math, logging, re
-from datetime import datetime, timedelta, timezone
+import os, sys, time, hmac, hashlib, base64, json, math, logging, re, io
+from datetime import datetime, timedelta, timezone, date
 from collections import defaultdict
 
 import requests as req_lib
@@ -30,8 +37,6 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
-# ============================================================
-# 환경변수
 # ============================================================
 NAVER_API_KEY     = os.environ["NAVER_API_KEY"]
 NAVER_SECRET_KEY  = os.environ["NAVER_SECRET_KEY"]
@@ -44,27 +49,20 @@ KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None).date()
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
-
-if FULL_REFRESH:
-    START = datetime(2025, 1, 1).date()
-else:
-    START = TODAY - timedelta(days=REFRESH_DAYS - 1)
-END = TODAY
-
+START = date(2025, 1, 1) if FULL_REFRESH else TODAY - timedelta(days=REFRESH_DAYS - 1)
+END = TODAY - timedelta(days=1)   # StatReport는 어제까지만 확정
 log.info(f"📅 네이버SA 수집: {START} ~ {END}")
 
-# ============================================================
-# 네이버 SA API - 서명/요청
-# ============================================================
 NAVER_BASE = "https://api.searchad.naver.com"
 
+# ============================================================
 def _sign(timestamp: str, method: str, uri: str) -> str:
     msg = f"{timestamp}.{method}.{uri}"
     sig = hmac.new(bytes(NAVER_SECRET_KEY, "utf-8"),
                    bytes(msg, "utf-8"), hashlib.sha256).digest()
     return base64.b64encode(sig).decode()
 
-def _naver_headers(method: str, uri: str) -> dict:
+def _headers(method: str, uri: str) -> dict:
     ts = str(round(time.time() * 1000))
     return {
         "Content-Type": "application/json; charset=UTF-8",
@@ -74,75 +72,113 @@ def _naver_headers(method: str, uri: str) -> dict:
         "X-Signature": _sign(ts, method, uri),
     }
 
-def naver_get(uri: str, params: dict | None = None):
+def naver_request(method: str, uri: str, params=None, body=None, raw=False):
     url = NAVER_BASE + uri
     for attempt in range(4):
         try:
-            resp = req_lib.get(url, headers=_naver_headers("GET", uri),
-                               params=params or {}, timeout=30)
+            resp = req_lib.request(method, url, headers=_headers(method, uri),
+                                   params=params, json=body, timeout=60)
             if resp.status_code == 200:
-                return resp.json()
+                return resp.content if raw else resp.json()
             if resp.status_code == 429:
-                time.sleep(5 + attempt * 5)
-                continue
-            log.error(f"  ❌ GET {uri} HTTP {resp.status_code}: {resp.text[:200]}")
+                time.sleep(5 + attempt * 5); continue
+            log.error(f"  ❌ {method} {uri} HTTP {resp.status_code}: {resp.text[:300]}")
             return None
         except Exception as e:
-            log.error(f"  ❌ GET {uri} 예외: {e}")
+            log.error(f"  ❌ {method} {uri} 예외: {e}")
             time.sleep(2 + attempt)
     return None
 
 # ============================================================
-# 1) 캠페인 → 광고그룹 목록
-# ============================================================
 def list_campaigns():
     log.info("📋 캠페인 목록 조회...")
-    data = naver_get("/ncc/campaigns")
-    if not data:
-        return []
+    data = naver_request("GET", "/ncc/campaigns")
+    if not data: return []
     log.info(f"  → {len(data)}개 캠페인")
     return data
 
 def list_adgroups(campaign_id: str):
-    data = naver_get("/ncc/adgroups", {"nccCampaignId": campaign_id})
-    return data or []
+    return naver_request("GET", "/ncc/adgroups",
+                         params={"nccCampaignId": campaign_id}) or []
 
 # ============================================================
-# 2) /stats - adgroup별 일자별 성과
+# StatReport: per-date report, polling, TSV download, parse
 # ============================================================
-STAT_FIELDS = ["impCnt", "clkCnt", "salesAmt", "ctr", "cpc",
-               "ccnt", "crnt", "convAmt"]
-# impCnt: 노출수, clkCnt: 클릭수, salesAmt: 광고비(VAT 포함), ctr: CTR,
-# cpc: CPC, ccnt: 전환수(클릭/간접 합계), convAmt: 전환금액
+REPORT_TP = "AD_CONVERSION_DETAIL"    # 광고그룹×키워드 단위 일별 전환포함
 
-def fetch_adgroup_stats(adgroup_ids: list[str], date_from, date_to):
-    """최대 100개 ID를 한 번에 호출하는 /stats 엔드포인트 (일별)."""
-    out = []
-    if not adgroup_ids:
-        return out
-    for i in range(0, len(adgroup_ids), 50):
-        chunk = adgroup_ids[i:i+50]
-        params = {
-            "ids": ",".join(chunk),
-            "fields": json.dumps(STAT_FIELDS),
-            "timeRange": json.dumps({
-                "since": date_from.strftime("%Y-%m-%d"),
-                "until": date_to.strftime("%Y-%m-%d"),
-            }),
-            "datePreset": "custom",
-            "timeIncrement": "1",   # 일별
-        }
-        resp = naver_get("/stats", params)
-        if not resp:
+def build_report(stat_dt: date) -> dict | None:
+    body = {"reportTp": REPORT_TP, "statDt": stat_dt.strftime("%Y%m%d")}
+    return naver_request("POST", "/stat-reports", body=body)
+
+def wait_report(job_id: str, max_wait: int = 180) -> dict | None:
+    """polling until BUILT or FAIL"""
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        r = naver_request("GET", f"/stat-reports/{job_id}")
+        if not r:
+            time.sleep(3); continue
+        status = r.get("status")
+        if status == "BUILT":
+            return r
+        if status in ("FAILED", "CANCELED"):
+            log.error(f"  ❌ report {job_id} status={status}")
+            return None
+        time.sleep(3)
+    log.error(f"  ❌ report {job_id} timeout")
+    return None
+
+def download_tsv(download_url: str) -> str | None:
+    """downloadUrl은 Naver API 경로(상대) — 헤더 서명 필요"""
+    # downloadUrl 은 풀 URL일 수도, 상대경로일 수도 있음
+    if download_url.startswith("http"):
+        # 풀 URL — 경로 부분만 발췌해서 서명
+        from urllib.parse import urlparse
+        uri = urlparse(download_url).path
+        if urlparse(download_url).query:
+            uri += "?" + urlparse(download_url).query
+        url = download_url
+    else:
+        uri = download_url
+        url = NAVER_BASE + uri
+    try:
+        # 다운로드는 HMAC 서명한 헤더로 직접 GET
+        method = "GET"
+        # 서명용 uri는 경로+쿼리 전체
+        signing_uri = uri if uri.startswith("/") else "/" + uri
+        resp = req_lib.get(url, headers=_headers(method, signing_uri), timeout=60)
+        if resp.status_code == 200:
+            return resp.text
+        log.error(f"  ❌ download HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        log.error(f"  ❌ download 예외: {e}")
+    return None
+
+def parse_tsv(tsv: str, stat_dt: date):
+    """
+    AD_CONVERSION_DETAIL 컬럼 인덱스:
+      0:statDt 1:advertiserId 2:campaignId 3:bizmoneyId 4:adgroupId 5:keywordId
+      6:adId 7:bizChannelId 8:media 9:pcMobile 10:impCnt 11:clkCnt 12:salesAmt
+      13:ccnt 14:convAmt 15:crtoCnt 16:crtoSalesAmt
+    """
+    agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0,"ccnt":0,"convAmt":0.0})
+    for line in tsv.splitlines():
+        cols = line.split("\t")
+        if len(cols) < 15: continue
+        ag_id = cols[4].strip()
+        if not ag_id or not ag_id.isdigit() and not ag_id.startswith("grp-"):
+            # 네이버 adgroup_id는 "grp-..." 형태
+            pass
+        a = agg[ag_id]
+        try:
+            a["impCnt"]   += int(cols[10] or 0)
+            a["clkCnt"]   += int(cols[11] or 0)
+            a["salesAmt"] += float(cols[12] or 0)
+            a["ccnt"]     += int(float(cols[13] or 0))
+            a["convAmt"]  += float(cols[14] or 0)
+        except (ValueError, IndexError):
             continue
-        # 응답 구조: { "data": [ { "id":..., "impCnt":..., ... } ] }
-        for row in resp.get("data", []):
-            out.append(row)
-        time.sleep(0.3)
-    return out
+    return dict(agg)
 
-# ============================================================
-# 3) Supabase 클라이언트
 # ============================================================
 class SupabaseClient:
     def __init__(self, url, key):
@@ -156,7 +192,6 @@ class SupabaseClient:
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",
         }
-
     def upsert(self, table, records, chunk=500):
         if not records: return 0
         url = f"{self.base}/rest/v1/{table}"
@@ -168,24 +203,19 @@ class SupabaseClient:
                 ok += len(batch)
                 log.info(f"  ✅ upsert {ok}/{len(records)}")
             else:
-                log.error(f"  ❌ upsert HTTP {resp.status_code}: {resp.text[:300]}")
+                log.error(f"  ❌ HTTP {resp.status_code}: {resp.text[:300]}")
             time.sleep(0.3)
         return ok
-
     @staticmethod
     def _clean(r):
         out = {}
         for k, v in r.items():
-            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-                v = 0
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)): v = 0
             out[k] = v
         return out
 
 # ============================================================
-# 4) 상품 추출 (adgroup_name에서 사주/솔로 등 상품 키워드)
-# ============================================================
 PRODUCT_KEYWORDS = ["사주", "솔로", "무당", "타로", "신점", "관상", "로또", "운세"]
-
 def extract_product(name: str) -> str | None:
     if not name: return None
     for kw in PRODUCT_KEYWORDS:
@@ -193,89 +223,90 @@ def extract_product(name: str) -> str | None:
     return None
 
 # ============================================================
-# 메인
-# ============================================================
 def main():
     log.info("=" * 60)
-    log.info("🚀 네이버SA → Supabase 파이프라인")
+    log.info("🚀 네이버SA → Supabase (StatReport)")
     log.info("=" * 60)
 
-    # 1. 캠페인 + 광고그룹 메타데이터
+    # 1. 메타데이터
     campaigns = list_campaigns()
-    camp_meta = {c["nccCampaignId"]: c for c in campaigns}
-
     all_adgroups = []
     for c in campaigns:
         ags = list_adgroups(c["nccCampaignId"])
         for ag in ags:
             ag["_campaign_name"] = c.get("name", "")
+            ag["_campaign_id"] = c["nccCampaignId"]
         all_adgroups.extend(ags)
-        time.sleep(0.2)
-    log.info(f"📋 광고그룹 {len(all_adgroups)}개")
-
+        time.sleep(0.1)
     adgroup_meta = {ag["nccAdgroupId"]: ag for ag in all_adgroups}
+    log.info(f"📋 광고그룹 {len(adgroup_meta)}개")
 
-    # 2. 기간 내 /stats 조회 (adgroup 단위 일별)
-    adgroup_ids = list(adgroup_meta.keys())
-    log.info(f"📊 /stats 호출: {len(adgroup_ids)}개 광고그룹, {START} ~ {END}")
-    raw_stats = fetch_adgroup_stats(adgroup_ids, START, END)
-    log.info(f"  → raw rows: {len(raw_stats)}")
+    # 2. 날짜별 StatReport 빌드 + 다운로드
+    all_records = []
+    d = START
+    while d <= END:
+        log.info(f"  📊 StatReport {d}...")
+        rpt = build_report(d)
+        if not rpt or "reportJobId" not in rpt:
+            log.warning(f"    빌드 실패 — 스킵")
+            d += timedelta(days=1); continue
+        job_id = rpt["reportJobId"]
+        status = rpt.get("status")
+        # 상태에 따라 폴링
+        if status != "BUILT":
+            rpt = wait_report(job_id)
+        if not rpt:
+            d += timedelta(days=1); continue
+        dl = rpt.get("downloadUrl")
+        if not dl:
+            log.warning(f"    downloadUrl 없음 — 스킵")
+            d += timedelta(days=1); continue
+        tsv = download_tsv(dl)
+        if not tsv:
+            d += timedelta(days=1); continue
+        agg = parse_tsv(tsv, d)
+        log.info(f"    {d}: adgroups={len(agg)}, lines={tsv.count(chr(10))}")
 
-    # 3. 레코드 구성
-    records = []
-    for row in raw_stats:
-        ag_id = str(row.get("id") or "")
-        meta = adgroup_meta.get(ag_id, {})
-        dt_str = row.get("date") or row.get("dt")
-        if not dt_str:
-            continue
-        # 네이버 /stats의 date는 "YYYYMMDD" 또는 "YYYY-MM-DD"
-        try:
-            if "-" in dt_str:
-                dt = datetime.strptime(dt_str[:10], "%Y-%m-%d").date()
-            else:
-                dt = datetime.strptime(dt_str[:8], "%Y%m%d").date()
-        except ValueError:
-            continue
+        for ag_id, a in agg.items():
+            meta = adgroup_meta.get(ag_id, {})
+            cost = a["salesAmt"]
+            rev  = a["convAmt"]
+            clk  = a["clkCnt"]
+            conv = a["ccnt"]
+            roas = (rev / cost * 100) if cost > 0 else 0
+            cvr  = (conv / clk * 100) if clk > 0 else 0
+            ctr  = (clk / a["impCnt"] * 100) if a["impCnt"] > 0 else 0
+            cpc  = (cost / clk) if clk > 0 else 0
+            all_records.append({
+                "date": d.isoformat(),
+                "adgroup_id": ag_id,
+                "campaign_id": meta.get("_campaign_id", ""),
+                "campaign_name": meta.get("_campaign_name", ""),
+                "adgroup_name": meta.get("name", ""),
+                "product": extract_product(meta.get("name", "")),
+                "cost_vat": round(cost, 2),
+                "impressions": a["impCnt"],
+                "clicks": clk,
+                "ctr": round(ctr, 4),
+                "cpc": round(cpc, 2),
+                "conversions": conv,
+                "revenue": round(rev, 2),
+                "profit": round(rev - cost, 2),
+                "roas": round(roas, 2),
+                "cvr": round(cvr, 4),
+            })
+        d += timedelta(days=1)
+        time.sleep(1)
 
-        cost = float(row.get("salesAmt") or 0)
-        imp  = int(row.get("impCnt") or 0)
-        clk  = int(row.get("clkCnt") or 0)
-        conv = int(row.get("ccnt") or 0)
-        rev  = float(row.get("convAmt") or 0)
-        ctr  = float(row.get("ctr") or 0)
-        cpc  = float(row.get("cpc") or 0)
-        profit = rev - cost
-        roas = (rev / cost * 100) if cost > 0 else 0
-        cvr  = (conv / clk * 100) if clk > 0 else 0
-
-        records.append({
-            "date": dt.isoformat(),
-            "adgroup_id": ag_id,
-            "campaign_id": meta.get("nccCampaignId", ""),
-            "campaign_name": meta.get("_campaign_name", ""),
-            "adgroup_name": meta.get("name", ""),
-            "product": extract_product(meta.get("name", "")),
-            "cost_vat": round(cost, 2),
-            "impressions": imp,
-            "clicks": clk,
-            "ctr": round(ctr, 4),
-            "cpc": round(cpc, 2),
-            "conversions": conv,
-            "revenue": round(rev, 2),
-            "profit": round(profit, 2),
-            "roas": round(roas, 2),
-            "cvr": round(cvr, 4),
-        })
-
-    log.info(f"📦 records: {len(records)}")
-    if not records:
-        log.warning("  ⚠️ 빈 결과 — 인증/기간/광고그룹 확인")
+    log.info(f"📦 records: {len(all_records)}")
+    if not all_records:
+        log.warning("  ⚠️ 빈 결과")
         return
-
-    # 4. Supabase upsert
+    # 샘플 출력
+    for r in all_records[:3]:
+        log.info(f"   {r['date']}  {r['adgroup_name'][:20]:20s}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
-    sb.upsert("naver_sa_daily", records)
+    sb.upsert("naver_sa_daily", all_records)
     log.info("✅ 완료")
 
 if __name__ == "__main__":
