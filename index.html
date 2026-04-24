@@ -351,6 +351,16 @@ const hlTbl=()=>{const m={kr:'adset_highlights',gl:'global_adset_highlights',cr:
 const hlIdCol=()=>(MODE==='cr'||MODE==='vc')?'ad_id':'adset_id';
 const perfTbl=()=>{const m={kr:'ad_performance_daily',gl:'global_ad_performance_daily',cr:'ad_creative_daily',vn:'vanced_ad_performance_daily',vc:'vanced_ad_creative_daily'};return m[MODE]||'ad_performance_daily'};
 function hlClass(id){const h=HIGHLIGHTS[id];return h&&HL_CONFIG[h]?HL_CONFIG[h].cls:''}
+// 현재 MODE의 원본 배열 반환 (norm된 AD 가 아닌 raw)
+function _srcAD(){
+  return MODE==='kr'?KR_AD:(MODE==='gl'?GL_AD:(MODE==='cr'?CR_AD:(MODE==='vn'?VN_AD:VC_AD)));
+}
+// AD + 원본배열 동시 갱신 (GL은 norm이 spread 복사해서 분리되므로 둘 다 업데이트 필요)
+function _syncRowField(id, date, field, value){
+  AD.forEach(r=>{if(rowId(r)===id&&r.date===date)r[field]=value});
+  _srcAD().forEach(r=>{if(rowId(r)===id&&r.date===date)r[field]=value});
+}
+
 async function saveHL(id,c){
   // 1) 추이차트용 저장 (adset_highlights)
   const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString()};
@@ -361,8 +371,8 @@ async function saveHL(id,c){
   const _y=new Date();_y.setDate(_y.getDate()-1);
   const yDate=_y.getFullYear()+'-'+String(_y.getMonth()+1).padStart(2,'0')+'-'+String(_y.getDate()).padStart(2,'0');
   await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+yDate+'&'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
-  // 메모리의 AD 데이터도 어제분만 갱신
-  AD.forEach(r=>{if(rowId(r)===id&&r.date===yDate)r.highlight=c||null});
+  // 메모리 동기화 — AD + 원본배열(GL_AD/VN_AD 등) 모두 갱신 → 탭 전환/모드 전환 후에도 유지
+  _syncRowField(id, yDate, 'highlight', c||null);
   renderTrend();
 }
 function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
@@ -385,6 +395,8 @@ async function saveMemo(date,id,memo,el){
   const tbl=perfTbl();
   const idCol=hlIdCol();
   await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&'+idCol+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo})});
+  // 메모리 동기화 — 탭/모드 전환 후에도 유지
+  _syncRowField(id, date, 'memo', memo);
   const ind=el.parentNode.querySelector('.memo-saved');if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
 }
 
@@ -1021,7 +1033,7 @@ function renderDateTab(){
   rows.forEach(r=>{
     const rid=rowId(r);const hl=r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
-    let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':F(Math.round(r.budget*(1+hlPct/100)))}
+    let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/"/g,'&quot;');
     const name2=((MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
     h+='<tr>';
