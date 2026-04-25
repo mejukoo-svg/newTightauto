@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -168,7 +168,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
-<div class="panel" id="p-dateproduct"><div class="filter"><label>날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><table id="dpTbl"></table></div></div>
+<div class="panel" id="p-dateproduct"><div class="filter"><label>날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table></div></div>
 <div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
@@ -1067,6 +1067,8 @@ function renderDateTab(){
 }
 
 // ===== DATE PRODUCT =====
+const COUNTRY_LIST=['대만','홍콩','일본','싱가폴','싱가포르','멕시코','미국','한국','중국','베트남','태국','인도네시아','필리핀','말레이시아','인도'];
+function extractCountry(cn){if(!cn)return'기타';for(const c of COUNTRY_LIST){if(cn.startsWith(c))return c}const p=cn.split('_')[0];return p||'기타'}
 function renderDateProduct(){
   const sel=document.getElementById('dpSel');
   if(!sel.options.length){DATES.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=DK(d)+' ('+WD(d)+')';sel.appendChild(o)})}
@@ -1078,6 +1080,25 @@ function renderDateProduct(){
   list.forEach(p=>{const roas=p.spend>0?p.revenue/p.spend*100:0;const cvr=p.uc>0&&p.mp>0?p.mp/p.uc*100:0;const ratio=totS>0?p.spend/totS*100:0;
   h+='<tr><td style="text-align:left;font-weight:600">'+p.product+'</td><td>'+p.cnt+'</td><td style="text-align:right;color:#d00">'+money(p.spend)+'</td><td style="text-align:right;color:#00d">'+money(p.revenue)+'</td><td style="text-align:right;color:'+(p.profit>=0?'green':'red')+'">'+money(p.profit)+'</td><td class="'+RC(roas)+'">'+roas.toFixed(1)+'%</td><td>'+cvr.toFixed(2)+'%</td><td>'+ratio.toFixed(1)+'%</td></tr>'});
   h+='</tbody>';document.getElementById('dpTbl').innerHTML=h;
+  // === 나라별 (글로벌 모드 전용) ===
+  const cWrap=document.getElementById('dpCountryWrap');
+  const pLabel=document.getElementById('dpProductLabel');
+  if(MODE==='gl'){
+    cWrap.style.display='';pLabel.style.display='';
+    const byC={};
+    rows.forEach(r=>{const c=extractCountry(r.campaign_name);if(!byC[c])byC[c]={country:c,spend:0,revenue:0,profit:0,mp:0,uc:0,cnt:0,cmp:new Set()};byC[c].spend+=r.spend;byC[c].revenue+=r.revenue;byC[c].profit+=r.profit;byC[c].mp+=r.results_mp;byC[c].uc+=r.unique_clicks;byC[c].cnt++;if(r.campaign_name)byC[c].cmp.add(r.campaign_name)});
+    const cList=Object.values(byC).sort((a,b)=>b.spend-a.spend);
+    let ch='<thead><tr><th style="text-align:left;background:#4476b8;color:#fff">국가</th><th style="background:#4476b8;color:#fff">캠페인수</th><th style="background:#4476b8;color:#fff">세트수</th><th style="background:#4476b8;color:#fff">지출</th><th style="background:#4476b8;color:#fff">매출</th><th style="background:#4476b8;color:#fff">이익</th><th style="background:#4476b8;color:#fff">ROAS</th><th style="background:#4476b8;color:#fff">CVR</th><th style="background:#4476b8;color:#fff">비중</th></tr></thead><tbody>';
+    cList.forEach(p=>{const roas=p.spend>0?p.revenue/p.spend*100:0;const cvr=p.uc>0&&p.mp>0?p.mp/p.uc*100:0;const ratio=totS>0?p.spend/totS*100:0;
+    ch+='<tr><td style="text-align:left;font-weight:600">'+p.country+'</td><td>'+p.cmp.size+'</td><td>'+p.cnt+'</td><td style="text-align:right;color:#d00">'+money(p.spend)+'</td><td style="text-align:right;color:#00d">'+money(p.revenue)+'</td><td style="text-align:right;color:'+(p.profit>=0?'green':'red')+'">'+money(p.profit)+'</td><td class="'+RC(roas)+'">'+roas.toFixed(1)+'%</td><td>'+cvr.toFixed(2)+'%</td><td>'+ratio.toFixed(1)+'%</td></tr>'});
+    // 합계 행
+    const tS=cList.reduce((a,b)=>a+b.spend,0),tR=cList.reduce((a,b)=>a+b.revenue,0),tP=cList.reduce((a,b)=>a+b.profit,0),tMp=cList.reduce((a,b)=>a+b.mp,0),tUc=cList.reduce((a,b)=>a+b.uc,0),tCnt=cList.reduce((a,b)=>a+b.cnt,0),tCmp=new Set();cList.forEach(p=>p.cmp.forEach(x=>tCmp.add(x)));
+    const tRoas=tS>0?tR/tS*100:0;const tCvr=tUc>0&&tMp>0?tMp/tUc*100:0;
+    ch+='<tr style="background:#e8e8e8;font-weight:700"><td style="text-align:left">합계</td><td>'+tCmp.size+'</td><td>'+tCnt+'</td><td style="text-align:right;color:#d00">'+money(tS)+'</td><td style="text-align:right;color:#00d">'+money(tR)+'</td><td style="text-align:right;color:'+(tP>=0?'green':'red')+'">'+money(tP)+'</td><td class="'+RC(tRoas)+'">'+tRoas.toFixed(1)+'%</td><td>'+tCvr.toFixed(2)+'%</td><td>100.0%</td></tr>';
+    ch+='</tbody>';document.getElementById('dpCountryTbl').innerHTML=ch;
+  }else{
+    cWrap.style.display='none';pLabel.style.display='none';
+  }
 }
 
 // ===== STRIPE =====
