@@ -175,7 +175,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
 <div class="panel" id="p-chrev"><div class="filter"><label>기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 전체/메타/밴스드/네이버/구글 채널별 ROAS·순이익·매출·지출 추이</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
-<div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select></div><div class="sheet-wrap"><table id="nsaTbl"></table></div></div>
+<div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Mixpanel cr 기반 — 결제로 전환된 검색어 (revenue / purchase_count)</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
@@ -200,7 +200,7 @@ const HL_CONFIG={
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],VC_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
-let NSA_DAILY=[],GOOGLE_ADS=[],NAVER_MP=[],TOSS_DAILY=[];
+let NSA_DAILY=[],GOOGLE_ADS=[],NAVER_MP=[],NAVER_KW=[],TOSS_DAILY=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={},VC_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
@@ -270,7 +270,7 @@ function rebuildLookups(){
 
 // ===== INIT =====
 async function initData(){
-  const [kr,gl,cr,vn,vc,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=await Promise.all([
+  const [kr,gl,cr,vn,vc,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr,naver_kw]=await Promise.all([
     sbAll('ad_performance_daily','spend'),
     sbAll('global_ad_performance_daily','spend_usd').catch(()=>[]),
     sbAll('ad_creative_daily','spend').catch(()=>[]),
@@ -287,9 +287,10 @@ async function initData(){
     sbQ('google_ads_daily','select=*&order=date.desc').catch(()=>[]),
     sbQ('naver_daily_mp','select=*&order=date.desc').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
+    sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=20000').catch(()=>[]),
   ]);
   KR_AD=kr;GL_AD=gl;CR_AD=cr;VN_AD=vn;VC_AD=vc;STRIPE_DATA=stripe;TOSS_DATA=toss;
-  NSA_DAILY=nsa;GOOGLE_ADS=google;NAVER_MP=naver_mp;TOSS_DAILY=toss_kr;
+  NSA_DAILY=nsa;GOOGLE_ADS=google;NAVER_MP=naver_mp;TOSS_DAILY=toss_kr;NAVER_KW=naver_kw||[];
   KR_HL={};krhl.forEach(x=>{KR_HL[x.adset_id]=x.highlight});
   GL_HL={};glhl.forEach(x=>{GL_HL[x.adset_id]=x.highlight});
   CR_HL={};crhl.forEach(x=>{CR_HL[x.ad_id]=x.highlight});
@@ -340,6 +341,7 @@ document.getElementById('chrDays').addEventListener('change',renderChannelRevenu
 document.getElementById('nsaDays').addEventListener('change',renderNsaDaily);
 document.getElementById('nsaSort').addEventListener('change',renderNsaDaily);
 document.getElementById('nsaMinSpend').addEventListener('change',renderNsaDaily);
+document.getElementById('nsaKwTop').addEventListener('change',renderNsaDaily);
 document.getElementById('nsaWeeks').addEventListener('change',renderNsaWeekly);
 document.getElementById('nsawMinSpend').addEventListener('change',renderNsaWeekly);
 
@@ -1623,6 +1625,8 @@ function renderNsaDaily(){
   const days=parseInt(document.getElementById('nsaDays').value);
   const minSp=parseFloat(document.getElementById('nsaMinSpend').value)||0;
   const sortBy=document.getElementById('nsaSort').value;
+  // 검색어 추이 먼저 렌더 (광고그룹 차트 위쪽 패널)
+  renderNsaKeywords(days);
   // 날짜 리스트
   const allDates=[...new Set(NSA_DAILY.map(r=>r.date))].sort().reverse().slice(0,days);
   if(!allDates.length){document.getElementById('nsaTbl').innerHTML='<tr><td>네이버SA 데이터 없음 — naver_sa_daily 파이프라인이 실행돼야 합니다</td></tr>';return}
@@ -1673,6 +1677,65 @@ function renderNsaDaily(){
     });
   });
   h+='</tbody>';document.getElementById('nsaTbl').innerHTML=h;
+}
+
+// ===== 네이버SA 검색어 추이 (Mixpanel cr 기반) =====
+function renderNsaKeywords(days){
+  const tbl=document.getElementById('nsaKwTbl');
+  if(!tbl)return;
+  if(!NAVER_KW||!NAVER_KW.length){
+    tbl.innerHTML='<tr><td style="padding:12px;color:#888">검색어 데이터 없음 — naver_keyword_mp_daily 테이블이 비어있거나 파이프라인 실행 전입니다</td></tr>';
+    return;
+  }
+  const topN=parseInt(document.getElementById('nsaKwTop').value)||20;
+  const allDates=[...new Set(NAVER_KW.map(r=>r.date))].sort().reverse().slice(0,days);
+  if(!allDates.length){tbl.innerHTML='<tr><td>검색어 데이터 없음</td></tr>';return}
+  const d7=allDates.slice(0,7);
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // keyword × date 그룹화
+  const byKw={};
+  NAVER_KW.forEach(r=>{
+    if(!allDates.includes(r.date))return;
+    const k=r.keyword||'';
+    if(!k)return;
+    if(!byKw[k])byKw[k]={kw:k,d:{},total:0,total7:0,totalCnt:0,total7Cnt:0,totalY:0};
+    byKw[k].d[r.date]={r:r.revenue||0,c:r.purchase_count||0};
+    byKw[k].total+=(r.revenue||0);
+    byKw[k].totalCnt+=(r.purchase_count||0);
+    if(d7.includes(r.date)){byKw[k].total7+=(r.revenue||0);byKw[k].total7Cnt+=(r.purchase_count||0)}
+    if(r.date===yDay)byKw[k].totalY+=(r.revenue||0);
+  });
+  const list=Object.values(byKw).sort((a,b)=>b.total7-a.total7).slice(0,topN);
+  if(!list.length){tbl.innerHTML='<tr><td>검색어 데이터 없음</td></tr>';return}
+  // 합계
+  const totD={};
+  allDates.forEach(d=>{let r=0,c=0;list.forEach(k=>{const x=k.d[d];if(x){r+=x.r;c+=x.c}});totD[d]={r,c}});
+  const tr7=d7.reduce((a,d)=>a+(totD[d]?.r||0),0);
+  const tc7=d7.reduce((a,d)=>a+(totD[d]?.c||0),0);
+  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+  let h='<thead><tr><th style="min-width:260px;text-align:left">검색어</th><th style="min-width:120px">7일 매출(건수)</th>'+ths+'</tr></thead><tbody>';
+  // 종합 행
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">📊 종합 Top'+list.length+'</td><td style="background:#e8e8e8;text-align:right;font-weight:700">'+(money(tr7)||'-')+'<span style="color:#888;font-size:10px">  ('+tc7+'건)</span></td>';
+  allDates.forEach(d=>{
+    const x=totD[d];const yd=d===yDay?' col-yday':'';
+    if(!x.r){h+='<td class="'+yd+'" style="background:#e8e8e8"></td>';return}
+    h+='<td class="'+yd+'" style="background:#e8e8e8;text-align:right;font-size:10px"><b>'+money(x.r)+'</b><br><span style="color:#888">('+x.c+')</span></td>';
+  });
+  h+='</tr>';
+  // 키워드 행
+  list.forEach((k,i)=>{
+    const cells=allDates.map(d=>{
+      const x=k.d[d];const yd=d===yDay?' col-yday':'';
+      if(!x||!x.r)return'<td class="'+yd+'"></td>';
+      return'<td class="'+yd+'" style="text-align:right;font-size:10px">'+money(x.r)+'<br><span style="color:#888">('+x.c+')</span></td>';
+    }).join('');
+    const kwSafe=(k.kw||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const kwDisp=kwSafe.length>34?kwSafe.slice(0,34)+'…':kwSafe;
+    h+='<tr><td class="fx fx0" title="'+kwSafe+'"><span style="color:#888;font-size:10px">'+(i+1)+'.</span> '+kwDisp+'</td><td style="text-align:right;font-size:11px">'+money(k.total7)+'<span style="color:#888;font-size:10px">  ('+k.total7Cnt+')</span></td>'+cells+'</tr>';
+  });
+  h+='</tbody>';
+  tbl.innerHTML=h;
 }
 
 // ===== 네이버SA_주간추이 (주간 집계) =====
