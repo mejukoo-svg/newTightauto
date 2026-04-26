@@ -1,25 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-네이버_supabase.py (v2 - StatReport)
-====================================
-네이버 검색광고 StatReport API → naver_sa_daily upsert
-
-v1의 /stats 엔드포인트가 "지원하지 않는 기능" 에러 (code=11001) 로 실패.
-StatReport는 폴링 기반이지만 지원 필드가 더 많고 (conversion 포함) 안정적.
+네이버_supabase.py (v3 - StatReport + Keyword level)
+=====================================================
+네이버 검색광고 StatReport API → Supabase
+  · naver_sa_daily          : 광고그룹 단위 (기존)
+  · naver_sa_keyword_daily  : 키워드 단위 (신규)
 
 흐름:
-  1) GET  /ncc/campaigns, /ncc/adgroups  ← 메타데이터
-  2) POST /stat-reports { reportTp: AD_CONVERSION_DETAIL, statDt: YYYYMMDD } (날짜마다)
-  3) GET  /stat-reports/{id} 폴링 (status=BUILT 될 때까지)
+  1) GET  /ncc/campaigns, /ncc/adgroups, /ncc/keywords  ← 메타데이터 (키워드 텍스트 매핑 포함)
+  2) POST /stat-reports { reportTp: AD | AD_CONVERSION_DETAIL, statDt: YYYYMMDD } (날짜마다)
+  3) GET  /stat-reports/{id} 폴링 (status=BUILT 까지)
   4) GET  downloadUrl (TSV) → 파싱
-  5) 광고그룹 단위로 집계 후 upsert
+  5) 광고그룹 단위 집계 + 키워드 단위 집계 → 두 테이블에 각각 upsert
 
 reportTp=AD_CONVERSION_DETAIL 컬럼:
   0: 일자(YYYYMMDD)   1: 광고주 ID   2: 캠페인 ID   3: 비즈머니 ID
   4: 광고그룹 ID      5: 키워드 ID   6: 광고 ID     7: 비즈채널 ID
-  8: 매체 9: PC/모바일구분 10: 노출수 11: 클릭수 12: 비용(VAT포함)
-  13: 전환수(클릭+간접) 14: 전환금액 15: 이월전환수 16: 이월전환금액
-  (네이버 SA API StatReport 공식 스키마)
+  ...
+
+reportTp=AD 컬럼 (run #81):
+  0:statDt 1:customerId 2:campaignId 3:adgroupId 4:keywordId 5:adId 6:bizChannelId
+  7:hourOrRank 8:pcMobile 9:impCnt 10:clkCnt 11:salesAmt 12:? 13:?
 
 환경변수:
   NAVER_API_KEY, NAVER_SECRET_KEY, NAVER_CUSTOMER_ID
@@ -101,6 +102,11 @@ def list_adgroups(campaign_id: str):
     return naver_request("GET", "/ncc/adgroups",
                          params={"nccCampaignId": campaign_id}) or []
 
+def list_keywords(adgroup_id: str):
+    """광고그룹의 키워드 메타데이터 (nccKeywordId, keyword text 등)"""
+    return naver_request("GET", "/ncc/keywords",
+                         params={"nccAdgroupId": adgroup_id}) or []
+
 # ============================================================
 # StatReport: per-date report, polling, TSV download, parse
 # ============================================================
@@ -112,7 +118,6 @@ def build_report(stat_dt: date, report_tp: str) -> dict | None:
     return naver_request("POST", "/stat-reports", body=body)
 
 def wait_report(job_id: str, max_wait: int = 300) -> dict | None:
-    """polling until BUILT or FAIL"""
     deadline = time.time() + max_wait
     while time.time() < deadline:
         r = naver_request("GET", f"/stat-reports/{job_id}")
@@ -129,18 +134,11 @@ def wait_report(job_id: str, max_wait: int = 300) -> dict | None:
     return None
 
 def download_tsv(download_url: str) -> str | None:
-    """
-    StatReport downloadUrl 다운로드. Naver는 2가지 형태로 응답:
-      (A) 쿼리에 auth 토큰 포함된 pre-signed URL → 헤더 서명 없이 plain GET
-      (B) API 경로 상대(또는 절대) → HMAC 서명 필요 (path only, 쿼리 제외)
-    두 가지 순차 시도.
-    """
     from urllib.parse import urlparse
     url = download_url if download_url.startswith("http") else NAVER_BASE + download_url
     parsed = urlparse(url)
-    path_only = parsed.path  # 서명용 URI (쿼리 제외)
-
-    # Try 1: plain GET (pre-signed URL 케이스)
+    path_only = parsed.path
+    # Try 1: plain GET (pre-signed URL)
     try:
         resp = req_lib.get(url, timeout=60)
         if resp.status_code == 200:
@@ -149,39 +147,26 @@ def download_tsv(download_url: str) -> str | None:
             log.error(f"  ❌ download(plain) HTTP {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         log.error(f"  ❌ download(plain) 예외: {e}")
-
-    # Try 2: HMAC 서명 (path-only URI)
+    # Try 2: HMAC 서명
     try:
         resp = req_lib.get(url, headers=_headers("GET", path_only), timeout=60)
         if resp.status_code == 200:
             return resp.text
         log.error(f"  ❌ download(signed) HTTP {resp.status_code}: {resp.text[:200]}")
-        log.error(f"     downloadUrl sample: {download_url[:150]}")
     except Exception as e:
         log.error(f"  ❌ download(signed) 예외: {e}")
     return None
 
+# ── 광고그룹 단위 파서 (기존 유지) ─────────────────────
 def parse_tsv_stat(tsv: str, label: str = "AD"):
-    """
-    AD 리포트 컬럼 (예상 — 실제 로그로 검증 중):
-      0: statDt(YYYYMMDD)  1: customerId  2: campaignId  3: adgroupId
-      4: keywordId  5: adId  6: bizChannelId  7: pcMobile
-      8: impCnt  9: clkCnt  10: cost(VAT포함)  (11+: ctr/cpc/avgRnk)
-    adgroup_id 기준 집계.
-    """
     lines = [l for l in tsv.splitlines() if l.strip()]
     if not lines: return {}
     log.info(f"    🔍 {label} TSV sample ({len(lines)} lines):")
     for i, line in enumerate(lines[:3]):
         cols = line.split("\t")
         log.info(f"      line{i} ({len(cols)} cols): {[c[:15] for c in cols]}")
-
-    # 실제 레이아웃 (run #81 로그):
-    #   0:statDt 1:customerId 2:campaignId 3:adgroupId 4:keywordId 5:adId 6:bizChannelId
-    #   7:hourOrRank 8:pcMobile 9:impCnt 10:clkCnt 11:salesAmt 12:? 13:?
     AG_IDX = 3
     IMP_IDX, CLK_IDX, COST_IDX = 9, 10, 11
-
     agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
     for line in lines:
         cols = line.split("\t")
@@ -198,24 +183,14 @@ def parse_tsv_stat(tsv: str, label: str = "AD"):
     return dict(agg)
 
 def parse_tsv_conv(tsv: str, label: str = "CONV"):
-    """
-    AD_CONVERSION_DETAIL 실제 컬럼 (run #80 로그로 확인):
-      0: statDt  1: customerId  2: campaignId  3: adgroupId
-      4: keywordId  5: adId  6: bizChannelId  7: hour(00~23)
-      8: ?  9: ?  10: pcMobile(P/M)  11: ?
-      12: conversionType(purchase/etc)  13: convCnt  14: convAmt
-    각 행 = 1개 전환이벤트. adgroupId 기준 합산.
-    """
     lines = [l for l in tsv.splitlines() if l.strip()]
     if not lines: return {}
     log.info(f"    🔍 {label} TSV sample ({len(lines)} lines):")
     for i, line in enumerate(lines[:3]):
         cols = line.split("\t")
         log.info(f"      line{i} ({len(cols)} cols): {[c[:15] for c in cols]}")
-
     AG_IDX = 3
     CONV_CNT_IDX, CONV_AMT_IDX = 13, 14
-
     agg = defaultdict(lambda: {"ccnt":0, "convAmt":0.0})
     for line in lines:
         cols = line.split("\t")
@@ -223,6 +198,50 @@ def parse_tsv_conv(tsv: str, label: str = "CONV"):
         ag_id = cols[AG_IDX].strip()
         if not ag_id: continue
         a = agg[ag_id]
+        try:
+            a["ccnt"]    += int(float(cols[CONV_CNT_IDX] or 0))
+            a["convAmt"] += float(cols[CONV_AMT_IDX] or 0)
+        except (ValueError, IndexError):
+            continue
+    return dict(agg)
+
+# ── 키워드 단위 파서 (신규: (adgroup_id, keyword_id) 키) ──
+def parse_tsv_stat_kw(tsv: str):
+    lines = [l for l in tsv.splitlines() if l.strip()]
+    if not lines: return {}
+    AG_IDX, KW_IDX = 3, 4
+    IMP_IDX, CLK_IDX, COST_IDX = 9, 10, 11
+    agg = defaultdict(lambda: {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
+    for line in lines:
+        cols = line.split("\t")
+        if len(cols) <= COST_IDX: continue
+        ag_id = cols[AG_IDX].strip()
+        kw_id = cols[KW_IDX].strip() if KW_IDX < len(cols) else ""
+        if not ag_id: continue
+        key = (ag_id, kw_id)
+        a = agg[key]
+        try:
+            a["impCnt"]   += int(float(cols[IMP_IDX] or 0))
+            a["clkCnt"]   += int(float(cols[CLK_IDX] or 0))
+            a["salesAmt"] += float(cols[COST_IDX] or 0)
+        except (ValueError, IndexError):
+            continue
+    return dict(agg)
+
+def parse_tsv_conv_kw(tsv: str):
+    lines = [l for l in tsv.splitlines() if l.strip()]
+    if not lines: return {}
+    AG_IDX, KW_IDX = 3, 4
+    CONV_CNT_IDX, CONV_AMT_IDX = 13, 14
+    agg = defaultdict(lambda: {"ccnt":0, "convAmt":0.0})
+    for line in lines:
+        cols = line.split("\t")
+        if len(cols) <= CONV_AMT_IDX: continue
+        ag_id = cols[AG_IDX].strip()
+        kw_id = cols[KW_IDX].strip() if KW_IDX < len(cols) else ""
+        if not ag_id: continue
+        key = (ag_id, kw_id)
+        a = agg[key]
         try:
             a["ccnt"]    += int(float(cols[CONV_CNT_IDX] or 0))
             a["convAmt"] += float(cols[CONV_AMT_IDX] or 0)
@@ -252,7 +271,7 @@ class SupabaseClient:
             resp = req_lib.post(url, headers=self.headers, json=batch, timeout=60)
             if resp.status_code in (200, 201):
                 ok += len(batch)
-                log.info(f"  ✅ upsert {ok}/{len(records)}")
+                log.info(f"  ✅ upsert {ok}/{len(records)} → {table}")
             else:
                 log.error(f"  ❌ HTTP {resp.status_code}: {resp.text[:300]}")
             time.sleep(0.3)
@@ -276,10 +295,10 @@ def extract_product(name: str) -> str | None:
 # ============================================================
 def main():
     log.info("=" * 60)
-    log.info("🚀 네이버SA → Supabase (StatReport)")
+    log.info("🚀 네이버SA → Supabase (StatReport + Keyword level)")
     log.info("=" * 60)
 
-    # 1. 메타데이터
+    # 1. 캠페인/광고그룹 메타데이터
     campaigns = list_campaigns()
     all_adgroups = []
     for c in campaigns:
@@ -292,47 +311,70 @@ def main():
     adgroup_meta = {ag["nccAdgroupId"]: ag for ag in all_adgroups}
     log.info(f"📋 광고그룹 {len(adgroup_meta)}개")
 
-    # 2. 날짜별 StatReport 빌드 + 다운로드 (AD + AD_CONVERSION_DETAIL 병행)
-    def fetch_and_parse(d, report_tp, parser, label):
+    # 1.5. 키워드 메타데이터: keyword_id → {text, adgroup_id}
+    log.info("📋 키워드 메타데이터 수집 중 (광고그룹별 /ncc/keywords)...")
+    keyword_meta = {}
+    for i, ag in enumerate(all_adgroups):
+        agid = ag["nccAdgroupId"]
+        kws = list_keywords(agid)
+        for kw in kws:
+            kid = kw.get("nccKeywordId")
+            if not kid: continue
+            keyword_meta[kid] = {
+                "text": (kw.get("keyword") or "").strip(),
+                "adgroup_id": agid,
+            }
+        if (i+1) % 20 == 0:
+            log.info(f"    진행 {i+1}/{len(all_adgroups)} | 누적 키워드={len(keyword_meta)}")
+        time.sleep(0.12)
+    log.info(f"  → 키워드 메타 {len(keyword_meta)}개")
+
+    # 2. 날짜별 StatReport (TSV 한 번 받아서 광고그룹/키워드 두 단위로 파싱)
+    def fetch_tsv(d, report_tp, label):
         rpt = build_report(d, report_tp)
         if not rpt or "reportJobId" not in rpt:
             log.warning(f"    {label} 빌드 실패")
-            return {}
+            return None
         if rpt.get("status") != "BUILT":
             rpt = wait_report(rpt["reportJobId"])
-        if not rpt: return {}
+        if not rpt: return None
         dl = rpt.get("downloadUrl")
         if not dl:
             log.warning(f"    {label} downloadUrl 없음")
-            return {}
-        tsv = download_tsv(dl)
-        if not tsv: return {}
-        return parser(tsv, label)
+            return None
+        return download_tsv(dl)
 
-    all_records = []
+    ag_records = []
+    kw_records = []
     d = START
     while d <= END:
         log.info(f"  📊 StatReport {d} (AD + CONV)...")
-        stat_agg = fetch_and_parse(d, REPORT_TP_STAT, parse_tsv_stat, "AD")
-        conv_agg = fetch_and_parse(d, REPORT_TP_CONV, parse_tsv_conv, "CONV")
-        log.info(f"    {d}: AD adgroups={len(stat_agg)}, CONV adgroups={len(conv_agg)}")
+        stat_tsv = fetch_tsv(d, REPORT_TP_STAT, "AD")
+        conv_tsv = fetch_tsv(d, REPORT_TP_CONV, "CONV")
 
-        # Merge by adgroup_id (union of both reports)
-        all_ag_ids = set(stat_agg.keys()) | set(conv_agg.keys())
+        # 광고그룹 단위 (기존)
+        stat_agg_ag = parse_tsv_stat(stat_tsv or "", "AD") if stat_tsv else {}
+        conv_agg_ag = parse_tsv_conv(conv_tsv or "", "CONV") if conv_tsv else {}
+        # 키워드 단위 (신규)
+        stat_agg_kw = parse_tsv_stat_kw(stat_tsv or "") if stat_tsv else {}
+        conv_agg_kw = parse_tsv_conv_kw(conv_tsv or "") if conv_tsv else {}
+
+        log.info(f"    {d}: AD ag={len(stat_agg_ag)}/kw={len(stat_agg_kw)},  "
+                 f"CONV ag={len(conv_agg_ag)}/kw={len(conv_agg_kw)}")
+
+        # ── 광고그룹 단위 record (기존 호환) ─────────────
+        all_ag_ids = set(stat_agg_ag.keys()) | set(conv_agg_ag.keys())
         for ag_id in all_ag_ids:
             meta = adgroup_meta.get(ag_id, {})
-            s = stat_agg.get(ag_id, {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
-            c = conv_agg.get(ag_id, {"ccnt":0,"convAmt":0.0})
-            cost = s["salesAmt"]
-            rev  = c["convAmt"]
-            clk  = s["clkCnt"]
-            imp  = s["impCnt"]
-            conv = c["ccnt"]
+            s = stat_agg_ag.get(ag_id, {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
+            c = conv_agg_ag.get(ag_id, {"ccnt":0,"convAmt":0.0})
+            cost = s["salesAmt"]; rev  = c["convAmt"]
+            clk  = s["clkCnt"];  imp  = s["impCnt"]; conv = c["ccnt"]
             roas = (rev / cost * 100) if cost > 0 else 0
             cvr  = (conv / clk * 100) if clk > 0 else 0
             ctr  = (clk / imp * 100) if imp > 0 else 0
             cpc  = (cost / clk) if clk > 0 else 0
-            all_records.append({
+            ag_records.append({
                 "date": d.isoformat(),
                 "adgroup_id": ag_id,
                 "campaign_id": meta.get("_campaign_id", ""),
@@ -340,28 +382,79 @@ def main():
                 "adgroup_name": meta.get("name", ""),
                 "product": extract_product(meta.get("name", "")),
                 "cost_vat": round(cost, 2),
-                "impressions": imp,
-                "clicks": clk,
-                "ctr": round(ctr, 4),
-                "cpc": round(cpc, 2),
+                "impressions": imp, "clicks": clk,
+                "ctr": round(ctr, 4), "cpc": round(cpc, 2),
                 "conversions": conv,
                 "revenue": round(rev, 2),
                 "profit": round(rev - cost, 2),
                 "roas": round(roas, 2),
                 "cvr": round(cvr, 4),
             })
+
+        # ── 키워드 단위 record (신규) ────────────────────
+        all_kw_keys = set(stat_agg_kw.keys()) | set(conv_agg_kw.keys())
+        for (ag_id, kw_id) in all_kw_keys:
+            ag_m = adgroup_meta.get(ag_id, {})
+            kw_m = keyword_meta.get(kw_id, {})
+            kw_text = kw_m.get("text", "") if kw_id else ""
+            s = stat_agg_kw.get((ag_id, kw_id), {"impCnt":0,"clkCnt":0,"salesAmt":0.0})
+            c = conv_agg_kw.get((ag_id, kw_id), {"ccnt":0,"convAmt":0.0})
+            cost = s["salesAmt"]; rev  = c["convAmt"]
+            clk  = s["clkCnt"];  imp  = s["impCnt"]; conv = c["ccnt"]
+            roas = (rev / cost * 100) if cost > 0 else 0
+            cvr  = (conv / clk * 100) if clk > 0 else 0
+            ctr  = (clk / imp * 100) if imp > 0 else 0
+            cpc  = (cost / clk) if clk > 0 else 0
+            kw_records.append({
+                "date": d.isoformat(),
+                "adgroup_id": ag_id,
+                "keyword_id": kw_id or "_empty_",
+                "keyword_text": kw_text or "(미매핑)",
+                "campaign_id": ag_m.get("_campaign_id", ""),
+                "campaign_name": ag_m.get("_campaign_name", ""),
+                "adgroup_name": ag_m.get("name", ""),
+                "product": extract_product(ag_m.get("name", "")),
+                "cost_vat": round(cost, 2),
+                "impressions": imp, "clicks": clk,
+                "ctr": round(ctr, 4), "cpc": round(cpc, 2),
+                "conversions": conv,
+                "revenue": round(rev, 2),
+                "profit": round(rev - cost, 2),
+                "roas": round(roas, 2),
+                "cvr": round(cvr, 4),
+            })
+
         d += timedelta(days=1)
         time.sleep(1)
 
-    log.info(f"📦 records: {len(all_records)}")
-    if not all_records:
+    log.info(f"📦 광고그룹 records: {len(ag_records)}  /  키워드 records: {len(kw_records)}")
+    if not ag_records and not kw_records:
         log.warning("  ⚠️ 빈 결과")
         return
-    # 샘플 출력
-    for r in all_records[:3]:
-        log.info(f"   {r['date']}  {r['adgroup_name'][:20]:20s}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
+
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
-    sb.upsert("naver_sa_daily", all_records)
+
+    # 샘플 출력
+    for r in ag_records[:3]:
+        log.info(f"   AG {r['date']}  {r['adgroup_name'][:20]:20s}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
+    if ag_records:
+        sb.upsert("naver_sa_daily", ag_records)
+
+    # 키워드 Top10 (기간 합계)
+    if kw_records:
+        kw_totals = defaultdict(lambda: {"cost":0,"rev":0,"clk":0})
+        for r in kw_records:
+            k = r["keyword_text"]
+            kw_totals[k]["cost"] += r["cost_vat"]
+            kw_totals[k]["rev"]  += r["revenue"]
+            kw_totals[k]["clk"]  += r["clicks"]
+        top = sorted(kw_totals.items(), key=lambda x: -x[1]["cost"])[:10]
+        log.info("  🏆 검색어 Top10 (기간 cost 합계):")
+        for kw, v in top:
+            roas = (v["rev"]/v["cost"]*100) if v["cost"]>0 else 0
+            log.info(f"    · {kw[:30]:30s}  지출 ₩{v['cost']:>11,.0f}  매출 ₩{v['rev']:>11,.0f}  ROAS={roas:.0f}%")
+        sb.upsert("naver_sa_keyword_daily", kw_records)
+
     log.info("✅ 완료")
 
 if __name__ == "__main__":
