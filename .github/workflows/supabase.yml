@@ -31,7 +31,7 @@ jobs:
   kr-adset:
     name: 🇰🇷 국내 세트별
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -56,7 +56,7 @@ jobs:
   kr-creative:
     name: 🎨 국내 소재별
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     needs: kr-adset
     steps:
       - uses: actions/checkout@v4
@@ -81,7 +81,7 @@ jobs:
   global:
     name: 🌏 글로벌 Meta+Stripe
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -108,7 +108,7 @@ jobs:
   vn-adset:
     name: 🎯 밴스드 세트별
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -131,7 +131,7 @@ jobs:
   vn-creative:
     name: 🎨 밴스드 소재별
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     needs: vn-adset
     steps:
       - uses: actions/checkout@v4
