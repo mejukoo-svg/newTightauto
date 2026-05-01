@@ -53,7 +53,7 @@ td.mc .cv{color:#000;font-size:9px}
 .bg-r300{background:#00ffff!important}.bg-r200{background:#b3ffb3!important}.bg-r100{background:#ffff99!important}.bg-r50{background:#ffcccc!important}.bg-r0{background:#ff9999!important}
 td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;font-size:10px;cursor:pointer}
 td.fx0{left:0}td.fx1{left:200px}
-#p-trend td.fx1,#p-trend th:nth-child(2){max-width:none}
+#p-trend td.fx0,#p-trend td.fx1{max-width:none}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
@@ -597,7 +597,7 @@ function renderTrend(){
   // Summary
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks}});totD[d]={s,r,p,mp,uc}});
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
-  let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:500px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,0)+'</td>'});
   h+='</tr>';
@@ -615,10 +615,17 @@ function renderTrend(){
     g.adsets.forEach(a=>{
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
-      h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+ck+'>'+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+      h+='<tr><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
   h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
+  // Adjust .fx1 sticky offset based on actual .fx0 column width (auto-fit)
+  requestAnimationFrame(()=>{
+    const fx0=document.querySelector('#tTbl tbody td.fx0');
+    if(!fx0)return;
+    const w=fx0.offsetWidth;
+    document.querySelectorAll('#tTbl td.fx1').forEach(td=>td.style.left=w+'px');
+  });
 }
 
 // ===== TREND WEEKLY (추이차트 주간) =====
