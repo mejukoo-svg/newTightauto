@@ -1,0 +1,44 @@
+name: Meta Ad Advisor (Daily)
+
+on:
+  schedule:
+    # UTC 15:30 = KST 00:30 (newTightauto가 KST 00:00에 ad_performance_daily 갱신 후 30분 버퍼)
+    - cron: '30 15 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '시트에 쓰지 않고 stdout만 (1/0)'
+        required: false
+        default: '0'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Vercel dashboard reachable
+        run: |
+          curl -fsSL -o /dev/null -w 'HTTP %{http_code}\n' https://new-tightauto.vercel.app/
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: meta_ad_advisor/requirements.txt
+
+      - name: Install dependencies
+        working-directory: meta_ad_advisor
+        run: pip install -r requirements.txt
+
+      - name: Run advisor
+        working-directory: meta_ad_advisor
+        env:
+          SUPABASE_URL:           ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:   ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_ADVISOR_META:        ${{ secrets.AI_ADVISOR_META }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
+        run: python run.py
