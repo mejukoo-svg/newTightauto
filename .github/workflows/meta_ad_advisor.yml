@@ -10,6 +10,10 @@ on:
         description: '시트에 쓰지 않고 stdout만 (1/0)'
         required: false
         default: '0'
+      target_date:
+        description: '특정 날짜 (YYYY-MM-DD). 비우면 D-1 자동.'
+        required: false
+        default: ''
 
 jobs:
   run:
@@ -40,5 +44,6 @@ jobs:
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
           ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
           AI_ADVISOR_META:        ${{ secrets.AI_ADVISOR_META }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
+          DRY_RUN:     ${{ github.event.inputs.dry_run || '0' }}
+          TARGET_DATE: ${{ github.event.inputs.target_date || '' }}
         run: python run.py

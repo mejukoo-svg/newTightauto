@@ -353,8 +353,13 @@ def write_to_sheet(ws, target_date: date, recs: list[dict]):
 
 def main():
     now_kst = datetime.now(KST)
-    target_date = (now_kst - timedelta(days=1)).date()
-    print(f"=== Run @ KST {now_kst.isoformat(timespec='seconds')} → target_date={target_date} ===")
+    override = os.environ.get("TARGET_DATE", "").strip()
+    if override:
+        target_date = datetime.strptime(override, "%Y-%m-%d").date()
+        print(f"=== Run @ KST {now_kst.isoformat(timespec='seconds')} → TARGET_DATE override={target_date} ===")
+    else:
+        target_date = (now_kst - timedelta(days=1)).date()
+        print(f"=== Run @ KST {now_kst.isoformat(timespec='seconds')} → target_date={target_date} (D-1) ===")
 
     candidates = fetch_candidates(target_date)
     if not candidates:
