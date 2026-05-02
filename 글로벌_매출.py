@@ -216,14 +216,9 @@ def _process_charge_daily(charge):
     charge_dt = datetime.fromtimestamp(charge.created, tz=KST)
     date_str = charge_dt.strftime("%Y-%m-%d")
 
-    country_code = None
-    bd = getattr(charge, "billing_details", None)
-    if bd:
-        addr = getattr(bd, "address", None)
-        if addr:
-            country_code = getattr(addr, "country", None)
-    if not country_code and currency:
-        country_code = CURRENCY_TO_COUNTRY.get(currency)
+    # 통화 기준으로만 국가 분류 (billing address 국가 무시)
+    # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
+    country_code = CURRENCY_TO_COUNTRY.get(currency) if currency else None
     if country_code not in TARGET_COUNTRIES:
         return None
 

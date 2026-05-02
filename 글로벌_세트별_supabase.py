@@ -315,12 +315,9 @@ def fetch_stripe_revenue(start_date, end_date):
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-        country_code = None
-        bd = getattr(ch, 'billing_details', None)
-        if bd:
-            addr = getattr(bd, 'address', None)
-            if addr: country_code = getattr(addr, 'country', None)
-        if not country_code: country_code = STRIPE_CURRENCY_MAP.get(currency)
+        # 통화 기준으로만 국가 분류 (billing address 국가 무시)
+        # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
+        country_code = STRIPE_CURRENCY_MAP.get(currency)
         if country_code not in STRIPE_COUNTRY_NAMES: continue
         country_name = STRIPE_COUNTRY_NAMES[country_code]
         divisor = STRIPE_DIVISOR.get(currency, 100)
