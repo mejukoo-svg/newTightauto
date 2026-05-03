@@ -589,11 +589,11 @@ function renderTrend(){
   const days=parseInt(document.getElementById('tDays').value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  // 이틀 전(D-2): 어제 데이터의 하루 전날에 증감액(증액/감액)을 했는지 표시 (KR 모드만)
+  // 이틀 전(D-2): 어제 데이터의 하루 전날에 증감액(증액/감액)을 했는지 표시 (KR/GL 모드)
   const _d2=new Date();_d2.setDate(_d2.getDate()-2);const d2Day=_d2.getFullYear()+'-'+String(_d2.getMonth()+1).padStart(2,'0')+'-'+String(_d2.getDate()).padStart(2,'0');
   const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
   const chgD2={};AD.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
-  const showChg=MODE==='kr';
+  const showChg=MODE==='kr'||MODE==='gl';
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
