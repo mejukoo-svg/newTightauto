@@ -175,7 +175,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 전체/메타/밴스드/네이버/구글 채널별 ROAS·순이익·매출·지출 추이</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 전체/메타/밴스드/네이버/구글 채널별 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
 <!-- Color picker -->
@@ -340,6 +340,16 @@ document.getElementById('crSort').addEventListener('change',renderCreativeRankin
 document.getElementById('krDays').addEventListener('change',renderAdsetRanking);
 document.getElementById('krSort').addEventListener('change',renderAdsetRanking);
 document.getElementById('chrDays').addEventListener('change',renderChannelRevenue);
+document.getElementById('chrView').addEventListener('change',function(){
+  const view=this.value;
+  const sel=document.getElementById('chrDays');
+  let opts,def,unit;
+  if(view==='daily'){opts=[14,30,60,90];def=30;unit='일'}
+  else if(view==='weekly'){opts=[4,8,12,24];def=12;unit='주'}
+  else{opts=[3,6,12,24];def=12;unit='개월'}
+  sel.innerHTML=opts.map(n=>'<option value="'+n+'"'+(n===def?' selected':'')+'>'+n+unit+'</option>').join('');
+  renderChannelRevenue();
+});
 document.getElementById('nsaDays').addEventListener('change',renderNsaDaily);
 document.getElementById('nsaSort').addEventListener('change',renderNsaDaily);
 document.getElementById('nsaMinSpend').addEventListener('change',renderNsaDaily);
@@ -1564,62 +1574,103 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){
 //   네이버:     naver_sa_daily.cost_vat (지출) + naver_daily_mp.revenue (매출: Mixpanel attribution)
 //   구글:       google_ads_daily                  (GOOGLE_ADS)
 function renderChannelRevenue(){
-  const days=parseInt(document.getElementById('chrDays').value);
+  const view=document.getElementById('chrView')?.value||'daily';
+  const count=parseInt(document.getElementById('chrDays').value);
+  const channels=_chrevChannels();
+  if(view==='daily')_chrevDaily(channels,count);
+  else _chrevPeriod(channels,view,count);
+}
+
+function _chrevChannels(){
+  // 채널별 일자 합산
+  const byDateKR={},byDateVN={},byDateNSA={},byDateNAVER_MP={},byDateGG={},byDateTOSS={};
+  KR_AD.forEach(r=>{if(!byDateKR[r.date])byDateKR[r.date]={s:0,r:0};byDateKR[r.date].s+=(r.spend||0);byDateKR[r.date].r+=(r.revenue||0)});
+  VN_AD.forEach(r=>{if(!byDateVN[r.date])byDateVN[r.date]={s:0,r:0};byDateVN[r.date].s+=(r.spend||0);byDateVN[r.date].r+=(r.revenue||0)});
+  NSA_DAILY.forEach(r=>{if(!byDateNSA[r.date])byDateNSA[r.date]={s:0,r:0};byDateNSA[r.date].s+=(r.cost_vat||0);byDateNSA[r.date].r+=(r.revenue||0)});
+  NAVER_MP.forEach(r=>{byDateNAVER_MP[r.date]=(r.revenue||0)});
+  GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
+  TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
+  function getNaver(d){const n=byDateNSA[d]||{s:0,r:0};const mpRev=byDateNAVER_MP[d]||0;return{s:n.s,r:mpRev>0?mpRev:n.r}}
+  function getTotalSpend(d){const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDateNSA[d]||{s:0},g=byDateGG[d]||{s:0};return k.s+v.s+n.s+g.s}
+  return [
+    {name:'전체',  get:d=>({s:getTotalSpend(d),r:(byDateTOSS[d]||0)})},  // rev=Toss, spend=합산
+    {name:'메타',  get:d=>byDateKR[d]||{s:0,r:0}},
+    {name:'밴스드',get:d=>byDateVN[d]||{s:0,r:0}},
+    {name:'네이버',get:d=>getNaver(d)},
+    {name:'구글',  get:d=>byDateGG[d]||{s:0,r:0}},
+  ];
+}
+
+function _chrevDaily(channels,days){
   const today=new Date();
   const dates=[];
   for(let i=0;i<days;i++){
     const d=new Date(today);d.setDate(today.getDate()-i);
     dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
-  // 채널별 일자 합산
-  const byDateKR={},byDateVN={},byDateNSA={},byDateNAVER_MP={},byDateGG={},byDateTOSS={};
-  KR_AD.forEach(r=>{if(!byDateKR[r.date])byDateKR[r.date]={s:0,r:0};byDateKR[r.date].s+=(r.spend||0);byDateKR[r.date].r+=(r.revenue||0)});
-  VN_AD.forEach(r=>{if(!byDateVN[r.date])byDateVN[r.date]={s:0,r:0};byDateVN[r.date].s+=(r.spend||0);byDateVN[r.date].r+=(r.revenue||0)});
-  // 네이버 — 네이버SA_추이차트와 동일하게 naver_sa_daily로 집계 (cost_vat+revenue)
-  NSA_DAILY.forEach(r=>{
-    if(!byDateNSA[r.date])byDateNSA[r.date]={s:0,r:0};
-    byDateNSA[r.date].s+=(r.cost_vat||0);
-    byDateNSA[r.date].r+=(r.revenue||0);
-  });
-  // Mixpanel 매출 (UTM 태깅 되면 우선 사용할 수 있는 future hook)
-  NAVER_MP.forEach(r=>{byDateNAVER_MP[r.date]=(r.revenue||0)});
-  // 구글
-  GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
-  // Toss 전체 매출
-  TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
-
-  // 네이버: Mixpanel revenue > 0 이면 우선 사용 (UTM 태깅 후), 아니면 Naver API convAmt
-  function getNaver(d){
-    const n=byDateNSA[d]||{s:0,r:0};
-    const mpRev=byDateNAVER_MP[d]||0;
-    return {s:n.s, r: mpRev>0 ? mpRev : n.r};
-  }
-  function getTotalSpend(d){
-    const k=byDateKR[d]||{s:0}, v=byDateVN[d]||{s:0}, n=byDateNSA[d]||{s:0}, g=byDateGG[d]||{s:0};
-    return k.s + v.s + n.s + g.s;
-  }
-  const channels=[
-    {name:'전체',  get:d=>({s:getTotalSpend(d), r:(byDateTOSS[d]||0)})},  // rev=Toss, spend=합산
-    {name:'메타',  get:d=>byDateKR[d]||{s:0,r:0}},
-    {name:'밴스드',get:d=>byDateVN[d]||{s:0,r:0}},
-    {name:'네이버',get:d=>getNaver(d)},
-    {name:'구글',  get:d=>byDateGG[d]||{s:0,r:0}},
-  ];
   const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
   const r7=dates.slice(0,7);
   channels.forEach(ch=>{
-    // 7일 평균
     let a7s=0,a7r=0;
     r7.forEach(d=>{const v=ch.get(d);a7s+=v.s;a7r+=v.r});
-    const a7roas=a7s>0?a7r/a7s*100:0, a7p=a7r-a7s;
+    const a7roas=a7s>0?a7r/a7s*100:0,a7p=a7r-a7s;
     h+='<tr><td class="fx fx0" style="background:#dce6f0;font-weight:700;padding:4px 6px">'+ch.name+'</td>';
     h+='<td class="mc '+RC(a7roas)+'" style="font-weight:700">'+MC_CH(a7roas,a7p,a7s,a7r)+'</td>';
     dates.forEach(d=>{
       const v=ch.get(d);
-      const roas=v.s>0?v.r/v.s*100:0, p=v.r-v.s;
+      const roas=v.s>0?v.r/v.s*100:0,p=v.r-v.s;
       if(v.s===0&&v.r===0){h+='<td></td>';return}
       h+='<td class="mc '+RC(roas)+'">'+MC_CH(roas,p,v.s,v.r)+'</td>';
+    });
+    h+='</tr>';
+  });
+  h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+}
+
+// 주별/월별 — 평면 표 (행=기간, 열=채널×{매출,지출,순이익,ROAS})
+function _chrevPeriod(channels,view,count){
+  const today=new Date();
+  const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const periods=[];
+  if(view==='weekly'){
+    const monStart=new Date(WM(fmt(today)));
+    for(let i=0;i<count;i++){
+      const start=new Date(monStart);start.setDate(monStart.getDate()-i*7);
+      const end=new Date(start);end.setDate(start.getDate()+6);
+      const dates=[];for(let j=0;j<7;j++){const d=new Date(start);d.setDate(start.getDate()+j);dates.push(fmt(d))}
+      const lab=(start.getMonth()+1)+'/'+start.getDate()+'~'+(end.getMonth()+1)+'/'+end.getDate();
+      periods.push({label:lab,dates:dates});
+    }
+  }else{
+    let yr=today.getFullYear(),mo=today.getMonth();
+    for(let i=0;i<count;i++){
+      const lastDay=new Date(yr,mo+1,0).getDate();
+      const dates=[];for(let d=1;d<=lastDay;d++){dates.push(yr+'-'+String(mo+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'))}
+      const lab=String(yr).slice(2)+'년 '+(mo+1)+'월';
+      periods.push({label:lab,dates:dates});
+      mo--;if(mo<0){mo=11;yr--}
+    }
+  }
+  const sub='<th style="min-width:90px">매출</th><th style="min-width:90px">지출</th><th style="min-width:90px">순이익</th><th style="min-width:55px">ROAS</th>';
+  let h='<thead>';
+  h+='<tr><th rowspan="2" style="min-width:100px;background:#efefef">기간</th>';
+  channels.forEach(ch=>{h+='<th colspan="4" style="background:#dce6f0">'+ch.name+'</th>'});
+  h+='</tr><tr>';
+  channels.forEach(()=>{h+=sub});
+  h+='</tr></thead><tbody>';
+  periods.forEach(per=>{
+    h+='<tr><td class="fx fx0" style="background:#f0f4f9;font-weight:600;padding:4px 8px;text-align:center">'+per.label+'</td>';
+    channels.forEach(ch=>{
+      let s=0,r=0;
+      per.dates.forEach(d=>{const v=ch.get(d);s+=v.s;r+=v.r});
+      if(s===0&&r===0){h+='<td></td><td></td><td></td><td></td>';return}
+      const roas=s>0?r/s*100:0,p=r-s;
+      const pColor=p>=0?'#1a6b1a':'#d00';
+      h+='<td style="text-align:right;padding-right:6px">'+(r>0?moneyKRW(r):'')+'</td>';
+      h+='<td style="text-align:right;padding-right:6px;color:#d00">'+(s>0?'-'+moneyKRW(s):'')+'</td>';
+      h+='<td style="text-align:right;padding-right:6px;color:'+pColor+';font-weight:600">'+(p!==0?moneyKRW(p):'')+'</td>';
+      h+='<td class="'+RC(roas)+'" style="font-weight:700">'+(s>0?roas.toFixed(0)+'%':'')+'</td>';
     });
     h+='</tr>';
   });
