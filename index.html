@@ -141,6 +141,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab" data-t="trend">추이차트</div>
 <div class="tab" data-t="trendw">추이차트(주간)</div>
 <div class="tab" data-t="trendp">추이차트_상품별</div>
+<div class="tab" data-t="trendinf">🌟 인플추이</div>
 <div class="tab" data-t="change">증감액</div>
 <div class="tab" data-t="weekly">주간종합</div>
 <div class="tab" data-t="budget">예산</div>
@@ -165,6 +166,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
+<div class="panel" id="p-trendinf"><div class="filter"><label>단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
@@ -307,6 +309,7 @@ function renderTab(id){
   if(id==='trend')renderTrend();
   if(id==='trendw')renderTrendWeekly();
   if(id==='trendp')renderTrendProduct();
+  if(id==='trendinf')renderTrendInfluencer();
   if(id==='change')renderChange();
   if(id==='weekly')renderWeekly();
   if(id==='budget')renderBudget();
@@ -331,6 +334,10 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
 document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
+document.getElementById('tiUnit').addEventListener('change',renderTrendInfluencer);
+document.getElementById('tiRange').addEventListener('change',renderTrendInfluencer);
+document.getElementById('tiSearch').addEventListener('input',renderTrendInfluencer);
+document.getElementById('tiMinSpend').addEventListener('change',renderTrendInfluencer);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
 document.getElementById('dtStart').addEventListener('change',renderDateTab);
 document.getElementById('dtEnd').addEventListener('change',renderDateTab);
@@ -764,6 +771,145 @@ function renderTrendProduct(){
     });
   });
   h+='</tbody>';document.getElementById('tpTbl').innerHTML=h;
+}
+
+// ===== TREND BY INFLUENCER (인플루언서별 추이) =====
+const INF_TEAM=new Set(['희상','수연','휘동','경원','지은','경민','지연','본걸','혜린']);
+const INF_SKIP=new Set(['인플','인플루언서','복제','증액','위닝','위닝세트','UGC','ai','aiUGC','AI','ASC','CBO','HR','JY','YS','ver1','야호','밴스드','오리지널','솔로','전환','테스트','캠페인','자동','상시','구매전환','사본','모음','단독','이미지','후기','분석','복증','버전','스타일','시리즈','소구','광공','노예','갤러리','체험','실시간','전체','신규','초창기','타겟','세면대','대만','홍콩','일본','여자','남자','남친','연애','재회','속궁합','구미호','집착','커리어','별해','퀴어','결혼','자녀','재물','무당','금전','사랑','시간','테마','컨셉','콘셉트','광고','매출','이벤트','프로모션','학생','직장인','주부','이번주','지난주','이번달','지난달']);
+function _normTokens(s){
+  s=(s||'').replace(/[\[\]\(\)]/g,' ').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu,' ').replace(/x\d+(?=\s|_|$)/g,' ');
+  s=s.replace(/[,\s]+/g,'_');
+  return s.split('_').map(t=>t.trim()).filter(Boolean);
+}
+function extractInfluencer(adsetName,campaignName){
+  if(!adsetName)return null;
+  const tokens=_normTokens(adsetName);
+  // Strategy 1: token immediately before "_인플(루언서)?" marker on the adset itself
+  let inflIdx=-1;
+  for(let i=tokens.length-1;i>=0;i--){if(/^인플(루언서)?(\d+차)?$/.test(tokens[i])){inflIdx=i;break}}
+  if(inflIdx>0){
+    for(let i=inflIdx-1;i>=0;i--){
+      const t=tokens[i].replace(/^[복제증액\-]+/,'').trim();
+      if(!t)continue;
+      if(INF_SKIP.has(t))continue;
+      if(INF_TEAM.has(t))return null;
+      if(/^\d+$/.test(t))continue;
+      if(/[가-힣A-Za-z]/.test(t)&&t.length<=12)return t;
+    }
+  }
+  // Strategy 2: only fires when the parent campaign explicitly is an influencer campaign
+  // (e.g., "260213_CBO_인플단독모음캠페인"). Otherwise too noisy (descriptors get picked up).
+  const campIsInfluencer=(campaignName||'').includes('인플');
+  if(!campIsInfluencer)return null;
+  for(let i=tokens.length-1;i>=0;i--){
+    const t=tokens[i].replace(/^[복제증액\-]+/,'').trim();
+    if(!t)continue;
+    if(INF_SKIP.has(t))continue;
+    if(INF_TEAM.has(t))return null;
+    if(/^\d/.test(t))continue;
+    if(/^[가-힣]{2,5}$/.test(t))return t;
+  }
+  return null;
+}
+
+function renderTrendInfluencer(){
+  const unit=document.getElementById('tiUnit').value;
+  const range=parseInt(document.getElementById('tiRange').value);
+  const search=(document.getElementById('tiSearch').value||'').trim().toLowerCase();
+  const minSpend=parseFloat(document.getElementById('tiMinSpend').value||'0');
+  // creative modes use ad_name; for kr/gl use adset_name
+  const nameOf=r=>(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||'');
+
+  // ---- Build period keys (weekly or daily) ----
+  let keys=[],keyLabel,keyOf;
+  if(unit==='weekly'){
+    const m={};AD.forEach(r=>{const wk=WM(r.date);m[wk]=true});
+    keys=Object.keys(m).sort().reverse().slice(0,range);
+    keyOf=d=>WM(d);
+    keyLabel=wk=>{const m=new Date(wk);const s=new Date(m.getTime()+6*864e5);return(m.getMonth()+1)+'/'+m.getDate()+'~'+(s.getMonth()+1)+'/'+s.getDate()};
+  }else{
+    const days=range===4?14:(range===8?30:60);
+    keys=DATES.slice(0,days);
+    keyOf=d=>d;
+    const _y=new Date();_y.setDate(_y.getDate()-1);
+    const yDay=_y.getFullYear()+'-'+String(_y.getMonth()+1).padStart(2,'0')+'-'+String(_y.getDate()).padStart(2,'0');
+    keyLabel=d=>{const w=WD(d);return DK(d)+'('+w+')'};
+    var YDAY=yDay;
+  }
+  if(!keys.length){document.getElementById('tiTbl').innerHTML='<thead><tr><th>데이터 없음</th></tr></thead>';return}
+  const keysReversed=keys.slice().reverse(); // oldest→newest for header
+
+  // ---- Aggregate per adset, only those with detectable influencer ----
+  const byA={};
+  AD.forEach(r=>{
+    const k=keyOf(r.date);if(!keys.includes(k))return;
+    const inf=extractInfluencer(nameOf(r),r.campaign_name);
+    if(!inf)return; // skip team-member sets and unknowns
+    const rid=rowId(r);
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:nameOf(r),id:rid,product:r.product||'기타',inf,k:{}};
+    if(!byA[rid].k[k])byA[rid].k[k]={spend:0,revenue:0,profit:0,mp:0,uc:0,imp:0,clicks:0};
+    const x=byA[rid].k[k];
+    x.spend+=r.spend;x.revenue+=r.revenue;x.profit+=r.profit;x.mp+=r.results_mp;x.uc+=r.unique_clicks;x.imp+=(r.impressions||0);x.clicks+=(r.clicks||r.unique_clicks||0);
+  });
+  // adset totals
+  const adsetList=Object.values(byA).map(a=>{
+    let s=0,rv=0,p=0,uc=0,mp=0;keys.forEach(k=>{const w=a.k[k];if(w){s+=w.spend;rv+=w.revenue;p+=w.profit;uc+=w.uc;mp+=w.mp}});
+    a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;return a;
+  });
+
+  // ---- Group by influencer ----
+  const byInf={};
+  adsetList.forEach(a=>{if(!byInf[a.inf])byInf[a.inf]={inf:a.inf,adsets:[],_s:0,_r:0,_p:0,_uc:0,_mp:0,k:{},products:new Set()};
+    const g=byInf[a.inf];g.adsets.push(a);g.products.add(a.product);
+    g._s+=a._s;g._r+=a._r;g._p+=a._p;
+    keys.forEach(k=>{const w=a.k[k];if(!w)return;if(!g.k[k])g.k[k]={spend:0,revenue:0,profit:0,mp:0,uc:0};
+      g.k[k].spend+=w.spend;g.k[k].revenue+=w.revenue;g.k[k].profit+=w.profit;g.k[k].mp+=w.mp;g.k[k].uc+=w.uc;
+      g._uc+=w.uc;g._mp+=w.mp;
+    });
+  });
+  let infList=Object.values(byInf).map(g=>{g._roas=g._s>0?g._r/g._s*100:0;g._cvr=g._uc>0&&g._mp>0?g._mp/g._uc*100:0;return g});
+  // Filter: search + minSpend
+  if(search)infList=infList.filter(g=>g.inf.toLowerCase().includes(search)||g.adsets.some(a=>(a.an||'').toLowerCase().includes(search)));
+  if(minSpend>0)infList=infList.filter(g=>g._s>=minSpend);
+  // Sort by total spend desc
+  infList.sort((a,b)=>b._s-a._s);
+
+  // ---- Build header ----
+  const ths=keysReversed.map(k=>{
+    let cls='',extra='';
+    if(unit==='daily'){const w=WD(k);cls=w==='일'?'sun':'';if(k===YDAY)extra=' col-yday'}
+    return'<th class="'+cls+extra+'" style="min-width:90px">'+keyLabel(k)+'</th>';
+  }).join('');
+  const colSpan=keys.length+4;
+
+  // ---- Totals ----
+  const totK={};keys.forEach(k=>{let s=0,r=0,p=0,mp=0,uc=0;infList.forEach(g=>{const w=g.k[k];if(w){s+=w.spend;r+=w.revenue;p+=w.profit;mp+=w.mp;uc+=w.uc}});totK[k]={s,r,p,mp,uc}});
+  const ts=keys.reduce((a,k)=>a+(totK[k]?.s||0),0),tr=keys.reduce((a,k)=>a+(totK[k]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
+
+  let h='<thead><tr><th style="min-width:140px;text-align:left">인플루언서</th><th style="min-width:90px">상품</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
+  // Top summary row
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+infList.length+'명)</td><td class="fx fx1" style="background:#e8e8e8;left:140px"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출</div><div class="rv">매출</div><div class="cv">CVR</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
+  keysReversed.forEach(k=>{const x=totK[k]||{s:0,r:0,p:0};const yd=(unit==='daily'&&k===YDAY)?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,0)+'</td>'});
+  h+='</tr>';
+
+  // Per influencer
+  infList.forEach(g=>{
+    const prods=[...g.products].slice(0,3).join(',')+(g.products.size>3?'+':'');
+    // Header row for the influencer
+    h+='<tr><td colspan="'+colSpan+'" class="prod-header" style="background:#5b3e8a">🌟 '+g.inf+' · '+g.adsets.length+'세트 · '+prods+' · 전체 ROAS '+g._roas.toFixed(0)+'% · 지출 '+money(g._s)+'</td></tr>';
+    // Influencer subtotal
+    const subCells=keysReversed.map(k=>{const w=g.k[k];const yd=(unit==='daily'&&k===YDAY)?' col-yday':'';if(!w||!w.spend)return'<td class="'+yd+'"></td>';const roas=w.spend>0?w.revenue/w.spend*100:0;const cvr=w.uc>0&&w.mp>0?w.mp/w.uc*100:0;return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,w.profit,w.spend,w.revenue,cvr)+'</td>'}).join('');
+    h+='<tr class="sr"><td class="fx fx0" style="background:#efe8f7;font-weight:700">'+g.inf+' 합계</td><td class="fx fx1" style="background:#efe8f7;left:140px;font-size:10px">'+prods+'</td><td></td><td class="mc '+RC(g._roas)+'">'+MC(g._roas,g._p,g._s,g._r,g._cvr)+'</td>'+subCells+'</tr>';
+    // Individual adsets, sorted by spend desc
+    g.adsets.slice().sort((a,b)=>b._s-a._s).forEach(a=>{
+      const cells=keysReversed.map(k=>{const w=a.k[k];const yd=(unit==='daily'&&k===YDAY)?' col-yday':'';if(!w||!w.spend)return'<td class="'+yd+'"></td>';const roas=w.spend>0?w.revenue/w.spend*100:0;const cvr=w.uc>0&&w.mp>0?w.mp/w.uc*100:0;return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,w.profit,w.spend,w.revenue,cvr)+'</td>'}).join('');
+      const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
+      h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.an||'').slice(0,28))+'</td><td class="fx fx1" style="left:140px;font-size:10px">'+a.product+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+    });
+  });
+  if(!infList.length)h+='<tr><td colspan="'+colSpan+'" style="padding:20px;color:#888;text-align:center">표시할 인플루언서 데이터가 없습니다. (팀원 9명 제외 · "_인플" 패턴 또는 인플 캠페인 끝 한글 이름으로 추출)</td></tr>';
+  h+='</tbody>';
+  document.getElementById('tiTbl').innerHTML=h;
 }
 
 // ===== CHANGE =====
