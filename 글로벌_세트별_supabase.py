@@ -313,6 +313,25 @@ def fetch_stripe_revenue(start_date, end_date):
     # 비중이 매우 높음. 통화만 보면 HK 거주자의 USD 결제가 통째로 누락됨.
     revenue = defaultdict(lambda: defaultdict(float))  # country -> date -> KRW
     skipped_currency = 0; classified_by_addr = 0; classified_by_currency = 0
+    # 진단: 매핑 실패 charge 분포 + 금액 + metadata 샘플
+    from collections import Counter as _Counter
+    unmatched_dist = _Counter()                        # (currency, addr) -> count
+    unmatched_amount = defaultdict(float)              # (currency, addr) -> KRW
+    matched_amount_by_addr = defaultdict(float)        # addr -> KRW (잡힌 매출)
+    sample_unmatched = []                              # 매핑 실패 샘플 (최대 8건)
+    sample_matched_md = []                             # 매핑 성공 metadata 샘플 (최대 3건)
+
+    def _calc_krw(ch_currency, ch_amount, dk):
+        if ch_currency not in STRIPE_DIVISOR: return 0
+        amt_local = ch_amount / STRIPE_DIVISOR[ch_currency]
+        krw_rate = get_rate(usd_rates.get('KRW', {}), dk, 1450)
+        if ch_currency == 'usd':
+            return round(amt_local * krw_rate)
+        usd_to_local = get_rate(usd_rates.get(ch_currency.upper(), {}), dk,
+                                FALLBACK_RATES.get(ch_currency.upper(), 1))
+        amt_usd = amt_local / usd_to_local if usd_to_local > 0 else 0
+        return round(amt_usd * krw_rate)
+
     for ch in all_charges:
         currency = (getattr(ch, 'currency', '') or '').lower()
         if currency not in STRIPE_DIVISOR:
@@ -340,23 +359,61 @@ def fetch_stripe_revenue(start_date, end_date):
             country_code = STRIPE_CURRENCY_MAP.get(currency)
             if country_code in STRIPE_COUNTRY_NAMES:
                 classified_by_currency += 1
-        if country_code not in STRIPE_COUNTRY_NAMES: continue
-        country_name = STRIPE_COUNTRY_NAMES[country_code]
 
-        divisor = STRIPE_DIVISOR.get(currency, 100)
-        amount_local = ch.amount / divisor
-        # KRW 환산 (금액 환산은 항상 charge.currency 기준)
-        krw_rates = usd_rates.get('KRW', {})
-        krw_rate = get_rate(krw_rates, dk, 1450)
-        if currency == 'usd':
-            amount_krw = round(amount_local * krw_rate)
-        else:
-            local_rates = usd_rates.get(currency.upper(), {})
-            usd_to_local = get_rate(local_rates, dk, FALLBACK_RATES.get(currency.upper(), 1))
-            amount_usd = amount_local / usd_to_local if usd_to_local > 0 else 0
-            amount_krw = round(amount_usd * krw_rate)
+        # 금액 계산 (분류 결과와 무관하게 모두)
+        amount_krw = _calc_krw(currency, ch.amount, dk)
+
+        if country_code not in STRIPE_COUNTRY_NAMES:
+            # 매핑 실패: 통화도 매핑 안 되고 billing도 TW/HK/JP가 아닌 charge
+            key = (currency, addr_country or 'NULL')
+            unmatched_dist[key] += 1
+            unmatched_amount[key] += amount_krw
+            if len(sample_unmatched) < 8:
+                md = getattr(ch, 'metadata', None) or {}
+                try: md_dict = dict(md)
+                except Exception: md_dict = {}
+                sample_unmatched.append({
+                    'id': ch.id, 'cur': currency, 'addr': addr_country,
+                    'krw': amount_krw, 'desc': (ch.description or '')[:60],
+                    'md_keys': list(md_dict.keys())[:8],
+                    'md_sample': {k: str(md_dict[k])[:40] for k in list(md_dict.keys())[:5]},
+                })
+            continue
+        country_name = STRIPE_COUNTRY_NAMES[country_code]
+        matched_amount_by_addr[addr_country or 'NULL'] += amount_krw
         revenue[country_name][date_str] += amount_krw
-    log.info(f"  💳 분류: address {classified_by_addr}건 / currency {classified_by_currency}건 / skip {skipped_currency}건")
+
+        # 분류된 charge 중 metadata 샘플 (HK만 우선)
+        if country_code == 'HK' and len(sample_matched_md) < 3:
+            md = getattr(ch, 'metadata', None) or {}
+            try: md_dict = dict(md)
+            except Exception: md_dict = {}
+            if md_dict:
+                sample_matched_md.append({
+                    'id': ch.id, 'addr': addr_country, 'cur': currency,
+                    'md': {k: str(md_dict[k])[:50] for k in list(md_dict.keys())[:8]},
+                })
+
+    log.info(f"  💳 분류: address {classified_by_addr}건 / currency {classified_by_currency}건 / skip(currency) {skipped_currency}건")
+    # ============ 진단 로그 ============
+    unmatched_total = sum(unmatched_amount.values())
+    log.info(f"  🔍 매핑 실패 charge: {sum(unmatched_dist.values())}건 / 총 ₩{unmatched_total:,.0f}")
+    log.info("  🔍 매핑 실패 분포 (금액 큰 순):")
+    sorted_unmatched = sorted(unmatched_dist.items(),
+                              key=lambda x: -unmatched_amount[x[0]])
+    for (cur, addr), n in sorted_unmatched[:15]:
+        amt = unmatched_amount[(cur, addr)]
+        log.info(f"     {cur:5} addr={addr:5} -> {n:>5}건  ₩{amt:>14,.0f}")
+    log.info("  🔍 매핑 실패 sample:")
+    for s in sample_unmatched:
+        log.info(f"     {s['id']} {s['cur']} addr={s['addr']} ₩{s['krw']:,} | desc={s['desc']!r}")
+        log.info(f"        md_keys={s['md_keys']}  md={s['md_sample']}")
+    log.info("  🔍 분류된 매출 (billing addr별 합계):")
+    for addr, total in sorted(matched_amount_by_addr.items(), key=lambda x: -x[1])[:10]:
+        log.info(f"     addr={addr:5} ₩{total:,.0f}")
+    log.info("  🔍 HK charge metadata 샘플 (분류 성공):")
+    for s in sample_matched_md:
+        log.info(f"     {s['id']} {s['cur']} addr={s['addr']} md={s['md']}")
     return revenue
 
 
