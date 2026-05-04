@@ -308,21 +308,44 @@ def fetch_stripe_revenue(start_date, end_date):
     log.info(f"  💳 총 {len(all_charges)}건")
 
     # 국가별 일별 집계
+    # 분류 우선순위: billing_details.address.country → currency fallback
+    # 홍콩은 HKD가 USD에 페그(1USD=7.8HKD)되어 있어 Stripe Checkout이 USD로 청구되는
+    # 비중이 매우 높음. 통화만 보면 HK 거주자의 USD 결제가 통째로 누락됨.
     revenue = defaultdict(lambda: defaultdict(float))  # country -> date -> KRW
+    skipped_currency = 0; classified_by_addr = 0; classified_by_currency = 0
     for ch in all_charges:
         currency = (getattr(ch, 'currency', '') or '').lower()
-        if currency not in STRIPE_DIVISOR: continue
+        if currency not in STRIPE_DIVISOR:
+            skipped_currency += 1
+            continue
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-        # 통화 기준으로만 국가 분류 (billing address 국가 무시)
-        # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
-        country_code = STRIPE_CURRENCY_MAP.get(currency)
+
+        # 1순위: billing address country (TW/HK/JP)
+        addr_country = None
+        bd = getattr(ch, 'billing_details', None)
+        if bd:
+            addr = getattr(bd, 'address', None)
+            if addr:
+                ac = getattr(addr, 'country', None)
+                if ac: addr_country = ac.upper()
+
+        country_code = None
+        if addr_country in STRIPE_COUNTRY_NAMES:
+            country_code = addr_country
+            classified_by_addr += 1
+        else:
+            # 2순위: currency fallback (TWD/HKD/JPY → 해당 국가)
+            country_code = STRIPE_CURRENCY_MAP.get(currency)
+            if country_code in STRIPE_COUNTRY_NAMES:
+                classified_by_currency += 1
         if country_code not in STRIPE_COUNTRY_NAMES: continue
         country_name = STRIPE_COUNTRY_NAMES[country_code]
+
         divisor = STRIPE_DIVISOR.get(currency, 100)
         amount_local = ch.amount / divisor
-        # KRW 환산
+        # KRW 환산 (금액 환산은 항상 charge.currency 기준)
         krw_rates = usd_rates.get('KRW', {})
         krw_rate = get_rate(krw_rates, dk, 1450)
         if currency == 'usd':
@@ -333,6 +356,7 @@ def fetch_stripe_revenue(start_date, end_date):
             amount_usd = amount_local / usd_to_local if usd_to_local > 0 else 0
             amount_krw = round(amount_usd * krw_rate)
         revenue[country_name][date_str] += amount_krw
+    log.info(f"  💳 분류: address {classified_by_addr}건 / currency {classified_by_currency}건 / skip {skipped_currency}건")
     return revenue
 
 
