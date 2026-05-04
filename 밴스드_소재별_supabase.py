@@ -132,7 +132,7 @@ def fetch_mixpanel(from_date, to_date):
                     raw_a=props.get('amount') or props.get('결제금액'); raw_v=props.get('value')
                     a_val=float(raw_a) if raw_a else 0.0; v_val=float(raw_v) if raw_v else 0.0
                     revenue=a_val if a_val>0 else (v_val if v_val>0 else 0.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','revenue':revenue,'서비스':props.get('서비스','')})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -217,9 +217,24 @@ def main():
     mp_value_map,mp_count_map={},{}
     if mp_raw:
         df=pd.DataFrame(mp_raw)
-        df=df[df['utm_content'].notna()&(df['utm_content']!='')&(df['utm_content']!='None')]
-        df=df.sort_values('revenue',ascending=False)
-        df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first')
+        def _norm(x):
+            s=str(x).strip() if x is not None else ''
+            return '' if s.lower() in ('','none','undefined','null') else s
+        df['utm_content']=df['utm_content'].apply(_norm)
+        if 'insert_id' in df.columns:
+            df_iid=df[df['insert_id'].astype(str).str.len()>0]
+            df_no=df[df['insert_id'].astype(str).str.len()==0]
+            df_iid=df_iid.drop_duplicates(subset=['insert_id'],keep='first')
+            df_d=pd.concat([df_iid,df_no],ignore_index=True)
+        else:
+            df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first')
+        # utm_content backfill (패키지 2번째 이벤트 attribution)
+        has_mask=df_d['utm_content'].astype(str).str.len()>0
+        bf_map=df_d[has_mask].groupby(['date','distinct_id'])['utm_content'].first().to_dict()
+        def _fill(r):
+            return r['utm_content'] if r['utm_content'] else bf_map.get((r['date'],r['distinct_id']),'')
+        df_d['utm_content']=df_d.apply(_fill,axis=1)
+        df_d=df_d[df_d['utm_content'].astype(str).str.len()>0]
         for (d,ut),v in df_d.groupby(['date','utm_content'])['revenue'].sum().items():
             if d and ut: mp_value_map[(d,str(ut))]=v
         for (d,ut),c in df_d.groupby(['date','utm_content']).size().items():

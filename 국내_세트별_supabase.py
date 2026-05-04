@@ -516,6 +516,7 @@ def fetch_mixpanel_data(from_date, to_date):
                         "value_raw": value_val,
                         "revenue": revenue,
                         "서비스": props.get("서비스", ""),
+                        "insert_id": props.get("$insert_id") or props.get("insert_id") or "",
                     })
                 except Exception:
                     pass
@@ -799,17 +800,37 @@ def main():
 
     if mp_raw:
         df = pd.DataFrame(mp_raw)
-        df = df[df["utm_term"].notna() & (df["utm_term"] != "") & (df["utm_term"] != "None")]
 
-        # utm_term 있는 이벤트 우선, 중복 제거
-        df["_has_utm"] = df["utm_term"].apply(
-            lambda x: 0 if (x and str(x).strip() and str(x).strip() != "None") else 1
-        )
-        df = df.sort_values(["_has_utm", "revenue"], ascending=[True, False])
-        df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
+        # utm_term 정규화: undefined/None 등을 빈 문자열로
+        def _norm_utm(x):
+            s = str(x).strip() if x is not None else ""
+            return "" if s.lower() in ("", "none", "undefined", "null") else s
+        df["utm_term"] = df["utm_term"].apply(_norm_utm)
+
+        # 1) Mixpanel canonical dedup: $insert_id 기준 (true duplicates만 제거)
+        if "insert_id" in df.columns:
+            df_iid = df[df["insert_id"].astype(str).str.len() > 0]
+            df_no_iid = df[df["insert_id"].astype(str).str.len() == 0]
+            df_iid = df_iid.drop_duplicates(subset=["insert_id"], keep="first")
+            df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
+        else:
+            df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
+
+        # 2) utm_term backfill: 같은 (date, distinct_id) 그룹의 비어있는 utm_term을
+        #    그룹 내 utm_term-set 이벤트 값으로 채움 → 패키지 2번째 이벤트도 attribution
+        has_utm_mask = df_d["utm_term"].astype(str).str.len() > 0
+        bf_map = (df_d[has_utm_mask].groupby(["date", "distinct_id"])["utm_term"].first().to_dict())
+        def _fill(row):
+            if row["utm_term"]:
+                return row["utm_term"]
+            return bf_map.get((row["date"], row["distinct_id"]), "")
+        df_d["utm_term"] = df_d.apply(_fill, axis=1)
+
+        # 3) utm_term이 채워진 이벤트만 attribution 집계
+        df_d = df_d[df_d["utm_term"].astype(str).str.len() > 0]
 
         total_revenue = df_d["revenue"].sum()
-        log.info(f"  📊 매출 합계: ₩{int(total_revenue):,}")
+        log.info(f"  📊 매출 합계 (utm_term backfill 적용): ₩{int(total_revenue):,}")
 
         for (d, ut), v in df_d.groupby(["date", "utm_term"])["revenue"].sum().items():
             if d and ut:

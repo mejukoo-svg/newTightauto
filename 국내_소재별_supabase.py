@@ -217,7 +217,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     a_val = float(raw_a) if raw_a else 0.0
                     v_val = float(raw_v) if raw_v else 0.0
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','revenue':revenue,'서비스':props.get('서비스','')})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -351,10 +351,34 @@ def main():
     mp_value_map = {}; mp_count_map = {}
     if mp_raw:
         df = pd.DataFrame(mp_raw)
-        df = df[df['utm_content'].notna() & (df['utm_content'] != '') & (df['utm_content'] != 'None')]
-        df = df.sort_values('revenue', ascending=False)
-        df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
-        log.info(f"  📊 매출 합계: ₩{int(df_d['revenue'].sum()):,}")
+
+        def _norm(x):
+            s = str(x).strip() if x is not None else ''
+            return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
+        df['utm_content'] = df['utm_content'].apply(_norm)
+
+        # 1) $insert_id 기준 dedup (Mixpanel canonical)
+        if 'insert_id' in df.columns:
+            df_iid = df[df['insert_id'].astype(str).str.len() > 0]
+            df_no_iid = df[df['insert_id'].astype(str).str.len() == 0]
+            df_iid = df_iid.drop_duplicates(subset=['insert_id'], keep='first')
+            df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
+        else:
+            df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
+
+        # 2) utm_content backfill: (date, distinct_id) 그룹 내 utm_content 채움
+        has_uc_mask = df_d['utm_content'].astype(str).str.len() > 0
+        bf_map = df_d[has_uc_mask].groupby(['date','distinct_id'])['utm_content'].first().to_dict()
+        def _fill(row):
+            if row['utm_content']:
+                return row['utm_content']
+            return bf_map.get((row['date'], row['distinct_id']), '')
+        df_d['utm_content'] = df_d.apply(_fill, axis=1)
+
+        # 3) utm_content 채워진 이벤트만 attribution
+        df_d = df_d[df_d['utm_content'].astype(str).str.len() > 0]
+
+        log.info(f"  📊 매출 합계 (utm_content backfill 적용): ₩{int(df_d['revenue'].sum()):,}")
         for (d, ut), v in df_d.groupby(['date','utm_content'])['revenue'].sum().items():
             if d and ut: mp_value_map[(d, str(ut))] = v
         for (d, ut), c in df_d.groupby(['date','utm_content']).size().items():
