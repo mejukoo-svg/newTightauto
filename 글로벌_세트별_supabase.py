@@ -308,32 +308,20 @@ def fetch_stripe_revenue(start_date, end_date):
     log.info(f"  💳 총 {len(all_charges)}건")
 
     # 국가별 일별 집계
+    # 분류 정책: billing_details.address.country 우선, 없거나 외국 주소면 currency fallback
+    # (Stripe API 로 직접 결제 지역 검증)
     revenue = defaultdict(lambda: defaultdict(float))  # country -> date -> KRW
-    # ── 진단 (DIAG_20260506): logic 무변경, 통계만 수집 ──
-    from collections import Counter as _Counter
-    diag_total_charges = len(all_charges)
-    diag_skipped_currency = 0          # currency not in STRIPE_DIVISOR
-    diag_dropped_country = 0           # country_code not in STRIPE_COUNTRY_NAMES
-    diag_kept = 0
-    diag_currency_dist = _Counter()    # all charges → currency distribution
-    diag_addr_by_currency = _Counter() # (currency, billing_country) → count
-    diag_amt_by_addr_cur = defaultdict(float)  # (currency, billing_country) → KRW
-    diag_sample_dropped = []           # samples of dropped charges (max 10)
-    diag_sample_usd_addr = _Counter()  # USD billing addr distribution
-    diag_amt_usd_by_addr = defaultdict(float)  # USD billing addr → KRW
-    def _calc_krw_diag(cur, amt, dk):
-        if cur not in STRIPE_DIVISOR: return 0
-        loc = amt / STRIPE_DIVISOR[cur]
-        kr_rate = get_rate(usd_rates.get('KRW', {}), dk, 1450)
-        if cur == 'usd':
-            return round(loc * kr_rate)
-        utl = get_rate(usd_rates.get(cur.upper(), {}), dk, FALLBACK_RATES.get(cur.upper(), 1))
-        return round((loc / utl if utl > 0 else 0) * kr_rate)
-
+    classified_addr = 0; classified_currency = 0; skipped = 0
     for ch in all_charges:
         currency = (getattr(ch, 'currency', '') or '').lower()
-        diag_currency_dist[currency] += 1
-        # billing address country 추출 (진단용)
+        if currency not in STRIPE_DIVISOR:
+            skipped += 1
+            continue
+        charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
+        date_str = charge_dt.strftime('%Y-%m-%d')
+        dk = make_date_key(charge_dt)
+
+        # billing address country 추출
         addr_country = None
         bd = getattr(ch, 'billing_details', None)
         if bd:
@@ -341,38 +329,24 @@ def fetch_stripe_revenue(start_date, end_date):
             if addr:
                 ac = getattr(addr, 'country', None)
                 if ac: addr_country = ac.upper()
-        diag_addr_by_currency[(currency, addr_country or 'NULL')] += 1
-        charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
-        date_str = charge_dt.strftime('%Y-%m-%d')
-        dk = make_date_key(charge_dt)
-        amount_krw_diag = _calc_krw_diag(currency, ch.amount, dk)
-        diag_amt_by_addr_cur[(currency, addr_country or 'NULL')] += amount_krw_diag
-        if currency == 'usd':
-            diag_sample_usd_addr[addr_country or 'NULL'] += 1
-            diag_amt_usd_by_addr[addr_country or 'NULL'] += amount_krw_diag
 
-        if currency not in STRIPE_DIVISOR:
-            diag_skipped_currency += 1
-            if len(diag_sample_dropped) < 10:
-                md = getattr(ch, 'metadata', None) or {}
-                try: md_dict = dict(md)
-                except: md_dict = {}
-                diag_sample_dropped.append({
-                    'id': ch.id, 'cur': currency, 'addr': addr_country,
-                    'amt': ch.amount, 'desc': (ch.description or '')[:50],
-                    'md': {k: str(md_dict[k])[:30] for k in list(md_dict.keys())[:5]},
-                })
-            continue
-        # 통화 기준으로만 국가 분류 (billing address 국가 무시)
-        # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
-        country_code = STRIPE_CURRENCY_MAP.get(currency)
+        # 분류: billing addr가 타겟 국가(TW/HK/JP/KR)이면 우선 사용,
+        #       아니면 currency 기반 (USD→GLOBAL, twd→TW, ...)
+        country_code = None
+        if addr_country in ('TW', 'HK', 'JP', 'KR'):
+            country_code = addr_country
+            classified_addr += 1
+        else:
+            country_code = STRIPE_CURRENCY_MAP.get(currency)
+            classified_currency += 1
         if country_code not in STRIPE_COUNTRY_NAMES:
-            diag_dropped_country += 1
+            skipped += 1
             continue
         country_name = STRIPE_COUNTRY_NAMES[country_code]
+
         divisor = STRIPE_DIVISOR.get(currency, 100)
         amount_local = ch.amount / divisor
-        # KRW 환산
+        # KRW 환산 (금액 환산은 항상 charge.currency 기준)
         krw_rates = usd_rates.get('KRW', {})
         krw_rate = get_rate(krw_rates, dk, 1450)
         if currency == 'usd':
@@ -383,26 +357,7 @@ def fetch_stripe_revenue(start_date, end_date):
             amount_usd = amount_local / usd_to_local if usd_to_local > 0 else 0
             amount_krw = round(amount_usd * krw_rate)
         revenue[country_name][date_str] += amount_krw
-        diag_kept += 1
-
-    # ── 진단 출력 ──
-    log.info(f"  🔍 [DIAG] 총 {diag_total_charges}건 / kept={diag_kept} / skip(currency)={diag_skipped_currency} / drop(country)={diag_dropped_country}")
-    log.info(f"  🔍 [DIAG] currency 분포:")
-    for cur, n in diag_currency_dist.most_common():
-        log.info(f"     {cur or 'NULL':5} -> {n:>5}건")
-    log.info(f"  🔍 [DIAG] USD billing address 분포 (HKD-pegged 가설 검증):")
-    for addr, n in diag_sample_usd_addr.most_common(15):
-        amt = diag_amt_usd_by_addr.get(addr, 0)
-        log.info(f"     USD addr={addr:5} -> {n:>5}건  ₩{amt:>14,.0f}")
-    log.info(f"  🔍 [DIAG] (currency, addr) 매출 합계 Top 20:")
-    sorted_amt = sorted(diag_amt_by_addr_cur.items(), key=lambda x: -x[1])[:20]
-    for (cur, addr), amt in sorted_amt:
-        n = diag_addr_by_currency[(cur, addr)]
-        log.info(f"     {cur:5} addr={addr:5} -> {n:>5}건  ₩{amt:>14,.0f}")
-    if diag_sample_dropped:
-        log.info(f"  🔍 [DIAG] currency-skipped charge 샘플:")
-        for s in diag_sample_dropped:
-            log.info(f"     {s['id']} {s['cur']} addr={s['addr']} amt={s['amt']} desc={s['desc']!r} md={s['md']}")
+    log.info(f"  💳 분류: addr={classified_addr}건 / currency={classified_currency}건 / skip={skipped}건")
     return revenue
 
 

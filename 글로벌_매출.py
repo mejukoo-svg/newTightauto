@@ -216,9 +216,24 @@ def _process_charge_daily(charge):
     charge_dt = datetime.fromtimestamp(charge.created, tz=KST)
     date_str = charge_dt.strftime("%Y-%m-%d")
 
-    # 통화 기준으로만 국가 분류 (billing address 국가 무시)
-    # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
-    country_code = CURRENCY_TO_COUNTRY.get(currency) if currency else None
+    # billing_details.address.country 추출 (Stripe API 직접 결제 지역 확인)
+    addr_country = None
+    bd = getattr(charge, "billing_details", None)
+    if bd:
+        addr = getattr(bd, "address", None)
+        if addr:
+            ac = getattr(addr, "country", None)
+            if ac:
+                addr_country = ac.upper()
+
+    # 1순위: billing address가 타겟 국가(TW/HK/JP)면 그대로
+    # 2순위: currency 기반 fallback (twd→TW, hkd→HK, jpy→JP)
+    # USD 결제 + 외국 빌링 → 타겟 외이므로 drop (시트 구조 유지)
+    country_code = None
+    if addr_country in TARGET_COUNTRIES:
+        country_code = addr_country
+    else:
+        country_code = CURRENCY_TO_COUNTRY.get(currency) if currency else None
     if country_code not in TARGET_COUNTRIES:
         return None
 
