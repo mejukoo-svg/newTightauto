@@ -471,7 +471,7 @@ function renderDashboard(){
 
   // Charts
   h+='<div class="chart-grid">';
-  h+='<div class="chart-card"><h3>📊 상품별 비교 (A vs B) <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option><option value="revenue">매출</option></select></h3><div class="chart-wrap" style="height:280px"><canvas id="chBar"></canvas></div></div>';
+  h+='<div class="chart-card"><h3>📊 상품별 비교 (A vs B) <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option><option value="revenue">매출</option><option value="purchases">구매수(PG)</option></select></h3><div class="chart-wrap" style="height:280px"><canvas id="chBar"></canvas></div></div>';
   h+='<div class="chart-card"><h3>🥧 지출 비중 — 날짜 A</h3><div class="chart-wrap"><canvas id="chPieA"></canvas></div></div>';
   h+='<div class="chart-card"><h3>🏆 Top 5 세트 — A (ROAS)</h3><ul class="top-list" id="topListA"></ul></div>';
   h+='<div class="chart-card"><h3>⚠️ 주의 세트 — A (지출↑ ROAS↓)</h3><ul class="top-list" id="warnListA"></ul></div>';
@@ -531,7 +531,7 @@ function renderDashboard(){
 const BRAND_COLORS=['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0','#ff6d01','#00acc1','#e91e63','#795548','#607d8b','#f59e0b','#10b981'];
 
 function aggByProduct(rows){
-  const by={};rows.forEach(r=>{if(!by[r.product])by[r.product]={product:r.product,spend:0,revenue:0,profit:0,mp:0,uc:0};by[r.product].spend+=r.spend;by[r.product].revenue+=r.revenue;by[r.product].profit+=r.profit;by[r.product].mp+=r.results_mp;by[r.product].uc+=r.unique_clicks});
+  const by={};rows.forEach(r=>{if(!by[r.product])by[r.product]={product:r.product,spend:0,revenue:0,profit:0,mp:0,uc:0,meta:0};by[r.product].spend+=r.spend;by[r.product].revenue+=r.revenue;by[r.product].profit+=r.profit;by[r.product].mp+=r.results_mp;by[r.product].uc+=r.unique_clicks;by[r.product].meta+=(r.results_meta||0)});
   return Object.values(by).filter(x=>x.spend>0);
 }
 
@@ -542,11 +542,12 @@ function drawDashBar(A,B){
   const mapA={};aggA.forEach(x=>{mapA[x.product]=x});const mapB={};aggB.forEach(x=>{mapB[x.product]=x});
   const getVal=(p,side)=>{const m=side==='A'?mapA[p]:mapB[p];if(!m)return 0;
     if(metric==='profit')return m.profit;if(metric==='spend')return m.spend;if(metric==='revenue')return m.revenue;
-    if(metric==='roas')return m.spend>0?m.revenue/m.spend*100:0;if(metric==='cvr')return m.uc>0&&m.mp>0?m.mp/m.uc*100:0;return 0};
+    if(metric==='roas')return m.spend>0?m.revenue/m.spend*100:0;if(metric==='cvr')return m.uc>0&&m.mp>0?m.mp/m.uc*100:0;
+    if(metric==='purchases')return m.meta||0;return 0};
   const products=[...allP].sort((a,b)=>getVal(b,'A')-getVal(a,'A')).slice(0,12);
   if(dashCharts.bar)dashCharts.bar.destroy();
   const ctx=document.getElementById('chBar');if(!ctx)return;
-  const labelMap={profit:'이익',roas:'ROAS(%)',spend:'지출',cvr:'CVR(%)',revenue:'매출'};
+  const labelMap={profit:'이익',roas:'ROAS(%)',spend:'지출',cvr:'CVR(%)',revenue:'매출',purchases:'구매수(PG)'};
   dashCharts.bar=new Chart(ctx,{type:'bar',data:{labels:products,datasets:[
     {label:'A: '+DK(dashState.dateA),data:products.map(p=>getVal(p,'A')),backgroundColor:'#4285f4'},
     {label:'B: '+DK(dashState.dateB),data:products.map(p=>getVal(p,'B')),backgroundColor:'#aaa'}
