@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 글로벌_세트별_supabase.py
 ========================
@@ -513,10 +513,12 @@ def main():
             spend = mr['spend']  # Already USD
             currency = detect_currency(mr['adset_name'], mr['campaign_name'])
             country = CURRENCY_TO_COUNTRY.get(currency, '글로벌')
-            # Mixpanel: 현지통화 → USD
+            # Mixpanel: 글로벌 결제 amount는 모두 TWD 단위로 저장되어 있음 (TW가 base 가격 시장)
+            # — HK/JP/US 고객도 동일 amount(TWD) 값으로 기록되므로 항상 TWD/USD rate로 환산
             mpc = mp_count_map.get((dk, asid), 0)
             mpv_local = mp_value_map.get((dk, asid), 0.0)
-            revenue = local_to_usd(float(mpv_local), currency, dk)
+            mp_currency = "KRW" if currency == "KRW" else "TWD"
+            revenue = local_to_usd(float(mpv_local), mp_currency, dk)
             profit = revenue - spend
             roas = (revenue / spend * 100) if spend > 0 else 0
             cvr = (mpc / mr['unique_clicks'] * 100) if mr['unique_clicks'] > 0 and mpc > 0 else 0
@@ -569,3 +571,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
