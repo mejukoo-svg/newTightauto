@@ -68,9 +68,9 @@ DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 # 환율 폴백
 FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0}
 CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌"}
-STRIPE_CURRENCY_MAP = {"twd": "TW", "hkd": "HK", "jpy": "JP"}
-STRIPE_COUNTRY_NAMES = {"TW": "대만", "HK": "홍콩", "JP": "일본"}
-STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100}
+STRIPE_CURRENCY_MAP = {"twd": "TW", "hkd": "HK", "jpy": "JP", "usd": "GLOBAL", "krw": "KR"}
+STRIPE_COUNTRY_NAMES = {"TW": "대만", "HK": "홍콩", "JP": "일본", "GLOBAL": "글로벌(USD)", "KR": "한국(KRW)"}
+STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1}
 
 
 # =========================================================
