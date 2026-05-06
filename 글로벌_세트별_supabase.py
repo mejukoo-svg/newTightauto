@@ -481,13 +481,17 @@ def main():
         # 2) utm_term backfill 비활성화 (2026-05-06)
         # 이유: backfill이 같은 user의 organic 결제까지 광고에 귀속시켜
         #       추이차트 매출이 Stripe 실결제를 초과하는 over-attribution 유발.
-        #       Stripe = ground truth이므로 광고 attribution은 항상 ≤ Stripe 여야 함.
-        # 효과: utm_term이 없는 organic 결제는 광고 매출에서 제외됨.
-        # 부작용: "패키지 2번째 이벤트" attribution 누락 가능 — 향후 시간윈도우(30분)
-        #         + 동일 distinct_id 조건으로 더 정밀하게 재구현 필요.
         before_n = len(df_d)
         df_d = df_d[df_d['utm_term'].astype(str).str.len() > 0]
         log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외)")
+
+        # 3) Logical payment dedup (2026-05-06)
+        # 이유: Mixpanel이 같은 결제를 다른 $insert_id로 1.7회 평균 중복 기록.
+        #       insert_id dedup만으로는 미해결, 71% over-attribution 발생 확인.
+        # 키: (date, distinct_id, revenue, 서비스, utm_term) 동일하면 같은 결제로 간주.
+        before_logical = len(df_d)
+        df_d = df_d.drop_duplicates(subset=['date','distinct_id','revenue','서비스','utm_term'], keep='first')
+        log.info(f"  logical dedup: {before_logical} -> {len(df_d)} ({before_logical - len(df_d)}건 중복 결제 제거)")
 
         for (d, ut), v in df_d.groupby(['date','utm_term'])['revenue'].sum().items():
             if d and ut: mp_value_map[(d, str(ut))] = v
