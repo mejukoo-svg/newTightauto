@@ -308,45 +308,21 @@ def fetch_stripe_revenue(start_date, end_date):
     log.info(f"  💳 총 {len(all_charges)}건")
 
     # 국가별 일별 집계
-    # 분류 정책: billing_details.address.country 우선, 없거나 외국 주소면 currency fallback
-    # (Stripe API 로 직접 결제 지역 검증)
     revenue = defaultdict(lambda: defaultdict(float))  # country -> date -> KRW
-    classified_addr = 0; classified_currency = 0; skipped = 0
     for ch in all_charges:
         currency = (getattr(ch, 'currency', '') or '').lower()
-        if currency not in STRIPE_DIVISOR:
-            skipped += 1
-            continue
+        if currency not in STRIPE_DIVISOR: continue
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-
-        # billing address country 추출
-        addr_country = None
-        bd = getattr(ch, 'billing_details', None)
-        if bd:
-            addr = getattr(bd, 'address', None)
-            if addr:
-                ac = getattr(addr, 'country', None)
-                if ac: addr_country = ac.upper()
-
-        # 분류: billing addr가 타겟 국가(TW/HK/JP/KR)이면 우선 사용,
-        #       아니면 currency 기반 (USD→GLOBAL, twd→TW, ...)
-        country_code = None
-        if addr_country in ('TW', 'HK', 'JP', 'KR'):
-            country_code = addr_country
-            classified_addr += 1
-        else:
-            country_code = STRIPE_CURRENCY_MAP.get(currency)
-            classified_currency += 1
-        if country_code not in STRIPE_COUNTRY_NAMES:
-            skipped += 1
-            continue
+        # 통화 기준으로만 국가 분류 (billing address 국가 무시)
+        # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
+        country_code = STRIPE_CURRENCY_MAP.get(currency)
+        if country_code not in STRIPE_COUNTRY_NAMES: continue
         country_name = STRIPE_COUNTRY_NAMES[country_code]
-
         divisor = STRIPE_DIVISOR.get(currency, 100)
         amount_local = ch.amount / divisor
-        # KRW 환산 (금액 환산은 항상 charge.currency 기준)
+        # KRW 환산
         krw_rates = usd_rates.get('KRW', {})
         krw_rate = get_rate(krw_rates, dk, 1450)
         if currency == 'usd':
@@ -357,7 +333,6 @@ def fetch_stripe_revenue(start_date, end_date):
             amount_usd = amount_local / usd_to_local if usd_to_local > 0 else 0
             amount_krw = round(amount_usd * krw_rate)
         revenue[country_name][date_str] += amount_krw
-    log.info(f"  💳 분류: addr={classified_addr}건 / currency={classified_currency}건 / skip={skipped}건")
     return revenue
 
 
@@ -503,15 +478,16 @@ def main():
         else:
             df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
 
-        # 2) utm_term backfill: (date, distinct_id) 그룹 내 빈 값 채움 → 패키지 2번째 이벤트 attribution
-        has_utm_mask = df_d['utm_term'].astype(str).str.len() > 0
-        bf_map = df_d[has_utm_mask].groupby(['date','distinct_id'])['utm_term'].first().to_dict()
-        def _fill(row):
-            if row['utm_term']:
-                return row['utm_term']
-            return bf_map.get((row['date'], row['distinct_id']), '')
-        df_d['utm_term'] = df_d.apply(_fill, axis=1)
+        # 2) utm_term backfill 비활성화 (2026-05-06)
+        # 이유: backfill이 같은 user의 organic 결제까지 광고에 귀속시켜
+        #       추이차트 매출이 Stripe 실결제를 초과하는 over-attribution 유발.
+        #       Stripe = ground truth이므로 광고 attribution은 항상 ≤ Stripe 여야 함.
+        # 효과: utm_term이 없는 organic 결제는 광고 매출에서 제외됨.
+        # 부작용: "패키지 2번째 이벤트" attribution 누락 가능 — 향후 시간윈도우(30분)
+        #         + 동일 distinct_id 조건으로 더 정밀하게 재구현 필요.
+        before_n = len(df_d)
         df_d = df_d[df_d['utm_term'].astype(str).str.len() > 0]
+        log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외)")
 
         for (d, ut), v in df_d.groupby(['date','utm_term'])['revenue'].sum().items():
             if d and ut: mp_value_map[(d, str(ut))] = v
