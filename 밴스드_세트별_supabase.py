@@ -267,9 +267,21 @@ def main():
         for (d,ut),c in df_d.groupby(['date','utm_term']).size().items():
             if d and ut: mp_count_map[(d,str(ut))]=c
 
+    # 3-1) 진단: utm_term 매칭 현황
+    log.info(f"\n3-1단계: utm_term 매칭 진단")
+    log.info(f"  🔍 mp_value_map 키 수: {len(mp_value_map)}")
+    if mp_value_map:
+        sample_keys=list(mp_value_map.items())[:5]
+        log.info(f"  🔍 mp_value_map 샘플(최대 5개): {[(k, f'₩{int(v):,}') for k,v in sample_keys]}")
+        # utm_term이 숫자 형태(adset_id)인지 비율 체크
+        all_uts=[ut for (_,ut) in mp_value_map.keys()]
+        numeric_uts=sum(1 for ut in all_uts if ut.isdigit())
+        log.info(f"  🔍 utm_term 형태: 숫자형(adset_id 추정) {numeric_uts}/{len(all_uts)}건")
+
     # 4) Merge
     log.info(f"\n4단계: 병합")
     records=[]
+    match_by_date={}  # date -> {'total':n,'matched':n,'unmatched_adsets':[]}
     for (dk,asid),mr in meta_data.items():
         parts=dk.split('/'); iso=f"20{parts[0]}-{parts[1]}-{parts[2]}"
         spend=mr['spend']; mpc=mp_count_map.get((dk,asid),0); mpv=mp_value_map.get((dk,asid),0.0)
@@ -277,6 +289,12 @@ def main():
         roas=(revenue/spend*100) if spend>0 else 0
         cvr=(mpc/mr['unique_clicks']*100) if mr['unique_clicks']>0 and mpc>0 else 0
         product=adset_to_product(mr['adset_name'])
+        # 진단 누적
+        if iso not in match_by_date: match_by_date[iso]={'total':0,'matched':0,'spend':0.0,'unmatched':[]}
+        match_by_date[iso]['total']+=1
+        match_by_date[iso]['spend']+=spend
+        if mpc>0: match_by_date[iso]['matched']+=1
+        elif spend>0: match_by_date[iso]['unmatched'].append(asid)
         records.append({
             'date':iso,'adset_id':asid,'campaign_name':mr['campaign_name'],'adset_name':mr['adset_name'],
             'ad_account_id':META_AD_ACCOUNT,'product':product,
@@ -290,6 +308,20 @@ def main():
             'budget':budget_map.get(asid,0),
         })
     log.info(f"✅ 레코드: {len(records)}개")
+
+    # 4-1) 진단: 일자별 매칭률
+    log.info(f"\n4-1단계: 일자별 매칭률 진단")
+    for iso in sorted(match_by_date.keys()):
+        m=match_by_date[iso]
+        rate=m['matched']/m['total']*100 if m['total']>0 else 0
+        flag='✅' if rate>=50 else ('⚠️' if rate>0 else '❌')
+        log.info(f"  {flag} {iso}: {m['matched']}/{m['total']} 매칭 ({rate:.0f}%) · 지출 ₩{int(m['spend']):,}")
+        # 매칭 0% 이고 지출 있는 날: 미매칭 adset_id와 그 날 mp_value_map에 있는 utm_term 비교
+        if rate==0 and m['spend']>0 and m['unmatched']:
+            mp_dk=f"{iso[2:4]}/{iso[5:7]}/{iso[8:10]}"
+            available_uts=[ut for (d,ut) in mp_value_map.keys() if d==mp_dk]
+            log.info(f"      🔻 미매칭 adset_id 샘플(최대3): {m['unmatched'][:3]}")
+            log.info(f"      🔻 그 날 mp_value_map utm_term 샘플(최대3): {available_uts[:3]} (총 {len(available_uts)}개)")
 
     # 5) Upsert
     log.info(f"\n5단계: Supabase upsert")
