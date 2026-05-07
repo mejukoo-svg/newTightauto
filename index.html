@@ -292,12 +292,14 @@ function switchMode(m){
   document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
   document.querySelectorAll('.tab.kr-only').forEach(t=>t.style.display=(m==='kr'||m==='vn')?'inline-block':'none');
   document.querySelectorAll('.tab.creative-only').forEach(t2=>t2.style.display=(m==='cr'||m==='vc')?'inline-block':'none');
-  // Switch data
+  // Switch data (lazy-load big tables)
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
-  else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
+  else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;
+    if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=CR_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
   else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
-  else if(m==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL}
+  else if(m==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL;
+    if(!VC_AD.length)ensureBigTable('vc').then(()=>{AD=VC_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -381,25 +383,27 @@ async function initData(){
   } else {
     await corePromise.then(applyAndRerender); // 첫 방문은 await
   }
-  // 3단계: 큰 보조 테이블 (백그라운드, 캐시 저장)
-  window._BG_PROMISES={
-    cr: sbAll('ad_creative_daily','spend',D180).catch(()=>[]).then(d=>{
-      CR_AD=d;window._CR_BY_ADSET=null;
-      cacheSet('t_cr',{ts:Date.now(),data:d});
-      if(MODE==='cr'){AD=CR_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
-    }),
-    vc: sbAll('vanced_ad_creative_daily','spend',D180).catch(()=>[]).then(d=>{
-      VC_AD=d;
-      cacheSet('t_vc',{ts:Date.now(),data:d});
-      if(MODE==='vc'){AD=VC_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
-    }),
-    nsakw: sbAll('naver_sa_keyword_daily','cost_vat',D180).catch(()=>[]).then(d=>{
-      NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});
-    }),
-    naverkw: sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).catch(()=>[]).then(d=>{
-      NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});
-    }),
+  // 큰 보조 테이블은 더 이상 백그라운드 fetch 안 함 — 사용자 인터랙션과 connection 경쟁 회피
+  // 필요한 모드/탭 진입 시 lazy 로드 (ensureBigTable 호출)
+}
+// 큰 테이블은 모드 진입 시 lazy 로드
+async function ensureBigTable(name){
+  if(window._BIG_LOADED&&window._BIG_LOADED[name])return;
+  if(!window._BIG_LOADING)window._BIG_LOADING={};
+  if(window._BIG_LOADING[name])return window._BIG_LOADING[name];
+  const D180='&date=gte.'+_dateCutoff(180);
+  const tasks={
+    cr:()=>sbAll('ad_creative_daily','spend',D180).then(d=>{CR_AD=d;cacheSet('t_cr',{ts:Date.now(),data:d});}),
+    vc:()=>sbAll('vanced_ad_creative_daily','spend',D180).then(d=>{VC_AD=d;cacheSet('t_vc',{ts:Date.now(),data:d});}),
+    nsakw:()=>sbAll('naver_sa_keyword_daily','cost_vat',D180).then(d=>{NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});}),
+    naverkw:()=>sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).then(d=>{NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});}),
   };
+  if(!tasks[name])return;
+  window._BIG_LOADING[name]=tasks[name]().then(()=>{
+    if(!window._BIG_LOADED)window._BIG_LOADED={};
+    window._BIG_LOADED[name]=true;
+  }).catch(()=>{});
+  return window._BIG_LOADING[name];
 }
 
 // ===== TAB ROUTING =====
@@ -795,12 +799,13 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   // 클릭 즉시 caret 변경 → 브라우저에 양보 → 사용자에 응답성 보장
   if(caret)caret.textContent='⌛';
   await new Promise(r=>requestAnimationFrame(r));
-  // 그 세트의 소재만 직접 fetch (per-adset 캐시)
+  // 그 세트의 소재만 직접 fetch (per-adset 캐시) — sbAll의 페이지네이션 루프 우회
   if(!window._CR_PER_ADSET)window._CR_PER_ADSET={};
   let records=window._CR_PER_ADSET[adsetId];
   if(!records){
-    const D180='&date=gte.'+_dateCutoff(180);
-    records=await sbAll('ad_creative_daily','spend','&adset_id=eq.'+encodeURIComponent(adsetId)+D180).catch(()=>[]);
+    const D90=_dateCutoff(90); // 소재는 90일이면 충분
+    const url=SB_URL+'/rest/v1/ad_creative_daily?select=*&order=date.desc&adset_id=eq.'+encodeURIComponent(adsetId)+'&date=gte.'+D90+'&limit=1000';
+    try{const r=await fetch(url,{headers:SBH});records=await r.json();}catch(e){records=[];}
     window._CR_PER_ADSET[adsetId]=records;
   }
   // 현재 추이차트 날짜 범위
