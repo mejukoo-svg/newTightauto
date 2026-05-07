@@ -773,12 +773,8 @@ function renderTrend(){
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // KR: caret 클릭 → 인라인 소재 목록 펼침
       let caretBtn='';
-      if(MODE==='kr'){
+      if(MODE==='kr'||MODE==='gl'){
         caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
-      } else if(MODE==='gl'){
-        const accNum=a.acc?String(a.acc).replace(/^act_/,''):'';
-        const accParam=accNum?('act='+accNum+'&'):'';
-        caretBtn='<a class="ex-caret" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?'+accParam+'selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
       }
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
@@ -796,7 +792,7 @@ function renderTrend(){
 // 클릭 시 해당 세트의 소재만 Supabase에서 직접 fetch (CR_AD 미사용)
 // → 클릭 즉시 lag 없음. 대기시간은 fetch 완료까지(~200ms)
 async function toggleAdsetCreatives(adsetId, anchorRow){
-  if(MODE!=='kr')return;
+  if(MODE!=='kr'&&MODE!=='gl')return;
   const tbody=anchorRow.parentNode;
   const sel='tr.creative-expanded[data-parent="'+CSS.escape(adsetId)+'"]';
   const existing=tbody.querySelectorAll(sel);
@@ -811,8 +807,11 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   if(caret)caret.textContent='⌛';
   await new Promise(r=>requestAnimationFrame(r));
   let records;
-  // 1) CR_AD 이미 prefetch 되어 있으면 인덱스 lookup (fetch 없음, 즉시)
-  if(CR_AD&&CR_AD.length){
+  // KR: ad_creative_daily, GL: global_ad_creative_daily (USD 필드 정규화)
+  const tbl=MODE==='gl'?'global_ad_creative_daily':'ad_creative_daily';
+  const isGL=MODE==='gl';
+  // 1) KR 만 CR_AD prefetch 인덱스 활용 (GL 은 prefetch 안 함 → 항상 per-adset fetch)
+  if(MODE==='kr'&&CR_AD&&CR_AD.length){
     if(!window._CR_BY_ADSET){
       const idx={};
       for(let i=0;i<CR_AD.length;i++){
@@ -823,21 +822,26 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     }
     records=window._CR_BY_ADSET[adsetId]||[];
   } else {
-    // 2) prefetch 미완료 시 fallback: per-adset fetch (in-flight 중복 방지)
+    // 2) per-adset fetch (in-flight 중복 방지) — KR prefetch 미완료 또는 GL 모드
+    const cacheKey=tbl+'::'+adsetId;
     if(!window._CR_PER_ADSET)window._CR_PER_ADSET={};
-    let entry=window._CR_PER_ADSET[adsetId];
+    let entry=window._CR_PER_ADSET[cacheKey];
     if(entry===undefined){
       const D90=_dateCutoff(90);
-      const url=SB_URL+'/rest/v1/ad_creative_daily?select=*&order=date.desc&adset_id=eq.'+encodeURIComponent(adsetId)+'&date=gte.'+D90+'&limit=1000';
+      const url=SB_URL+'/rest/v1/'+tbl+'?select=*&order=date.desc&adset_id=eq.'+encodeURIComponent(adsetId)+'&date=gte.'+D90+'&limit=1000';
       const p=fetch(url,{headers:SBH}).then(r=>r.json()).catch(()=>[]);
-      window._CR_PER_ADSET[adsetId]=p;
+      window._CR_PER_ADSET[cacheKey]=p;
       records=await p;
-      window._CR_PER_ADSET[adsetId]=records;
+      window._CR_PER_ADSET[cacheKey]=records;
     } else if(entry&&typeof entry.then==='function'){
       records=await entry;
     } else {
       records=entry;
     }
+  }
+  // GL 모드: spend_usd/revenue_usd/profit_usd → spend/revenue/profit 으로 정규화
+  if(isGL&&records&&records.length){
+    records=records.map(r=>({...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd}));
   }
   // 현재 추이차트 날짜 범위 (세트 row 와 동일하게)
   const days=parseInt(document.getElementById('tDays').value);
