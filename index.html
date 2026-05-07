@@ -737,7 +737,9 @@ function renderTrend(){
   const showChg=MODE==='kr'||MODE==='gl';
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
-  const list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 추이차트에서 숨김 (DOM 부담 감소)
+  if(MODE==='kr'||MODE==='gl')list=list.filter(a=>a._s>0||a._yS>0);
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4+(showChg?1:0);
   // Summary
