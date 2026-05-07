@@ -772,19 +772,14 @@ function renderTrend(){
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // KR: caret 클릭 → 인라인 소재 목록 펼침
-      // GL: caret 클릭 → Meta Ads Manager 에서 그 세트의 광고들 직접 열기
-      // ★ 디버그용 임시 스타일: 노란 배경+빨강 글씨로 무조건 눈에 띄게
       let caretBtn='';
-      const _dbgStyle='display:inline-block;background:#ffeb3b;color:#d32f2f;font-weight:900;font-size:14px;padding:2px 6px;margin-right:6px;cursor:pointer;text-decoration:none;border-radius:3px;border:1px solid #f57f17';
       if(MODE==='kr'){
-        caretBtn='<span class="ex-caret" style="'+_dbgStyle+'" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
+        caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
       } else if(MODE==='gl'){
         const accNum=a.acc?String(a.acc).replace(/^act_/,''):'';
         const accParam=accNum?('act='+accNum+'&'):'';
-        caretBtn='<a class="ex-caret" style="'+_dbgStyle+'" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?'+accParam+'selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
+        caretBtn='<a class="ex-caret" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?'+accParam+'selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
       }
-      // 디버그 로그: 첫 행에서만 MODE 와 caretBtn 길이 출력
-      if(!window._GL_DBG_LOGGED){window._GL_DBG_LOGGED=true;console.log('[GL caret debug] MODE=',MODE,' caretBtn.length=',caretBtn.length);}
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
