@@ -276,12 +276,11 @@ function rebuildLookups(){
 
 // ===== INIT =====
 async function initData(){
-  const [kr,gl,cr,vn,vc,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr,naver_kw,nsa_kw]=await Promise.all([
+  // 1단계: 핵심 데이터 — 페이지 즉시 응답에 필요한 것만
+  const [kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=await Promise.all([
     sbAll('ad_performance_daily','spend'),
     sbAll('global_ad_performance_daily','spend_usd').catch(()=>[]),
-    sbAll('ad_creative_daily','spend').catch(()=>[]),
     sbAll('vanced_ad_performance_daily','spend').catch(()=>[]),
-    sbAll('vanced_ad_creative_daily','spend').catch(()=>[]),
     sbQ('adset_highlights','select=*').catch(()=>[]),
     sbQ('global_adset_highlights','select=*').catch(()=>[]),
     sbQ('ad_creative_highlights','select=*').catch(()=>[]),
@@ -293,17 +292,29 @@ async function initData(){
     sbQ('google_ads_daily','select=*&order=date.desc').catch(()=>[]),
     sbQ('naver_daily_mp','select=*&order=date.desc').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
-    sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=20000').catch(()=>[]),
-    sbAll('naver_sa_keyword_daily','cost_vat').catch(()=>[]),
   ]);
-  KR_AD=kr;GL_AD=gl;CR_AD=cr;VN_AD=vn;VC_AD=vc;STRIPE_DATA=stripe;TOSS_DATA=toss;
-  NSA_DAILY=nsa;GOOGLE_ADS=google;NAVER_MP=naver_mp;TOSS_DAILY=toss_kr;NAVER_KW=naver_kw||[];NSA_KW=nsa_kw||[];
+  KR_AD=kr;GL_AD=gl;VN_AD=vn;CR_AD=[];VC_AD=[];NAVER_KW=[];NSA_KW=[];
+  STRIPE_DATA=stripe;TOSS_DATA=toss;
+  NSA_DAILY=nsa;GOOGLE_ADS=google;NAVER_MP=naver_mp;TOSS_DAILY=toss_kr;
   KR_HL={};krhl.forEach(x=>{KR_HL[x.adset_id]=x.highlight});
   GL_HL={};glhl.forEach(x=>{GL_HL[x.adset_id]=x.highlight});
   CR_HL={};crhl.forEach(x=>{CR_HL[x.ad_id]=x.highlight});
   VN_HL={};vnhl.forEach(x=>{VN_HL[x.adset_id]=x.highlight});
   VC_HL={};vchl.forEach(x=>{VC_HL[x.ad_id]=x.highlight});
-  switchMode('kr');
+  switchMode('kr'); // 핵심 데이터로 즉시 렌더
+  // 2단계: 큰 보조 테이블은 백그라운드 로드 (초기 인터랙션 차단 안 함)
+  window._BG_PROMISES = {
+    cr: sbAll('ad_creative_daily','spend').catch(()=>[]).then(d=>{
+      CR_AD=d;window._CR_BY_ADSET=null;
+      if(MODE==='cr'){AD=CR_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
+    }),
+    vc: sbAll('vanced_ad_creative_daily','spend').catch(()=>[]).then(d=>{
+      VC_AD=d;
+      if(MODE==='vc'){AD=VC_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
+    }),
+    nsakw: sbAll('naver_sa_keyword_daily','cost_vat').catch(()=>[]).then(d=>{NSA_KW=d||[];}),
+    naverkw: sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=20000').catch(()=>[]).then(d=>{NAVER_KW=d||[];}),
+  };
 }
 
 // ===== TAB ROUTING =====
@@ -681,7 +692,7 @@ function renderTrend(){
 
 // ===== TREND: Toggle 소재 (creatives) under a 세트 row (KR only) =====
 // CR_AD(ad_creative_daily)를 adset_id로 필터링해 소재 행을 펼침/접음
-function toggleAdsetCreatives(adsetId, anchorRow){
+async function toggleAdsetCreatives(adsetId, anchorRow){
   if(MODE!=='kr')return;
   const sel='tr.creative-expanded[data-parent="'+CSS.escape(adsetId)+'"]';
   const existing=document.querySelectorAll(sel);
@@ -690,6 +701,12 @@ function toggleAdsetCreatives(adsetId, anchorRow){
     existing.forEach(r=>r.remove());
     if(caret)caret.textContent='▶';
     return;
+  }
+  // CR_AD가 백그라운드 로딩 중이면 대기
+  if((!CR_AD||!CR_AD.length) && window._BG_PROMISES && window._BG_PROMISES.cr){
+    if(caret)caret.textContent='⌛';
+    await window._BG_PROMISES.cr;
+    if(caret)caret.textContent='▶';
   }
   // 현재 추이차트 날짜 범위 재계산
   const days=parseInt(document.getElementById('tDays').value);
