@@ -57,8 +57,9 @@ td.fx0{left:0}td.fx1{left:200px}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
+td.expandable-adset{position:relative;padding-left:18px!important}
 td.expandable-adset:hover{background:#fffde7!important}
-.ex-caret{display:inline-block;width:10px;font-size:9px;color:#888;margin-right:2px;transition:transform .15s}
+.ex-caret{position:absolute;left:4px;top:50%;transform:translateY(-50%);font-size:11px;color:#2563eb;font-weight:700;line-height:1}
 tr.creative-expanded td{border-top:1px dashed #e0c060!important}
 .filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px;flex-wrap:wrap;border-radius:4px;margin-bottom:4px}
 .filter select{padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px}
@@ -666,7 +667,7 @@ function renderTrend(){
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const ckEx=(MODE==='kr')?(' clickable expandable-adset" data-id="'+a.id+'" onclick="toggleAdsetCreatives(\''+a.id+'\',this.parentNode)" title="클릭하면 소재 목록 펼치기/접기"'):ck;
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
-      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ckEx+'>'+(MODE==='kr'?'<span class="ex-caret">▶</span> ':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ckEx+'>'+(MODE==='kr'?'<span class="ex-caret">▶</span>':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
   h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
