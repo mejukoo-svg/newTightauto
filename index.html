@@ -786,6 +786,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   if(existing.length){
     existing.forEach(r=>r.remove());
     if(caret)caret.textContent='▶';
+    delete anchorRow.dataset.crAll; // 다음 펼침은 기본 30개부터
     return;
   }
   // CR_AD가 백그라운드 로딩 중이면 대기
@@ -828,6 +829,12 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     c._cvr=(uc>0&&mp>0)?mp/uc*100:0;
   });
   list.sort((a,b)=>(b._s||0)-(a._s||0));
+  // 기본 30개만 노출 (DOM 폭증 방지). 'crAll' 데이터셋 플래그로 전체 보기 토글
+  const MAX=30;
+  const showAll=anchorRow.dataset.crAll==='1';
+  const fullCount=list.length;
+  const displayList=(showAll||fullCount<=MAX)?list:list.slice(0,MAX);
+  const hidden=fullCount-displayList.length;
   if(!list.length){
     const colSpan=anchorRow.cells.length;
     const tr=document.createElement('tr');
@@ -859,8 +866,9 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     const tr=document.createElement('tr');
     tr.className='creative-expanded cr-subtotal';
     tr.setAttribute('data-parent',adsetId);
+    const subLabel=hidden>0?('↳ 소재 소계 ('+fullCount+'개 중 상위 '+displayList.length+'개 지출순)'):('↳ 소재 소계 ('+fullCount+'개)');
     tr.innerHTML=
-      '<td class="cr-name">↳ 소재 소계 ('+list.length+'개)</td>'+
+      '<td class="cr-name">'+subLabel+'</td>'+
       '<td class="cr-name2"></td>'+
       '<td class="cr-id"></td>'+
       colChgPad+
@@ -868,8 +876,8 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       subCells;
     trs.push(tr);
   }
-  // 개별 소재 rows
-  list.forEach(c=>{
+  // 개별 소재 rows (displayList = 상위 N개 또는 전체)
+  displayList.forEach(c=>{
     const cells=dd.map(d=>{
       const r=c.d[d];const yd=d===yDay?' col-yday':'';
       if(!r||!r.spend)return'<td class="'+yd+'"></td>';
@@ -893,12 +901,31 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       cells;
     trs.push(tr);
   });
+  // 숨긴 소재가 있으면 '더 보기' 버튼 row
+  if(hidden>0){
+    const colSpan=anchorRow.cells.length;
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded cr-more';
+    tr.setAttribute('data-parent',adsetId);
+    tr.innerHTML='<td colspan="'+colSpan+'" style="text-align:center;background:#fff7e6;font-size:11px;padding:6px;border-top:1px dashed #e0c060"><a href="#" onclick="event.preventDefault();showAllCreatives(\''+adsetId+'\')" style="color:#1877f2;text-decoration:none;font-weight:600">▼ 나머지 '+hidden+'개 더 보기 (전체 '+fullCount+'개)</a></td>';
+    trs.push(tr);
+  }
   // anchorRow 바로 아래에 한 번에 삽입 (DocumentFragment로 reflow 최소화)
   const frag=document.createDocumentFragment();
   for(let i=0;i<trs.length;i++)frag.appendChild(trs[i]);
   anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
   if(caret)caret.textContent='▼';
   // 소재 row는 sticky가 아니므로 fx1 오프셋 재조정 불필요
+}
+
+// 전체 소재 보기 — '더 보기' 클릭 시 호출
+function showAllCreatives(adsetId){
+  const row=document.querySelector('tr[data-adset-row="'+CSS.escape(adsetId)+'"]');
+  if(!row)return;
+  row.dataset.crAll='1';
+  // 기존 expansion 제거 후 재펼침
+  document.querySelectorAll('tr.creative-expanded[data-parent="'+CSS.escape(adsetId)+'"]').forEach(r=>r.remove());
+  toggleAdsetCreatives(adsetId,row);
 }
 
 // ===== TREND WEEKLY (추이차트 주간) =====
