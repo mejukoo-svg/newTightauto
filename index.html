@@ -904,7 +904,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     const anEsc=(c.an||'').replace(/"/g,'&quot;');
     const accNum=String(c.acc||'').replace(/^act_/,'');
     const idCell=accNum
-      ? '<a href="https://business.facebook.com/adsmanager/manage/ads?act='+accNum+'&selected_ad_ids='+c.id+'&split_pane=preview" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 검토 (Meta Ads Manager)" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
+      ? '<a href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_ad_ids='+c.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 검토 (Meta Ads Manager)" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
     tr.innerHTML='<td colspan="'+totalCols+'" style="background:#fff8e1;padding:4px 12px 4px 32px;font-size:11px"><span style="color:#888">┗</span> <b style="color:#444" title="'+anEsc+'">'+(c.an||'')+'</b> <span style="color:#888;font-size:9px">'+idCell+'</span> &nbsp;&nbsp; '+fmtSummary(c._roas,c._p,c._s,c._r,c._cvr)+'</td>';
     trs.push(tr);
