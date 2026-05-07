@@ -697,15 +697,25 @@ function toggleAdsetCreatives(adsetId, anchorRow){
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   const showChg=true;
-  // CR_AD에서 해당 adset_id의 소재만 추출
+  // CR_AD를 adset_id로 한 번 인덱싱(캐시) — 클릭마다 57k+ 행 풀스캔 방지
+  if(!window._CR_BY_ADSET){
+    const idx={};
+    for(let i=0;i<CR_AD.length;i++){
+      const r=CR_AD[i];const k=r.adset_id;if(!k)continue;
+      (idx[k]||(idx[k]=[])).push(r);
+    }
+    window._CR_BY_ADSET=idx;
+  }
+  const ddSet=new Set(dd);
+  const records=window._CR_BY_ADSET[adsetId]||[];
   const byC={};
-  CR_AD.forEach(r=>{
-    if(r.adset_id!==adsetId)return;
-    if(!dd.includes(r.date))return;
+  for(let i=0;i<records.length;i++){
+    const r=records[i];
+    if(!ddSet.has(r.date))continue;
     const cid=r.ad_id;
     if(!byC[cid])byC[cid]={an:r.ad_name||'',id:cid,acc:r.ad_account_id||'',d:{}};
     byC[cid].d[r.date]=r;
-  });
+  }
   const list=Object.values(byC);
   list.forEach(c=>{
     let s=0,rv=0,p=0,uc=0,mp=0;
@@ -780,16 +790,20 @@ function toggleAdsetCreatives(adsetId, anchorRow){
       cells;
     trs.push(tr);
   });
-  // anchorRow 바로 아래에 삽입
-  let last=anchorRow;
-  trs.forEach(tr=>{last.after(tr);last=tr;});
+  // anchorRow 바로 아래에 한 번에 삽입 (DocumentFragment로 reflow 최소화)
+  const frag=document.createDocumentFragment();
+  for(let i=0;i<trs.length;i++)frag.appendChild(trs[i]);
+  anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
   if(caret)caret.textContent='▼';
-  // fx1 sticky 오프셋 재조정
+  // fx1 sticky 오프셋 재조정 (새 행에만 적용 — 기존 행은 이미 정렬돼 있음)
   requestAnimationFrame(()=>{
     const fx0=document.querySelector('#tTbl tbody td.fx0');
     if(!fx0)return;
-    const w=fx0.offsetWidth;
-    document.querySelectorAll('#tTbl td.fx1').forEach(td=>td.style.left=w+'px');
+    const w=fx0.offsetWidth+'px';
+    for(let i=0;i<trs.length;i++){
+      const fx1=trs[i].querySelector('td.fx1');
+      if(fx1)fx1.style.left=w;
+    }
   });
 }
 
