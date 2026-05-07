@@ -703,7 +703,7 @@ function toggleAdsetCreatives(adsetId, anchorRow){
     if(r.adset_id!==adsetId)return;
     if(!dd.includes(r.date))return;
     const cid=r.ad_id;
-    if(!byC[cid])byC[cid]={an:r.ad_name||'',id:cid,d:{}};
+    if(!byC[cid])byC[cid]={an:r.ad_name||'',id:cid,acc:r.ad_account_id||'',d:{}};
     byC[cid].d[r.date]=r;
   });
   const list=Object.values(byC);
@@ -767,10 +767,14 @@ function toggleAdsetCreatives(adsetId, anchorRow){
     tr.className='creative-expanded';
     tr.setAttribute('data-parent',adsetId);
     const anEsc=(c.an||'').replace(/"/g,'&quot;');
+    const accNum=String(c.acc||'').replace(/^act_/,'');
+    const idCell=accNum
+      ? '<a href="https://business.facebook.com/adsmanager/manage/ads?act='+accNum+'&selected_ad_ids='+c.id+'" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none;font-weight:500" title="Meta Ads Manager에서 광고 소재 열기" onclick="event.stopPropagation()">'+c.id+' ↗</a>'
+      : c.id;
     tr.innerHTML=
       '<td class="fx fx0" style="background:#fff8e1;padding-left:32px;font-size:11px;color:#666">┗ 소재</td>'+
       '<td class="fx fx1" style="background:#fff8e1;font-size:11px" title="'+anEsc+'">'+(c.an||'')+'</td>'+
-      '<td style="font-size:9px;color:#888;background:#fff8e1">'+c.id+'</td>'+
+      '<td style="font-size:9px;background:#fff8e1">'+idCell+'</td>'+
       colChgPad+
       '<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr)+'</td>'+
       cells;
