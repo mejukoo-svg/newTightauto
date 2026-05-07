@@ -799,14 +799,21 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   // 클릭 즉시 caret 변경 → 브라우저에 양보 → 사용자에 응답성 보장
   if(caret)caret.textContent='⌛';
   await new Promise(r=>requestAnimationFrame(r));
-  // 그 세트의 소재만 직접 fetch (per-adset 캐시) — sbAll의 페이지네이션 루프 우회
+  // 그 세트의 소재만 직접 fetch (per-adset, in-flight 중복 방지)
   if(!window._CR_PER_ADSET)window._CR_PER_ADSET={};
-  let records=window._CR_PER_ADSET[adsetId];
-  if(!records){
-    const D90=_dateCutoff(90); // 소재는 90일이면 충분
+  let entry=window._CR_PER_ADSET[adsetId];
+  let records;
+  if(entry===undefined){
+    const D90=_dateCutoff(90);
     const url=SB_URL+'/rest/v1/ad_creative_daily?select=*&order=date.desc&adset_id=eq.'+encodeURIComponent(adsetId)+'&date=gte.'+D90+'&limit=1000';
-    try{const r=await fetch(url,{headers:SBH});records=await r.json();}catch(e){records=[];}
-    window._CR_PER_ADSET[adsetId]=records;
+    const p=fetch(url,{headers:SBH}).then(r=>r.json()).catch(()=>[]);
+    window._CR_PER_ADSET[adsetId]=p; // 진행 중 promise 저장
+    records=await p;
+    window._CR_PER_ADSET[adsetId]=records; // 완료 후 결과로 덮어쓰기
+  } else if(entry&&typeof entry.then==='function'){
+    records=await entry; // 같은 세트가 진행 중이면 그 promise를 공유
+  } else {
+    records=entry; // 캐시된 결과
   }
   // 현재 추이차트 날짜 범위
   const days=parseInt(document.getElementById('tDays').value);
