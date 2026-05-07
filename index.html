@@ -38,9 +38,8 @@ th.filterable.filtered::after{content:'✕';font-size:9px;opacity:1;color:#d00}
 .col-filter .cf-all{border-bottom:1px solid #ddd;font-weight:600;padding:4px 10px}
 .panel{display:none;padding:10px 8px}
 .panel.active{display:block}
-.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px;contain:layout style paint}
+.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px}
 table{border-collapse:collapse;font-size:11px;width:max-content}
-#tTbl{contain:layout}
 th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
 th{background:#efefef;font-weight:600;font-size:10px;white-space:nowrap;position:sticky;top:0;z-index:10}
 th.sun{background:#ffe0e0;color:#c00}
@@ -58,8 +57,7 @@ td.fx0{left:0}td.fx1{left:200px}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
-td.expandable-adset:hover{background:#fffde7!important}
-.ex-caret{display:inline-block;color:#2563eb;font-weight:700;font-size:12px;margin-right:5px;min-width:11px}
+.ex-caret{display:inline-block;color:#2563eb;font-weight:700;font-size:12px;margin-right:5px;min-width:11px;cursor:pointer}
 /* 소재 펼침 행 — sticky 미적용으로 스크롤 성능 확보 */
 tr.creative-expanded>td{background:#fff8e1;border-top:1px dashed #e0c060}
 tr.creative-expanded.cr-subtotal>td{background:#fff3cd}
@@ -764,24 +762,18 @@ function renderTrend(){
     g.adsets.forEach(a=>{
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
-      const ckEx=(MODE==='kr')?(' clickable expandable-adset" data-id="'+a.id+'" onclick="toggleAdsetCreatives(\''+a.id+'\',this.parentNode)" title="클릭하면 소재 목록 펼치기/접기"'):ck;
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
-      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ckEx+'>'+(MODE==='kr'?'<span class="ex-caret">▶</span>':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+      // KR 모드만 caret에 직접 onclick (셀 전체가 아니라 caret만 클릭 영역)
+      const caretBtn=(MODE==='kr')?('<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>'):'';
+      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
-  const tbl=document.getElementById('tTbl');
-  // 새 렌더 전에 layout 잠금 해제 (이전 sticky width 측정 위해)
-  tbl.style.tableLayout='auto';tbl.style.width='';
-  h+='</tbody>';tbl.innerHTML=h;
+  h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
   requestAnimationFrame(()=>{
     const fx0=document.querySelector('#tTbl tbody td.fx0');
     if(!fx0)return;
     const w=fx0.offsetWidth;
     document.querySelectorAll('#tTbl td.fx1').forEach(td=>td.style.left=w+'px');
-    // ★ 핵심 perf fix: 컬럼 너비 측정 끝났으면 테이블 폭/레이아웃 고정
-    // → 이후 행 삽입(소재 펼침)이 전체 컬럼 reflow 트리거하지 않음
-    tbl.style.width=tbl.offsetWidth+'px';
-    tbl.style.tableLayout='fixed';
   });
 }
 
