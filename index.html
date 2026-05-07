@@ -774,9 +774,10 @@ function renderTrend(){
       let caretBtn='';
       if(MODE==='kr'){
         caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
-      } else if(MODE==='gl'&&a.acc){
-        const accNum=String(a.acc).replace(/^act_/,'');
-        caretBtn='<a class="ex-caret" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
+      } else if(MODE==='gl'){
+        const accNum=a.acc?String(a.acc).replace(/^act_/,''):'';
+        const accParam=accNum?('act='+accNum+'&'):'';
+        caretBtn='<a class="ex-caret" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?'+accParam+'selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
       }
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
