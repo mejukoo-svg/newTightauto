@@ -38,11 +38,9 @@ th.filterable.filtered::after{content:'✕';font-size:9px;opacity:1;color:#d00}
 .col-filter .cf-all{border-bottom:1px solid #ddd;font-weight:600;padding:4px 10px}
 .panel{display:none;padding:10px 8px}
 .panel.active{display:block}
-.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px;contain:layout style}
+.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px;contain:layout style paint}
 table{border-collapse:collapse;font-size:11px;width:max-content}
-#tTbl{contain:layout style}
-#tTbl tbody tr{contain:layout style}
-#tTbl td.fx{will-change:transform}
+#tTbl{contain:layout}
 th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
 th{background:#efefef;font-weight:600;font-size:10px;white-space:nowrap;position:sticky;top:0;z-index:10}
 th.sun{background:#ffe0e0;color:#c00}
@@ -789,20 +787,22 @@ function renderTrend(){
 // CR_AD(ad_creative_daily)를 adset_id로 필터링해 소재 행을 펼침/접음
 async function toggleAdsetCreatives(adsetId, anchorRow){
   if(MODE!=='kr')return;
+  const tbody=anchorRow.parentNode;
   const sel='tr.creative-expanded[data-parent="'+CSS.escape(adsetId)+'"]';
-  const existing=document.querySelectorAll(sel);
+  const existing=tbody.querySelectorAll(sel);
   const caret=anchorRow.querySelector('.ex-caret');
   if(existing.length){
     existing.forEach(r=>r.remove());
     if(caret)caret.textContent='▶';
-    delete anchorRow.dataset.crAll; // 다음 펼침은 기본 30개부터
+    delete anchorRow.dataset.crAll;
     return;
   }
+  // ★ 클릭 즉시 caret만 바꾸고 두 프레임 양보 → 브라우저가 paint하고 페이지 응답성 유지
+  if(caret)caret.textContent='⌛';
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
   // CR_AD가 백그라운드 로딩 중이면 대기
   if((!CR_AD||!CR_AD.length) && window._BG_PROMISES && window._BG_PROMISES.cr){
-    if(caret)caret.textContent='⌛';
     await window._BG_PROMISES.cr;
-    if(caret)caret.textContent='▶';
   }
   // 현재 추이차트 날짜 범위 재계산
   const days=parseInt(document.getElementById('tDays').value);
