@@ -770,14 +770,15 @@ function renderTrend(){
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // KR: caret 클릭 → 인라인 소재 목록 펼침
-      // GL: caret 클릭 → Meta Ads Manager 에서 그 세트의 광고들 직접 열기 (소재 데이터 미수집)
+      // GL: caret 클릭 → Meta Ads Manager 에서 그 세트의 광고들 직접 열기
       let caretBtn='';
+      const _caretStyle='display:inline-block;color:#2563eb;font-weight:700;font-size:13px;margin-right:5px;cursor:pointer;text-decoration:none';
       if(MODE==='kr'){
-        caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
+        caretBtn='<span class="ex-caret" style="'+_caretStyle+'" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
       } else if(MODE==='gl'){
         const accNum=a.acc?String(a.acc).replace(/^act_/,''):'';
         const accParam=accNum?('act='+accNum+'&'):'';
-        caretBtn='<a class="ex-caret" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?'+accParam+'selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
+        caretBtn='<a class="ex-caret" style="'+_caretStyle+'" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?'+accParam+'selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
       }
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
