@@ -839,12 +839,12 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       records=entry;
     }
   }
-  // 현재 추이차트 날짜 범위
+  // 현재 추이차트 날짜 범위 (세트 row 와 동일하게)
   const days=parseInt(document.getElementById('tDays').value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  const showChg=true;
+  const showChg=(MODE==='kr'||MODE==='gl');
   const ddSet=new Set(dd);
   const byC={};
   for(let i=0;i<records.length;i++){
@@ -863,49 +863,48 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     c._cvr=(uc>0&&mp>0)?mp/uc*100:0;
   });
   list.sort((a,b)=>(b._s||0)-(a._s||0));
-  // 기본 상위 10개만 노출 (lag 최소화). '더 보기' 클릭 시 전체 표시
   const MAX=10;
   const showAll=anchorRow.dataset.crAll==='1';
   const fullCount=list.length;
   const displayList=(showAll||fullCount<=MAX)?list:list.slice(0,MAX);
   const hidden=fullCount-displayList.length;
+  const totalCols=anchorRow.cells.length;
   if(!list.length){
-    const colSpan=anchorRow.cells.length;
     const tr=document.createElement('tr');
     tr.className='creative-expanded';
     tr.setAttribute('data-parent',adsetId);
-    tr.innerHTML='<td colspan="'+colSpan+'" style="padding:8px 24px;background:#fff7e6;color:#999;font-size:11px;font-style:italic">↳ 소재 데이터 없음 (ad_creative_daily 미수집 또는 해당 기간 미운영)</td>';
+    tr.innerHTML='<td colspan="'+totalCols+'" style="padding:8px 24px;background:#fff7e6;color:#999;font-size:11px;font-style:italic">↳ 소재 데이터 없음 (ad_creative_daily 미수집 또는 해당 기간 미운영)</td>';
     anchorRow.after(tr);
     if(caret)caret.textContent='▼';
     return;
   }
-  // 소계
+  // 소재 소계: 일자별 합산
+  const subDaily={};
+  dd.forEach(d=>{let s=0,r=0,p=0,uc=0,mp=0;
+    list.forEach(c=>{const x=c.d[d];if(x){s+=x.spend||0;r+=x.revenue||0;p+=x.profit||0;uc+=x.unique_clicks||0;mp+=x.results_mp||0;}});
+    subDaily[d]={s,r,p,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0}});
   let tS=0,tR=0,tP=0,tUc=0,tMp=0;
   list.forEach(c=>{tS+=c._s;tR+=c._r;tP+=c._p;
     d7.forEach(d=>{const r=c.d[d];if(r){tUc+=r.unique_clicks||0;tMp+=r.results_mp||0;}});
   });
   const tRoas=tS>0?tR/tS*100:0,tCvr=(tUc>0&&tMp>0)?tMp/tUc*100:0;
-  const totalCols=anchorRow.cells.length;
   const trs=[];
-  const fmtSummary=(roas,p,s,r,cvr)=>{
-    const pColor=p>=0?'#16a34a':'#dc2626';
-    return '<span style="color:#666">7일</span> · '+
-      'ROAS <b style="color:'+(roas>=100?'#16a34a':'#dc2626')+'">'+roas.toFixed(0)+'%</b> · '+
-      '이익 <b style="color:'+pColor+'">'+(p>=0?'+':'')+money(p)+'</b> · '+
-      '지출 <span style="color:#d00">'+money(s)+'</span> · '+
-      '매출 <span style="color:#00d">'+money(r)+'</span> · '+
-      'CVR <b>'+cvr.toFixed(2)+'%</b>';
-  };
-  // 소재 소계 row (colspan 으로 단일 셀)
+  // 1) 소재 소계 row — 세트 row 와 동일한 컬럼 구조
   {
     const tr=document.createElement('tr');
-    tr.className='creative-expanded cr-subtotal';
+    tr.className='creative-expanded cr-subtotal sr';
     tr.setAttribute('data-parent',adsetId);
     const subLabel=hidden>0?('↳ 소재 소계 ('+fullCount+'개 중 상위 '+displayList.length+'개)'):('↳ 소재 소계 ('+fullCount+'개)');
-    tr.innerHTML='<td colspan="'+totalCols+'" style="background:#fff3cd;padding:6px 12px;font-size:11px"><b>'+subLabel+'</b> &nbsp;&nbsp; '+fmtSummary(tRoas,tP,tS,tR,tCvr)+'</td>';
+    const subCells=dd.map(d=>{const t=subDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'" style="background:#fff3cd">'+MC(t.roas,t.p,t.s,t.r,t.cvr)+'</td>':'<td class="'+yd+'" style="background:#fff3cd"></td>'}).join('');
+    tr.innerHTML='<td class="fx fx0" style="background:#fff3cd;font-size:10px"><b>'+subLabel+'</b></td>'
+      +'<td class="fx fx1" style="background:#fff3cd"></td>'
+      +'<td style="background:#fff3cd"></td>'
+      +(showChg?'<td style="background:#fff3cd"></td>':'')
+      +'<td class="mc '+RC(tRoas)+'" style="background:#fff3cd">'+MC(tRoas,tP,tS,tR,tCvr)+'</td>'
+      +subCells;
     trs.push(tr);
   }
-  // 개별 소재 rows (compact: 한 줄에 colspan 단일 셀)
+  // 2) 개별 소재 rows — 세트 row 와 동일한 컬럼 구조
   displayList.forEach(c=>{
     const tr=document.createElement('tr');
     tr.className='creative-expanded';
@@ -915,24 +914,33 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     const idCell=accNum
       ? '<a href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_ad_ids='+c.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 (Meta Ads Manager) — 좌측 상단 검토 탭 클릭" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
-    tr.innerHTML='<td colspan="'+totalCols+'" style="background:#fff8e1;padding:4px 12px 4px 32px;font-size:11px"><span style="color:#888">┗</span> <b style="color:#444" title="'+anEsc+'">'+(c.an||'')+'</b> <span style="color:#888;font-size:9px">'+idCell+'</span> &nbsp;&nbsp; '+fmtSummary(c._roas,c._p,c._s,c._r,c._cvr)+'</td>';
+    const cells=dd.map(d=>{const r=c.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';return'<td class="mc '+RC(r.roas)+yd+'" style="background:#fff8e1">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
+    tr.innerHTML='<td class="fx fx0" style="background:#fff8e1"></td>'
+      +'<td class="fx fx1" style="background:#fff8e1;padding-left:24px" title="'+anEsc+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
+      +'<td style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
+      +(showChg?'<td style="background:#fff8e1"></td>':'')
+      +'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr)+'</td>'
+      +cells;
     trs.push(tr);
   });
-  // 숨긴 소재가 있으면 '더 보기' 버튼 row
+  // 3) 숨긴 소재 '더 보기' 버튼 row — colspan 으로 단일 셀
   if(hidden>0){
-    const colSpan=anchorRow.cells.length;
     const tr=document.createElement('tr');
     tr.className='creative-expanded cr-more';
     tr.setAttribute('data-parent',adsetId);
-    tr.innerHTML='<td colspan="'+colSpan+'" style="text-align:center;background:#fff7e6;font-size:11px;padding:6px;border-top:1px dashed #e0c060"><a href="#" onclick="event.preventDefault();showAllCreatives(\''+adsetId+'\')" style="color:#1877f2;text-decoration:none;font-weight:600">▼ 나머지 '+hidden+'개 더 보기 (전체 '+fullCount+'개)</a></td>';
+    tr.innerHTML='<td colspan="'+totalCols+'" style="text-align:center;background:#fff7e6;font-size:11px;padding:6px;border-top:1px dashed #e0c060"><a href="#" onclick="event.preventDefault();showAllCreatives(\''+adsetId+'\')" style="color:#1877f2;text-decoration:none;font-weight:600">▼ 나머지 '+hidden+'개 더 보기 (전체 '+fullCount+'개)</a></td>';
     trs.push(tr);
   }
-  // anchorRow 바로 아래에 한 번에 삽입 (DocumentFragment로 reflow 최소화)
   const frag=document.createDocumentFragment();
   for(let i=0;i<trs.length;i++)frag.appendChild(trs[i]);
   anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
+  // sticky fx1 의 left 오프셋을 세트 row 와 동일하게 맞춤
+  const fx0Ref=document.querySelector('#tTbl tbody td.fx0');
+  if(fx0Ref){
+    const w=fx0Ref.offsetWidth;
+    trs.forEach(tr=>tr.querySelectorAll('td.fx1').forEach(td=>td.style.left=w+'px'));
+  }
   if(caret)caret.textContent='▼';
-  // 소재 row는 sticky가 아니므로 fx1 오프셋 재조정 불필요
 }
 
 // 전체 소재 보기 — '더 보기' 클릭 시 호출
