@@ -222,6 +222,42 @@ async function sbAll(t,orderCol,extra){let p=0,a=[];const ex=extra||'';while(tru
 // 날짜 컷오프: 모든 추이/주간 탭 max 범위(16주=112일)를 커버하면서 불필요한 과거 데이터는 제외
 function _dateCutoff(days){const d=new Date();d.setDate(d.getDate()-days);return d.toISOString().slice(0,10)}
 
+// ===== IndexedDB 캐시 (stale-while-revalidate) =====
+const _IDB_NAME='tightauto_dash_cache_v1', _IDB_STORE='tables';
+let _idbP;
+function _idb(){
+  if(!_idbP) _idbP = new Promise(res=>{
+    try{
+      const r=indexedDB.open(_IDB_NAME,1);
+      r.onupgradeneeded=e=>{e.target.result.createObjectStore(_IDB_STORE)};
+      r.onsuccess=e=>res(e.target.result);
+      r.onerror=()=>res(null);
+    }catch(e){res(null)}
+  });
+  return _idbP;
+}
+async function cacheGet(k){
+  const db=await _idb(); if(!db) return null;
+  return new Promise(res=>{
+    try{
+      const tx=db.transaction(_IDB_STORE,'readonly');
+      const r=tx.objectStore(_IDB_STORE).get(k);
+      r.onsuccess=()=>res(r.result||null);
+      r.onerror=()=>res(null);
+    }catch(e){res(null)}
+  });
+}
+async function cacheSet(k,v){
+  const db=await _idb(); if(!db) return;
+  return new Promise(res=>{
+    try{
+      const tx=db.transaction(_IDB_STORE,'readwrite');
+      tx.objectStore(_IDB_STORE).put(v,k);
+      tx.oncomplete=res; tx.onerror=res;
+    }catch(e){res()}
+  });
+}
+
 function money(n){
   if(n==null||n===0)return'';
   return MODE==='gl'?'$'+Math.round(n).toLocaleString('en-US'):'₩'+Math.round(n).toLocaleString('ko-KR');
@@ -283,10 +319,34 @@ function rebuildLookups(){
 }
 
 // ===== INIT =====
+function _applyCore(d){
+  KR_AD=d.kr||[];GL_AD=d.gl||[];VN_AD=d.vn||[];
+  STRIPE_DATA=d.stripe||[];TOSS_DATA=d.toss||[];
+  NSA_DAILY=d.nsa||[];GOOGLE_ADS=d.google||[];
+  NAVER_MP=d.naver_mp||[];TOSS_DAILY=d.toss_kr||[];
+  KR_HL={};(d.krhl||[]).forEach(x=>{KR_HL[x.adset_id]=x.highlight});
+  GL_HL={};(d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight});
+  CR_HL={};(d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight});
+  VN_HL={};(d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight});
+  VC_HL={};(d.vchl||[]).forEach(x=>{VC_HL[x.ad_id]=x.highlight});
+}
 async function initData(){
-  const D180='&date=gte.'+_dateCutoff(180); // 180일 컷오프 (16주 max + 버퍼)
-  // 1단계: 핵심 데이터 — 페이지 즉시 응답에 필요한 것만 (날짜 필터로 양 축소)
-  const [kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=await Promise.all([
+  const D180='&date=gte.'+_dateCutoff(180);
+  // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
+  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','vchl','stripe','toss','nsa','google','naver_mp','toss_kr','cr','vc','nsa_kw','naver_kw'];
+  const cached={};
+  await Promise.all(cKeys.map(k=>cacheGet('t_'+k).then(v=>{cached[k]=v?.data;})));
+  let renderedFromCache=false;
+  if(cached.kr&&cached.kr.length){
+    _applyCore(cached);
+    CR_AD=cached.cr||[];VC_AD=cached.vc||[];
+    NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];
+    window._CR_BY_ADSET=null;
+    switchMode('kr'); // 캐시로 즉시 렌더
+    renderedFromCache=true;
+  }
+  // 2단계: 핵심 데이터 fresh fetch (캐시 있으면 백그라운드, 없으면 await)
+  const corePromise=Promise.all([
     sbAll('ad_performance_daily','spend',D180),
     sbAll('global_ad_performance_daily','spend_usd',D180).catch(()=>[]),
     sbAll('vanced_ad_performance_daily','spend',D180).catch(()=>[]),
@@ -301,28 +361,45 @@ async function initData(){
     sbQ('google_ads_daily','select=*&order=date.desc&limit=200').catch(()=>[]),
     sbQ('naver_daily_mp','select=*&order=date.desc&limit=200').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc&limit=200').catch(()=>[]),
-  ]);
-  KR_AD=kr;GL_AD=gl;VN_AD=vn;CR_AD=[];VC_AD=[];NAVER_KW=[];NSA_KW=[];
-  STRIPE_DATA=stripe;TOSS_DATA=toss;
-  NSA_DAILY=nsa;GOOGLE_ADS=google;NAVER_MP=naver_mp;TOSS_DAILY=toss_kr;
-  KR_HL={};krhl.forEach(x=>{KR_HL[x.adset_id]=x.highlight});
-  GL_HL={};glhl.forEach(x=>{GL_HL[x.adset_id]=x.highlight});
-  CR_HL={};crhl.forEach(x=>{CR_HL[x.ad_id]=x.highlight});
-  VN_HL={};vnhl.forEach(x=>{VN_HL[x.adset_id]=x.highlight});
-  VC_HL={};vchl.forEach(x=>{VC_HL[x.ad_id]=x.highlight});
-  switchMode('kr'); // 핵심 데이터로 즉시 렌더
-  // 2단계: 큰 보조 테이블도 180일치만 백그라운드 로드
-  window._BG_PROMISES = {
+  ]).then(arr=>{
+    const [kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=arr;
+    return {kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr};
+  });
+  const applyAndRerender=async(d)=>{
+    _applyCore(d);
+    if(renderedFromCache){
+      const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
+    } else {
+      CR_AD=[];VC_AD=[];NAVER_KW=[];NSA_KW=[];
+      switchMode('kr');
+    }
+    // 캐시 저장
+    const ts=Date.now();
+    Object.keys(d).forEach(k=>cacheSet('t_'+k,{ts,data:d[k]}));
+  };
+  if(renderedFromCache){
+    corePromise.then(applyAndRerender); // 백그라운드 갱신
+  } else {
+    await corePromise.then(applyAndRerender); // 첫 방문은 await
+  }
+  // 3단계: 큰 보조 테이블 (백그라운드, 캐시 저장)
+  window._BG_PROMISES={
     cr: sbAll('ad_creative_daily','spend',D180).catch(()=>[]).then(d=>{
       CR_AD=d;window._CR_BY_ADSET=null;
+      cacheSet('t_cr',{ts:Date.now(),data:d});
       if(MODE==='cr'){AD=CR_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
     }),
     vc: sbAll('vanced_ad_creative_daily','spend',D180).catch(()=>[]).then(d=>{
       VC_AD=d;
+      cacheSet('t_vc',{ts:Date.now(),data:d});
       if(MODE==='vc'){AD=VC_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
     }),
-    nsakw: sbAll('naver_sa_keyword_daily','cost_vat',D180).catch(()=>[]).then(d=>{NSA_KW=d||[];}),
-    naverkw: sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).catch(()=>[]).then(d=>{NAVER_KW=d||[];}),
+    nsakw: sbAll('naver_sa_keyword_daily','cost_vat',D180).catch(()=>[]).then(d=>{
+      NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});
+    }),
+    naverkw: sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).catch(()=>[]).then(d=>{
+      NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});
+    }),
   };
 }
 
