@@ -843,60 +843,43 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     if(caret)caret.textContent='▼';
     return;
   }
-  // 소계 row
+  // 소계
   let tS=0,tR=0,tP=0,tUc=0,tMp=0;
   list.forEach(c=>{tS+=c._s;tR+=c._r;tP+=c._p;
     d7.forEach(d=>{const r=c.d[d];if(r){tUc+=r.unique_clicks||0;tMp+=r.results_mp||0;}});
   });
   const tRoas=tS>0?tR/tS*100:0,tCvr=(tUc>0&&tMp>0)?tMp/tUc*100:0;
-  const colChgPad=showChg?'<td></td>':'';
+  const totalCols=anchorRow.cells.length;
   const trs=[];
-  // 소재 합계 row
+  const fmtSummary=(roas,p,s,r,cvr)=>{
+    const pColor=p>=0?'#16a34a':'#dc2626';
+    return '<span style="color:#666">7일</span> · '+
+      'ROAS <b style="color:'+(roas>=100?'#16a34a':'#dc2626')+'">'+roas.toFixed(0)+'%</b> · '+
+      '이익 <b style="color:'+pColor+'">'+(p>=0?'+':'')+money(p)+'</b> · '+
+      '지출 <span style="color:#d00">'+money(s)+'</span> · '+
+      '매출 <span style="color:#00d">'+money(r)+'</span> · '+
+      'CVR <b>'+cvr.toFixed(2)+'%</b>';
+  };
+  // 소재 소계 row (colspan 으로 단일 셀)
   {
-    const subCells=dd.map(d=>{
-      let s=0,r=0,p=0,uc=0,mp=0;
-      list.forEach(c=>{const x=c.d[d];if(x){s+=x.spend||0;r+=x.revenue||0;p+=x.profit||0;uc+=x.unique_clicks||0;mp+=x.results_mp||0;}});
-      const yd=d===yDay?' col-yday':'';
-      if(!s)return'<td class="'+yd+'"></td>';
-      const roas=r/s*100,cvr=(uc>0&&mp>0)?mp/uc*100:0;
-      return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,p,s,r,cvr)+'</td>';
-    }).join('');
     const tr=document.createElement('tr');
     tr.className='creative-expanded cr-subtotal';
     tr.setAttribute('data-parent',adsetId);
-    const subLabel=hidden>0?('↳ 소재 소계 ('+fullCount+'개 중 상위 '+displayList.length+'개 지출순)'):('↳ 소재 소계 ('+fullCount+'개)');
-    tr.innerHTML=
-      '<td class="cr-name">'+subLabel+'</td>'+
-      '<td class="cr-name2"></td>'+
-      '<td class="cr-id"></td>'+
-      colChgPad+
-      '<td class="mc '+RC(tRoas)+'">'+MC(tRoas,tP,tS,tR,tCvr)+'</td>'+
-      subCells;
+    const subLabel=hidden>0?('↳ 소재 소계 ('+fullCount+'개 중 상위 '+displayList.length+'개)'):('↳ 소재 소계 ('+fullCount+'개)');
+    tr.innerHTML='<td colspan="'+totalCols+'" style="background:#fff3cd;padding:6px 12px;font-size:11px"><b>'+subLabel+'</b> &nbsp;&nbsp; '+fmtSummary(tRoas,tP,tS,tR,tCvr)+'</td>';
     trs.push(tr);
   }
-  // 개별 소재 rows (displayList = 상위 N개 또는 전체)
+  // 개별 소재 rows (compact: 한 줄에 colspan 단일 셀)
   displayList.forEach(c=>{
-    const cells=dd.map(d=>{
-      const r=c.d[d];const yd=d===yDay?' col-yday':'';
-      if(!r||!r.spend)return'<td class="'+yd+'"></td>';
-      const roas=r.roas||0,cvr=r.cvr||0;
-      return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,r.profit,r.spend,r.revenue,cvr)+'</td>';
-    }).join('');
     const tr=document.createElement('tr');
     tr.className='creative-expanded';
     tr.setAttribute('data-parent',adsetId);
     const anEsc=(c.an||'').replace(/"/g,'&quot;');
     const accNum=String(c.acc||'').replace(/^act_/,'');
     const idCell=accNum
-      ? '<a href="https://business.facebook.com/adsmanager/manage/ads/edit?act='+accNum+'&selected_ad_ids='+c.id+'" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none;font-weight:500" title="광고 미리보기 (Meta Ads Manager)" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
+      ? '<a href="https://business.facebook.com/adsmanager/manage/ads/edit?act='+accNum+'&selected_ad_ids='+c.id+'" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 미리보기" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
-    tr.innerHTML=
-      '<td class="cr-name">┗ 소재</td>'+
-      '<td class="cr-name2" title="'+anEsc+'">'+(c.an||'')+'</td>'+
-      '<td class="cr-id">'+idCell+'</td>'+
-      colChgPad+
-      '<td class="mc '+RC(c._roas)+'">'+MC(c._roas,c._p,c._s,c._r,c._cvr)+'</td>'+
-      cells;
+    tr.innerHTML='<td colspan="'+totalCols+'" style="background:#fff8e1;padding:4px 12px 4px 32px;font-size:11px"><span style="color:#888">┗</span> <b style="color:#444" title="'+anEsc+'">'+(c.an||'')+'</b> <span style="color:#888;font-size:9px">'+idCell+'</span> &nbsp;&nbsp; '+fmtSummary(c._roas,c._p,c._s,c._r,c._cvr)+'</td>';
     trs.push(tr);
   });
   // 숨긴 소재가 있으면 '더 보기' 버튼 row
