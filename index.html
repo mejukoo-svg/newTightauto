@@ -740,7 +740,7 @@ function renderTrend(){
   const chgD2={};AD.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
   const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,d:{}};byA[rid].d[r.date]=r});
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 추이차트에서 숨김 (DOM 부담 감소)
   if(MODE==='kr'||MODE==='gl')list=list.filter(a=>a._s>0||a._yS>0);
@@ -769,8 +769,15 @@ function renderTrend(){
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
-      // KR 모드만 caret에 직접 onclick (셀 전체가 아니라 caret만 클릭 영역)
-      const caretBtn=(MODE==='kr')?('<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>'):'';
+      // KR: caret 클릭 → 인라인 소재 목록 펼침
+      // GL: caret 클릭 → Meta Ads Manager 에서 그 세트의 광고들 직접 열기 (소재 데이터 미수집)
+      let caretBtn='';
+      if(MODE==='kr'){
+        caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
+      } else if(MODE==='gl'&&a.acc){
+        const accNum=String(a.acc).replace(/^act_/,'');
+        caretBtn='<a class="ex-caret" href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_adset_ids='+a.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="이 세트의 광고들을 Meta Ads Manager 에서 보기">▶</a>';
+      }
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
