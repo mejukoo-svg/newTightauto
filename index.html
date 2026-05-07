@@ -212,7 +212,9 @@ let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
 // ===== HELPERS =====
 async function sbQ(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:SBH});return r.json()}
-async function sbAll(t,orderCol){let p=0,a=[];while(true){const r=await sbQ(t,'select=*&order=date.desc,'+orderCol+'.desc&limit=1000&offset='+p*1000);a=a.concat(r);if(r.length<1000)break;p++}return a}
+async function sbAll(t,orderCol,extra){let p=0,a=[];const ex=extra||'';while(true){const r=await sbQ(t,'select=*&order=date.desc,'+orderCol+'.desc&limit=1000&offset='+p*1000+ex);a=a.concat(r);if(r.length<1000)break;p++}return a}
+// 날짜 컷오프: 모든 추이/주간 탭 max 범위(16주=112일)를 커버하면서 불필요한 과거 데이터는 제외
+function _dateCutoff(days){const d=new Date();d.setDate(d.getDate()-days);return d.toISOString().slice(0,10)}
 
 function money(n){
   if(n==null||n===0)return'';
@@ -276,22 +278,23 @@ function rebuildLookups(){
 
 // ===== INIT =====
 async function initData(){
-  // 1단계: 핵심 데이터 — 페이지 즉시 응답에 필요한 것만
+  const D180='&date=gte.'+_dateCutoff(180); // 180일 컷오프 (16주 max + 버퍼)
+  // 1단계: 핵심 데이터 — 페이지 즉시 응답에 필요한 것만 (날짜 필터로 양 축소)
   const [kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=await Promise.all([
-    sbAll('ad_performance_daily','spend'),
-    sbAll('global_ad_performance_daily','spend_usd').catch(()=>[]),
-    sbAll('vanced_ad_performance_daily','spend').catch(()=>[]),
+    sbAll('ad_performance_daily','spend',D180),
+    sbAll('global_ad_performance_daily','spend_usd',D180).catch(()=>[]),
+    sbAll('vanced_ad_performance_daily','spend',D180).catch(()=>[]),
     sbQ('adset_highlights','select=*').catch(()=>[]),
     sbQ('global_adset_highlights','select=*').catch(()=>[]),
     sbQ('ad_creative_highlights','select=*').catch(()=>[]),
     sbQ('vanced_adset_highlights','select=*').catch(()=>[]),
     sbQ('vanced_creative_highlights','select=*').catch(()=>[]),
-    sbQ('global_stripe_daily','select=*&order=date.desc').catch(()=>[]),
-    sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
-    sbAll('naver_sa_daily','cost_vat').catch(()=>[]),
-    sbQ('google_ads_daily','select=*&order=date.desc').catch(()=>[]),
-    sbQ('naver_daily_mp','select=*&order=date.desc').catch(()=>[]),
-    sbQ('toss_daily_revenue','select=*&order=date.desc').catch(()=>[]),
+    sbQ('global_stripe_daily','select=*&order=date.desc&limit=200').catch(()=>[]),
+    sbQ('toss_daily_revenue','select=*&order=date.desc&limit=200').catch(()=>[]),
+    sbAll('naver_sa_daily','cost_vat',D180).catch(()=>[]),
+    sbQ('google_ads_daily','select=*&order=date.desc&limit=200').catch(()=>[]),
+    sbQ('naver_daily_mp','select=*&order=date.desc&limit=200').catch(()=>[]),
+    sbQ('toss_daily_revenue','select=*&order=date.desc&limit=200').catch(()=>[]),
   ]);
   KR_AD=kr;GL_AD=gl;VN_AD=vn;CR_AD=[];VC_AD=[];NAVER_KW=[];NSA_KW=[];
   STRIPE_DATA=stripe;TOSS_DATA=toss;
@@ -302,18 +305,18 @@ async function initData(){
   VN_HL={};vnhl.forEach(x=>{VN_HL[x.adset_id]=x.highlight});
   VC_HL={};vchl.forEach(x=>{VC_HL[x.ad_id]=x.highlight});
   switchMode('kr'); // 핵심 데이터로 즉시 렌더
-  // 2단계: 큰 보조 테이블은 백그라운드 로드 (초기 인터랙션 차단 안 함)
+  // 2단계: 큰 보조 테이블도 180일치만 백그라운드 로드
   window._BG_PROMISES = {
-    cr: sbAll('ad_creative_daily','spend').catch(()=>[]).then(d=>{
+    cr: sbAll('ad_creative_daily','spend',D180).catch(()=>[]).then(d=>{
       CR_AD=d;window._CR_BY_ADSET=null;
       if(MODE==='cr'){AD=CR_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
     }),
-    vc: sbAll('vanced_ad_creative_daily','spend').catch(()=>[]).then(d=>{
+    vc: sbAll('vanced_ad_creative_daily','spend',D180).catch(()=>[]).then(d=>{
       VC_AD=d;
       if(MODE==='vc'){AD=VC_AD.map(norm);const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);}
     }),
-    nsakw: sbAll('naver_sa_keyword_daily','cost_vat').catch(()=>[]).then(d=>{NSA_KW=d||[];}),
-    naverkw: sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=20000').catch(()=>[]).then(d=>{NAVER_KW=d||[];}),
+    nsakw: sbAll('naver_sa_keyword_daily','cost_vat',D180).catch(()=>[]).then(d=>{NSA_KW=d||[];}),
+    naverkw: sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).catch(()=>[]).then(d=>{NAVER_KW=d||[];}),
   };
 }
 
