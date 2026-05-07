@@ -779,7 +779,7 @@ function toggleAdsetCreatives(adsetId, anchorRow){
     const anEsc=(c.an||'').replace(/"/g,'&quot;');
     const accNum=String(c.acc||'').replace(/^act_/,'');
     const idCell=accNum
-      ? '<a href="https://business.facebook.com/adsmanager/manage/ads?act='+accNum+'&selected_ad_ids='+c.id+'" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none;font-weight:500" title="Meta Ads Manager에서 광고 소재 열기" onclick="event.stopPropagation()">'+c.id+' ↗</a>'
+      ? '<a href="https://business.facebook.com/adsmanager/manage/ads/edit?act='+accNum+'&selected_ad_ids='+c.id+'" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none;font-weight:500" title="광고 미리보기 (Meta Ads Manager)" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
     tr.innerHTML=
       '<td class="fx fx0" style="background:#fff8e1;padding-left:32px;font-size:11px;color:#666">┗ 소재</td>'+
