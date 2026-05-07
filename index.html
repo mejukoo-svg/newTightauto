@@ -38,8 +38,11 @@ th.filterable.filtered::after{content:'✕';font-size:9px;opacity:1;color:#d00}
 .col-filter .cf-all{border-bottom:1px solid #ddd;font-weight:600;padding:4px 10px}
 .panel{display:none;padding:10px 8px}
 .panel.active{display:block}
-.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px}
+.sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px;contain:layout style}
 table{border-collapse:collapse;font-size:11px;width:max-content}
+#tTbl{contain:layout style}
+#tTbl tbody tr{contain:layout style}
+#tTbl td.fx{will-change:transform}
 th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
 th{background:#efefef;font-weight:600;font-size:10px;white-space:nowrap;position:sticky;top:0;z-index:10}
 th.sun{background:#ffe0e0;color:#c00}
@@ -766,13 +769,19 @@ function renderTrend(){
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ckEx+'>'+(MODE==='kr'?'<span class="ex-caret">▶</span>':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
-  h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
-  // Adjust .fx1 sticky offset based on actual .fx0 column width (auto-fit)
+  const tbl=document.getElementById('tTbl');
+  // 새 렌더 전에 layout 잠금 해제 (이전 sticky width 측정 위해)
+  tbl.style.tableLayout='auto';tbl.style.width='';
+  h+='</tbody>';tbl.innerHTML=h;
   requestAnimationFrame(()=>{
     const fx0=document.querySelector('#tTbl tbody td.fx0');
     if(!fx0)return;
     const w=fx0.offsetWidth;
     document.querySelectorAll('#tTbl td.fx1').forEach(td=>td.style.left=w+'px');
+    // ★ 핵심 perf fix: 컬럼 너비 측정 끝났으면 테이블 폭/레이아웃 고정
+    // → 이후 행 삽입(소재 펼침)이 전체 컬럼 reflow 트리거하지 않음
+    tbl.style.width=tbl.offsetWidth+'px';
+    tbl.style.tableLayout='fixed';
   });
 }
 
@@ -829,8 +838,8 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     c._cvr=(uc>0&&mp>0)?mp/uc*100:0;
   });
   list.sort((a,b)=>(b._s||0)-(a._s||0));
-  // 기본 30개만 노출 (DOM 폭증 방지). 'crAll' 데이터셋 플래그로 전체 보기 토글
-  const MAX=30;
+  // 기본 상위 10개만 노출 (lag 최소화). '더 보기' 클릭 시 전체 표시
+  const MAX=10;
   const showAll=anchorRow.dataset.crAll==='1';
   const fullCount=list.length;
   const displayList=(showAll||fullCount<=MAX)?list:list.slice(0,MAX);
