@@ -210,6 +210,7 @@ const HL_CONFIG={
 
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
+console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+');
 let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],VC_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let NSA_DAILY=[],GOOGLE_ADS=[],NAVER_MP=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={},VC_HL={};
@@ -731,6 +732,7 @@ function drawRevDaily(){
 
 // ===== TREND (상품별 그룹) =====
 function renderTrend(){
+  console.log('[DBG] renderTrend called, MODE=',MODE);
   const days=parseInt(document.getElementById('tDays').value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
