@@ -57,6 +57,9 @@ td.fx0{left:0}td.fx1{left:200px}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
+td.expandable-adset:hover{background:#fffde7!important}
+.ex-caret{display:inline-block;width:10px;font-size:9px;color:#888;margin-right:2px;transition:transform .15s}
+tr.creative-expanded td{border-top:1px dashed #e0c060!important}
 .filter{padding:8px 12px;background:#f8f9fa;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;font-size:11px;flex-wrap:wrap;border-radius:4px;margin-bottom:4px}
 .filter select{padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px}
 th.h-meta{background:#eee}th.h-mp{background:#999;color:#fff}th.h-budget{background:#d9d2e9}
@@ -661,12 +664,123 @@ function renderTrend(){
     g.adsets.forEach(a=>{
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
+      const ckEx=(MODE==='kr')?(' clickable expandable-adset" data-id="'+a.id+'" onclick="toggleAdsetCreatives(\''+a.id+'\',this.parentNode)" title="클릭하면 소재 목록 펼치기/접기"'):ck;
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
-      h+='<tr><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ckEx+'>'+(MODE==='kr'?'<span class="ex-caret">▶</span> ':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
   h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
   // Adjust .fx1 sticky offset based on actual .fx0 column width (auto-fit)
+  requestAnimationFrame(()=>{
+    const fx0=document.querySelector('#tTbl tbody td.fx0');
+    if(!fx0)return;
+    const w=fx0.offsetWidth;
+    document.querySelectorAll('#tTbl td.fx1').forEach(td=>td.style.left=w+'px');
+  });
+}
+
+// ===== TREND: Toggle 소재 (creatives) under a 세트 row (KR only) =====
+// CR_AD(ad_creative_daily)를 adset_id로 필터링해 소재 행을 펼침/접음
+function toggleAdsetCreatives(adsetId, anchorRow){
+  if(MODE!=='kr')return;
+  const sel='tr.creative-expanded[data-parent="'+CSS.escape(adsetId)+'"]';
+  const existing=document.querySelectorAll(sel);
+  const caret=anchorRow.querySelector('.ex-caret');
+  if(existing.length){
+    existing.forEach(r=>r.remove());
+    if(caret)caret.textContent='▶';
+    return;
+  }
+  // 현재 추이차트 날짜 범위 재계산
+  const days=parseInt(document.getElementById('tDays').value);
+  const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  const showChg=true;
+  // CR_AD에서 해당 adset_id의 소재만 추출
+  const byC={};
+  CR_AD.forEach(r=>{
+    if(r.adset_id!==adsetId)return;
+    if(!dd.includes(r.date))return;
+    const cid=r.ad_id;
+    if(!byC[cid])byC[cid]={an:r.ad_name||'',id:cid,d:{}};
+    byC[cid].d[r.date]=r;
+  });
+  const list=Object.values(byC);
+  list.forEach(c=>{
+    let s=0,rv=0,p=0,uc=0,mp=0;
+    d7.forEach(d=>{const r=c.d[d];if(r){s+=r.spend||0;rv+=r.revenue||0;p+=r.profit||0;uc+=r.unique_clicks||0;mp+=r.results_mp||0;}});
+    c._s=s;c._r=rv;c._p=p;
+    c._roas=s>0?rv/s*100:0;
+    c._cvr=(uc>0&&mp>0)?mp/uc*100:0;
+  });
+  list.sort((a,b)=>(b._s||0)-(a._s||0));
+  if(!list.length){
+    const colSpan=anchorRow.cells.length;
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded';
+    tr.setAttribute('data-parent',adsetId);
+    tr.innerHTML='<td colspan="'+colSpan+'" style="padding:8px 24px;background:#fff7e6;color:#999;font-size:11px;font-style:italic">↳ 소재 데이터 없음 (ad_creative_daily 미수집 또는 해당 기간 미운영)</td>';
+    anchorRow.after(tr);
+    if(caret)caret.textContent='▼';
+    return;
+  }
+  // 소계 row
+  let tS=0,tR=0,tP=0,tUc=0,tMp=0;
+  list.forEach(c=>{tS+=c._s;tR+=c._r;tP+=c._p;
+    d7.forEach(d=>{const r=c.d[d];if(r){tUc+=r.unique_clicks||0;tMp+=r.results_mp||0;}});
+  });
+  const tRoas=tS>0?tR/tS*100:0,tCvr=(tUc>0&&tMp>0)?tMp/tUc*100:0;
+  const colChgPad=showChg?'<td style="background:#fff8e1"></td>':'';
+  const trs=[];
+  // 소재 합계 row
+  {
+    const subCells=dd.map(d=>{
+      let s=0,r=0,p=0,uc=0,mp=0;
+      list.forEach(c=>{const x=c.d[d];if(x){s+=x.spend||0;r+=x.revenue||0;p+=x.profit||0;uc+=x.unique_clicks||0;mp+=x.results_mp||0;}});
+      const yd=d===yDay?' col-yday':'';
+      if(!s)return'<td class="'+yd+'" style="background:#fff3cd"></td>';
+      const roas=r/s*100,cvr=(uc>0&&mp>0)?mp/uc*100:0;
+      return'<td class="mc '+RC(roas)+yd+'" style="background:#fff3cd">'+MC(roas,p,s,r,cvr)+'</td>';
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded';
+    tr.setAttribute('data-parent',adsetId);
+    tr.innerHTML=
+      '<td class="fx fx0" style="background:#fff3cd;padding-left:24px;font-size:11px;font-weight:700;color:#444">↳ 소재 소계 ('+list.length+'개)</td>'+
+      '<td class="fx fx1" style="background:#fff3cd;font-size:11px"></td>'+
+      '<td style="font-size:9px;background:#fff3cd"></td>'+
+      colChgPad+
+      '<td class="mc '+RC(tRoas)+'" style="background:#fff3cd">'+MC(tRoas,tP,tS,tR,tCvr)+'</td>'+
+      subCells;
+    trs.push(tr);
+  }
+  // 개별 소재 rows
+  list.forEach(c=>{
+    const cells=dd.map(d=>{
+      const r=c.d[d];const yd=d===yDay?' col-yday':'';
+      if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';
+      const roas=r.roas||0,cvr=r.cvr||0;
+      return'<td class="mc '+RC(roas)+yd+'" style="background:#fff8e1">'+MC(roas,r.profit,r.spend,r.revenue,cvr)+'</td>';
+    }).join('');
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded';
+    tr.setAttribute('data-parent',adsetId);
+    const anEsc=(c.an||'').replace(/"/g,'&quot;');
+    tr.innerHTML=
+      '<td class="fx fx0" style="background:#fff8e1;padding-left:32px;font-size:11px;color:#666">┗ 소재</td>'+
+      '<td class="fx fx1" style="background:#fff8e1;font-size:11px" title="'+anEsc+'">'+(c.an||'')+'</td>'+
+      '<td style="font-size:9px;color:#888;background:#fff8e1">'+c.id+'</td>'+
+      colChgPad+
+      '<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr)+'</td>'+
+      cells;
+    trs.push(tr);
+  });
+  // anchorRow 바로 아래에 삽입
+  let last=anchorRow;
+  trs.forEach(tr=>{last.after(tr);last=tr;});
+  if(caret)caret.textContent='▼';
+  // fx1 sticky 오프셋 재조정
   requestAnimationFrame(()=>{
     const fx0=document.querySelector('#tTbl tbody td.fx0');
     if(!fx0)return;
