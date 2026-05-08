@@ -328,11 +328,13 @@ function _applyCore(d){
   STRIPE_DATA=d.stripe||[];TOSS_DATA=d.toss||[];
   NSA_DAILY=d.nsa||[];GOOGLE_ADS=d.google||[];
   NAVER_MP=d.naver_mp||[];TOSS_DAILY=d.toss_kr||[];
-  KR_HL={};(d.krhl||[]).forEach(x=>{KR_HL[x.adset_id]=x.highlight});
-  GL_HL={};(d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight});
-  CR_HL={};(d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight});
-  VN_HL={};(d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight});
-  VC_HL={};(d.vchl||[]).forEach(x=>{VC_HL[x.ad_id]=x.highlight});
+  // 하이라이트: in-place merge — HIGHLIGHTS 참조 identity 유지 + 로컬 쓰기(저장 직후) 보존
+  // (이전엔 KR_HL={} 으로 재할당해서 HIGHLIGHTS 가 옛 객체에 dangle → 모드 전환/refresh 시 사라짐)
+  (d.krhl||[]).forEach(x=>{KR_HL[x.adset_id]=x.highlight});
+  (d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight});
+  (d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight});
+  (d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight});
+  (d.vchl||[]).forEach(x=>{VC_HL[x.ad_id]=x.highlight});
 }
 async function initData(){
   const D180='&date=gte.'+_dateCutoff(180);
