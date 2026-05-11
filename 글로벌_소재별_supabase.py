@@ -87,10 +87,10 @@ def make_date_key(dt):
     return f"{dt.year % 100:02d}/{dt.month:02d}/{dt.day:02d}"
 
 SKIP_WORDS = {"tw","kr","hk","my","sg","id","jp","th","vn","ph","asia","taiwan","japan","hongkong","korea",
-    "singapore","malaysia","broad","interest","lookalike","retarget","custom","asc","cbo","abo",
+    "singapore","malaysia","thailand","broad","interest","lookalike","retarget","custom","asc","cbo","abo",
     "dpa","advantage","campaign","adset","ad","ads","set","purchase","conversion","traffic",
     "v1","v2","v3","v4","v5","test","new","old","copy","sajutight","ttsaju","saju","tight",
-    "대만","일본","홍콩","한국","국내","글로벌","台灣","台湾","日本","香港"}
+    "대만","일본","홍콩","한국","국내","글로벌","태국","台灣","台湾","日本","香港"}
 
 def extract_product(adset_name, campaign_name=None):
     for name in [campaign_name, adset_name]:
