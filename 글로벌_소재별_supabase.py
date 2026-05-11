@@ -63,8 +63,8 @@ if FULL_REFRESH:
 DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 
 # 환율 폴백
-FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0}
-CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌"}
+FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5}
+CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국"}
 
 
 # =========================================================
@@ -108,6 +108,7 @@ def detect_currency(adset_name, campaign_name=None):
         if "jp" in parts or "japan" in parts or "일본" in n: return "JPY"
         if "hk" in parts or "hongkong" in parts or "홍콩" in n: return "HKD"
         if "kr" in parts or "korea" in parts or "한국" in n or "국내" in n: return "KRW"
+        if "th" in parts or "thailand" in parts or "태국" in n: return "THB"
         if "tw" in parts or "taiwan" in parts or "대만" in n or "台灣" in n: return "TWD"
     return "TWD"
 
@@ -332,7 +333,7 @@ def main():
     # 1) 환율 조회
     log.info("\n1단계: 환율 조회")
     rate_start = DATA_REFRESH_START - timedelta(days=7)
-    for curr in ["TWD", "JPY", "HKD", "KRW"]:
+    for curr in ["TWD", "JPY", "HKD", "KRW", "THB"]:
         usd_rates[curr] = fetch_usd_rates(rate_start, TODAY, curr)
 
     # 2) Meta Insights (ad level)
@@ -448,10 +449,15 @@ def main():
             spend = mr['spend']  # USD
             currency = detect_currency(mr['adset_name'], mr['campaign_name'])
             country = CURRENCY_TO_COUNTRY.get(currency, '글로벌')
-            # Mixpanel 결제 amount: 글로벌은 TWD 기준 저장 (TW base price)
+            # Mixpanel 결제 amount: 시장별 현지통화 (TW/HK/JP/US=TWD base, TH=THB, KR=KRW)
             mpc = mp_count_map.get((dk, ad_id), 0)
             mpv_local = mp_value_map.get((dk, ad_id), 0.0)
-            mp_currency = "KRW" if currency == "KRW" else "TWD"
+            if currency == "KRW":
+                mp_currency = "KRW"
+            elif currency == "THB":
+                mp_currency = "THB"
+            else:
+                mp_currency = "TWD"
             revenue = local_to_usd(float(mpv_local), mp_currency, dk)
             profit = revenue - spend
             roas = (revenue / spend * 100) if spend > 0 else 0
