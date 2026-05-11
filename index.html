@@ -835,7 +835,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     let entry=window._CR_PER_ADSET[cacheKey];
     if(entry===undefined){
       const D90=_dateCutoff(90);
-      const url=SB_URL+'/rest/v1/'+tbl+'?select=*&order=date.desc&adset_id=eq.'+encodeURIComponent(adsetId)+'&date=gte.'+D90+'&limit=1000';
+      const url=SB_URL+'/rest/v1/'+tbl+'?select=*&order=date.desc&adset_id=eq.'+encodeURIComponent(adsetId)+'&date=gte.'+D90+'&limit=100000';
       const p=fetch(url,{headers:SBH}).then(r=>r.json()).catch(()=>[]);
       window._CR_PER_ADSET[cacheKey]=p;
       records=await p;
@@ -874,11 +874,9 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     c._cvr=(uc>0&&mp>0)?mp/uc*100:0;
   });
   list.sort((a,b)=>(b._s||0)-(a._s||0));
-  const MAX=10;
-  const showAll=anchorRow.dataset.crAll==='1';
   const fullCount=list.length;
-  const displayList=(showAll||fullCount<=MAX)?list:list.slice(0,MAX);
-  const hidden=fullCount-displayList.length;
+  const displayList=list;
+  const hidden=0;
   const totalCols=anchorRow.cells.length;
   if(!list.length){
     const tr=document.createElement('tr');
@@ -905,7 +903,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     const tr=document.createElement('tr');
     tr.className='creative-expanded cr-subtotal sr';
     tr.setAttribute('data-parent',adsetId);
-    const subLabel=hidden>0?('↳ 소재 소계 ('+fullCount+'개 중 상위 '+displayList.length+'개)'):('↳ 소재 소계 ('+fullCount+'개)');
+    const subLabel='↳ 소재 소계 ('+fullCount+'개)';
     const subCells=dd.map(d=>{const t=subDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'" style="background:#fff3cd">'+MC(t.roas,t.p,t.s,t.r,t.cvr)+'</td>':'<td class="'+yd+'" style="background:#fff3cd"></td>'}).join('');
     tr.innerHTML='<td class="fx fx0" style="background:#fff3cd;font-size:10px"><b>'+subLabel+'</b></td>'
       +'<td class="fx fx1" style="background:#fff3cd"></td>'
@@ -934,14 +932,6 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       +cells;
     trs.push(tr);
   });
-  // 3) 숨긴 소재 '더 보기' 버튼 row — colspan 으로 단일 셀
-  if(hidden>0){
-    const tr=document.createElement('tr');
-    tr.className='creative-expanded cr-more';
-    tr.setAttribute('data-parent',adsetId);
-    tr.innerHTML='<td colspan="'+totalCols+'" style="text-align:center;background:#fff7e6;font-size:11px;padding:6px;border-top:1px dashed #e0c060"><a href="#" onclick="event.preventDefault();showAllCreatives(\''+adsetId+'\')" style="color:#1877f2;text-decoration:none;font-weight:600">▼ 나머지 '+hidden+'개 더 보기 (전체 '+fullCount+'개)</a></td>';
-    trs.push(tr);
-  }
   const frag=document.createDocumentFragment();
   for(let i=0;i<trs.length;i++)frag.appendChild(trs[i]);
   anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
@@ -1632,6 +1622,12 @@ function renderGlobalRevenue(){
   dates.forEach(d=>{const bd=byDate[d]||{};const t=(bd['대만']?.revenue_usd||0)+(bd['홍콩']?.revenue_usd||0)+(bd['일본']?.revenue_usd||0)+(bd['태국']?.revenue_usd||0);dailyTotals[d]=t;grandTotal+=t;
     h+='<td style="text-align:right">$'+F(t)+'</td>'});
   h+='<td style="text-align:right">$'+F(grandTotal)+'</td></tr>';
+  // 메타지출 행 (광고지출 USD)
+  h+='<tr style="background:#f4cccc;font-weight:700"><td style="text-align:left">메타지출</td>';
+  let mtTotal=0;
+  dates.forEach(d=>{const spend=spendByDate[d]||0;mtTotal+=spend;
+    h+='<td style="text-align:right">$'+F(spend)+'</td>'});
+  h+='<td style="text-align:right">$'+F(mtTotal)+'</td></tr>';
   // 순이익 행 (종합매출 USD - 광고지출 USD)
   h+='<tr style="background:#d9ead3;font-weight:700"><td style="text-align:left">순이익</td>';
   let npTotal=0;
