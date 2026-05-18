@@ -283,8 +283,13 @@ function MC(roas,profit,spend,revenue,cvr){
   return'<div class="r">'+roas.toFixed(0)+'</div><div class="'+pc+'">'+money(profit)+'</div><div class="s">-'+money(spend)+'</div><div class="rv">'+money(revenue)+'</div><div class="cv">'+P(cvr)+'</div>';
 }
 // Normalize row: global→common, creative→common (ad_id as key)
+const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
+  if((MODE==='vn'||MODE==='vc')&&(!r.product||r.product==='etc')){
+    const m=(r.campaign_name||'').match(/^\[Vanced\]_([^_]+)_/i);
+    if(m){const raw=m[1];return{...r,product:VANCED_PRODUCT_MAP[raw]||raw}}
+  }
   return r;
 }
 // Row ID: adset_id for kr/gl, ad_id for creative
@@ -310,7 +315,8 @@ function switchMode(m){
     if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=CR_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
   else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL;
     // ▶ 펼침용 vc(소재) idle prefetch — KR 이 cr 을 prefetch 하는 것과 동일 패턴
-    if(!VC_AD.length){const _idle=window.requestIdleCallback||((cb)=>setTimeout(cb,3000));_idle(()=>{ensureBigTable('vc');},{timeout:30000});}}
+    // 캐시가 있어도(VC_AD.length>0) 항상 fresh fetch 트리거: 캐시에 없는 신규 소재 누락 방지
+    const _idle=window.requestIdleCallback||((cb)=>setTimeout(cb,3000));_idle(()=>{ensureBigTable('vc');},{timeout:30000});}
   else if(m==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL;
     if(!VC_AD.length)ensureBigTable('vc').then(()=>{AD=VC_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
   rebuildLookups();
@@ -384,6 +390,16 @@ async function initData(){
   const applyAndRerender=async(d)=>{
     _applyCore(d);
     if(renderedFromCache){
+      // AD 는 switchMode 시점의 스냅샷이므로 fresh VN_AD/KR_AD 갱신 후 재할당 필요
+      // 안 그러면 DATES 가 stale 캐시 기준이라 today/yesterday 가 dd 윈도우에서 누락됨
+      if(MODE==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
+      else if(MODE==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
+      else if(MODE==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
+      else if(MODE==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
+      else if(MODE==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL}
+      rebuildLookups();
+      // 펼침 인덱스도 무효화 (다음 클릭 시 fresh 로 재구축)
+      window._CR_BY_ADSET=null;window._VC_BY_ADSET=null;
       const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
     } else {
       CR_AD=[];VC_AD=[];NAVER_KW=[];NSA_KW=[];
@@ -410,8 +426,8 @@ async function ensureBigTable(name){
   if(window._BIG_LOADING[name])return window._BIG_LOADING[name];
   const D180='&date=gte.'+_dateCutoff(180);
   const tasks={
-    cr:()=>sbAll('ad_creative_daily','spend',D180).then(d=>{CR_AD=d;cacheSet('t_cr',{ts:Date.now(),data:d});}),
-    vc:()=>sbAll('vanced_ad_creative_daily','spend',D180).then(d=>{VC_AD=d;cacheSet('t_vc',{ts:Date.now(),data:d});}),
+    cr:()=>sbAll('ad_creative_daily','spend',D180).then(d=>{CR_AD=d;window._CR_BY_ADSET=null;cacheSet('t_cr',{ts:Date.now(),data:d});}),
+    vc:()=>sbAll('vanced_ad_creative_daily','spend',D180).then(d=>{VC_AD=d;window._VC_BY_ADSET=null;cacheSet('t_vc',{ts:Date.now(),data:d});}),
     nsakw:()=>sbAll('naver_sa_keyword_daily','cost_vat',D180).then(d=>{NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});}),
     naverkw:()=>sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).then(d=>{NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});}),
   };
@@ -886,9 +902,12 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   // KR: ad_creative_daily, GL: global_ad_creative_daily (USD 필드 정규화), VN: vanced_ad_creative_daily
   const tbl=MODE==='gl'?'global_ad_creative_daily':(MODE==='vn'?'vanced_ad_creative_daily':'ad_creative_daily');
   const isGL=MODE==='gl';
-  // 1) KR/VN prefetch 인덱스 활용 (GL 은 prefetch 안 함 → 항상 per-adset fetch)
-  const prefetchSrc=MODE==='kr'?CR_AD:(MODE==='vn'?VC_AD:null);
-  const prefetchKey=MODE==='kr'?'_CR_BY_ADSET':(MODE==='vn'?'_VC_BY_ADSET':null);
+  // 1) KR 만 prefetch 인덱스 활용. VN/GL 은 항상 per-adset 직접 fetch (DB ground truth).
+  //    VN 은 ensureBigTable('vc') 의 silent fail 로 인한 stale 데이터 회귀를 원천 차단.
+  const bigKey=MODE==='kr'?'cr':null;
+  const freshLoaded=bigKey && window._BIG_LOADED && window._BIG_LOADED[bigKey];
+  const prefetchSrc=freshLoaded?CR_AD:null;
+  const prefetchKey=MODE==='kr'?'_CR_BY_ADSET':null;
   if(prefetchSrc&&prefetchSrc.length){
     if(!window[prefetchKey]){
       const idx={};
