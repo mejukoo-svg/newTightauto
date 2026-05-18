@@ -96,6 +96,10 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .chart-card h3{font-size:12px;font-weight:700;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
 .chart-card h3 select{padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:10px}
 .chart-wrap{position:relative;height:240px}
+.donut-pair{display:flex;gap:6px;height:240px;align-items:stretch}
+.donut-pair .chart-wrap{flex:1;height:100%;min-width:0}
+.donut-pair .donut-cell{display:flex;flex-direction:column;flex:1;min-width:0}
+.donut-pair .donut-cap{font-size:11px;font-weight:700;color:#555;text-align:center;margin-bottom:2px}
 #dashContent{max-width:1200px;margin:0 auto;padding:16px}
 .top-list{list-style:none;padding:0}.top-list li{display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:10px}.top-list .rank{font-weight:700;color:#4285f4;margin-right:6px}
 /* Zoom+Search */
@@ -551,25 +555,19 @@ async function saveMemo(date,id,memo,el){
 let dashCharts={};
 let dashState={dateA:null,dateB:null,metric:'profit'};
 
-function aggregateDay(date){
-  const rows=AD.filter(r=>r.date===date);
+// 단일 기간 집계 — 두 날짜 드롭다운을 [lo,hi] 구간으로 해석 (순서 무관)
+function aggregatePeriod(start,end){
+  const lo=start<=end?start:end, hi=start<=end?end:start;
+  const rows=AD.filter(r=>r.date>=lo&&r.date<=hi);
   const s=rows.reduce((a,b)=>a+b.spend,0),r=rows.reduce((a,b)=>a+b.revenue,0),p=r-s;
   const mp=rows.reduce((a,b)=>a+b.results_mp,0),uc=rows.reduce((a,b)=>a+b.unique_clicks,0);
   const imp=rows.reduce((a,b)=>a+(b.impressions||0),0),cpm=imp>0?s/imp*1000:0;
-  return{s,r,p,mp,uc,imp,cpm,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,rows};
-}
-function diffPct(a,b){if(!b||b===0)return null;return(a-b)/Math.abs(b)*100}
-function fmtDiff(d,inv){
-  if(d==null)return'<span style="color:#999">—</span>';
-  const sign=d>0?'▲':(d<0?'▼':'');
-  let color=d>0?'#16a34a':(d<0?'#dc2626':'#999');
-  if(inv){color=d>0?'#dc2626':(d<0?'#16a34a':'#999')}
-  return'<span style="color:'+color+';font-weight:600">'+sign+' '+Math.abs(d).toFixed(1)+'%</span>';
+  return{s,r,p,mp,uc,imp,cpm,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,rows,lo,hi};
 }
 
 function renderDashboard(){
   const el=document.getElementById('dashContent');
-  if(!dashState.dateA&&DATES.length){dashState.dateA=DATES[0];dashState.dateB=DATES[1]||DATES[0]}
+  if(!dashState.dateA&&DATES.length){dashState.dateA=DATES[0];dashState.dateB=DATES[Math.min(6,DATES.length-1)]||DATES[0]}
   const dateOpts=DATES.map(d=>'<option value="'+d+'">'+DK(d)+' ('+WD(d)+')</option>').join('');
   const modeLabel=MODE==='kr'?'🇰🇷 국내':'🌏 글로벌';
 
@@ -633,34 +631,33 @@ function renderDashboard(){
         +'</div>';
     }
   }
-  h+='<div class="dash-filter"><span style="font-weight:700">'+modeLabel+'</span><label style="margin-left:14px">날짜 A</label><select id="dA">'+dateOpts+'</select><label style="margin-left:10px">날짜 B (비교)</label><select id="dB">'+dateOpts+'</select><span id="dPeriodInfo" style="color:#888;margin-left:12px;font-size:11px"></span></div>';
+  h+='<div class="dash-filter"><span style="font-weight:700">'+modeLabel+'</span><label style="margin-left:14px">시작</label><select id="dA">'+dateOpts+'</select><label style="margin-left:10px">종료</label><select id="dB">'+dateOpts+'</select><span id="dPeriodInfo" style="color:#888;margin-left:12px;font-size:11px"></span></div>';
 
-  const A=aggregateDay(dashState.dateA),B=aggregateDay(dashState.dateB);
+  const A=aggregatePeriod(dashState.dateA,dashState.dateB);
 
   h+='<div class="kpi-grid">';
   const kpiData=[
-    {label:'💰 순이익',a:A.p,b:B.p,isMoney:true,colorByValue:true},
-    {label:'🎯 ROAS',a:A.roas,b:B.roas,isPct:true},
-    {label:'💸 지출',a:A.s,b:B.s,isMoney:true,invert:true,color:'#d00'},
-    {label:'🛒 CVR',a:A.cvr,b:B.cvr,isPct:true},
-    {label:'📢 CPM',a:A.cpm,b:B.cpm,isMoney:true,invert:true,color:'#795548'},
+    {label:'💰 순이익',v:A.p,isMoney:true,colorByValue:true},
+    {label:'🎯 ROAS',v:A.roas,isPct:true},
+    {label:'💸 지출',v:A.s,isMoney:true,color:'#d00'},
+    {label:'💵 매출',v:A.r,isMoney:true,color:'#2563eb'},
+    {label:'🛒 CVR',v:A.cvr,isPct:true},
+    {label:'📢 CPM',v:A.cpm,isMoney:true,color:'#795548'},
   ];
   kpiData.forEach(k=>{
-    const d=diffPct(k.a,k.b);
-    let valCls='';if(k.colorByValue)valCls=k.a>=0?'color:#16a34a':'color:#dc2626';
+    let valCls='';if(k.colorByValue)valCls=k.v>=0?'color:#16a34a':'color:#dc2626';
     if(k.color)valCls='color:'+k.color;
-    const valA=k.isMoney?money(k.a):(k.a||0).toFixed(2)+'%';
-    const valB=k.isMoney?money(k.b):(k.b||0).toFixed(2)+'%';
-    h+='<div class="kpi-card"><div class="k-label">'+k.label+'</div><div class="k-value" style="'+valCls+'">'+valA+'</div><div class="k-sub">vs B: '+valB+' &nbsp;'+fmtDiff(d,k.invert)+'</div></div>';
+    const val=k.isMoney?money(k.v):(k.v||0).toFixed(2)+'%';
+    h+='<div class="kpi-card"><div class="k-label">'+k.label+'</div><div class="k-value" style="'+valCls+'">'+val+'</div></div>';
   });
   h+='</div>';
 
   // Charts
   h+='<div class="chart-grid">';
-  h+='<div class="chart-card"><h3>📊 상품별 비교 (A vs B) <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option><option value="revenue">매출</option><option value="purchases">구매수(PG)</option></select></h3><div class="chart-wrap" style="height:280px"><canvas id="chBar"></canvas></div></div>';
-  h+='<div class="chart-card"><h3>🥧 지출 비중 — 날짜 A</h3><div class="chart-wrap"><canvas id="chPieA"></canvas></div></div>';
-  h+='<div class="chart-card"><h3>🏆 Top 5 세트 — A (ROAS)</h3><ul class="top-list" id="topListA"></ul></div>';
-  h+='<div class="chart-card"><h3>⚠️ 주의 세트 — A (지출↑ ROAS↓)</h3><ul class="top-list" id="warnListA"></ul></div>';
+  h+='<div class="chart-card"><h3>📊 상품별 합계 <select id="dBarMetric"><option value="profit">이익</option><option value="roas">ROAS</option><option value="spend">지출</option><option value="cvr">CVR</option><option value="revenue">매출</option><option value="purchases">구매수(PG)</option></select></h3><div class="chart-wrap" style="height:280px"><canvas id="chBar"></canvas></div></div>';
+  h+='<div class="chart-card"><h3>🥧 지출 vs 매출 비중 — 기간</h3><div class="donut-pair"><div class="donut-cell"><div class="donut-cap">지출</div><div class="chart-wrap"><canvas id="chPieA"></canvas></div></div><div class="donut-cell"><div class="donut-cap">매출</div><div class="chart-wrap"><canvas id="chPieRevA"></canvas></div></div></div></div>';
+  h+='<div class="chart-card"><h3>🏆 Top 5 세트 (ROAS)</h3><ul class="top-list" id="topListA"></ul></div>';
+  h+='<div class="chart-card"><h3>⚠️ 주의 세트 (지출↑ ROAS↓)</h3><ul class="top-list" id="warnListA"></ul></div>';
   h+='</div>';
 
   // 메타 매출 비중 차트 (일별)
@@ -703,16 +700,64 @@ function renderDashboard(){
   document.getElementById('dA').value=dashState.dateA;
   document.getElementById('dB').value=dashState.dateB;
   document.getElementById('dBarMetric').value=dashState.metric;
-  const dA=new Date(dashState.dateA),dB=new Date(dashState.dateB);
-  const dayDiff=Math.round((dA-dB)/864e5);
-  document.getElementById('dPeriodInfo').textContent='※ A는 B보다 '+(dayDiff>=0?dayDiff+'일 후':Math.abs(dayDiff)+'일 전');
+  const dLo=new Date(A.lo),dHi=new Date(A.hi);
+  const days=Math.round((dHi-dLo)/864e5)+1;
+  document.getElementById('dPeriodInfo').textContent='기간: '+DK(A.lo)+' ~ '+DK(A.hi)+' ('+days+'일)';
   document.getElementById('dA').addEventListener('change',e=>{dashState.dateA=e.target.value;renderDashboard()});
   document.getElementById('dB').addEventListener('change',e=>{dashState.dateB=e.target.value;renderDashboard()});
-  document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawDashBar(A,B)});
+  document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawDashBar(A)});
   document.getElementById('dRevDays').addEventListener('change',()=>drawRevDaily());
 
-  setTimeout(()=>{drawDashBar(A,B);drawDashPie(A);drawDashTopLists(A);drawRevDaily()},50);
+  setTimeout(()=>{drawDashBar(A);drawDashPie(A);drawDashPieRev(A);drawDashTopLists(A);drawRevDaily()},50);
 }
+
+// Chart.js plugin: outside leader-line labels with arrow tip for doughnut slices.
+// 슬라이스 중간각 → 외부 leader → 화살표 → 다중행 라벨. minPct 미만은 생략.
+// 호버 없이도 상품 · 금액 · 비중% 노출. 옵션: opts.format(label,value,pct), opts.minPct.
+const outsideLabelsPlugin={
+  id:'outsideLabels',
+  afterDraw(chart,_a,opts){
+    if(!opts||!opts.enabled)return;
+    const meta=chart.getDatasetMeta(0);if(!meta||!meta.data||!meta.data.length)return;
+    const ds=chart.data.datasets[0];const labels=chart.data.labels||[];
+    const total=ds.data.reduce((a,b)=>a+(+b||0),0);if(total<=0)return;
+    const fmt=opts.format||((l,v,p)=>l+' '+p.toFixed(0)+'%');
+    const minPct=opts.minPct!=null?opts.minPct:1.5;
+    const lineColor=opts.lineColor||'#666';
+    const textColor=opts.textColor||'#222';
+    const font=opts.font||'10px sans-serif';
+    const horiz=opts.horiz||16;   // 수평 leader 길이
+    const radial=opts.radial||10; // 방사 leader 길이
+    const ah=opts.arrowSize||4;
+    const lineH=opts.lineHeight||11;
+    const ctx=chart.ctx;ctx.save();ctx.font=font;ctx.fillStyle=textColor;ctx.strokeStyle=lineColor;ctx.lineWidth=1;
+    meta.data.forEach((arc,i)=>{
+      const v=+ds.data[i]||0;if(v<=0)return;
+      const pct=v/total*100;if(pct<minPct)return;
+      const p=arc.getProps(['x','y','startAngle','endAngle','outerRadius'],true);
+      const mid=(p.startAngle+p.endAngle)/2;
+      const cx=Math.cos(mid),sy=Math.sin(mid);
+      const x0=p.x+cx*p.outerRadius,y0=p.y+sy*p.outerRadius;
+      const x1=p.x+cx*(p.outerRadius+radial),y1=p.y+sy*(p.outerRadius+radial);
+      const right=cx>=0;
+      const x2=x1+(right?horiz:-horiz),y2=y1;
+      // leader
+      ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+      // arrow tip at x2 (outward)
+      ctx.beginPath();
+      if(right){ctx.moveTo(x2,y2);ctx.lineTo(x2-ah,y2-ah);ctx.moveTo(x2,y2);ctx.lineTo(x2-ah,y2+ah);}
+      else{ctx.moveTo(x2,y2);ctx.lineTo(x2+ah,y2-ah);ctx.moveTo(x2,y2);ctx.lineTo(x2+ah,y2+ah);}
+      ctx.stroke();
+      // label
+      const text=String(fmt(labels[i]||'',v,pct));const lines=text.split('\n');
+      ctx.textBaseline='middle';ctx.textAlign=right?'left':'right';
+      const startY=y2-(lines.length-1)*lineH/2;const tx=x2+(right?3:-3);
+      lines.forEach((ln,li)=>ctx.fillText(ln,tx,startY+li*lineH));
+    });
+    ctx.restore();
+  }
+};
+Chart.register(outsideLabelsPlugin);
 
 const BRAND_COLORS=['#4285f4','#ea4335','#fbbc04','#34a853','#9c27b0','#ff6d01','#00acc1','#e91e63','#795548','#607d8b','#f59e0b','#10b981'];
 
@@ -721,31 +766,56 @@ function aggByProduct(rows){
   return Object.values(by).filter(x=>x.spend>0);
 }
 
-function drawDashBar(A,B){
+function drawDashBar(A){
   const metric=dashState.metric;
-  const aggA=aggByProduct(A.rows),aggB=aggByProduct(B.rows);
-  const allP=new Set([...aggA.map(x=>x.product),...aggB.map(x=>x.product)]);
-  const mapA={};aggA.forEach(x=>{mapA[x.product]=x});const mapB={};aggB.forEach(x=>{mapB[x.product]=x});
-  const getVal=(p,side)=>{const m=side==='A'?mapA[p]:mapB[p];if(!m)return 0;
-    if(metric==='profit')return m.profit;if(metric==='spend')return m.spend;if(metric==='revenue')return m.revenue;
-    if(metric==='roas')return m.spend>0?m.revenue/m.spend*100:0;if(metric==='cvr')return m.uc>0&&m.mp>0?m.mp/m.uc*100:0;
-    if(metric==='purchases')return m.meta||0;return 0};
-  const products=[...allP].sort((a,b)=>getVal(b,'A')-getVal(a,'A')).slice(0,12);
+  const agg=aggByProduct(A.rows);
+  const getVal=m=>{
+    if(metric==='profit')return m.profit;
+    if(metric==='spend')return m.spend;
+    if(metric==='revenue')return m.revenue;
+    if(metric==='roas')return m.spend>0?m.revenue/m.spend*100:0;
+    if(metric==='cvr')return m.uc>0&&m.mp>0?m.mp/m.uc*100:0;
+    if(metric==='purchases')return m.meta||0;
+    return 0;
+  };
+  agg.sort((a,b)=>getVal(b)-getVal(a));
+  const top=agg.slice(0,12);
   if(dashCharts.bar)dashCharts.bar.destroy();
   const ctx=document.getElementById('chBar');if(!ctx)return;
   const labelMap={profit:'이익',roas:'ROAS(%)',spend:'지출',cvr:'CVR(%)',revenue:'매출',purchases:'구매수(PG)'};
-  dashCharts.bar=new Chart(ctx,{type:'bar',data:{labels:products,datasets:[
-    {label:'A: '+DK(dashState.dateA),data:products.map(p=>getVal(p,'A')),backgroundColor:'#4285f4'},
-    {label:'B: '+DK(dashState.dateB),data:products.map(p=>getVal(p,'B')),backgroundColor:'#aaa'}
-  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},scales:{x:{ticks:{font:{size:10}}},y:{ticks:{font:{size:10}}}}}});
+  dashCharts.bar=new Chart(ctx,{type:'bar',data:{
+    labels:top.map(x=>x.product),
+    datasets:[{label:labelMap[metric]||metric,data:top.map(getVal),backgroundColor:'#4285f4'}]
+  },options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},scales:{x:{ticks:{font:{size:10}}},y:{ticks:{font:{size:10}}}}}});
+}
+
+// 도넛 차트 공통 옵션 — outsideLabels(외부 leader + 화살표 + 다중행 라벨) 활성화
+function _donutOptions(total){
+  return {
+    responsive:true, maintainAspectRatio:false,
+    layout:{padding:{left:64,right:64,top:14,bottom:14}},
+    plugins:{
+      legend:{display:false},
+      tooltip:{callbacks:{label:c=>{const v=c.parsed||0;const pct=total>0?(v/total*100):0;return c.label+': '+money(v)+' ('+pct.toFixed(1)+'%)';}}},
+      outsideLabels:{enabled:true,minPct:2,format:(l,v,p)=>l+'\n'+money(v)+' · '+p.toFixed(0)+'%'}
+    }
+  };
 }
 
 function drawDashPie(A){
-  const agg=aggByProduct(A.rows).sort((a,b)=>b.spend-a.spend).slice(0,10);
+  const agg=aggByProduct(A.rows).filter(x=>x.spend>0).sort((a,b)=>b.spend-a.spend).slice(0,10);
   if(dashCharts.pie)dashCharts.pie.destroy();
   const ctx=document.getElementById('chPieA');if(!ctx)return;
-  const totalSpend=agg.reduce((s,x)=>s+x.spend,0);
-  dashCharts.pie=new Chart(ctx,{type:'doughnut',data:{labels:agg.map(x=>x.product),datasets:[{data:agg.map(x=>x.spend),backgroundColor:BRAND_COLORS}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}},tooltip:{callbacks:{label:function(ctx){const v=ctx.parsed||0;const pct=totalSpend>0?(v/totalSpend*100):0;return ctx.label+': '+money(v)+' ('+pct.toFixed(1)+'%)'}}}}}});
+  const total=agg.reduce((s,x)=>s+x.spend,0);
+  dashCharts.pie=new Chart(ctx,{type:'doughnut',data:{labels:agg.map(x=>x.product),datasets:[{data:agg.map(x=>x.spend),backgroundColor:BRAND_COLORS}]},options:_donutOptions(total)});
+}
+
+function drawDashPieRev(A){
+  const agg=aggByProduct(A.rows).filter(x=>x.revenue>0).sort((a,b)=>b.revenue-a.revenue).slice(0,10);
+  if(dashCharts.pieRev)dashCharts.pieRev.destroy();
+  const ctx=document.getElementById('chPieRevA');if(!ctx)return;
+  const total=agg.reduce((s,x)=>s+x.revenue,0);
+  dashCharts.pieRev=new Chart(ctx,{type:'doughnut',data:{labels:agg.map(x=>x.product),datasets:[{data:agg.map(x=>x.revenue),backgroundColor:BRAND_COLORS}]},options:_donutOptions(total)});
 }
 
 function drawDashTopLists(A){
