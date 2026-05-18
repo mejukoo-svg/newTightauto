@@ -140,7 +140,6 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn" data-mode="gl" onclick="switchMode('gl')">🌏 글로벌</div>
 <div class="mode-btn" data-mode="cr" onclick="switchMode('cr')">🎨 국내소재</div>
 <div class="mode-btn" data-mode="vn" onclick="switchMode('vn')">🎯 밴스드</div>
-<div class="mode-btn" data-mode="vc" onclick="switchMode('vc')">🎨 밴스드소재</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
 </div>
 <!-- Tabs -->
@@ -221,9 +220,9 @@ const HL_CONFIG={
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+');
-let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],VC_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
+let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let NSA_DAILY=[],GOOGLE_ADS=[],NAVER_MP=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[];
-let KR_HL={},GL_HL={},CR_HL={},VN_HL={},VC_HL={};
+let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
 // ===== HELPERS =====
@@ -286,39 +285,34 @@ function MC(roas,profit,spend,revenue,cvr){
 const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
-  if((MODE==='vn'||MODE==='vc')&&(!r.product||r.product==='etc')){
+  if(MODE==='vn'&&(!r.product||r.product==='etc')){
     const m=(r.campaign_name||'').match(/^\[Vanced\]_([^_]+)_/i);
     if(m){const raw=m[1];return{...r,product:VANCED_PRODUCT_MAP[raw]||raw}}
   }
   return r;
 }
 // Row ID: adset_id for kr/gl, ad_id for creative
-function rowId(r){return(MODE==='cr'||MODE==='vc')?(r.ad_id||''):(r.adset_id||'')}
-function rowName1(r){return(MODE==='cr'||MODE==='vc')?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
-function rowIdLabel(){return(MODE==='cr'||MODE==='vc')?'소재 ID':'세트 ID'}
-function rowNameLabel(){return(MODE==='cr'||MODE==='vc')?'소재':'세트'}
+function rowId(r){return MODE==='cr'?(r.ad_id||''):(r.adset_id||'')}
+function rowName1(r){return MODE==='cr'?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
+function rowIdLabel(){return MODE==='cr'?'소재 ID':'세트 ID'}
+function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
 
 // ===== MODE SWITCH =====
 function switchMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',vc:'밴스드소재 · KRW'};
+  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW'};
   document.getElementById('modeLabel').textContent=mLabels[m]||m;
   // Toggle global-only tabs
   document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
   document.querySelectorAll('.tab.kr-only').forEach(t=>t.style.display=(m==='kr'||m==='vn')?'inline-block':'none');
-  document.querySelectorAll('.tab.creative-only').forEach(t2=>t2.style.display=(m==='cr'||m==='vc')?'inline-block':'none');
+  document.querySelectorAll('.tab.creative-only').forEach(t2=>t2.style.display=m==='cr'?'inline-block':'none');
   // Switch data (lazy-load big tables)
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
   else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;
     if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=CR_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
-  else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL;
-    // ▶ 펼침용 vc(소재) idle prefetch — KR 이 cr 을 prefetch 하는 것과 동일 패턴
-    // 캐시가 있어도(VC_AD.length>0) 항상 fresh fetch 트리거: 캐시에 없는 신규 소재 누락 방지
-    const _idle=window.requestIdleCallback||((cb)=>setTimeout(cb,3000));_idle(()=>{ensureBigTable('vc');},{timeout:30000});}
-  else if(m==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL;
-    if(!VC_AD.length)ensureBigTable('vc').then(()=>{AD=VC_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
+  else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -350,18 +344,17 @@ function _applyCore(d){
   (d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight});
   (d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight});
   (d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight});
-  (d.vchl||[]).forEach(x=>{VC_HL[x.ad_id]=x.highlight});
 }
 async function initData(){
   const D180='&date=gte.'+_dateCutoff(180);
   // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
-  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','vchl','stripe','toss','nsa','google','naver_mp','toss_kr','cr','vc','nsa_kw','naver_kw'];
+  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','naver_mp','toss_kr','cr','nsa_kw','naver_kw'];
   const cached={};
   await Promise.all(cKeys.map(k=>cacheGet('t_'+k).then(v=>{cached[k]=v?.data;})));
   let renderedFromCache=false;
   if(cached.kr&&cached.kr.length){
     _applyCore(cached);
-    CR_AD=cached.cr||[];VC_AD=cached.vc||[];
+    CR_AD=cached.cr||[];
     NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];
     window._CR_BY_ADSET=null;
     switchMode('kr'); // 캐시로 즉시 렌더
@@ -376,7 +369,6 @@ async function initData(){
     sbQ('global_adset_highlights','select=*').catch(()=>[]),
     sbQ('ad_creative_highlights','select=*').catch(()=>[]),
     sbQ('vanced_adset_highlights','select=*').catch(()=>[]),
-    sbQ('vanced_creative_highlights','select=*').catch(()=>[]),
     sbQ('global_stripe_daily','select=*&order=date.desc&limit=200').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc&limit=200').catch(()=>[]),
     sbAll('naver_sa_daily','cost_vat',D180).catch(()=>[]),
@@ -384,8 +376,8 @@ async function initData(){
     sbQ('naver_daily_mp','select=*&order=date.desc&limit=200').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc&limit=200').catch(()=>[]),
   ]).then(arr=>{
-    const [kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr]=arr;
-    return {kr,gl,vn,krhl,glhl,crhl,vnhl,vchl,stripe,toss,nsa,google,naver_mp,toss_kr};
+    const [kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr]=arr;
+    return {kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr};
   });
   const applyAndRerender=async(d)=>{
     _applyCore(d);
@@ -396,13 +388,12 @@ async function initData(){
       else if(MODE==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
       else if(MODE==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
       else if(MODE==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
-      else if(MODE==='vc'){AD=VC_AD.map(norm);HIGHLIGHTS=VC_HL}
       rebuildLookups();
       // 펼침 인덱스도 무효화 (다음 클릭 시 fresh 로 재구축)
-      window._CR_BY_ADSET=null;window._VC_BY_ADSET=null;
+      window._CR_BY_ADSET=null;
       const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
     } else {
-      CR_AD=[];VC_AD=[];NAVER_KW=[];NSA_KW=[];
+      CR_AD=[];NAVER_KW=[];NSA_KW=[];
       switchMode('kr');
     }
     // 캐시 저장
@@ -427,7 +418,6 @@ async function ensureBigTable(name){
   const D180='&date=gte.'+_dateCutoff(180);
   const tasks={
     cr:()=>sbAll('ad_creative_daily','spend',D180).then(d=>{CR_AD=d;window._CR_BY_ADSET=null;cacheSet('t_cr',{ts:Date.now(),data:d});}),
-    vc:()=>sbAll('vanced_ad_creative_daily','spend',D180).then(d=>{VC_AD=d;window._VC_BY_ADSET=null;cacheSet('t_vc',{ts:Date.now(),data:d});}),
     nsakw:()=>sbAll('naver_sa_keyword_daily','cost_vat',D180).then(d=>{NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});}),
     naverkw:()=>sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).then(d=>{NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});}),
   };
@@ -504,13 +494,13 @@ document.getElementById('nsawMinSpend').addEventListener('change',renderNsaWeekl
 // HIGHLIGHTS: 추이차트용 (adset_highlights 테이블, 전체삭제 가능)
 // r.highlight: 날짜탭용 (ad_performance_daily.highlight 컬럼, 영구저장)
 let currentHlId=null;
-const hlTbl=()=>{const m={kr:'adset_highlights',gl:'global_adset_highlights',cr:'ad_creative_highlights',vn:'vanced_adset_highlights',vc:'vanced_creative_highlights'};return m[MODE]||'adset_highlights'};
-const hlIdCol=()=>(MODE==='cr'||MODE==='vc')?'ad_id':'adset_id';
-const perfTbl=()=>{const m={kr:'ad_performance_daily',gl:'global_ad_performance_daily',cr:'ad_creative_daily',vn:'vanced_ad_performance_daily',vc:'vanced_ad_creative_daily'};return m[MODE]||'ad_performance_daily'};
+const hlTbl=()=>{const m={kr:'adset_highlights',gl:'global_adset_highlights',cr:'ad_creative_highlights',vn:'vanced_adset_highlights'};return m[MODE]||'adset_highlights'};
+const hlIdCol=()=>MODE==='cr'?'ad_id':'adset_id';
+const perfTbl=()=>{const m={kr:'ad_performance_daily',gl:'global_ad_performance_daily',cr:'ad_creative_daily',vn:'vanced_ad_performance_daily'};return m[MODE]||'ad_performance_daily'};
 function hlClass(id){const h=HIGHLIGHTS[id];return h&&HL_CONFIG[h]?HL_CONFIG[h].cls:''}
 // 현재 MODE의 원본 배열 반환 (norm된 AD 가 아닌 raw)
 function _srcAD(){
-  return MODE==='kr'?KR_AD:(MODE==='gl'?GL_AD:(MODE==='cr'?CR_AD:(MODE==='vn'?VN_AD:VC_AD)));
+  return MODE==='kr'?KR_AD:(MODE==='gl'?GL_AD:(MODE==='cr'?CR_AD:VN_AD));
 }
 // AD + 원본배열 동시 갱신 (GL은 norm이 spread 복사해서 분리되므로 둘 다 업데이트 필요)
 function _syncRowField(id, date, field, value){
@@ -759,7 +749,7 @@ function drawDashPie(A){
 }
 
 function drawDashTopLists(A){
-  const byA={};A.rows.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={name:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),product:r.product,spend:0,revenue:0};byA[rid].spend+=r.spend;byA[rid].revenue+=r.revenue});
+  const byA={};A.rows.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={name:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),product:r.product,spend:0,revenue:0};byA[rid].spend+=r.spend;byA[rid].revenue+=r.revenue});
   const list=Object.values(byA).filter(x=>x.spend>=100).map(x=>({...x,roas:x.spend>0?x.revenue/x.spend*100:0}));
   const top=list.sort((a,b)=>b.roas-a.roas).slice(0,5);
   const topEl=document.getElementById('topListA');
@@ -833,7 +823,7 @@ function renderTrend(){
   const chgD2={};AD.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
   const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 추이차트에서 숨김 (DOM 부담 감소)
   // 단, 하이라이트가 걸려 있는 세트는 색 유지 위해 항상 표시
@@ -903,7 +893,6 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   const tbl=MODE==='gl'?'global_ad_creative_daily':(MODE==='vn'?'vanced_ad_creative_daily':'ad_creative_daily');
   const isGL=MODE==='gl';
   // 1) KR 만 prefetch 인덱스 활용. VN/GL 은 항상 per-adset 직접 fetch (DB ground truth).
-  //    VN 은 ensureBigTable('vc') 의 silent fail 로 인한 stale 데이터 회귀를 원천 차단.
   const bigKey=MODE==='kr'?'cr':null;
   const freshLoaded=bigKey && window._BIG_LOADED && window._BIG_LOADED[bigKey];
   const prefetchSrc=freshLoaded?CR_AD:null;
@@ -1059,7 +1048,7 @@ function renderTrendWeekly(){
   AD.forEach(r=>{
     const wk=WM(r.date);if(!weekKeys.includes(wk))return;
     const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,w:{}};
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,w:{}};
     if(!byA[rid].w[wk])byA[rid].w[wk]={spend:0,revenue:0,profit:0,mp:0,uc:0};
     byA[rid].w[wk].spend+=r.spend;byA[rid].w[wk].revenue+=r.revenue;byA[rid].w[wk].profit+=r.profit;
     byA[rid].w[wk].mp+=r.results_mp;byA[rid].w[wk].uc+=r.unique_clicks;
@@ -1123,7 +1112,7 @@ function renderTrendProduct(){
   // Also aggregate by rowId for detail sections
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product||'기타',d:{}};
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product||'기타',d:{}};
     byA[rid].d[r.date]=r});
   const allItems=Object.values(byA).map(a=>{
     let s7=0,r7=0,p7=0,uc7=0,mp7=0;d7.forEach(d=>{if(a.d[d]){s7+=a.d[d].spend;r7+=a.d[d].revenue;p7+=a.d[d].profit;uc7+=a.d[d].unique_clicks;mp7+=a.d[d].results_mp}});
@@ -1210,7 +1199,7 @@ function renderTrendInfluencer(){
   const search=(document.getElementById('tiSearch').value||'').trim().toLowerCase();
   const minSpend=parseFloat(document.getElementById('tiMinSpend').value||'0');
   // creative modes use ad_name; for kr/gl use adset_name
-  const nameOf=r=>(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||'');
+  const nameOf=r=>MODE==='cr'?(r.ad_name||''):(r.adset_name||'');
 
   // ---- Build period keys (weekly or daily) ----
   let keys=[],keyLabel,keyOf;
@@ -1307,7 +1296,7 @@ function renderTrendInfluencer(){
 // ===== CHANGE =====
 function renderChange(){
   const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:(MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
+  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
   const list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
   const totD={};dd.forEach(d=>{let s=0,r=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});totD[d]={s,r}});
@@ -1601,7 +1590,7 @@ function renderDateTab(){
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/"/g,'&quot;');
-    const name2=((MODE==='cr'||MODE==='vc')?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
+    const name2=(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
     h+='<tr>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+name2+'</td>';
@@ -1810,7 +1799,7 @@ let crankFilters={};
 function clearCrankFilters(){crankFilters={};renderCreativeRanking()}
 
 function renderCreativeRanking(){
-  if(MODE!=='cr'&&MODE!=='vc'){document.getElementById('crTbl').innerHTML='<tr><td>소재 모드에서만 사용</td></tr>';return}
+  if(MODE!=='cr'){document.getElementById('crTbl').innerHTML='<tr><td>소재 모드에서만 사용</td></tr>';return}
   const days=parseInt(document.getElementById('crDays').value);
   const sortKey=document.getElementById('crSort').value;
   const dd=DATES.slice(0,days);
