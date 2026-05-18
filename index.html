@@ -668,7 +668,8 @@ function drawDashPie(A){
   const agg=aggByProduct(A.rows).sort((a,b)=>b.spend-a.spend).slice(0,10);
   if(dashCharts.pie)dashCharts.pie.destroy();
   const ctx=document.getElementById('chPieA');if(!ctx)return;
-  dashCharts.pie=new Chart(ctx,{type:'doughnut',data:{labels:agg.map(x=>x.product),datasets:[{data:agg.map(x=>x.spend),backgroundColor:BRAND_COLORS}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}}}}});
+  const totalSpend=agg.reduce((s,x)=>s+x.spend,0);
+  dashCharts.pie=new Chart(ctx,{type:'doughnut',data:{labels:agg.map(x=>x.product),datasets:[{data:agg.map(x=>x.spend),backgroundColor:BRAND_COLORS}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10}}},tooltip:{callbacks:{label:function(ctx){const v=ctx.parsed||0;const pct=totalSpend>0?(v/totalSpend*100):0;return ctx.label+': '+money(v)+' ('+pct.toFixed(1)+'%)'}}}}}});
 }
 
 function drawDashTopLists(A){
