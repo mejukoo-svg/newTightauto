@@ -752,13 +752,24 @@ def main():
     YESTERDAY = TODAY - timedelta(days=1)
     mp_raw = []
 
+    # ★ KST 경계 보정 버퍼:
+    #   Mixpanel raw export 는 from_date 를 프로젝트(UTC) 날짜로 필터하지만,
+    #   parse 단계에서 이벤트 time 을 KST(UTC+9)로 재버킷팅한다. 그래서 fetch
+    #   윈도우의 '첫 KST 날짜'는 새벽분(KST 00:00~09:00 = 전날 UTC)이 from_date
+    #   미만으로 빠져 ~25~35% 과소집계된다. from_date 를 MP_FETCH_BUFFER_DAYS 만큼
+    #   앞당겨 실제 시작일을 '내부 날짜'로 만든다. records 는 meta 윈도우
+    #   (>= DATA_REFRESH_START) 날짜에만 생성되고, 청크 겹침 중복은 insert_id
+    #   기준 dedup(아래)으로 제거되므로 안전하다.
+    MP_FETCH_BUFFER_DAYS = 2
+
     if REFRESH_DAYS > 14:
-        # 7일 단위 청크
+        # 7일 단위 청크 (각 청크 from_date 를 버퍼만큼 앞당겨 겹쳐 fetch)
         chunks = []
         chunk_start = DATA_REFRESH_START
         while chunk_start <= YESTERDAY:
             chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
-            chunks.append((chunk_start.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")))
+            fetch_from = (chunk_start - timedelta(days=MP_FETCH_BUFFER_DAYS)).strftime("%Y-%m-%d")
+            chunks.append((fetch_from, chunk_end.strftime("%Y-%m-%d")))
             chunk_start = chunk_end + timedelta(days=1)
 
         with ThreadPoolExecutor(max_workers=MIXPANEL_CHUNK_WORKERS) as pool:
@@ -773,9 +784,11 @@ def main():
                     log.error(f"  ❌ 청크 오류: {e}")
     else:
         if DATA_REFRESH_START <= YESTERDAY:
+            # 단일 호출이므로 겹침 중복 없음 — from_date 만 버퍼만큼 앞당기면 됨
+            mp_from = (DATA_REFRESH_START - timedelta(days=MP_FETCH_BUFFER_DAYS)).strftime("%Y-%m-%d")
             mp_raw.extend(
                 fetch_mixpanel_data(
-                    DATA_REFRESH_START.strftime("%Y-%m-%d"),
+                    mp_from,
                     YESTERDAY.strftime("%Y-%m-%d"),
                 )
             )
@@ -808,10 +821,15 @@ def main():
         df["utm_term"] = df["utm_term"].apply(_norm_utm)
 
         # 1) Mixpanel canonical dedup: $insert_id 기준 (true duplicates만 제거)
+        #    insert_id 가 없는 이벤트는 청크 2일 겹침 fetch 시 중복될 수 있어
+        #    파싱 필드 조합으로 추가 dedup 한다(단일 호출 시엔 제거 대상이 거의 없음).
         if "insert_id" in df.columns:
             df_iid = df[df["insert_id"].astype(str).str.len() > 0]
             df_no_iid = df[df["insert_id"].astype(str).str.len() == 0]
             df_iid = df_iid.drop_duplicates(subset=["insert_id"], keep="first")
+            df_no_iid = df_no_iid.drop_duplicates(
+                subset=["date", "distinct_id", "서비스", "utm_term", "revenue"], keep="first"
+            )
             df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
         else:
             df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
