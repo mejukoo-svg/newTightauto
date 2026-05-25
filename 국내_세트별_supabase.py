@@ -857,6 +857,31 @@ def main():
             if d and ut:
                 mp_count_map[(d, str(ut))] = c
 
+    # ── only-raise 가드용: 현재 저장된 귀속(results_mp/revenue) 미리 읽기 ──
+    #   부실/부분 실패한 Mixpanel fetch 가 이미 정상인 과거 귀속을 '낮추지' 못하게 한다.
+    #   (spend/meta/budget 등 Meta-side 필드는 항상 최신값으로 갱신됨)
+    prev_attr = {}
+    _ps = DATA_REFRESH_START.strftime("%Y-%m-%d")
+    _pe = TODAY.strftime("%Y-%m-%d")
+    _off = 0
+    while True:
+        _u = (f"{sb.base_url}/rest/v1/ad_performance_daily?select=date,adset_id,results_mp,revenue"
+              f"&date=gte.{_ps}&date=lte.{_pe}&limit=1000&offset={_off}")
+        try:
+            _chunk = req_lib.get(_u, headers={**sb.headers, "Prefer": ""}, timeout=60).json()
+        except Exception as _e:
+            log.warning(f"  ⚠️ 기존 귀속 읽기 실패(가드 비활성화): {_e}")
+            _chunk = []
+        if not isinstance(_chunk, list) or not _chunk:
+            break
+        for _row in _chunk:
+            prev_attr[(_row.get("date"), str(_row.get("adset_id")))] = (
+                int(_row.get("results_mp") or 0), float(_row.get("revenue") or 0.0))
+        if len(_chunk) < 1000:
+            break
+        _off += 1000
+    log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 로드")
+
     # =======================================================
     # 5) 병합 → Supabase 레코드 생성
     # =======================================================
@@ -888,6 +913,11 @@ def main():
             # Mixpanel 매칭
             mpc = mp_count_map.get((dk, asid), 0)
             mpv = mp_value_map.get((dk, asid), 0.0)
+            # ★ only-raise 가드: 새 귀속이 기존 저장값보다 낮으면(부실 fetch 등) 기존 보존
+            _prev = prev_attr.get((iso_date, str(asid)))
+            if _prev and mpc < _prev[0]:
+                mpc = _prev[0]
+                mpv = _prev[1]
             revenue = float(mpv)
 
             # 파생 지표
