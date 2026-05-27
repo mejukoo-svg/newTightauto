@@ -235,3 +235,23 @@ jobs:
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 네이버_mp_supabase.py
+
+  # ─── 지표 하이아라키 KPI (국내 세트별 + Toss 끝나면 집계) ───
+  kpi:
+    name: 📈 지표 KPI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [kr-adset, toss]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run KPI 집계
+        env:
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python kpi_supabase.py

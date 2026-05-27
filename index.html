@@ -24,6 +24,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:
 .tab.global-only{display:none}
 .tab.creative-only{display:none}
 .tab.kr-only{display:none}
+.tab.kpi-only{display:none}
 /* Column filters */
 th.filterable{cursor:pointer;position:relative}
 th.filterable:hover{background:#d0d8e8!important}
@@ -102,6 +103,11 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .donut-pair .donut-cell{display:flex;flex-direction:column;flex:1;min-width:0}
 .donut-pair .donut-cap{font-size:11px;font-weight:700;color:#555;text-align:center;margin-bottom:2px}
 #dashContent{max-width:1200px;margin:0 auto;padding:16px}
+#kpiDashBody{max-width:1200px;margin:0 auto;padding:16px}
+.kpi-table{border-collapse:collapse;font-size:11px;width:max-content}
+.kpi-table th{background:#f1f5f9;border:1px solid #e2e8f0;padding:6px 12px;position:sticky;top:0;white-space:nowrap}
+.kpi-table td{border:1px solid #eee;padding:5px 12px;text-align:right;white-space:nowrap}
+.kpi-table tbody tr:hover{background:#f8fafc}
 .top-list{list-style:none;padding:0}.top-list li{display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:10px}.top-list .rank{font-weight:700;color:#4285f4;margin-right:6px}
 /* Zoom+Search */
 .zoom-bar{position:sticky;top:73px;z-index:99;display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:4px 10px;background:#f0f0f0;border-bottom:1px solid #ddd;font-size:11px;border-radius:0 0 4px 4px}
@@ -145,6 +151,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn" data-mode="gl" onclick="switchMode('gl')">🌏 글로벌</div>
 <div class="mode-btn" data-mode="cr" onclick="switchMode('cr')">🎨 국내소재</div>
 <div class="mode-btn" data-mode="vn" onclick="switchMode('vn')">🎯 밴스드</div>
+<div class="mode-btn" data-mode="kpi" onclick="switchMode('kpi')">📈 지표KPI</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
 </div>
 <!-- Tabs -->
@@ -167,6 +174,9 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kr-only" data-t="chrev">📊 매출</div>
 <div class="tab kr-only" data-t="nsadaily">🔍 네이버SA_추이차트</div>
 <div class="tab kr-only" data-t="nsaweekly">📅 네이버SA_주간추이</div>
+<div class="tab kpi-only" data-t="kpiDash">📊 KPI 대시보드</div>
+<div class="tab kpi-only" data-t="kpiWeekly">📅 주간</div>
+<div class="tab kpi-only" data-t="kpiMonthly">🗓 월간</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -192,6 +202,9 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-chrev"><div class="filter"><label>보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 전체/메타/밴스드/네이버/구글 채널별 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
+<div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
+<div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
+<div class="panel" id="p-kpiMonthly"><div class="sheet-wrap"><table id="kpiMTbl" class="kpi-table"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -308,12 +321,33 @@ function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
 function switchMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW'};
+  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI'};
   document.getElementById('modeLabel').textContent=mLabels[m]||m;
-  // Toggle global-only tabs
-  document.querySelectorAll('.tab.global-only').forEach(t=>t.style.display=m==='gl'?'inline-block':'none');
-  document.querySelectorAll('.tab.kr-only').forEach(t=>t.style.display=(m==='kr'||m==='vn')?'inline-block':'none');
-  document.querySelectorAll('.tab.creative-only').forEach(t2=>t2.style.display=m==='cr'?'inline-block':'none');
+  const isKpi=(m==='kpi');
+  // Tab visibility (unified)
+  document.querySelectorAll('.tab').forEach(t=>{
+    if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
+    if(t.classList.contains('global-only')){t.style.display=(!isKpi&&m==='gl')?'inline-block':'none';return}
+    if(t.classList.contains('kr-only')){t.style.display=(!isKpi&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
+    if(t.classList.contains('creative-only')){t.style.display=(!isKpi&&m==='cr')?'inline-block':'none';return}
+    t.style.display=isKpi?'none':'inline-block';
+  });
+  if(isKpi){
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+    document.querySelector('.tab[data-t="kpiDash"]').classList.add('active');
+    document.getElementById('p-kpiDash').classList.add('active');
+    ensureKpiData().then(()=>renderTab('kpiDash'));
+    return;
+  }
+  // returning from KPI mode: if active tab is now hidden, reset to dashboard
+  {const _at=document.querySelector('.tab.active');
+   if(!_at||_at.classList.contains('kpi-only')){
+     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+     document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+     document.querySelector('.tab[data-t="dashboard"]').classList.add('active');
+     document.getElementById('p-dashboard').classList.add('active');
+   }}
   // Switch data (lazy-load big tables)
   if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
   else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
@@ -436,6 +470,99 @@ async function ensureBigTable(name){
   return window._BIG_LOADING[name];
 }
 
+// ===== 지표 하이아라키 KPI (kpi_metrics) =====
+let KPI_DATA=null,_kpiLoading=null,kpiCharts={},kpiDashPeriod='weekly';
+async function ensureKpiData(){
+  if(KPI_DATA)return KPI_DATA;
+  if(_kpiLoading)return _kpiLoading;
+  _kpiLoading=sbQ('kpi_metrics','select=*&order=period_start.desc')
+    .then(d=>{KPI_DATA=Array.isArray(d)?d:[];return KPI_DATA})
+    .catch(()=>{KPI_DATA=[];return KPI_DATA});
+  return _kpiLoading;
+}
+const _wonK=n=>n==null?'-':'₩'+Math.round(n).toLocaleString('ko-KR');
+const _pctK=n=>n==null?'-':(n*100).toFixed(1)+'%';
+const _numK=n=>n==null||n===0?'-':Math.round(n).toLocaleString('ko-KR');
+function _kpiRows(period){return (KPI_DATA||[]).filter(r=>r.period===period)
+  .sort((a,b)=>a.period_start<b.period_start?1:-1);} // newest first
+function _kpiDestroy(){Object.values(kpiCharts).forEach(c=>{try{c.destroy()}catch(e){}});kpiCharts={}}
+
+function renderKpiDashboard(){
+  if(!KPI_DATA){ensureKpiData().then(renderKpiDashboard);return}
+  _kpiDestroy();
+  const el=document.getElementById('kpiDashBody');
+  const rows=_kpiRows(kpiDashPeriod).filter(r=>(r.revenue||0)>0); // meaningful, newest first
+  if(!rows.length){el.innerHTML='<div style="padding:48px;text-align:center;color:#888">데이터가 아직 없습니다. <code>kpi_supabase.py</code> 적재 후 표시됩니다.</div>';return}
+  const latest=rows[0];
+  const N=kpiDashPeriod==='weekly'?12:6;
+  const series=rows.slice(0,N).slice().reverse(); // oldest→newest for charts
+  const labels=series.map(r=>r.period_label);
+  let h='';
+  h+='<div class="dash-filter"><span style="font-weight:700">📈 지표 하이아라키 KPI</span>'
+    +'<label style="margin-left:14px">기간</label><select id="kpiDashPeriodSel">'
+    +'<option value="weekly"'+(kpiDashPeriod==='weekly'?' selected':'')+'>주간</option>'
+    +'<option value="monthly"'+(kpiDashPeriod==='monthly'?' selected':'')+'>월간</option></select>'
+    +'<span style="color:#888;margin-left:12px;font-size:11px">최신: '+latest.period_label+'</span></div>';
+  h+='<div class="kpi-grid">';
+  [{l:'💵 매출',v:_wonK(latest.revenue),c:'#2563eb'},
+   {l:'💸 예산',v:_wonK(latest.budget),c:'#d00'},
+   {l:'💰 순이익',v:_wonK(latest.net_profit),c:(latest.net_profit>=0?'#16a34a':'#dc2626')},
+   {l:'🎯 ROAS',v:_pctK(latest.roas),c:'#7c3aed'},
+   {l:'🛒 결제율',v:_pctK(latest.pay_rate),c:'#0891b2'},
+   {l:'🧾 객단가',v:_wonK(latest.aov),c:'#b45309'}
+  ].forEach(k=>h+='<div class="kpi-card"><div class="k-label">'+k.l+'</div><div class="k-value" style="color:'+k.c+'">'+k.v+'</div></div>');
+  h+='</div>';
+  h+='<div class="chart-grid">'
+    +'<div class="chart-card"><h3>💰 매출·예산·순이익</h3><div class="chart-wrap" style="height:280px"><canvas id="kpiCh1"></canvas></div></div>'
+    +'<div class="chart-card"><h3>🎯 ROAS 추이</h3><div class="chart-wrap" style="height:280px"><canvas id="kpiCh2"></canvas></div></div>'
+    +'<div class="chart-card"><h3>🛒 결제율 추이</h3><div class="chart-wrap" style="height:280px"><canvas id="kpiCh3"></canvas></div></div>'
+    +'<div class="chart-card"><h3>🧾 객단가 추이</h3><div class="chart-wrap" style="height:280px"><canvas id="kpiCh4"></canvas></div></div>'
+    +'</div>';
+  h+='<div class="chart-card" style="margin-bottom:16px"><h3>👥 판매수·PV 추이</h3><div style="position:relative;height:300px"><canvas id="kpiCh5"></canvas></div></div>';
+  el.innerHTML=h;
+  document.getElementById('kpiDashPeriodSel').addEventListener('change',e=>{kpiDashPeriod=e.target.value;renderKpiDashboard()});
+  const wonAxis=v=>v>=1e8?(v/1e8).toFixed(1)+'억':(v>=1e4?(v/1e4).toFixed(0)+'만':v);
+  const mkLine=(id,label,data,color,pct)=>new Chart(document.getElementById(id),{type:'line',
+    data:{labels,datasets:[{label,data,borderColor:color,backgroundColor:color+'22',tension:0.3,fill:true,pointRadius:3}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>pct?(c.parsed.y*100).toFixed(2)+'%':_wonK(c.parsed.y)}}},
+      scales:{y:{ticks:{callback:v=>pct?(v*100).toFixed(0)+'%':wonAxis(v)}}}}});
+  kpiCharts.c1=new Chart(document.getElementById('kpiCh1'),{data:{labels,datasets:[
+    {type:'bar',label:'매출',data:series.map(r=>r.revenue),backgroundColor:'#2563eb'},
+    {type:'bar',label:'예산',data:series.map(r=>r.budget),backgroundColor:'#f59e0b'},
+    {type:'line',label:'순이익',data:series.map(r=>r.net_profit),borderColor:'#16a34a',backgroundColor:'#16a34a22',tension:0.3,pointRadius:3}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'},
+    tooltip:{callbacks:{label:c=>c.dataset.label+': '+_wonK(c.parsed.y)}}},
+    scales:{y:{ticks:{callback:wonAxis}}}}});
+  kpiCharts.c2=mkLine('kpiCh2','ROAS',series.map(r=>r.roas),'#7c3aed',true);
+  kpiCharts.c3=mkLine('kpiCh3','결제율',series.map(r=>r.pay_rate),'#0891b2',true);
+  kpiCharts.c4=mkLine('kpiCh4','객단가',series.map(r=>r.aov),'#b45309',false);
+  kpiCharts.c5=new Chart(document.getElementById('kpiCh5'),{data:{labels,datasets:[
+    {type:'bar',label:'판매수',data:series.map(r=>r.sales),backgroundColor:'#6366f1',yAxisID:'y'},
+    {type:'line',label:'PV',data:series.map(r=>r.pv),borderColor:'#ec4899',backgroundColor:'#ec489922',tension:0.3,pointRadius:3,yAxisID:'y1'}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},
+    scales:{y:{position:'left',title:{display:true,text:'판매수'}},
+            y1:{position:'right',title:{display:true,text:'PV'},grid:{drawOnChartArea:false}}}}});
+}
+
+function renderKpiTable(period){
+  if(!KPI_DATA){ensureKpiData().then(()=>renderKpiTable(period));return}
+  const tbl=document.getElementById(period==='weekly'?'kpiWTbl':'kpiMTbl');
+  const rows=_kpiRows(period);
+  let h='<thead><tr><th style="text-align:left">기간</th><th>예산</th><th>매출</th><th>PV</th><th>판매수</th>'
+    +'<th>순이익</th><th>객단가</th><th>ROAS</th><th>CPP</th><th>결제율</th><th>CAC</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    h+='<tr><td style="text-align:left;font-weight:600">'+r.period_label+'</td>'
+      +'<td>'+_wonK(r.budget)+'</td><td>'+_wonK(r.revenue)+'</td>'
+      +'<td>'+_numK(r.pv)+'</td><td>'+_numK(r.sales)+'</td>'
+      +'<td style="color:'+((r.net_profit||0)>=0?'#16a34a':'#dc2626')+'">'+_wonK(r.net_profit)+'</td>'
+      +'<td>'+_wonK(r.aov)+'</td><td style="font-weight:600">'+_pctK(r.roas)+'</td>'
+      +'<td>'+_wonK(r.cpp)+'</td><td>'+_pctK(r.pay_rate)+'</td><td>'+_wonK(r.cac)+'</td></tr>';
+  });
+  h+='</tbody>';
+  tbl.innerHTML=h;
+}
+
 // ===== TAB ROUTING =====
 function renderTab(id){
   if(id==='dashboard')renderDashboard();
@@ -456,6 +583,9 @@ function renderTab(id){
   if(id==='chrev')renderChannelRevenue();
   if(id==='nsadaily')renderNsaDaily();
   if(id==='nsaweekly')renderNsaWeekly();
+  if(id==='kpiDash')renderKpiDashboard();
+  if(id==='kpiWeekly')renderKpiTable('weekly');
+  if(id==='kpiMonthly')renderKpiTable('monthly');
 }
 
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
