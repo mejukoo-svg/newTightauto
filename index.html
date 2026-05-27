@@ -471,7 +471,7 @@ async function ensureBigTable(name){
 }
 
 // ===== 지표 하이아라키 KPI (kpi_metrics) =====
-let KPI_DATA=null,_kpiLoading=null,kpiCharts={},kpiDashPeriod='weekly';
+let KPI_DATA=null,_kpiLoading=null,kpiCharts={},kpiDashPeriod='weekly',kpiSel={weekly:null,monthly:null};
 async function ensureKpiData(){
   if(KPI_DATA)return KPI_DATA;
   if(_kpiLoading)return _kpiLoading;
@@ -493,24 +493,31 @@ function renderKpiDashboard(){
   const el=document.getElementById('kpiDashBody');
   const rows=_kpiRows(kpiDashPeriod).filter(r=>(r.revenue||0)>0); // meaningful, newest first
   if(!rows.length){el.innerHTML='<div style="padding:48px;text-align:center;color:#888">데이터가 아직 없습니다. <code>kpi_supabase.py</code> 적재 후 표시됩니다.</div>';return}
-  const latest=rows[0];
+  const sel=rows.find(r=>r.period_start===kpiSel[kpiDashPeriod])||rows[0]; // 선택한 기간(기본 최신)
+  const si=rows.indexOf(sel);
+  const latest=sel;                       // 카드/증감은 선택한 기간 기준
+  const prev=rows[si+1]||null;            // 직전 기간(증감 비교용)
   const N=kpiDashPeriod==='weekly'?12:6;
-  const series=rows.slice(0,N).slice().reverse(); // oldest→newest for charts
+  const series=rows.slice(si,si+N).slice().reverse(); // 선택 기간으로 끝나는 추이
   const labels=series.map(r=>r.period_label);
   let h='';
   h+='<div class="dash-filter"><span style="font-weight:700">📈 지표 하이아라키 KPI</span>'
     +'<label style="margin-left:14px">기간</label><select id="kpiDashPeriodSel">'
     +'<option value="weekly"'+(kpiDashPeriod==='weekly'?' selected':'')+'>주간</option>'
     +'<option value="monthly"'+(kpiDashPeriod==='monthly'?' selected':'')+'>월간</option></select>'
-    +'<span style="color:#888;margin-left:12px;font-size:11px">최신: '+latest.period_label+'</span></div>';
+    +'<label style="margin-left:10px">'+(kpiDashPeriod==='weekly'?'주차':'월')+'</label>'
+    +'<select id="kpiPeriodPick">'+rows.map(r=>'<option value="'+r.period_start+'"'+(r.period_start===sel.period_start?' selected':'')+'>'+r.period_label+'</option>').join('')+'</select>'
+    +'<span style="color:#888;margin-left:12px;font-size:11px">기준일: '+sel.period_end+(si===0?' · 최신':'')+'</span></div>';
+  const _dlt=(cur,prv)=>{if(prv==null||prv===0||cur==null)return '';const d=(cur-prv)/Math.abs(prv)*100;const up=d>=0;
+    return '<div style="font-size:10px;margin-top:2px;color:'+(up?'#16a34a':'#dc2626')+'">'+(up?'▲':'▼')+Math.abs(d).toFixed(1)+'% <span style="color:#aaa">vs 직전</span></div>'};
   h+='<div class="kpi-grid">';
-  [{l:'💵 매출',v:_wonK(latest.revenue),c:'#2563eb'},
-   {l:'💸 예산',v:_wonK(latest.budget),c:'#d00'},
-   {l:'💰 순이익',v:_wonK(latest.net_profit),c:(latest.net_profit>=0?'#16a34a':'#dc2626')},
-   {l:'🎯 ROAS',v:_pctK(latest.roas),c:'#7c3aed'},
-   {l:'🛒 결제율',v:_pctK(latest.pay_rate),c:'#0891b2'},
-   {l:'🧾 객단가',v:_wonK(latest.aov),c:'#b45309'}
-  ].forEach(k=>h+='<div class="kpi-card"><div class="k-label">'+k.l+'</div><div class="k-value" style="color:'+k.c+'">'+k.v+'</div></div>');
+  [{l:'💵 매출',v:_wonK(latest.revenue),c:'#2563eb',cur:latest.revenue,prv:prev&&prev.revenue},
+   {l:'💸 예산',v:_wonK(latest.budget),c:'#d00',cur:latest.budget,prv:prev&&prev.budget},
+   {l:'💰 순이익',v:_wonK(latest.net_profit),c:(latest.net_profit>=0?'#16a34a':'#dc2626'),cur:latest.net_profit,prv:prev&&prev.net_profit},
+   {l:'🎯 ROAS',v:_pctK(latest.roas),c:'#7c3aed',cur:latest.roas,prv:prev&&prev.roas},
+   {l:'🛒 결제율',v:_pctK(latest.pay_rate),c:'#0891b2',cur:latest.pay_rate,prv:prev&&prev.pay_rate},
+   {l:'🧾 객단가',v:_wonK(latest.aov),c:'#b45309',cur:latest.aov,prv:prev&&prev.aov}
+  ].forEach(k=>h+='<div class="kpi-card"><div class="k-label">'+k.l+'</div><div class="k-value" style="color:'+k.c+'">'+k.v+'</div>'+_dlt(k.cur,k.prv)+'</div>');
   h+='</div>';
   h+='<div class="chart-grid">'
     +'<div class="chart-card"><h3>💰 매출·예산·순이익</h3><div class="chart-wrap" style="height:280px"><canvas id="kpiCh1"></canvas></div></div>'
@@ -520,7 +527,8 @@ function renderKpiDashboard(){
     +'</div>';
   h+='<div class="chart-card" style="margin-bottom:16px"><h3>👥 판매수·PV 추이</h3><div style="position:relative;height:300px"><canvas id="kpiCh5"></canvas></div></div>';
   el.innerHTML=h;
-  document.getElementById('kpiDashPeriodSel').addEventListener('change',e=>{kpiDashPeriod=e.target.value;renderKpiDashboard()});
+  document.getElementById('kpiDashPeriodSel').addEventListener('change',e=>{kpiDashPeriod=e.target.value;kpiSel[kpiDashPeriod]=null;renderKpiDashboard()});
+  document.getElementById('kpiPeriodPick').addEventListener('change',e=>{kpiSel[kpiDashPeriod]=e.target.value;renderKpiDashboard()});
   const wonAxis=v=>v>=1e8?(v/1e8).toFixed(1)+'억':(v>=1e4?(v/1e4).toFixed(0)+'만':v);
   const mkLine=(id,label,data,color,pct)=>new Chart(document.getElementById(id),{type:'line',
     data:{labels,datasets:[{label,data,borderColor:color,backgroundColor:color+'22',tension:0.3,fill:true,pointRadius:3}]},
