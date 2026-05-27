@@ -52,6 +52,11 @@ MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
+# 글로벌 성과 측정 시 제외할 "한국" 국가값 (Mixpanel mp_country_code).
+# raw export(/api/2.0/export)의 mp_country_code는 ISO alpha-2 코드("KR")로 저장됨
+# (Mixpanel UI 표시값은 "South Korea"). 풀네임도 방어적으로 함께 매칭.
+KOREA_CC = {"KR", "KOR", "SOUTH KOREA", "KOREA, REPUBLIC OF", "REPUBLIC OF KOREA", "한국", "대한민국"}
+
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 
 KST = timezone(timedelta(hours=9))
@@ -274,7 +279,9 @@ def fetch_mixpanel_data(from_date, to_date):
                     a_val = float(raw_a) if raw_a else 0.0
                     v_val = float(raw_v) if raw_v else 0.0
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
+                    # mp_country_code: 결제 국가 (글로벌 성과에서 한국 제외용)
+                    country = props.get('mp_country_code') or ''
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','country':str(country).strip()})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -494,6 +501,15 @@ def main():
         before_logical = len(df_d)
         df_d = df_d.drop_duplicates(subset=['date','distinct_id','revenue','서비스','utm_term'], keep='first')
         log.info(f"  logical dedup: {before_logical} -> {len(df_d)} ({before_logical - len(df_d)}건 중복 결제 제거)")
+
+        # 4) 한국(South Korea) 결제 제외 (2026-05-27)
+        # 글로벌 성과는 비한국 결제만으로 측정. mp_country_code=KR(=South Korea)인 결제 제외.
+        # country 미상(None/빈값)은 '한국으로 나온 것'이 아니므로 유지.
+        if 'country' in df_d.columns:
+            before_kr = len(df_d)
+            _is_kr = df_d['country'].astype(str).str.strip().str.upper().isin(KOREA_CC)
+            df_d = df_d[~_is_kr]
+            log.info(f"  한국(KR) 제외: {before_kr} -> {len(df_d)} ({before_kr - len(df_d)}건 South Korea 결제 제외)")
 
         for (d, ut), v in df_d.groupby(['date','utm_term'])['revenue'].sum().items():
             if d and ut: mp_value_map[(d, str(ut))] = v
