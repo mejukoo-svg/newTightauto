@@ -131,6 +131,27 @@ def build_mp_maps(start, end):
             seen_no.add(key)
         deduped.append(r)
 
+    # 1.5) order_id 주문단위 dedup (결제완료/payment_complete 이중발화 방지)
+    #   같은 order_id 그룹에서 utm_term-set & 최대 revenue 행 1건만 보존(귀속 유실 방지).
+    by_oid = OrderedDict()
+    no_oid = []
+    for r in deduped:
+        oid = str(r.get("order_id") or "").strip()
+        if not oid:
+            no_oid.append(r)
+            continue
+        cur = by_oid.get(oid)
+        if cur is None:
+            by_oid[oid] = r
+            continue
+        cur_has = bool(str(cur.get("utm_term") or ""))
+        r_has = bool(str(r.get("utm_term") or ""))
+        if (r_has and not cur_has) or (
+            r_has == cur_has and float(r.get("revenue") or 0) > float(cur.get("revenue") or 0)
+        ):
+            by_oid[oid] = r
+    deduped = list(by_oid.values()) + no_oid
+
     # 2) utm_term backfill: (date,distinct_id) 그룹의 첫 non-empty utm 으로 빈 값 채움
     bf_map = {}
     for r in deduped:
@@ -164,12 +185,14 @@ def monday(iso):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     apply = "--apply" in sys.argv
+    force = "--force" in sys.argv  # only-raise 가드 우회: 하향(과대계상 보정)도 덮어씀
     if len(args) < 2:
         sys.exit("사용: py _backfill_mp_kst.py START END [--apply]")
     start, end = args[0], args[1]
 
     sb = SupabaseClient(SB_URL, SB_KEY)
-    print(f"\n{'='*70}\n백필 {start} ~ {end}  (버퍼 {BUFFER_DAYS}일)  mode={'APPLY' if apply else 'DRY-RUN'}\n{'='*70}")
+    print(f"\n{'='*70}\n백필 {start} ~ {end}  (버퍼 {BUFFER_DAYS}일)  "
+          f"mode={'APPLY' if apply else 'DRY-RUN'}{' +FORCE(하향허용)' if force else ''}\n{'='*70}")
 
     existing = fetch_existing(sb, start, end)
     print(f"기존 ad_performance_daily 행: {len(existing)}")
@@ -194,7 +217,7 @@ def main():
         mpc = int(count_map.get((dk, asid), 0))
         mpv = float(value_map.get((dk, asid), 0.0))
 
-        raises = mpc > old_mp  # 상향일 때만 갱신
+        raises = force or (mpc > old_mp)  # 평소 상향만; --force 시 하향(과대계상 보정)도 갱신
         if raises:
             revenue = mpv
             profit = revenue - spend

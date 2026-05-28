@@ -517,6 +517,7 @@ def fetch_mixpanel_data(from_date, to_date):
                         "revenue": revenue,
                         "서비스": props.get("서비스", ""),
                         "insert_id": props.get("$insert_id") or props.get("insert_id") or "",
+                        "order_id": props.get("order_id") or "",
                     })
                 except Exception:
                     pass
@@ -833,6 +834,24 @@ def main():
             df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
         else:
             df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
+
+        # 1.5) order_id 기준 주문 단위 dedup (결제완료/payment_complete 이중발화 방지)
+        #   한 주문이 두 이벤트명 + 재시도로 평균 ~3.3회 발화하는데, 발화마다 insert_id
+        #   가 달라 위 insert_id dedup 으로는 안 걸러진다 → utm_term backfill 후 groupby
+        #   sum 단계에서 같은 주문 매출이 2~3배 중복 합산되어 특정 날짜 귀속이 과대계상된다
+        #   (원본 order_id dedup 검증: 일 총매출이 Toss 와 ±0.5% 일치).
+        #   같은 order_id 그룹에서 utm_term-set & 최대 revenue 행을 1건만 보존(귀속 유실 방지).
+        if "order_id" in df_d.columns:
+            df_d["_oid"] = df_d["order_id"].astype(str).str.strip()
+            _has_oid = df_d["_oid"].str.len() > 0
+            _with = df_d[_has_oid].copy()
+            _without = df_d[~_has_oid]
+            _with["_hasu"] = (_with["utm_term"].astype(str).str.len() > 0).astype(int)
+            _with = (_with.sort_values(["_oid", "_hasu", "revenue"], ascending=[True, False, False])
+                          .drop_duplicates(subset=["_oid"], keep="first")
+                          .drop(columns=["_hasu"]))
+            df_d = pd.concat([_with, _without], ignore_index=True).drop(columns=["_oid"])
+            log.info(f"  🧹 order_id 주문단위 dedup 후: {len(df_d)}건")
 
         # 2) utm_term backfill: 같은 (date, distinct_id) 그룹의 비어있는 utm_term을
         #    그룹 내 utm_term-set 이벤트 값으로 채움 → 패키지 2번째 이벤트도 attribution

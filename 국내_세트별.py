@@ -518,6 +518,7 @@ def fetch_mixpanel_data(from_date, to_date):
                         "value_raw": value_val,
                         "revenue": revenue,
                         "서비스": props.get("서비스", ""),
+                        "order_id": props.get("order_id") or "",
                     })
                 except Exception:
                     pass
@@ -808,7 +809,15 @@ def main():
             lambda x: 0 if (x and str(x).strip() and str(x).strip() != "None") else 1
         )
         df = df.sort_values(["_has_utm", "revenue"], ascending=[True, False])
-        df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
+        # order_id 기준 주문단위 dedup(결제완료/payment_complete 이중발화로 같은 주문이
+        # ~3회 발화 → 매출 중복 합산되는 것 방지). order_id 없으면 (date,distinct_id,서비스) 폴백
+        if "order_id" in df.columns:
+            df["_oid"] = df["order_id"].astype(str).str.strip()
+            _w = df[df["_oid"].str.len() > 0].drop_duplicates(subset=["_oid"], keep="first")
+            _wo = df[df["_oid"].str.len() == 0].drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
+            df_d = pd.concat([_w, _wo], ignore_index=True).drop(columns=["_oid"])
+        else:
+            df_d = df.drop_duplicates(subset=["date", "distinct_id", "서비스"], keep="first")
 
         total_revenue = df_d["revenue"].sum()
         log.info(f"  📊 매출 합계: ₩{int(total_revenue):,}")
