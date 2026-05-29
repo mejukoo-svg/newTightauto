@@ -5,12 +5,13 @@ kpi_slack_alert.py — Supabase 데이터 조건 검사 → Slack 알람 (중복
 조건:
   [고예산 저ROAS 세트] 오늘(실시간) 국내 광고세트 중
         일예산(budget) >= 800,000  AND  ROAS < 110%  (지출 기준)
-        + 오전 오알람 방지: 오늘 지출이 일예산의 SPEND_MATURITY(기본 30%) 이상인 세트만
-        → 세트별 하루 1회, ROAS 낮은 순 목록으로 전송       · ad_performance_daily
+        + 오전 오알람 방지: 오늘 지출이 일예산의 SPEND_MATURITY(기본 15%) 이상인 세트만
+        → ROAS 낮은 순 목록(세트ID 포함). 조건 지속 시 매시간 재알림  · ad_performance_daily
   [일ROAS 경고] 어제 국내 광고 일ROAS < 100% (KR 지출 > 매출)   · ad_performance_daily
 
-중복 방지: alert_log(alert_key PK). key 에 대상날짜(+세트id)가 들어가므로
-  파이프라인이 하루 4회 돌아도 같은 항목은 1회만 전송, 날짜 바뀌면 재검사.
+중복 방지: alert_log(alert_key PK).
+  - 고예산세트 key = 날짜+시각(HH)+세트id → 매시간 재검사·재알림(같은 시각 중복 실행만 차단)
+  - 일ROAS key = 날짜 → 하루 1회(어제 기준이라 불변)
 
 env: SUPABASE_URL, SUPABASE_SERVICE_KEY, SLACK_WEBHOOK_URL
 옵션: --dry (전송/기록 생략, 판정만 출력)
@@ -126,16 +127,18 @@ def check_adset_low_roas():
             qual.append((roas, r, budget, spend, rev))
     qual.sort(key=lambda x: x[0])  # ROAS 낮은 순
     items = []
+    hh = f"{NOW:%H}"  # KST 시 — 매시간 재알림용 dedup 키 (조건 지속 시 매시간 재전송)
     for roas, r, budget, spend, rev in qual[:ADSET_MAX_LINES]:
         name = (r.get("adset_name") or r.get("adset_id") or "?")[:44]
         prod = r.get("product") or "-"
-        key = f"adset_low_roas:{d}:{r.get('adset_id')}"
-        line = (f"• *{name}* ({prod})  ROAS *{roas:.0f}%* · "
+        aid = r.get("adset_id") or "?"
+        key = f"adset_low_roas:{d}T{hh}:{aid}"   # 세트별 시간당 1회 → 매시간 재알림
+        line = (f"• *{name}*  세트ID `{aid}`  ({prod})  ROAS *{roas:.0f}%* · "
                 f"일예산 {won(budget)} · 지출 {won(spend)} · 매출 {won(rev)}")
         items.append((key, line))
     extra = len(qual) - ADSET_MAX_LINES
     if extra > 0:
-        items.append((f"adset_low_roas_more:{d}", f"…외 {extra}개 세트"))
+        items.append((f"adset_low_roas_more:{d}T{hh}", f"…외 {extra}개 세트"))
     if not items:
         log.info(f"고예산 저ROAS 세트 없음 ({d})")
         return None
