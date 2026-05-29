@@ -104,7 +104,17 @@ def slack_send(blocks, fallback):
 
 
 def won(n):
-    return "₩" + format(round(n), ",")
+    """가독성을 위해 만원 단위로 축약 (1만 미만은 원 단위)."""
+    n = round(n)
+    if abs(n) >= 10_000:
+        man = n / 10_000
+        return f"₩{man:,.0f}만" if abs(man - round(man)) < 0.05 else f"₩{man:,.1f}만"
+    return "₩" + format(n, ",")
+
+
+def sev_emoji(roas):
+    """ROAS 심각도: 🔴<70 · 🟠<90 · 🟡 그 외(90~110)."""
+    return "🔴" if roas < 70 else ("🟠" if roas < 90 else "🟡")
 
 
 # ───────────────────── 조건 ─────────────────────
@@ -129,20 +139,24 @@ def check_adset_low_roas():
     items = []
     hh = f"{NOW:%H}"  # KST 시 — 매시간 재알림용 dedup 키 (조건 지속 시 매시간 재전송)
     for roas, r, budget, spend, rev in qual[:ADSET_MAX_LINES]:
-        name = (r.get("adset_name") or r.get("adset_id") or "?")[:44]
+        name = (r.get("adset_name") or r.get("adset_id") or "?")[:46]
         prod = r.get("product") or "-"
         aid = r.get("adset_id") or "?"
         key = f"adset_low_roas:{d}T{hh}:{aid}"   # 세트별 시간당 1회 → 매시간 재알림
-        line = (f"• *{name}*  세트ID `{aid}`  ({prod})  ROAS *{roas:.0f}%* · "
-                f"일예산 {won(budget)} · 지출 {won(spend)} · 매출 {won(rev)}")
+        loss = spend - rev
+        pl = f"적자 *{won(loss)}*" if loss > 0 else f"이익 {won(-loss)}"
+        line = (f"{sev_emoji(roas)} *{name}*  ·  {prod}\n"
+                f"↳ ROAS *{roas:.0f}%*  ·  지출 {won(spend)} → 매출 {won(rev)}  ·  {pl}\n"
+                f"↳ 예산 {won(budget)}  ·  세트ID `{aid}`")
         items.append((key, line))
     extra = len(qual) - ADSET_MAX_LINES
     if extra > 0:
-        items.append((f"adset_low_roas_more:{d}T{hh}", f"…외 {extra}개 세트"))
+        items.append((f"adset_low_roas_more:{d}T{hh}", f"_…외 {extra}개 세트 더 있음_"))
     if not items:
         log.info(f"고예산 저ROAS 세트 없음 ({d})")
         return None
-    return {"title": f"🚨 고예산 저ROAS 광고세트 (오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & ROAS<{ADSET_ROAS_MAX}%)",
+    return {"title": f"🚨 고예산 저ROAS 세트  ·  {len(qual)}건",
+            "subtitle": f"오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & ROAS<{ADSET_ROAS_MAX}% · ROAS 낮은 순",
             "items": items}
 
 
@@ -156,8 +170,9 @@ def check_daily_roas():
         return None
     roas = rev / spend * 100
     if rev < spend:
-        line = f"• 어제({y}) 국내 일ROAS *{roas:.0f}%* — 지출 {won(spend)} > 매출 {won(rev)} (손실 {won(spend - rev)})"
-        return {"title": "🔴 국내 일ROAS 경고", "items": [(f"daily_roas:{y}", line)]}
+        line = (f"🔴 어제(*{y}*) 국내 전체 일ROAS *{roas:.0f}%*\n"
+                f"↳ 지출 {won(spend)} > 매출 {won(rev)}  ·  손실 *{won(spend - rev)}*")
+        return {"title": "🔴 국내 일ROAS 경고", "subtitle": "어제 KR 광고 지출 > 매출", "items": [(f"daily_roas:{y}", line)]}
     log.info(f"국내 일ROAS {roas:.0f}% — 정상({y})")
     return None
 
@@ -181,26 +196,42 @@ def main():
         if not new:
             log.info(f"[{chk.__name__}] 해당 항목 이미 전송됨")
             continue
-        sections.append((res["title"], [l for _, l in new]))
+        sections.append((res["title"], res.get("subtitle", ""), [l for _, l in new]))
         keys += [k for k, _ in new]
 
     if not sections:
         log.info("전송할 새 알람 없음")
         return
 
-    blocks = [{"type": "header", "text": {"type": "plain_text", "text": "⚠️ Tight 광고 알람"}}]
-    for title, lines in sections:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*" + title + "*\n" + "\n".join(lines)}})
+    # ── Slack Block Kit 조립 (헤더 → 섹션별 제목/부제 → 카드 라인(분할) → 구분선 → 푸터) ──
+    blocks = [{"type": "header",
+               "text": {"type": "plain_text", "text": "🚨 Tight 광고 퍼포먼스 알람", "emoji": True}}]
+    for i, (title, subtitle, lines) in enumerate(sections):
+        if i > 0:
+            blocks.append({"type": "divider"})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*"}})
+        if subtitle:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": subtitle}]})
+        # Slack section 텍스트 3000자 제한 → 여러 블록으로 분할 (6줄/2600자 단위)
+        buf = []
+        for l in lines:
+            if buf and (len(buf) >= 6 or sum(len(x) for x in buf) + len(l) > 2600):
+                blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(buf)}})
+                buf = []
+            buf.append(l)
+        if buf:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(buf)}})
+    blocks.append({"type": "divider"})
     blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
-                   "text": f"검사 {NOW:%Y-%m-%d %H:%M} KST · <https://new-tightauto.vercel.app|📊 대시보드 열기>"}]})
+                   "text": f"🕒 {NOW:%Y-%m-%d %H:%M} KST   ·   <https://new-tightauto.vercel.app|📊 대시보드 열기>"}]})
 
     fallback = sections[0][0]
     if DRY:
         log.info("[DRY] 전송 예정:")
-        for title, lines in sections:
-            print(f"\n[{title}]")
+        for title, subtitle, lines in sections:
+            print(f"\n■ {title}" + (f"   ({subtitle})" if subtitle else ""))
             for l in lines:
-                print("   " + l.replace("*", ""))
+                print("   " + l.replace("*", "").replace("\n", "\n   "))
     else:
         if slack_send(blocks, fallback):
             for k in keys:
