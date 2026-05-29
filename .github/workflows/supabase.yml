@@ -1,10 +1,8 @@
 name: 전체 Supabase 파이프라인
 on:
   schedule:
-    - cron: '30 15 * * *'   # KST 00:30
-    - cron: '0 21 * * *'    # KST 06:00
-    - cron: '0 9 * * *'     # KST 18:00
-    - cron: '0 12 * * *'    # KST 21:00
+    # 매시 정각 실행. UTC 0-17 = KST 09:00~익일 02:00 (KST 03~08시 제외, 하루 18회)
+    - cron: '0 0-17 * * *'
   workflow_dispatch:
     inputs:
       full_refresh:
