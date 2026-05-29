@@ -2,22 +2,32 @@
 """
 kpi_slack_alert.py — Supabase 데이터 조건 검사 → Slack 알람 (중복 방지)
 ======================================================================
-현재 조건:
-  [일ROAS 경고] 어제 국내 광고 일ROAS < 100% (KR 지출 > 매출)  · ad_performance_daily
+조건:
+  [고예산 저ROAS 세트] 오늘(실시간) 국내 광고세트 중
+        일예산(budget) >= 800,000  AND  ROAS < 110%  (지출 기준)
+        + 오전 오알람 방지: 오늘 지출이 일예산의 SPEND_MATURITY(기본 30%) 이상인 세트만
+        → 세트별 하루 1회, ROAS 낮은 순 목록으로 전송       · ad_performance_daily
+  [일ROAS 경고] 어제 국내 광고 일ROAS < 100% (KR 지출 > 매출)   · ad_performance_daily
 
-중복 방지: alert_log 테이블에 alert_key 기록 → 이미 보낸 키는 skip
-  (파이프라인이 하루 4회 돌아도 같은 알람은 1회만 전송).
-  alert_key 에 "대상 날짜"가 들어가므로 날짜가 바뀌면 다시 검사·전송.
+중복 방지: alert_log(alert_key PK). key 에 대상날짜(+세트id)가 들어가므로
+  파이프라인이 하루 4회 돌아도 같은 항목은 1회만 전송, 날짜 바뀌면 재검사.
 
 env: SUPABASE_URL, SUPABASE_SERVICE_KEY, SLACK_WEBHOOK_URL
-옵션: --dry (Slack 전송/기록 생략, 판정만 출력)
-로컬 실행 시 ./.env 또는 ../meta_scraper/.env 자동 로드 (SLACK_WEBHOOK_URL 은 직접 설정).
+옵션: --dry (전송/기록 생략, 판정만 출력)
+로컬 실행 시 ./.env 또는 ../meta_scraper/.env 자동 로드.
 
-새 조건 추가: check_* 함수 만들고 ALERT_CHECKS 에 등록. (key, message) 반환 or None.
+새 조건 추가: check_* 함수 만들어 ALERT_CHECKS 에 등록.
+  반환 형식: {"title": str, "items": [(alert_key, mrkdwn_line), ...]}  또는 None.
 """
 import os, sys, json, logging, urllib.request, urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+# ── 임계값 (필요시 여기만 수정) ──
+ADSET_BUDGET_MIN = 800_000   # 일예산 하한 (KRW)
+ADSET_ROAS_MAX   = 110       # ROAS 상한 (% 미만이면 알람)
+SPEND_MATURITY   = 0.15      # 오늘 지출이 일예산의 이 비율 이상인 세트만 판정(새벽 빈데이터 오알람 방지). 0=끔
+ADSET_MAX_LINES  = 30        # 한 메시지 최대 세트 수
 
 
 def _load_env():
@@ -41,14 +51,21 @@ SB_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 SLACK = os.environ.get("SLACK_WEBHOOK_URL", "")
 SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json"}
 KST = timezone(timedelta(hours=9))
-TODAY = datetime.now(KST).replace(tzinfo=None).date()
+NOW = datetime.now(KST).replace(tzinfo=None)
+TODAY = NOW.date()
 DRY = "--dry" in sys.argv
 
 
 # ───────────────────── Supabase ─────────────────────
 def sb_get(table, q):
-    req = urllib.request.Request(f"{SB_URL}/rest/v1/{table}?{q}", headers=SBH)
-    return json.loads(urllib.request.urlopen(req, timeout=30).read().decode("utf-8"))
+    out, off = [], 0
+    while True:
+        req = urllib.request.Request(f"{SB_URL}/rest/v1/{table}?{q}&limit=1000&offset={off}", headers=SBH)
+        chunk = json.loads(urllib.request.urlopen(req, timeout=40).read().decode("utf-8"))
+        out += chunk
+        if len(chunk) < 1000:
+            return out
+        off += 1000
 
 
 def sb_insert(table, rec):
@@ -59,7 +76,7 @@ def sb_insert(table, rec):
 
 def already_sent(key):
     try:
-        rows = sb_get("alert_log", f"alert_key=eq.{urllib.parse.quote(key)}&select=alert_key&limit=1")
+        rows = sb_get("alert_log", f"alert_key=eq.{urllib.parse.quote(key)}&select=alert_key")
         return len(rows) > 0
     except Exception as e:
         log.warning(f"alert_log 조회 실패(전송 진행): {e}")
@@ -68,7 +85,7 @@ def already_sent(key):
 
 def mark_sent(key, detail):
     try:
-        sb_insert("alert_log", {"alert_key": key, "detail": detail})
+        sb_insert("alert_log", {"alert_key": key, "detail": detail[:500]})
     except Exception as e:
         log.warning(f"alert_log 기록 실패: {e}")
 
@@ -77,11 +94,12 @@ def mark_sent(key, detail):
 def slack_send(blocks, fallback):
     if not SLACK:
         log.error("SLACK_WEBHOOK_URL 미설정 — 전송 불가")
-        return
+        return False
     body = json.dumps({"text": fallback, "blocks": blocks}).encode("utf-8")
     req = urllib.request.Request(SLACK, data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     urllib.request.urlopen(req, timeout=15).read()
+    return True
 
 
 def won(n):
@@ -89,6 +107,42 @@ def won(n):
 
 
 # ───────────────────── 조건 ─────────────────────
+def check_adset_low_roas():
+    """오늘(실시간) 일예산 800k↑ & ROAS<110% 광고세트 (지출 성숙도 가드)."""
+    d = TODAY.isoformat()
+    rows = sb_get("ad_performance_daily",
+                  f"date=eq.{d}&select=adset_id,adset_name,product,campaign_name,budget,spend,revenue")
+    qual = []
+    for r in rows:
+        budget = float(r.get("budget") or 0)
+        spend = float(r.get("spend") or 0)
+        rev = float(r.get("revenue") or 0)
+        if budget < ADSET_BUDGET_MIN or spend <= 0:
+            continue
+        if SPEND_MATURITY > 0 and spend < budget * SPEND_MATURITY:
+            continue  # 아직 일예산 대비 충분히 안 써서 판정 보류(오전 오알람 방지)
+        roas = rev / spend * 100
+        if roas < ADSET_ROAS_MAX:
+            qual.append((roas, r, budget, spend, rev))
+    qual.sort(key=lambda x: x[0])  # ROAS 낮은 순
+    items = []
+    for roas, r, budget, spend, rev in qual[:ADSET_MAX_LINES]:
+        name = (r.get("adset_name") or r.get("adset_id") or "?")[:44]
+        prod = r.get("product") or "-"
+        key = f"adset_low_roas:{d}:{r.get('adset_id')}"
+        line = (f"• *{name}* ({prod})  ROAS *{roas:.0f}%* · "
+                f"일예산 {won(budget)} · 지출 {won(spend)} · 매출 {won(rev)}")
+        items.append((key, line))
+    extra = len(qual) - ADSET_MAX_LINES
+    if extra > 0:
+        items.append((f"adset_low_roas_more:{d}", f"…외 {extra}개 세트"))
+    if not items:
+        log.info(f"고예산 저ROAS 세트 없음 ({d})")
+        return None
+    return {"title": f"🚨 고예산 저ROAS 광고세트 (오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & ROAS<{ADSET_ROAS_MAX}%)",
+            "items": items}
+
+
 def check_daily_roas():
     """어제 국내 광고 일ROAS < 100% (지출 > 매출)."""
     y = (TODAY - timedelta(days=1)).isoformat()
@@ -97,48 +151,58 @@ def check_daily_roas():
     rev = sum(float(r.get("revenue") or 0) for r in rows)
     if spend <= 0:
         return None
-    roas = rev / spend
+    roas = rev / spend * 100
     if rev < spend:
-        msg = (f"🔴 *어제({y}) 국내 광고 일ROAS {roas*100:.0f}%*\n"
-               f"지출 {won(spend)} > 매출 {won(rev)}  (손실 {won(spend - rev)})")
-        return (f"daily_roas:{y}", msg)
-    log.info(f"일ROAS {roas*100:.0f}% — 정상({y})")
+        line = f"• 어제({y}) 국내 일ROAS *{roas:.0f}%* — 지출 {won(spend)} > 매출 {won(rev)} (손실 {won(spend - rev)})"
+        return {"title": "🔴 국내 일ROAS 경고", "items": [(f"daily_roas:{y}", line)]}
+    log.info(f"국내 일ROAS {roas:.0f}% — 정상({y})")
     return None
 
 
-ALERT_CHECKS = [check_daily_roas]
+ALERT_CHECKS = [check_adset_low_roas, check_daily_roas]
 
 
 def main():
     log.info("=" * 56)
-    log.info("🔔 KPI Slack 알람 검사" + ("  [DRY]" if DRY else ""))
-    sent = 0
+    log.info("🔔 광고 알람 검사" + ("  [DRY]" if DRY else ""))
+    sections, keys = [], []
     for chk in ALERT_CHECKS:
         try:
             res = chk()
         except Exception as e:
-            log.error(f"{chk.__name__} 검사 오류: {e}")
+            log.error(f"{chk.__name__} 오류: {e}")
             continue
         if not res:
             continue
-        key, msg = res
-        if already_sent(key):
-            log.info(f"이미 전송됨, skip: {key}")
+        new = [(k, l) for k, l in res["items"] if not already_sent(k)]
+        if not new:
+            log.info(f"[{chk.__name__}] 해당 항목 이미 전송됨")
             continue
-        blocks = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": msg}},
-            {"type": "context", "elements": [{"type": "mrkdwn",
-             "text": f"검사 {TODAY} (KST) · <https://new-tightauto.vercel.app|📊 대시보드 열기>"}]},
-        ]
-        if DRY:
-            log.info(f"[DRY] 전송 대상: {key}\n{msg}")
-        else:
-            slack_send(blocks, msg.splitlines()[0])
-            mark_sent(key, msg.replace("\n", " | "))
-            log.info(f"✅ 전송: {key}")
-        sent += 1
-    if sent == 0:
-        log.info("조건 미해당 — 알람 없음")
+        sections.append((res["title"], [l for _, l in new]))
+        keys += [k for k, _ in new]
+
+    if not sections:
+        log.info("전송할 새 알람 없음")
+        return
+
+    blocks = [{"type": "header", "text": {"type": "plain_text", "text": "⚠️ Tight 광고 알람"}}]
+    for title, lines in sections:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*" + title + "*\n" + "\n".join(lines)}})
+    blocks.append({"type": "context", "elements": [{"type": "mrkdwn",
+                   "text": f"검사 {NOW:%Y-%m-%d %H:%M} KST · <https://new-tightauto.vercel.app|📊 대시보드 열기>"}]})
+
+    fallback = sections[0][0]
+    if DRY:
+        log.info("[DRY] 전송 예정:")
+        for title, lines in sections:
+            print(f"\n[{title}]")
+            for l in lines:
+                print("   " + l.replace("*", ""))
+    else:
+        if slack_send(blocks, fallback):
+            for k in keys:
+                mark_sent(k, "sent")
+            log.info(f"✅ 전송 완료 ({len(keys)}개 항목)")
 
 
 if __name__ == "__main__":
