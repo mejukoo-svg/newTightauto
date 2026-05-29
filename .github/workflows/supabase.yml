@@ -254,3 +254,21 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python kpi_supabase.py
+
+  # ─── 슬랙 알람 (국내 데이터 갱신 후 조건 검사) ───
+  alert:
+    name: 🔔 슬랙 알람
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [kr-adset]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run 알람 검사
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python kpi_slack_alert.py
