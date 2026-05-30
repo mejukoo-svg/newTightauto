@@ -1082,12 +1082,12 @@ function drawMetaDailyTable(){
     +'<th class="dt">날짜</th><th>노출</th><th>클릭</th><th>CTR</th><th>CPC</th>'
     +'<th>광고비</th><th>CPA</th><th>직접 전환</th><th>직접 매출</th><th>직접ROAS</th><th>총전환</th>'
     +'</tr></thead><tbody>';
+  h+='<tr class="mdt-total"><td class="dt">합계 '+dd.length+'일</td>'+rowCells(T)+'</tr>';
   dd.forEach(d=>{
     const x=daily[d]||{imp:0,clicks:0,spend:0,revenue:0,meta:0,mp:0};
     const cls=d===yDay?' class="mdt-yday"':'';
     h+='<tr'+cls+'><td class="dt">'+DK(d)+'('+WD(d)+')</td>'+rowCells(x)+'</tr>';
   });
-  h+='<tr class="mdt-total"><td class="dt">합계 '+dd.length+'일</td>'+rowCells(T)+'</tr>';
   h+='</tbody></table>';
   wrap.innerHTML=h;
 }
