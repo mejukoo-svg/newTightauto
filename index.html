@@ -108,6 +108,18 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .kpi-table th{background:#f1f5f9;border:1px solid #e2e8f0;padding:6px 12px;position:sticky;top:0;white-space:nowrap}
 .kpi-table td{border:1px solid #eee;padding:5px 12px;text-align:right;white-space:nowrap}
 .kpi-table tbody tr:hover{background:#f8fafc}
+/* 메타 일별 성과 테이블 (스냅샷 스타일) */
+.mdt-wrap{overflow-x:auto;border:1px solid #e2e2e2;border-radius:6px}
+.mdt{border-collapse:collapse;font-size:11px;width:100%;min-width:820px}
+.mdt th{background:#6b5b95;color:#fff;font-weight:700;padding:7px 8px;border:1px solid #5a4b80;white-space:nowrap;text-align:right;position:sticky;top:0}
+.mdt th.dt{text-align:center}
+.mdt td{border:1px solid #ececec;padding:5px 8px;text-align:right;white-space:nowrap;color:#333}
+.mdt td.dt{text-align:center;font-weight:600;color:#444;background:#faf9fc}
+.mdt tbody tr:nth-child(even) td{background:#f7f6fb}
+.mdt tbody tr:hover td{background:#efe9f7}
+.mdt tr.mdt-yday td{background:#fff7e6 !important;outline:2px dashed #f59e0b;outline-offset:-2px}
+.mdt tr.mdt-total td{background:#ede9f5 !important;font-weight:700;border-top:2px solid #6b5b95;color:#3a2f55}
+.mdt .roas-hi{color:#16a34a;font-weight:700}.mdt .roas-lo{color:#dc2626;font-weight:600}
 .top-list{list-style:none;padding:0}.top-list li{display:flex;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #f0f0f0;font-size:10px}.top-list .rank{font-weight:700;color:#4285f4;margin-right:6px}
 /* Zoom+Search */
 .zoom-bar{position:sticky;top:73px;z-index:99;display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:4px 10px;background:#f0f0f0;border-bottom:1px solid #ddd;font-size:11px;border-radius:0 0 4px 4px}
@@ -804,6 +816,9 @@ function renderDashboard(){
   // 메타 매출 비중 차트 (일별)
   h+='<div class="chart-card" style="margin-bottom:16px"><h3>📈 메타 매출 비중 (일별) <select id="dRevDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></h3><div style="position:relative;height:300px"><canvas id="chRevDaily"></canvas></div></div>';
 
+  // 메타 일별 성과 테이블 (위 차트와 동일 기간 · 매출=메타 귀속 매출, 토스 전체 아님)
+  h+='<div class="chart-card" style="margin-bottom:16px"><h3>📋 메타 일별 성과 <span style="font-weight:400;color:#888;font-size:10px">매출=메타 귀속 매출 (토스 전체 아님) · 위 차트와 동일 기간</span></h3><div class="mdt-wrap" id="metaDailyTableWrap"></div></div>';
+
   // Stripe summary for global
   if(MODE==='gl'&&STRIPE_DATA.length){
     const sDates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort().reverse().slice(0,7);
@@ -847,9 +862,9 @@ function renderDashboard(){
   document.getElementById('dA').addEventListener('change',e=>{dashState.dateA=e.target.value;renderDashboard()});
   document.getElementById('dB').addEventListener('change',e=>{dashState.dateB=e.target.value;renderDashboard()});
   document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawDashBar(A)});
-  document.getElementById('dRevDays').addEventListener('change',()=>drawRevDaily());
+  document.getElementById('dRevDays').addEventListener('change',()=>{drawRevDaily();drawMetaDailyTable()});
 
-  setTimeout(()=>{drawDashBar(A);drawDashPie(A);drawDashPieRev(A);drawDashTopLists(A);drawRevDaily()},50);
+  setTimeout(()=>{drawDashBar(A);drawDashPie(A);drawDashPieRev(A);drawDashTopLists(A);drawRevDaily();drawMetaDailyTable()},50);
 }
 
 // Chart.js plugin: outside leader-line labels with arrow tip for doughnut slices.
@@ -1020,6 +1035,61 @@ function drawRevDaily(){
       x:{ticks:{font:{size:9},maxRotation:45}}
     }
   }});
+}
+
+// 메타 일별 성과 테이블 — 위 chRevDaily 차트와 동일 기간/데이터.
+// 컬럼: 날짜 · 노출 · 클릭 · CTR · CPC · 광고비 · CPA · 직접 전환 · 직접 매출 · 직접ROAS · 총전환
+// 매출은 메타 귀속 매출(r.revenue), 토스 전체 매출 아님. MODE(gl)는 money()가 $ 처리.
+function drawMetaDailyTable(){
+  const wrap=document.getElementById('metaDailyTableWrap');if(!wrap)return;
+  const daysN=parseInt(document.getElementById('dRevDays')?.value||'30');
+  const dd=DATES.slice(0,daysN); // newest first
+  const daily={};
+  AD.forEach(r=>{
+    if(!daily[r.date])daily[r.date]={imp:0,clicks:0,spend:0,revenue:0,meta:0,mp:0};
+    const x=daily[r.date];
+    x.imp+=(r.impressions||0);
+    x.clicks+=(r.clicks||r.unique_clicks||0);
+    x.spend+=(r.spend||0);
+    x.revenue+=(r.revenue||0);
+    x.meta+=(r.results_meta||0);
+    x.mp+=(r.results_mp||0);
+  });
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  const T={imp:0,clicks:0,spend:0,revenue:0,meta:0,mp:0};
+  dd.forEach(d=>{const x=daily[d];if(x){T.imp+=x.imp;T.clicks+=x.clicks;T.spend+=x.spend;T.revenue+=x.revenue;T.meta+=x.meta;T.mp+=x.mp;}});
+
+  const roasCls=v=>v>=200?'roas-hi':(v>0&&v<100?'roas-lo':'');
+  const rowCells=x=>{
+    const ctr=x.imp>0?x.clicks/x.imp*100:0;
+    const cpc=x.clicks>0?x.spend/x.clicks:0;
+    const cpa=x.meta>0?x.spend/x.meta:0;
+    const roas=x.spend>0?x.revenue/x.spend*100:0;
+    return '<td>'+F(x.imp)+'</td>'
+      +'<td>'+F(x.clicks)+'</td>'
+      +'<td>'+ctr.toFixed(2)+'%</td>'
+      +'<td>'+money(cpc)+'</td>'
+      +'<td>'+money(x.spend)+'</td>'
+      +'<td>'+money(cpa)+'</td>'
+      +'<td>'+F(x.meta)+'</td>'
+      +'<td style="font-weight:600">'+money(x.revenue)+'</td>'
+      +'<td class="'+roasCls(roas)+'">'+(x.spend>0?roas.toFixed(0)+'%':'-')+'</td>'
+      +'<td>'+F(x.mp)+'</td>';
+  };
+
+  let h='<table class="mdt"><thead><tr>'
+    +'<th class="dt">날짜</th><th>노출</th><th>클릭</th><th>CTR</th><th>CPC</th>'
+    +'<th>광고비</th><th>CPA</th><th>직접 전환</th><th>직접 매출</th><th>직접ROAS</th><th>총전환</th>'
+    +'</tr></thead><tbody>';
+  dd.forEach(d=>{
+    const x=daily[d]||{imp:0,clicks:0,spend:0,revenue:0,meta:0,mp:0};
+    const cls=d===yDay?' class="mdt-yday"':'';
+    h+='<tr'+cls+'><td class="dt">'+DK(d)+'('+WD(d)+')</td>'+rowCells(x)+'</tr>';
+  });
+  h+='<tr class="mdt-total"><td class="dt">합계 '+dd.length+'일</td>'+rowCells(T)+'</tr>';
+  h+='</tbody></table>';
+  wrap.innerHTML=h;
 }
 
 // ===== TREND (상품별 그룹) =====
