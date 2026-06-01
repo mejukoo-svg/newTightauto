@@ -777,9 +777,10 @@ function renderDashboard(){
   // 매출 목표 배너 (국내 / 글로벌 모드)
   if(MODE==='kr'||MODE==='gl'){
     const pad=n=>String(n).padStart(2,'0');
+    const now=new Date();
     const yest=new Date();yest.setDate(yest.getDate()-1);
     const yYmd=yest.getFullYear()+'-'+pad(yest.getMonth()+1)+'-'+pad(yest.getDate());
-    const yMonth=yYmd.slice(0,7);
+    const yMonth=now.getFullYear()+'-'+pad(now.getMonth()+1);  // 이번 달 기준 (월 1일에도 당월 목표 즉시 표시)
     const goal=(MONTHLY_REVENUE_GOAL[MODE]||{})[yMonth];
     if(goal){
       let mtd=0,extra='';
@@ -806,9 +807,10 @@ function renderDashboard(){
       }
       const pct=goal>0?(mtd/goal*100):0;
       const remaining=goal-mtd;
-      const totalDaysInMonth=new Date(yest.getFullYear(),yest.getMonth()+1,0).getDate();
-      const daysLeft=totalDaysInMonth-yest.getDate();
-      const needPerDay=daysLeft>0?Math.max(0,remaining)/daysLeft:0;
+      const totalDaysInMonth=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+      const elapsed=(yest.getFullYear()===now.getFullYear()&&yest.getMonth()===now.getMonth())?yest.getDate():0;  // 이번 달 경과일(어제까지)
+      const daysLeft=Math.max(1,totalDaysInMonth-elapsed);
+      const needPerDay=Math.max(0,remaining)/daysLeft;
       const barW=Math.min(100,Math.max(0,pct)).toFixed(1);
       const barColor=pct>=100?'#16a34a':(pct>=70?'#2563eb':(pct>=40?'#d97706':'#dc2626'));
       const fmt=n=>'₩'+Math.round(n).toLocaleString('ko-KR');
@@ -818,7 +820,7 @@ function renderDashboard(){
       h+='<div style="background:'+bg+';border:1px solid '+bd+';border-radius:8px;padding:14px 18px;margin-bottom:14px">'
         +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
         +'<span style="font-size:14px;font-weight:700">🎯 '+labelFlag+' '+yMonth.slice(0,4)+'년 '+parseInt(yMonth.slice(5))+'월 매출 목표 달성률</span>'
-        +'<span style="font-size:11px;color:#666">기준일: '+DK(yYmd)+' (어제까지 누적)</span>'
+        +'<span style="font-size:11px;color:#666">'+(elapsed>0?'기준일: '+DK(yYmd)+' (어제까지 누적)':'이번 달 집계 시작 전 (어제까지 데이터 없음)')+'</span>'
         +'</div>'
         +'<div style="display:flex;gap:24px;margin-top:8px;font-size:13px;flex-wrap:wrap;align-items:center">'
         +'<span><b style="color:#555">목표</b> '+fmt(goal)+'</span>'
