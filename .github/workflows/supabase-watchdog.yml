@@ -1,0 +1,55 @@
+name: Supabase Watchdog
+
+# 목적: 5분마다 supabase.yml의 마지막 성공 run을 확인하고,
+#       90분 이상 무소식이면 자동 트리거. 깃허브 이메일 알림으로 실패 통지.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'   # 5분마다
+  workflow_dispatch:
+
+permissions:
+  actions: write   # 다른 워크플로우 트리거 권한
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check last successful supabase.yml run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          THRESHOLD_MIN: '90'
+        run: |
+          set -euo pipefail
+
+          LAST=$(gh run list --repo "${{ github.repository }}" \
+            --workflow=supabase.yml \
+            --status=success \
+            --limit=1 \
+            --json updatedAt --jq '.[0].updatedAt // empty')
+
+          if [ -z "$LAST" ]; then
+            echo "::warning::성공 기록 없음. 강제 트리거"
+            gh workflow run supabase.yml --repo "${{ github.repository }}"
+            echo "FAIL=true" >> "$GITHUB_ENV"
+            exit 1
+          fi
+
+          NOW_TS=$(date -u +%s)
+          # ISO 8601 → epoch (Linux GNU date)
+          LAST_TS=$(date -u -d "$LAST" +%s)
+          GAP_MIN=$(( (NOW_TS - LAST_TS) / 60 ))
+
+          echo "마지막 성공: $LAST"
+          echo "경과: ${GAP_MIN}분 (임계값: ${THRESHOLD_MIN}분)"
+
+          if [ "$GAP_MIN" -gt "$THRESHOLD_MIN" ]; then
+            echo "::warning::임계값 초과! supabase.yml 자동 트리거"
+            gh workflow run supabase.yml --repo "${{ github.repository }}"
+            # 실패로 마킹 → GitHub가 워크플로우 실패 이메일 발송
+            exit 1
+          else
+            echo "정상 (${GAP_MIN}분 < ${THRESHOLD_MIN}분)"
+          fi
