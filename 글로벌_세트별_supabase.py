@@ -487,6 +487,22 @@ def main():
         else:
             df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
 
+        # === 진단: 서비스별 organic 비율 (글로벌 시장 식별용 · 결과 미변경) ===
+        # 제품(서비스)별로 결제통화가 일정하므로 통화 오염 없이 organic 비율 비교 가능.
+        try:
+            _t = df_d.copy()
+            _t['_hasutm'] = _t['utm_term'].astype(str).str.len() > 0
+            g_all = _t.groupby('서비스')['revenue'].sum()
+            g_utm = _t[_t['_hasutm']].groupby('서비스')['revenue'].sum()
+            g_cnt = _t.groupby('서비스').size()
+            log.info("  ── 서비스별 진단 (organic 비율, local통화) ──")
+            for svc in g_all.sort_values(ascending=False).head(15).index:
+                tot = float(g_all.get(svc, 0)); utm = float(g_utm.get(svc, 0)); cnt = int(g_cnt.get(svc, 0))
+                pct = (utm / tot * 100) if tot else 0
+                log.info(f"   [{svc!r}] 건수 {cnt} 매출 {tot:,.0f} · utm있음 {utm:,.0f} ({pct:.0f}%) · organic {tot-utm:,.0f}")
+        except Exception as e:
+            log.warning(f"  서비스 진단 skip: {e}")
+
         # 2) utm_term backfill 비활성화 (2026-05-06)
         # 이유: backfill이 같은 user의 organic 결제까지 광고에 귀속시켜
         #       추이차트 매출이 Stripe 실결제를 초과하는 over-attribution 유발.
