@@ -235,9 +235,11 @@ const SBH={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
 const MONTHLY_REVENUE_GOAL={
   kr:{
     '2026-05': 1500000000,  // 국내: 15억
+    '2026-06': 1700000000,  // 국내: 17억
   },
   gl:{
     '2026-05': 450000000,   // 글로벌: 4.5억 (KRW 환산 기준, USD→KRW per-day rate)
+    '2026-06': 600000000,   // 글로벌: 6억 (KRW 환산 기준, USD→KRW per-day rate)
   },
 };
 
@@ -859,7 +861,7 @@ function renderDashboard(){
   h+='</div>';
 
   // 메타 매출 비중 차트 (일별)
-  h+='<div class="chart-card" style="margin-bottom:16px"><h3>📈 메타 매출 비중 (일별) <select id="dRevDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option></select></h3><div style="position:relative;height:300px"><canvas id="chRevDaily"></canvas></div></div>';
+  h+='<div class="chart-card" style="margin-bottom:16px"><h3>📈 메타 매출 비중 <select id="dRevUnit"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><select id="dRevDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select></h3><div style="position:relative;height:300px"><canvas id="chRevDaily"></canvas></div></div>';
 
   // 메타 일별 성과 테이블 (위 차트와 동일 기간 · 매출=메타 귀속 매출, 토스 전체 아님)
   h+='<div class="chart-card" style="margin-bottom:16px"><h3>📋 메타 일별 성과 <span style="font-weight:400;color:#888;font-size:10px">매출=메타 귀속 매출 (토스 전체 아님) · 위 차트와 동일 기간</span></h3><div class="mdt-wrap" id="metaDailyTableWrap"></div></div>';
@@ -908,6 +910,7 @@ function renderDashboard(){
   document.getElementById('dB').addEventListener('change',e=>{dashState.dateB=e.target.value;renderDashboard()});
   document.getElementById('dBarMetric').addEventListener('change',e=>{dashState.metric=e.target.value;drawDashBar(A)});
   document.getElementById('dRevDays').addEventListener('change',()=>{drawRevDaily();drawMetaDailyTable()});
+  document.getElementById('dRevUnit').addEventListener('change',drawRevDaily);
 
   setTimeout(()=>{drawDashBar(A);drawDashPie(A);drawDashPieRev(A);drawDashTopLists(A);drawRevDaily();drawMetaDailyTable()},50);
 }
@@ -1033,7 +1036,8 @@ function drawDashTopLists(A){
 // ===== META REVENUE DAILY CHART =====
 function drawRevDaily(){
   const daysN=parseInt(document.getElementById('dRevDays')?.value||'30');
-  const dd=DATES.slice(0,daysN).reverse(); // oldest→newest
+  const unit=document.getElementById('dRevUnit')?.value||'day';
+  const dd=DATES.slice(0,daysN).reverse(); // oldest→newest (선택한 일수 창)
   // Daily aggregation (Meta)
   const daily={};
   AD.forEach(r=>{
@@ -1048,13 +1052,23 @@ function drawRevDaily(){
   const tossMap={};
   TOSS_DATA.forEach(r=>{tossMap[r.date]=r.net_amount||0});
 
-  const labels=dd.map(d=>DK(d).slice(3));
-  const profitData=dd.map(d=>{const x=daily[d];return x?(x.revenue-x.spend):0});
-  const metaRevData=dd.map(d=>daily[d]?.revenue||0);
-  const tossRevData=dd.map(d=>tossMap[d]||0);
-  const roasData=dd.map(d=>{const x=daily[d];return x&&x.spend>0?x.revenue/x.spend*100:0});
+  // 일/주/월 버킷팅 — 선택한 일수 창(dd) 안에서 합산 (주=월요일 시작 WM, 월=YYYY-MM)
+  const bk={};const order=[];
+  dd.forEach(d=>{
+    const key=unit==='week'?WM(d):unit==='month'?d.slice(0,7):d;
+    if(!bk[key]){bk[key]={key,spend:0,metaRev:0,tossRev:0};order.push(key)}
+    const x=daily[d];if(x){bk[key].spend+=x.spend;bk[key].metaRev+=x.revenue}
+    bk[key].tossRev+=tossMap[d]||0;
+  });
+  const buckets=order.map(k=>bk[k]);
+  const _blab=k=>{if(unit==='week'){const m=new Date(k);return(m.getMonth()+1)+'/'+m.getDate()}if(unit==='month')return k.slice(2);return DK(k).slice(3)};
+  const labels=buckets.map(b=>_blab(b.key));
+  const profitData=buckets.map(b=>b.metaRev-b.spend);
+  const metaRevData=buckets.map(b=>b.metaRev);
+  const tossRevData=buckets.map(b=>b.tossRev);
+  const roasData=buckets.map(b=>b.spend>0?b.metaRev/b.spend*100:0);
   // ★ 메타 비중 = Meta 매출(MP) / 토스 전체 매출 × 100
-  const ratioData=dd.map(d=>{const metaR=daily[d]?.revenue||0;const tossR=tossMap[d]||0;return tossR>0?metaR/tossR*100:0});
+  const ratioData=buckets.map(b=>b.tossRev>0?b.metaRev/b.tossRev*100:0);
 
   if(dashCharts.revDaily)dashCharts.revDaily.destroy();
   const ctx=document.getElementById('chRevDaily');if(!ctx)return;
