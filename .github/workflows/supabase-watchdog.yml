@@ -24,6 +24,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          # 1) 이미 in_progress 또는 queued/pending 상태의 run이 있으면 트리거 스킵
+          ACTIVE=$(gh run list --repo "${{ github.repository }}" \
+            --workflow=supabase.yml \
+            --limit=10 \
+            --json status \
+            --jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting")] | length')
+
+          if [ "$ACTIVE" -gt 0 ]; then
+            echo "정상: 이미 실행/대기 중인 run ${ACTIVE}개 → 트리거 스킵"
+            exit 0
+          fi
+
+          # 2) 마지막 성공 run 시각 확인
           LAST=$(gh run list --repo "${{ github.repository }}" \
             --workflow=supabase.yml \
             --status=success \
@@ -33,12 +46,10 @@ jobs:
           if [ -z "$LAST" ]; then
             echo "::warning::성공 기록 없음. 강제 트리거"
             gh workflow run supabase.yml --repo "${{ github.repository }}"
-            echo "FAIL=true" >> "$GITHUB_ENV"
             exit 1
           fi
 
           NOW_TS=$(date -u +%s)
-          # ISO 8601 → epoch (Linux GNU date)
           LAST_TS=$(date -u -d "$LAST" +%s)
           GAP_MIN=$(( (NOW_TS - LAST_TS) / 60 ))
 
