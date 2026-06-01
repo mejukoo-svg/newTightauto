@@ -541,12 +541,19 @@ function renderKpiDashboard(){
   el.innerHTML=h;
   document.getElementById('kpiDashPeriodSel').addEventListener('change',e=>{kpiDashPeriod=e.target.value;kpiSel[kpiDashPeriod]=null;renderKpiDashboard()});
   document.getElementById('kpiPeriodPick').addEventListener('change',e=>{kpiSel[kpiDashPeriod]=e.target.value;renderKpiDashboard()});
-  const wonAxis=v=>v>=1e8?(v/1e8).toFixed(1)+'억':(v>=1e4?(v/1e4).toFixed(0)+'만':v);
+  // 축 눈금: 인접 눈금이 같은 숫자로 뭉치지 않게 눈금 간격(step) 기준으로 소수 자리수 자동 결정
+  const _tv=t=>(t&&typeof t==='object')?t.value:t;
+  const _axStep=ticks=>{if(!ticks||ticks.length<2)return 0;let m=Infinity;for(let i=1;i<ticks.length;i++){const d=Math.abs(_tv(ticks[i])-_tv(ticks[i-1]));if(d>0&&d<m)m=d}return m===Infinity?0:m};
+  const _decals=step=>(!step||!isFinite(step)||step<=0)?1:Math.max(0,Math.min(6,Math.ceil(-Math.log10(step))));
+  const wonAxis=(v,i,ticks)=>{const st=_axStep(ticks),a=Math.abs(v);
+    if(a>=1e8)return (v/1e8).toFixed(Math.max(1,_decals(st/1e8)))+'억';
+    if(a>=1e4)return (v/1e4).toFixed(Math.max(1,_decals(st/1e4)))+'만';
+    const d=_decals(st);return d>0?v.toFixed(d):''+Math.round(v)};
   const mkLine=(id,label,data,color,pct)=>new Chart(document.getElementById(id),{type:'line',
     data:{labels,datasets:[{label,data,borderColor:color,backgroundColor:color+'22',tension:0.3,fill:true,pointRadius:3}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>pct?(c.parsed.y*100).toFixed(2)+'%':_wonK(c.parsed.y)}}},
-      scales:{y:{ticks:{callback:v=>pct?(v*100).toFixed(0)+'%':wonAxis(v)}}}}});
+      scales:{y:{ticks:{callback:(v,i,ticks)=>pct?(v*100).toFixed(Math.max(1,_decals(_axStep(ticks)*100)))+'%':wonAxis(v,i,ticks)}}}}});
   kpiCharts.c1=new Chart(document.getElementById('kpiCh1'),{data:{labels,datasets:[
     {type:'bar',label:'매출',data:series.map(r=>r.revenue),backgroundColor:'#2563eb'},
     {type:'bar',label:'예산',data:series.map(r=>r.budget),backgroundColor:'#f59e0b'},
