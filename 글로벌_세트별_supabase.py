@@ -490,9 +490,10 @@ def main():
         # 2) utm_term backfill 비활성화 (2026-05-06)
         # 이유: backfill이 같은 user의 organic 결제까지 광고에 귀속시켜
         #       추이차트 매출이 Stripe 실결제를 초과하는 over-attribution 유발.
-        before_n = len(df_d)
+        before_n = len(df_d); before_rev = float(df_d['revenue'].sum())
         df_d = df_d[df_d['utm_term'].astype(str).str.len() > 0]
-        log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외)")
+        after_rev = float(df_d['revenue'].sum())
+        log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외 · 매출 {before_rev:,.0f} -> {after_rev:,.0f} local, organic drop {before_rev - after_rev:,.0f})")
 
         # 3) Logical payment dedup (2026-05-06)
         # 이유: Mixpanel이 같은 결제를 다른 $insert_id로 1.7회 평균 중복 기록.
@@ -528,6 +529,7 @@ def main():
     # 5) 병합
     log.info(f"\n5단계: 병합")
     records = []
+    matched_local = 0.0  # 진단용: adset_id 매칭에 성공해 귀속된 mp 매출(local) 합
     for dk, rows in meta_data.items():
         parts = dk.split('/'); iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
         for mr in rows:
@@ -542,6 +544,7 @@ def main():
             # - KR: KRW
             mpc = mp_count_map.get((dk, asid), 0)
             mpv_local = mp_value_map.get((dk, asid), 0.0)
+            matched_local += float(mpv_local)  # 진단용
             if currency == "KRW":
                 mp_currency = "KRW"
             elif currency == "THB":
@@ -572,6 +575,16 @@ def main():
             })
     log.info(f"✅ 레코드: {len(records)}개")
 
+    # === 진단 로그 (귀속 손실 추적 — 결과/업로드 미변경) ===
+    attributed_usd = sum(r['revenue_usd'] for r in records)
+    total_utm_local = sum(mp_value_map.values())          # utm_term 있고 비KR·dedup 후 전체 매출(local)
+    unmatched_local = total_utm_local - matched_local     # ②: utm_term은 있으나 adset_id 매칭 실패분
+    unmatched_pct = (unmatched_local / total_utm_local * 100) if total_utm_local > 0 else 0
+    log.info("  ── 귀속 진단 (local≈TWD 기준) ──")
+    log.info(f"  utm_term 매출(비KR·dedup후) 합: {total_utm_local:,.0f} local")
+    log.info(f"    └ adset 매칭 성공(귀속): {matched_local:,.0f}  /  매칭 실패②: {unmatched_local:,.0f} ({unmatched_pct:.1f}%)")
+    log.info(f"  최종 귀속 매출(USD): ${attributed_usd:,.0f}")
+
     # 6) Supabase upsert — 광고 성과
     log.info(f"\n6단계: Supabase upsert ({len(records)}행)")
     if records:
@@ -594,6 +607,13 @@ def main():
     if stripe_records:
         sb.upsert("global_stripe_daily", stripe_records)
         log.info(f"✅ Stripe: {len(stripe_records)}행")
+
+    # === 진단 로그: 메타 귀속 매출 vs Stripe 실매출 (동일 기간 합, USD) ===
+    stripe_total_usd = sum(s['revenue_usd'] for s in stripe_records)
+    if stripe_total_usd > 0:
+        log.info("  ── 매출 비교 (기간 합, USD) ──")
+        log.info(f"  메타 귀속 ${attributed_usd:,.0f}  vs  Stripe 실매출 ${stripe_total_usd:,.0f}  → 귀속률 {attributed_usd / stripe_total_usd * 100:.1f}%")
+        log.info(f"  (주의: 이 Stripe 합은 본 스크립트 수집분=TW/HK/JP/TH, USD통화·일본 별도수집분 제외될 수 있음)")
 
     log.info("\n" + "=" * 60)
     log.info("✅ 글로벌 파이프라인 완료!")
