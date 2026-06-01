@@ -280,6 +280,7 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PRODUCT_SB_KEY: ${{ secrets.PRODUCT_SB_KEY }}
         run: python kpi_supabase.py
 
   # ─── 슬랙 알람 (국내 데이터 갱신 후 조건 검사) ───

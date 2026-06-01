@@ -62,6 +62,11 @@ WEEKS_BACK = int(os.environ.get("WEEKS_BACK", "30"))
 MONTH_START = os.environ.get("MONTH_START", "2026-01")
 DRY = "--dry" in sys.argv
 
+# 상품별 실매출(Top10) — 제품DB(payments) RPC kpi_product_daily 사용
+PRODUCT_SB_URL = os.environ.get("PRODUCT_SB_URL", "https://wvgwlwaqlhewhobzauda.supabase.co").rstrip("/")
+PRODUCT_SB_KEY = os.environ.get("PRODUCT_SB_KEY", "")
+TOP_N_PRODUCTS = int(os.environ.get("TOP_N_PRODUCTS", "10"))
+
 
 # ───────────────────── Supabase REST ─────────────────────
 def sb_get(table, select_query):
@@ -75,6 +80,11 @@ def sb_get(table, select_query):
             break
         off += 1000
     return out
+
+
+def sb_delete(table, filt):
+    req = urllib.request.Request(f"{SB_URL}/rest/v1/{table}?{filt}", headers=SBH, method="DELETE")
+    urllib.request.urlopen(req, timeout=60).read()
 
 
 def sb_upsert(table, records, chunk=500):
@@ -195,6 +205,94 @@ def build_records():
     return recs
 
 
+# ───────────────────── 상품별 실매출 (제품DB payments RPC) ─────────────────────
+def product_daily(win_start, win_end):
+    """제품DB RPC kpi_product_daily(p_start,p_end) → {date: {product: [revenue, cnt]}} (KST 일자)."""
+    url = f"{PRODUCT_SB_URL}/rest/v1/rpc/kpi_product_daily"
+    body = json.dumps({"p_start": win_start, "p_end": win_end}).encode("utf-8")
+    h = {"apikey": PRODUCT_SB_KEY, "Authorization": "Bearer " + PRODUCT_SB_KEY,
+         "Content-Type": "application/json"}
+    req = urllib.request.Request(url, data=body, headers=h, method="POST")
+    rows = json.loads(urllib.request.urlopen(req, timeout=120).read().decode("utf-8"))
+    out = {}
+    for r in rows:
+        d = (r.get("d") or "")[:10]
+        p = (r.get("product_name") or "(미지정)").strip() or "(미지정)"
+        if not d:
+            continue
+        cell = out.setdefault(d, {}).setdefault(p, [0, 0])
+        cell[0] += int(r.get("revenue") or 0)
+        cell[1] += int(r.get("cnt") or 0)
+    return out
+
+
+def product_records(pdaily):
+    """기간(주간/월간)별 상품 매출 합산 → Top N(매출순) 레코드."""
+    now = datetime.now(timezone.utc).isoformat()
+    recs = []
+
+    def build(period, label, s, end):
+        e = min(end, TODAY)
+        agg = {}
+        d = s
+        while d <= e:
+            day = pdaily.get(d.isoformat())
+            if day:
+                for p, (rev, cnt) in day.items():
+                    a = agg.setdefault(p, [0, 0]); a[0] += rev; a[1] += cnt
+            d += timedelta(days=1)
+        top = sorted(agg.items(), key=lambda kv: kv[1][0], reverse=True)[:TOP_N_PRODUCTS]
+        for rank, (p, (rev, cnt)) in enumerate(top, 1):
+            recs.append({"period": period, "period_label": label,
+                         "period_start": s.isoformat(), "period_end": e.isoformat(),
+                         "product": p, "revenue": int(rev), "sales": int(cnt),
+                         "aov": round(rev / cnt, 2) if cnt else None,
+                         "rank": rank, "updated_at": now})
+
+    for s, sun in gen_weeks(WEEKS_BACK):
+        build("weekly", f"{s:%m.%d}~{sun:%m.%d}", s, sun)
+    for s, e in gen_months(MONTH_START):
+        build("monthly", f"{s:%Y-%m}", s, e)
+    return recs
+
+
+def run_products():
+    """상품별 실매출 Top10 → kpi_product_metrics. 본체(kpi_metrics)와 독립, 실패해도 무시."""
+    if not PRODUCT_SB_KEY:
+        log.warning("⚠️ PRODUCT_SB_KEY 미설정 — 상품별 KPI 건너뜀")
+        return
+    try:
+        earliest_week = gen_weeks(WEEKS_BACK)[-1][0]
+        earliest_month = date(*map(int, MONTH_START.split("-")), 1)
+        win = min(earliest_week, earliest_month)
+        log.info(f"\n📦 상품별 실매출(제품DB) {win} ~ {TODAY}")
+        pdaily = product_daily(win.isoformat(), TODAY.isoformat())
+        recs = product_records(pdaily)
+        nw = len([r for r in recs if r["period"] == "weekly"])
+        nm = len([r for r in recs if r["period"] == "monthly"])
+        log.info(f"  상품 records {len(recs)} (주 {nw} / 월 {nm})")
+        latest = [r for r in recs if r["period"] == "weekly"]
+        if latest:
+            ls = max(r["period_start"] for r in latest)
+            print(f"\n=== 상품 Top (최신주 {ls}) ===")
+            for r in sorted([x for x in latest if x["period_start"] == ls], key=lambda x: x["rank"]):
+                print(f"  {r['rank']:>2}. {r['product']:<18} 매출 {fmt(r['revenue']):>12} · 판매 {fmt(r['sales']):>6} · 객단가 {fmt(round(r['aov']) if r['aov'] else 0):>7}")
+        if DRY:
+            log.info("[DRY RUN] 상품 upsert 생략")
+            return
+        sb_delete("kpi_product_metrics", f"period_start=gte.{win.isoformat()}")
+        sb_upsert("kpi_product_metrics", recs)
+        log.info("✅ 상품별 KPI(kpi_product_metrics) 완료")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8")[:300]
+        log.error(f"⚠️ 상품별 KPI 실패 HTTP {e.code}: {body}")
+        if e.code == 404:
+            log.error("  → kpi_product_metrics 테이블 없음. sql/kpi_product_metrics.sql 실행 필요.")
+        log.error("  (kpi_metrics 본체엔 영향 없음)")
+    except Exception as e:
+        log.error(f"⚠️ 상품별 KPI 실패: {e} (kpi_metrics 본체엔 영향 없음)")
+
+
 def fmt(n):
     return f"{n:,}" if isinstance(n, (int, float)) else "-"
 
@@ -215,11 +313,13 @@ def main():
             print(f"  {r['period_label']:<14}{fmt(r['budget']):>13}{fmt(r['revenue']):>14}"
                   f"{fmt(r['sales']):>8}{fmt(r['pv']):>9}{roas:>8}{pr:>8}{aov:>9}")
     log.info(f"\n📊 총 {len(recs)} records")
-    if DRY:
-        log.info("[DRY RUN] upsert 생략. 실제 적재하려면 --dry 빼고 실행.")
-        return
-    sb_upsert("kpi_metrics", recs)
-    log.info("✅ 완료")
+    if not DRY:
+        sb_upsert("kpi_metrics", recs)
+        log.info("✅ kpi_metrics 완료")
+    else:
+        log.info("[DRY RUN] kpi_metrics upsert 생략.")
+    # 상품별 실매출 Top10 (독립 단계 — 실패해도 본체에 영향 없음)
+    run_products()
 
 
 if __name__ == "__main__":

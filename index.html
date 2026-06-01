@@ -499,6 +499,37 @@ function _kpiRows(period){return (KPI_DATA||[]).filter(r=>r.period===period)
   .sort((a,b)=>a.period_start<b.period_start?1:-1);} // newest first
 function _kpiDestroy(){Object.values(kpiCharts).forEach(c=>{try{c.destroy()}catch(e){}});kpiCharts={}}
 
+// ===== KPI 상품별 Top10 (실매출, kpi_product_metrics) =====
+let KPI_PRODUCT_DATA=null,_kpiProdLoading=null;
+function ensureKpiProductData(){
+  if(KPI_PRODUCT_DATA)return Promise.resolve(KPI_PRODUCT_DATA);
+  if(_kpiProdLoading)return _kpiProdLoading;
+  _kpiProdLoading=sbQ('kpi_product_metrics','select=*&order=period_start.desc,rank.asc')
+    .then(d=>{KPI_PRODUCT_DATA=Array.isArray(d)?d:[];return KPI_PRODUCT_DATA})
+    .catch(()=>{KPI_PRODUCT_DATA=[];return KPI_PRODUCT_DATA});
+  return _kpiProdLoading;
+}
+function renderKpiProducts(sel){
+  if(!document.getElementById('kpiProductSection'))return;
+  ensureKpiProductData().then(all=>{
+    const host=document.getElementById('kpiProductSection');if(!host)return;
+    const rows=(all||[]).filter(r=>r.period===sel.period&&r.period_start===sel.period_start).sort((a,b)=>a.rank-b.rank);
+    if(!rows.length){host.innerHTML='<div class="chart-card"><h3>🏆 Top10 상품 (실매출)</h3><div style="padding:24px;text-align:center;color:#888">이 기간 상품별 데이터가 없습니다. <code>kpi_product_metrics</code> 적재 후 표시됩니다.</div></div>';return}
+    let t='<table class="kpi-table" style="width:100%"><thead><tr><th style="text-align:left">#</th><th style="text-align:left">상품</th><th>실매출</th><th>판매수</th><th>객단가</th></tr></thead><tbody>';
+    rows.forEach(r=>{t+='<tr><td style="text-align:left">'+r.rank+'</td><td style="text-align:left;font-weight:600">'+(r.product||'')+'</td><td style="color:#2563eb;font-weight:600">'+_wonK(r.revenue)+'</td><td>'+_numK(r.sales)+'</td><td>'+_wonK(r.aov)+'</td></tr>'});
+    t+='</tbody></table>';
+    host.innerHTML='<div class="chart-card" style="margin-bottom:16px"><h3>🏆 Top10 상품 (실매출 · '+(sel.period_label||'')+')</h3>'
+      +'<div class="chart-wrap" style="height:'+Math.max(220,rows.length*34+40)+'px"><canvas id="kpiChProd"></canvas></div></div>'
+      +'<div class="chart-card">'+t+'</div>';
+    try{if(kpiCharts.cp)kpiCharts.cp.destroy()}catch(e){}
+    kpiCharts.cp=new Chart(document.getElementById('kpiChProd'),{type:'bar',
+      data:{labels:rows.map(r=>r.product),datasets:[{label:'실매출',data:rows.map(r=>r.revenue),backgroundColor:'#2563eb'}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:c=>'실매출 '+_wonK(c.parsed.x)}}},
+        scales:{x:{ticks:{callback:v=>v>=1e8?(v/1e8).toFixed(1)+'억':(v>=1e4?(v/1e4).toFixed(0)+'만':v)}}}}});
+  });
+}
+
 function renderKpiDashboard(){
   if(!KPI_DATA){ensureKpiData().then(renderKpiDashboard);return}
   _kpiDestroy();
@@ -540,6 +571,7 @@ function renderKpiDashboard(){
     +'<div class="chart-card"><h3>👤 CAC(고객획득비용) 추이</h3><div class="chart-wrap" style="height:280px"><canvas id="kpiCh7"></canvas></div></div>'
     +'</div>';
   h+='<div class="chart-card" style="margin-bottom:16px"><h3>👥 판매수·PV 추이</h3><div style="position:relative;height:300px"><canvas id="kpiCh5"></canvas></div></div>';
+  h+='<div id="kpiProductSection" style="margin-bottom:16px"><div style="padding:24px;text-align:center;color:#888">상품별 실매출 불러오는 중…</div></div>';
   el.innerHTML=h;
   document.getElementById('kpiDashPeriodSel').addEventListener('change',e=>{kpiDashPeriod=e.target.value;kpiSel[kpiDashPeriod]=null;renderKpiDashboard()});
   document.getElementById('kpiPeriodPick').addEventListener('change',e=>{kpiSel[kpiDashPeriod]=e.target.value;renderKpiDashboard()});
@@ -574,6 +606,7 @@ function renderKpiDashboard(){
   ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},
     scales:{y:{position:'left',title:{display:true,text:'판매수'}},
             y1:{position:'right',title:{display:true,text:'PV'},grid:{drawOnChartArea:false}}}}});
+  renderKpiProducts(sel);
 }
 
 function renderKpiTable(period){
