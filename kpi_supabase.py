@@ -207,22 +207,29 @@ def build_records():
 
 # ───────────────────── 상품별 실매출 (제품DB payments RPC) ─────────────────────
 def product_daily(win_start, win_end):
-    """제품DB RPC kpi_product_daily(p_start,p_end) → {date: {product: [revenue, cnt]}} (KST 일자)."""
-    url = f"{PRODUCT_SB_URL}/rest/v1/rpc/kpi_product_daily"
+    """제품DB RPC kpi_product_daily(p_start,p_end) → {date: {product: [revenue, cnt]}} (KST 일자).
+    PostgREST RPC 응답은 1000행 기본 제한 → order 고정 + limit/offset 페이지네이션."""
+    base = f"{PRODUCT_SB_URL}/rest/v1/rpc/kpi_product_daily"
     body = json.dumps({"p_start": win_start, "p_end": win_end}).encode("utf-8")
     h = {"apikey": PRODUCT_SB_KEY, "Authorization": "Bearer " + PRODUCT_SB_KEY,
          "Content-Type": "application/json"}
-    req = urllib.request.Request(url, data=body, headers=h, method="POST")
-    rows = json.loads(urllib.request.urlopen(req, timeout=120).read().decode("utf-8"))
     out = {}
-    for r in rows:
-        d = (r.get("d") or "")[:10]
-        p = (r.get("product_name") or "(미지정)").strip() or "(미지정)"
-        if not d:
-            continue
-        cell = out.setdefault(d, {}).setdefault(p, [0, 0])
-        cell[0] += int(r.get("revenue") or 0)
-        cell[1] += int(r.get("cnt") or 0)
+    off = 0
+    while True:
+        url = base + f"?order=d.asc,product_name.asc&limit=1000&offset={off}"
+        req = urllib.request.Request(url, data=body, headers=h, method="POST")
+        rows = json.loads(urllib.request.urlopen(req, timeout=120).read().decode("utf-8"))
+        for r in rows:
+            d = (r.get("d") or "")[:10]
+            p = (r.get("product_name") or "(미지정)").strip() or "(미지정)"
+            if not d:
+                continue
+            cell = out.setdefault(d, {}).setdefault(p, [0, 0])
+            cell[0] += int(r.get("revenue") or 0)
+            cell[1] += int(r.get("cnt") or 0)
+        if len(rows) < 1000:
+            break
+        off += 1000
     return out
 
 
