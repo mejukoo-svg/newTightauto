@@ -253,7 +253,7 @@ const HL_CONFIG={
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+');
 let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
-let NSA_DAILY=[],GOOGLE_ADS=[],NAVER_MP=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[];
+let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
 
@@ -391,7 +391,7 @@ function rebuildLookups(){
 function _applyCore(d){
   KR_AD=d.kr||[];GL_AD=d.gl||[];VN_AD=d.vn||[];
   STRIPE_DATA=d.stripe||[];TOSS_DATA=d.toss||[];
-  NSA_DAILY=d.nsa||[];GOOGLE_ADS=d.google||[];
+  NSA_DAILY=d.nsa||[];GOOGLE_ADS=d.google||[];GOOGLE_DG=d.googledg||[];
   NAVER_MP=d.naver_mp||[];TOSS_DAILY=d.toss_kr||[];
   // 하이라이트: in-place merge — HIGHLIGHTS 참조 identity 유지 + 로컬 쓰기(저장 직후) 보존
   // (이전엔 KR_HL={} 으로 재할당해서 HIGHLIGHTS 가 옛 객체에 dangle → 모드 전환/refresh 시 사라짐)
@@ -403,7 +403,7 @@ function _applyCore(d){
 async function initData(){
   const D180='&date=gte.'+_dateCutoff(215);
   // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
-  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','naver_mp','toss_kr','cr','nsa_kw','naver_kw'];
+  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naver_mp','toss_kr','cr','nsa_kw','naver_kw'];
   const cached={};
   await Promise.all(cKeys.map(k=>cacheGet('t_'+k).then(v=>{cached[k]=v?.data;})));
   let renderedFromCache=false;
@@ -430,9 +430,10 @@ async function initData(){
     sbQ('google_ads_daily','select=*&order=date.desc&limit=2000').catch(()=>[]),
     sbQ('naver_daily_mp','select=*&order=date.desc&limit=2000').catch(()=>[]),
     sbQ('toss_daily_revenue','select=*&order=date.desc&limit=2000').catch(()=>[]),
+    sbQ('google_demandgen_daily','select=*&order=date.desc&limit=2000').catch(()=>[]),
   ]).then(arr=>{
-    const [kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr]=arr;
-    return {kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr};
+    const [kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr,googledg]=arr;
+    return {kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr,googledg};
   });
   const applyAndRerender=async(d)=>{
     _applyCore(d);
@@ -2470,21 +2471,23 @@ function renderChannelRevenue(){
 
 function _chrevChannels(){
   // 채널별 일자 합산
-  const byDateKR={},byDateVN={},byDateNSA={},byDateNAVER_MP={},byDateGG={},byDateTOSS={};
+  const byDateKR={},byDateVN={},byDateNSA={},byDateNAVER_MP={},byDateGG={},byDateGGDG={},byDateTOSS={};
   KR_AD.forEach(r=>{if(!byDateKR[r.date])byDateKR[r.date]={s:0,r:0};byDateKR[r.date].s+=(r.spend||0);byDateKR[r.date].r+=(r.revenue||0)});
   VN_AD.forEach(r=>{if(!byDateVN[r.date])byDateVN[r.date]={s:0,r:0};byDateVN[r.date].s+=(r.spend||0);byDateVN[r.date].r+=(r.revenue||0)});
   NSA_DAILY.forEach(r=>{if(!byDateNSA[r.date])byDateNSA[r.date]={s:0,r:0};byDateNSA[r.date].s+=(r.cost_vat||0);byDateNSA[r.date].r+=(r.revenue||0)});
   NAVER_MP.forEach(r=>{byDateNAVER_MP[r.date]=(r.revenue||0)});
   GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
+  GOOGLE_DG.forEach(r=>{byDateGGDG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});  // 구글 디멘드젠 (별도 채널)
   TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
   function getNaver(d){const n=byDateNSA[d]||{s:0,r:0};const mpRev=byDateNAVER_MP[d]||0;return{s:n.s,r:mpRev>0?mpRev:n.r}}
-  function getTotalSpend(d){const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDateNSA[d]||{s:0},g=byDateGG[d]||{s:0};return k.s+v.s+n.s+g.s}
+  function getTotalSpend(d){const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDateNSA[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0};return k.s+v.s+n.s+g.s+gd.s}
   return [
-    {name:'전체',  get:d=>({s:getTotalSpend(d),r:(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0))})},  // rev=시트(2026-03 이전) 또는 Toss(2026-04 이후), spend=합산
+    {name:'전체',  get:d=>({s:getTotalSpend(d),r:(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0))})},  // rev=시트(2026-03 이전) 또는 Toss(2026-04 이후), spend=합산(메타+밴스드+네이버+구글검색+구글디멘드젠)
     {name:'메타',  get:d=>byDateKR[d]||{s:0,r:0}},
     {name:'밴스드',get:d=>byDateVN[d]||{s:0,r:0}},
     {name:'네이버',get:d=>getNaver(d)},
     {name:'구글',  get:d=>byDateGG[d]||{s:0,r:0}},
+    {name:'구글디멘드젠',get:d=>byDateGGDG[d]||{s:0,r:0}},
   ];
 }
 

@@ -85,10 +85,11 @@ def fetch_gviz_csv():
     return list(csv.reader(resp.text.splitlines()))
 
 def load_google_section():
+    empty = {"search": [], "dg": []}
     rows = fetch_gviz_csv()
     if not rows or len(rows) < 2:
         log.error("  ❌ 빈 시트")
-        return []
+        return empty
     log.info(f"  📊 rows={len(rows)}")
 
     hdr = [str(v).strip() for v in rows[0]]
@@ -96,14 +97,14 @@ def load_google_section():
     for ci, h in enumerate(hdr):
         if h: log.info(f"    col{ci}: {repr(h)[:60]}")
 
-    # 구글 섹션 컬럼 찾기
+    # 구글 검색광고 섹션 컬럼 찾기
     cost_brand_ci = cost_general_ci = revenue_ci = None
     # cost_brand: 헤더에 '구글' AND '브랜드' AND '지출'
     for ci, h in enumerate(hdr):
         if "구글" in h and "브랜드" in h and "지출" in h:
             cost_brand_ci = ci; break
     if cost_brand_ci is None:
-        log.error("  ❌ '구글 브랜드 지출' 컬럼 못 찾음"); return []
+        log.error("  ❌ '구글 브랜드 지출' 컬럼 못 찾음"); return empty
 
     # cost_general: cost_brand 바로 뒤 1~3 col 내에 '일반' AND '지출'
     for ci in range(cost_brand_ci + 1, min(cost_brand_ci + 4, len(hdr))):
@@ -123,10 +124,26 @@ def load_google_section():
     if revenue_ci is not None:
         log.info(f"  → revenue={revenue_ci}({hdr[revenue_ci]!r})")
     if revenue_ci is None:
-        log.error("  ❌ '구매전환값' 컬럼 못 찾음"); return []
+        log.error("  ❌ '구매전환값' 컬럼 못 찾음"); return empty
+
+    # 구글 디멘드젠 섹션 (별도 채널): '디멘드젠 … 지출' + 바로 뒤 '구매전(환/홤)값'
+    # ※ 시트 헤더에 오타 '구매전홤값'(전환→전홤) 존재 → '구매전' 부분일치로 잡음
+    dg_cost_ci = dg_rev_ci = None
+    for ci, h in enumerate(hdr):
+        if "디멘드젠" in h and "지출" in h:
+            dg_cost_ci = ci; break
+    if dg_cost_ci is not None:
+        for ci in range(dg_cost_ci + 1, min(dg_cost_ci + 4, len(hdr))):
+            if "구매전" in hdr[ci]:  # '구매전환값' 또는 오타 '구매전홤값'
+                dg_rev_ci = ci; break
+    if dg_cost_ci is not None and dg_rev_ci is not None:
+        log.info(f"  → demandgen cost={dg_cost_ci}({hdr[dg_cost_ci]!r}) rev={dg_rev_ci}({hdr[dg_rev_ci]!r})")
+    else:
+        log.warning("  ⚠️ 구글 디멘드젠 컬럼 못 찾음 — 디멘드젠 스킵")
 
     # Row 1+ 데이터
     records = []
+    dg_records = []
     for ri in range(1, len(rows)):
         row = rows[ri]
         if not row:
@@ -134,24 +151,40 @@ def load_google_section():
         dt = _parse_date(row[0])
         if dt is None or dt < START or dt > END:
             continue
+        # 검색광고
         cost_brand = _num(row[cost_brand_ci]) if cost_brand_ci < len(row) else 0
         cost_general = _num(row[cost_general_ci]) if (cost_general_ci is not None and cost_general_ci < len(row)) else 0
         revenue = _num(row[revenue_ci]) if revenue_ci < len(row) else 0
         cost = cost_brand + cost_general
-        if cost == 0 and revenue == 0:
-            continue
-        profit = revenue - cost
-        roas = (revenue / cost * 100) if cost > 0 else 0
-        records.append({
-            "date": dt.isoformat(),
-            "cost_vat": round(cost, 2),
-            "revenue": round(revenue, 2),
-            "profit": round(profit, 2),
-            "roas": round(roas, 2),
-            "impressions": 0, "clicks": 0, "ctr": 0, "cpc": 0,
-            "conversions": 0, "cvr": 0,
-        })
-    return records
+        if cost != 0 or revenue != 0:
+            profit = revenue - cost
+            roas = (revenue / cost * 100) if cost > 0 else 0
+            records.append({
+                "date": dt.isoformat(),
+                "cost_vat": round(cost, 2),
+                "revenue": round(revenue, 2),
+                "profit": round(profit, 2),
+                "roas": round(roas, 2),
+                "impressions": 0, "clicks": 0, "ctr": 0, "cpc": 0,
+                "conversions": 0, "cvr": 0,
+            })
+        # 디멘드젠
+        if dg_cost_ci is not None and dg_rev_ci is not None:
+            dg_cost = _num(row[dg_cost_ci]) if dg_cost_ci < len(row) else 0
+            dg_rev = _num(row[dg_rev_ci]) if dg_rev_ci < len(row) else 0
+            if dg_cost != 0 or dg_rev != 0:
+                dg_profit = dg_rev - dg_cost
+                dg_roas = (dg_rev / dg_cost * 100) if dg_cost > 0 else 0
+                dg_records.append({
+                    "date": dt.isoformat(),
+                    "cost_vat": round(dg_cost, 2),
+                    "revenue": round(dg_rev, 2),
+                    "profit": round(dg_profit, 2),
+                    "roas": round(dg_roas, 2),
+                    "impressions": 0, "clicks": 0, "ctr": 0, "cpc": 0,
+                    "conversions": 0, "cvr": 0,
+                })
+    return {"search": records, "dg": dg_records}
 
 # ============================================================
 class SupabaseClient:
@@ -186,13 +219,22 @@ def main():
     log.info("=" * 60)
     log.info("🚀 구글Ads(gviz CSV) → Supabase")
     log.info("=" * 60)
-    records = load_google_section()
-    log.info(f"📦 records: {len(records)}")
-    if not records:
-        log.warning("  ⚠️ 빈 결과"); return
-    for r in records[:3]:
-        log.info(f"   {r['date']}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
-    SupabaseClient(SUPABASE_URL, SUPABASE_KEY).upsert("google_ads_daily", records)
+    data = load_google_section()
+    records = data["search"]; dg_records = data["dg"]
+    log.info(f"📦 검색광고 records: {len(records)} / 디멘드젠 records: {len(dg_records)}")
+    client = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
+    if records:
+        for r in records[:3]:
+            log.info(f"   [검색]   {r['date']}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
+        client.upsert("google_ads_daily", records)
+    else:
+        log.warning("  ⚠️ 검색광고 빈 결과")
+    if dg_records:
+        for r in dg_records[:3]:
+            log.info(f"   [디멘드젠] {r['date']}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
+        client.upsert("google_demandgen_daily", dg_records)
+    else:
+        log.warning("  ⚠️ 디멘드젠 빈 결과 (테이블 미생성 시 upsert 404 — CREATE TABLE 필요)")
     log.info("✅ 완료")
 
 if __name__ == "__main__":
