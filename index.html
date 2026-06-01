@@ -1106,9 +1106,11 @@ function renderTrend(){
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._cpm=imp>0?s/imp*1000:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
-  // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 추이차트에서 숨김 (DOM 부담 감소)
-  // 단, 하이라이트가 걸려 있는 세트는 색 유지 위해 항상 표시
-  if(MODE==='kr'||MODE==='gl')list=list.filter(a=>a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
+  // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 "개별 행"만 숨김 (DOM 부담 감소).
+  //   단, 종합/소계/일별 합계는 전체 세트 기준으로 계산해야 추이차트(주간) 합과 일치한다.
+  //   (예전엔 list 자체를 필터해 합계가 과거 구간에서 누락됐음)
+  // 하이라이트가 걸려 있는 세트는 색 유지 위해 항상 표시.
+  const isHidden=a=>(MODE==='kr'||MODE==='gl')&&!(a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4+(showChg?1:0);
   // Summary
@@ -1133,8 +1135,9 @@ function renderTrend(){
     const pCpm=pImp>0?pS/pImp*1000:0;
     const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm)+'</td>':'<td class="'+yd+'"></td>'}).join('');
     h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,0,pCpm)+'</td>'+pCells+'</tr>';
-    // Individual adsets
+    // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
+      if(isHidden(a))return;
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
@@ -2066,13 +2069,13 @@ function renderGlobalWeekly(){
       // 날짜 행
       h+='<tr style="background:#dce6f0;font-weight:500"><td colspan="2" style="text-align:left">'+mn+'월 '+weekNum+'주차</td>';
       let weekUSD=0;
-      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];
-        h+='<td style="text-align:center;font-size:9px">'+ds.slice(5)+'</td>';
-        weekUSD+=dailyUSD[ds]||0;}
+      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];const inM=ds.slice(0,7)===mk;
+        h+='<td style="text-align:center;font-size:9px;color:'+(inM?'inherit':'#ccc')+'">'+(inM?ds.slice(5):'')+'</td>';
+        if(inM)weekUSD+=dailyUSD[ds]||0;}
       h+='<td style="text-align:center;font-weight:600">'+mn+'월 '+weekNum+'주차</td></tr>';
       // 달러 행
       h+='<tr><td style="text-align:right;font-weight:600">$'+Math.round(weekUSD).toLocaleString()+'</td><td style="color:#888">달러</td>';
-      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];const v=dailyUSD[ds]||0;
+      for(let i=0;i<7;i++){const day=new Date(mon.getTime()+i*864e5);const ds=day.toISOString().split('T')[0];const v=ds.slice(0,7)===mk?(dailyUSD[ds]||0):0;
         h+='<td style="text-align:right">'+(v?'$'+Math.round(v).toLocaleString():'')+'</td>'}
       h+='<td style="text-align:right;font-weight:700">$'+Math.round(weekUSD).toLocaleString()+'</td></tr>';
       mon=new Date(sun.getTime()+864e5);weekNum++;
