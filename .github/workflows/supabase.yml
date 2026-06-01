@@ -1,8 +1,15 @@
 name: 전체 Supabase 파이프라인
+
+# 동일 실행 직렬화 (맥미니 트리거 + GitHub cron 중복 방지)
+concurrency:
+  group: supabase-pipeline
+  cancel-in-progress: false
+
 on:
   schedule:
-    # 매시 정각 실행 (24시간 매시 1회, 하루 24회) - 새벽 공백 제거
-    - cron: '0 * * * *'
+    # 정각 회피 + 다중 백업 (맥미니가 :00 정각에 발사, 깃허브는 백업)
+    - cron: '7 * * * *'      # 매시 7분 - 메인 백업
+    - cron: '37 * * * *'     # 매시 37분 - 2차 백업
   workflow_dispatch:
     inputs:
       full_refresh:
