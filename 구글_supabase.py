@@ -85,7 +85,7 @@ def fetch_gviz_csv():
     return list(csv.reader(resp.text.splitlines()))
 
 def load_google_section():
-    empty = {"search": [], "dg": []}
+    empty = {"search": [], "dg": [], "naver": []}
     rows = fetch_gviz_csv()
     if not rows or len(rows) < 2:
         log.error("  ❌ 빈 시트")
@@ -141,9 +141,27 @@ def load_google_section():
     else:
         log.warning("  ⚠️ 구글 디멘드젠 컬럼 못 찾음 — 디멘드젠 스킵")
 
+    # 네이버 파워링크 (별도 채널): '네이버 … 브랜드 … 지출'(col3) + '일반 지출'(col4) + '총 구매전환값'(col5)
+    nv_brand_ci = nv_gen_ci = nv_rev_ci = None
+    for ci, h in enumerate(hdr):
+        if "네이버" in h and "브랜드" in h and "지출" in h:
+            nv_brand_ci = ci; break
+    if nv_brand_ci is not None:
+        for ci in range(nv_brand_ci + 1, min(nv_brand_ci + 4, len(hdr))):
+            if "일반" in hdr[ci] and "지출" in hdr[ci]:
+                nv_gen_ci = ci; break
+        for ci in range(nv_brand_ci + 1, len(hdr)):
+            if hdr[ci].strip() in ("총 구매전환값", "구매전환값"):
+                nv_rev_ci = ci; break
+    if nv_brand_ci is not None and nv_rev_ci is not None:
+        log.info(f"  → naver brand={nv_brand_ci}({hdr[nv_brand_ci]!r}) general={nv_gen_ci} rev={nv_rev_ci}({hdr[nv_rev_ci]!r})")
+    else:
+        log.warning("  ⚠️ 네이버 파워링크 컬럼 못 찾음 — 네이버 스킵")
+
     # Row 1+ 데이터
     records = []
     dg_records = []
+    nv_records = []
     for ri in range(1, len(rows)):
         row = rows[ri]
         if not row:
@@ -184,7 +202,25 @@ def load_google_section():
                     "impressions": 0, "clicks": 0, "ctr": 0, "cpc": 0,
                     "conversions": 0, "cvr": 0,
                 })
-    return {"search": records, "dg": dg_records}
+        # 네이버 파워링크
+        if nv_brand_ci is not None and nv_rev_ci is not None:
+            nv_brand = _num(row[nv_brand_ci]) if nv_brand_ci < len(row) else 0
+            nv_gen = _num(row[nv_gen_ci]) if (nv_gen_ci is not None and nv_gen_ci < len(row)) else 0
+            nv_rev = _num(row[nv_rev_ci]) if nv_rev_ci < len(row) else 0
+            nv_cost = nv_brand + nv_gen
+            if nv_cost != 0 or nv_rev != 0:
+                nv_profit = nv_rev - nv_cost
+                nv_roas = (nv_rev / nv_cost * 100) if nv_cost > 0 else 0
+                nv_records.append({
+                    "date": dt.isoformat(),
+                    "cost_vat": round(nv_cost, 2),
+                    "revenue": round(nv_rev, 2),
+                    "profit": round(nv_profit, 2),
+                    "roas": round(nv_roas, 2),
+                    "brand_cost": round(nv_brand, 2),
+                    "general_cost": round(nv_gen, 2),
+                })
+    return {"search": records, "dg": dg_records, "naver": nv_records}
 
 # ============================================================
 class SupabaseClient:
@@ -220,8 +256,8 @@ def main():
     log.info("🚀 구글Ads(gviz CSV) → Supabase")
     log.info("=" * 60)
     data = load_google_section()
-    records = data["search"]; dg_records = data["dg"]
-    log.info(f"📦 검색광고 records: {len(records)} / 디멘드젠 records: {len(dg_records)}")
+    records = data["search"]; dg_records = data["dg"]; nv_records = data["naver"]
+    log.info(f"📦 검색광고: {len(records)} / 디멘드젠: {len(dg_records)} / 네이버: {len(nv_records)}")
     client = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
     if records:
         for r in records[:3]:
@@ -235,6 +271,12 @@ def main():
         client.upsert("google_demandgen_daily", dg_records)
     else:
         log.warning("  ⚠️ 디멘드젠 빈 결과 (테이블 미생성 시 upsert 404 — CREATE TABLE 필요)")
+    if nv_records:
+        for r in nv_records[:3]:
+            log.info(f"   [네이버]  {r['date']}  cost=₩{r['cost_vat']:,.0f}  rev=₩{r['revenue']:,.0f}  ROAS={r['roas']:.0f}%")
+        client.upsert("naver_powerlink_daily", nv_records)
+    else:
+        log.warning("  ⚠️ 네이버 빈 결과 (테이블 미생성 시 upsert 404 — CREATE TABLE 필요)")
     log.info("✅ 완료")
 
 if __name__ == "__main__":
