@@ -2,8 +2,9 @@ name: 글로벌 소재별 Meta → Supabase
 
 on:
   schedule:
-    - cron: '40 0 * * *'
-    - cron: '40 9 * * *'
+    # 매시 40분 실행. UTC 0-17 = KST 09:40~익일 02:40 (국내와 동일하게 시간당 1회, 하루 18회)
+    # 분은 :40으로 둬서 국내(:00)·세트별(:30)과 겹치지 않게 stagger
+    - cron: '40 0-17 * * *'
   workflow_dispatch:
     inputs:
       full_refresh:

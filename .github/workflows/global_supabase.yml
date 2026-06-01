@@ -2,8 +2,9 @@ name: 글로벌 Meta+Stripe → Supabase
 
 on:
   schedule:
-    - cron: '30 0 * * *'
-    - cron: '30 9 * * *'
+    # 매시 30분 실행. UTC 0-17 = KST 09:30~익일 02:30 (국내와 동일하게 시간당 1회, 하루 18회)
+    # 분은 :30으로 둬서 국내(:00)·소재별(:40)과 겹치지 않게 stagger
+    - cron: '30 0-17 * * *'
   workflow_dispatch:
     inputs:
       full_refresh:
