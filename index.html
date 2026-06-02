@@ -164,6 +164,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn" data-mode="cr" onclick="switchMode('cr')">🎨 국내소재</div>
 <div class="mode-btn" data-mode="vn" onclick="switchMode('vn')">🎯 밴스드</div>
 <div class="mode-btn" data-mode="kpi" onclick="switchMode('kpi')">📈 지표KPI</div>
+<div class="mode-btn" data-mode="mkt" onclick="switchMode('mkt')">👤 마케터</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
 </div>
 <!-- Tabs -->
@@ -189,6 +190,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kpi-only" data-t="kpiDash">📊 KPI 대시보드</div>
 <div class="tab kpi-only" data-t="kpiWeekly">📅 주간</div>
 <div class="tab kpi-only" data-t="kpiMonthly">🗓 월간</div>
+<div class="tab mkt-only" data-t="mktDash">👤 마케터 성과</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -217,6 +219,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
 <div class="panel" id="p-kpiMonthly"><div class="sheet-wrap"><table id="kpiMTbl" class="kpi-table"></table></div></div>
+<div class="panel" id="p-mktDash"><div id="mktBody"></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -335,17 +338,28 @@ function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
 function switchMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI'};
+  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI',mkt:'👤 마케터별 소재 성과'};
   document.getElementById('modeLabel').textContent=mLabels[m]||m;
   const isKpi=(m==='kpi');
+  const isMkt=(m==='mkt');
+  const isSpecial=isKpi||isMkt;
   // Tab visibility (unified)
   document.querySelectorAll('.tab').forEach(t=>{
+    if(t.classList.contains('mkt-only')){t.style.display=isMkt?'inline-block':'none';return}
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
-    if(t.classList.contains('global-only')){t.style.display=(!isKpi&&m==='gl')?'inline-block':'none';return}
-    if(t.classList.contains('kr-only')){t.style.display=(!isKpi&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
-    if(t.classList.contains('creative-only')){t.style.display=(!isKpi&&m==='cr')?'inline-block':'none';return}
-    t.style.display=isKpi?'none':'inline-block';
+    if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
+    if(t.classList.contains('kr-only')){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
+    if(t.classList.contains('creative-only')){t.style.display=(!isSpecial&&m==='cr')?'inline-block':'none';return}
+    t.style.display=isSpecial?'none':'inline-block';
   });
+  if(isMkt){
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+    document.querySelector('.tab[data-t="mktDash"]').classList.add('active');
+    document.getElementById('p-mktDash').classList.add('active');
+    if(!CR_AD.length)ensureBigTable('cr').then(()=>renderMarketer());else renderMarketer();
+    return;
+  }
   if(isKpi){
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -356,7 +370,7 @@ function switchMode(m){
   }
   // returning from KPI mode: if active tab is now hidden, reset to dashboard
   {const _at=document.querySelector('.tab.active');
-   if(!_at||_at.classList.contains('kpi-only')){
+   if(!_at||_at.classList.contains('kpi-only')||_at.classList.contains('mkt-only')){
      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
      document.querySelector('.tab[data-t="dashboard"]').classList.add('active');
@@ -631,6 +645,84 @@ function renderKpiTable(period){
   tbl.innerHTML=h;
 }
 
+// ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper 로직 통합 =====
+const MARKETERS=['경민','수연','희상','혜린','본걸','지은','휘동','지연'];
+let mktState={name:'경민',days:14,sort:'spend'};
+let mktChart=null;
+const _mkNorm=s=>(s==null?'':String(s)).normalize('NFC').toLowerCase().replace(/\s+/g,' ').trim();
+function _mkMatch(r,needle){return [r.ad_name,r.adset_name,r.campaign_name,r.memo].some(f=>f&&_mkNorm(f).includes(needle))}
+function _mkCreated(adName){if(!adName)return null;const m=String(adName).match(/_(\d{6})(?:_|$|x|\b)/);if(!m)return null;const s=m[1];const mm=+s.slice(2,4),dd=+s.slice(4,6);if(mm<1||mm>12||dd<1||dd>31)return null;return '20'+s.slice(0,2)+'-'+s.slice(2,4)+'-'+s.slice(4,6)}
+function renderMarketer(){
+  const body=document.getElementById('mktBody');if(!body)return;
+  if(!CR_AD.length){body.innerHTML='<div style="padding:48px;text-align:center;color:#888">소재 데이터 로딩 중…</div>';ensureBigTable('cr').then(renderMarketer);return}
+  const needle=_mkNorm(mktState.name);const days=mktState.days;
+  let cutoff='0000-00-00';
+  if(days>0){const d=new Date();d.setDate(d.getDate()-days+1);cutoff=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+  const rows=CR_AD.filter(r=>_mkMatch(r,needle)&&(days===0||r.date>=cutoff));
+  // 소재(ad_id)별 집계
+  const byId={};
+  rows.forEach(r=>{const key=r.ad_id||(r.ad_name+'__'+r.adset_id);
+    if(!byId[key])byId[key]={ad_id:r.ad_id,ad_name:r.ad_name||'(이름없음)',adset_name:r.adset_name,campaign_name:r.campaign_name,product:r.product,created:_mkCreated(r.ad_name),imp:0,clk:0,spend:0,rev:0,profit:0,res:0,days:new Set()};
+    const t=byId[key];t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=(+r.spend||0);t.rev+=(+r.revenue||0);t.profit+=(r.profit!=null?+r.profit:((+r.revenue||0)-(+r.spend||0)));t.res+=(+r.results_meta||0)+(+r.results_mp||0);t.days.add(r.date)});
+  let list=Object.values(byId).map(t=>({...t,ndays:t.days.size,ctr:t.imp>0?t.clk/t.imp*100:0,cpm:t.imp>0?t.spend/t.imp*1000:0,roas:t.spend>0?t.rev/t.spend*100:0,cvr:t.clk>0?t.res/t.clk*100:0}));
+  const sk=mktState.sort;list.sort((a,b)=>(b[sk]||0)-(a[sk]||0));
+  // 합계
+  const T=list.reduce((a,c)=>{a.imp+=c.imp;a.clk+=c.clk;a.spend+=c.spend;a.rev+=c.rev;a.profit+=c.profit;a.res+=c.res;return a},{imp:0,clk:0,spend:0,rev:0,profit:0,res:0});
+  const Tctr=T.imp>0?T.clk/T.imp*100:0,Tcpm=T.imp>0?T.spend/T.imp*1000:0,Troas=T.spend>0?T.rev/T.spend*100:0,Tcvr=T.clk>0?T.res/T.clk*100:0;
+  // 일별 추이
+  const byDate={};rows.forEach(r=>{if(!byDate[r.date])byDate[r.date]={s:0,r:0};byDate[r.date].s+=(+r.spend||0);byDate[r.date].r+=(+r.revenue||0)});
+  const dts=Object.keys(byDate).sort();
+  let h='';
+  h+='<div class="dash-filter" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">';
+  h+='<span style="font-weight:700;font-size:14px">👤 마케터 성과</span>';
+  h+='<label style="margin-left:8px">마케터</label><select id="mktName">'+MARKETERS.map(n=>'<option value="'+n+'"'+(n===mktState.name?' selected':'')+'>'+n+'</option>').join('')+'</select>';
+  h+='<label style="margin-left:8px">기간</label><select id="mktDays">'+[[0,'전체'],[7,'7일'],[14,'14일'],[30,'30일'],[60,'60일']].map(o=>'<option value="'+o[0]+'"'+(o[0]===days?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>';
+  h+='<label style="margin-left:8px">정렬</label><select id="mktSort">'+[['spend','지출'],['roas','ROAS'],['profit','이익'],['rev','매출'],['cvr','CVR'],['ctr','CTR']].map(o=>'<option value="'+o[0]+'"'+(o[0]===sk?' selected':'')+'>'+o[1]+'↓</option>').join('')+'</select>';
+  h+='<span style="color:#888;font-size:11px;margin-left:auto">소재 '+list.length+'개 · '+(days===0?'전체기간':('최근 '+days+'일'))+' · 이름 부분일치(소재/세트/캠페인/메모)</span>';
+  h+='</div>';
+  const card=(l,v,c)=>'<div class="kpi-card"><div class="k-label">'+l+'</div><div class="k-value"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div></div>';
+  h+='<div class="kpi-grid">';
+  h+=card('🎬 소재수',list.length+'개','#4285f4');
+  h+=card('💸 지출',money(T.spend),'#d00');
+  h+=card('💵 매출',money(T.rev),'#2563eb');
+  h+=card('💰 순이익',money(T.profit),T.profit>=0?'#16a34a':'#dc2626');
+  h+=card('🎯 ROAS',Troas.toFixed(0)+'%',Troas>=100?'#16a34a':'#dc2626');
+  h+=card('👆 CTR',Tctr.toFixed(2)+'%','#7c3aed');
+  h+=card('📣 CPM',money(Tcpm),'#b45309');
+  h+=card('🛒 CVR',Tcvr.toFixed(2)+'%','#0891b2');
+  h+='</div>';
+  h+='<div class="chart-card" style="margin-bottom:14px"><h3>📈 일별 지출·매출·ROAS</h3><div class="chart-wrap" style="height:260px"><canvas id="mktCh"></canvas></div></div>';
+  h+='<div class="sheet-wrap"><table id="mktTbl"><thead><tr><th style="width:28px">#</th><th style="text-align:left">소재</th><th>일수</th><th>노출</th><th>클릭</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th><th>CTR</th><th>CPM</th><th>CVR</th></tr></thead><tbody>';
+  if(!list.length){h+='<tr><td colspan="12" style="text-align:center;color:#888;padding:30px">"'+mktState.name+'" 이름이 들어간 소재가 이 기간에 없습니다.</td></tr>'}
+  list.forEach((c,i)=>{const meta=[c.product,c.adset_name,(c.created?'생성 '+c.created:'')].filter(Boolean).join(' · ');
+    h+='<tr><td style="color:#aaa;text-align:center">'+(i+1)+'</td>'
+      +'<td style="text-align:left"><div style="font-weight:600">'+(c.ad_name||'')+'</div><div style="color:#999;font-size:10px">'+meta+'</div></td>'
+      +'<td style="text-align:center">'+c.ndays+'</td>'
+      +'<td style="text-align:right">'+F(c.imp)+'</td>'
+      +'<td style="text-align:right">'+F(c.clk)+'</td>'
+      +'<td style="text-align:right;color:#d00">'+money(c.spend)+'</td>'
+      +'<td style="text-align:right;color:#2563eb">'+money(c.rev)+'</td>'
+      +'<td style="text-align:right;color:'+(c.profit>=0?'green':'red')+'">'+money(c.profit)+'</td>'
+      +'<td class="'+RC(c.roas)+'" style="text-align:right;font-weight:600">'+c.roas.toFixed(0)+'%</td>'
+      +'<td style="text-align:right">'+c.ctr.toFixed(2)+'%</td>'
+      +'<td style="text-align:right">'+money(c.cpm)+'</td>'
+      +'<td style="text-align:right">'+c.cvr.toFixed(2)+'%</td></tr>';});
+  h+='</tbody></table></div>';
+  body.innerHTML=h;
+  document.getElementById('mktName').addEventListener('change',e=>{mktState.name=e.target.value;renderMarketer()});
+  document.getElementById('mktDays').addEventListener('change',e=>{mktState.days=+e.target.value;renderMarketer()});
+  document.getElementById('mktSort').addEventListener('change',e=>{mktState.sort=e.target.value;renderMarketer()});
+  if(mktChart){try{mktChart.destroy()}catch(e){}mktChart=null}
+  const ctx=document.getElementById('mktCh');
+  if(ctx&&dts.length){mktChart=new Chart(ctx,{data:{labels:dts.map(d=>DK(d).slice(3)),datasets:[
+    {type:'bar',label:'지출',data:dts.map(d=>byDate[d].s),backgroundColor:'rgba(220,0,0,0.3)',borderColor:'#d00',borderWidth:1,yAxisID:'y'},
+    {type:'bar',label:'매출',data:dts.map(d=>byDate[d].r),backgroundColor:'rgba(37,99,235,0.3)',borderColor:'#2563eb',borderWidth:1,yAxisID:'y'},
+    {type:'line',label:'ROAS%',data:dts.map(d=>byDate[d].s>0?byDate[d].r/byDate[d].s*100:0),borderColor:'#16a34a',backgroundColor:'transparent',borderWidth:2,pointRadius:2,yAxisID:'y1'}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{position:'top',labels:{font:{size:10}}},tooltip:{callbacks:{label:c=>c.dataset.yAxisID==='y1'?c.dataset.label+': '+c.raw.toFixed(0)+'%':c.dataset.label+': '+money(c.raw)}}},
+    scales:{y:{position:'left',ticks:{font:{size:9},callback:v=>'₩'+(v/10000).toFixed(0)+'만'}},y1:{position:'right',ticks:{font:{size:9},callback:v=>v+'%'},grid:{display:false}},x:{ticks:{font:{size:9},maxRotation:45}}}}});}
+}
+
 // ===== TAB ROUTING =====
 function renderTab(id){
   if(id==='dashboard')renderDashboard();
@@ -654,6 +746,7 @@ function renderTab(id){
   if(id==='kpiDash')renderKpiDashboard();
   if(id==='kpiWeekly')renderKpiTable('weekly');
   if(id==='kpiMonthly')renderKpiTable('monthly');
+  if(id==='mktDash')renderMarketer();
 }
 
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
