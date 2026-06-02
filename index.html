@@ -645,82 +645,103 @@ function renderKpiTable(period){
   tbl.innerHTML=h;
 }
 
-// ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper 로직 통합 =====
+// ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper report 구성 복제(라이트 테마) =====
 const MARKETERS=['경민','수연','희상','혜린','본걸','지은','휘동','지연'];
-let mktState={name:'경민',days:14,sort:'spend'};
-let mktChart=null;
+const _mkToday=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const _mkAddDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+let mktState={name:'경민',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
+let mktCharts={};
 const _mkNorm=s=>(s==null?'':String(s)).normalize('NFC').toLowerCase().replace(/\s+/g,' ').trim();
 function _mkMatch(r,needle){return [r.ad_name,r.adset_name,r.campaign_name,r.memo].some(f=>f&&_mkNorm(f).includes(needle))}
 function _mkCreated(adName){if(!adName)return null;const m=String(adName).match(/_(\d{6})(?:_|$|x|\b)/);if(!m)return null;const s=m[1];const mm=+s.slice(2,4),dd=+s.slice(4,6);if(mm<1||mm>12||dd<1||dd>31)return null;return '20'+s.slice(0,2)+'-'+s.slice(2,4)+'-'+s.slice(4,6)}
+function _mkAggregate(rows){const byId={};
+  rows.forEach(r=>{const key=r.ad_id||(r.ad_name+'__'+r.adset_id);
+    if(!byId[key])byId[key]={ad_id:r.ad_id,ad_name:r.ad_name||'(이름없음)',adset_name:r.adset_name,campaign_name:r.campaign_name,product:r.product,created:_mkCreated(r.ad_name),imp:0,clk:0,spend:0,rev:0,profit:0,res:0,days:new Set()};
+    const t=byId[key];const sp=+r.spend||0,rv=+r.revenue||0;t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=sp;t.rev+=rv;t.profit+=(r.profit!=null?+r.profit:(rv-sp));t.res+=(+r.results_meta||0)+(+r.results_mp||0);t.days.add(r.date)});
+  return Object.values(byId).map(t=>({...t,ndays:t.days.size,ctr:t.imp>0?t.clk/t.imp*100:0,cpm:t.imp>0?t.spend/t.imp*1000:0,roas:t.spend>0?t.rev/t.spend*100:0,cvr:t.clk>0?t.res/t.clk*100:0}));}
+function _mkTotals(list){const t={spend:0,rev:0,profit:0,imp:0,clk:0,res:0};list.forEach(c=>{t.spend+=c.spend;t.rev+=c.rev;t.profit+=c.profit;t.imp+=c.imp;t.clk+=c.clk;t.res+=c.res});t.ctr=t.imp>0?t.clk/t.imp*100:0;t.cpm=t.imp>0?t.spend/t.imp*1000:0;t.roas=t.spend>0?t.rev/t.spend*100:0;t.cvr=t.clk>0?t.res/t.clk*100:0;return t}
+function _mkDestroy(){Object.values(mktCharts).forEach(c=>{try{c.destroy()}catch(e){}});mktCharts={}}
 function renderMarketer(){
   const body=document.getElementById('mktBody');if(!body)return;
   if(!CR_AD.length){body.innerHTML='<div style="padding:48px;text-align:center;color:#888">소재 데이터 로딩 중…</div>';ensureBigTable('cr').then(renderMarketer);return}
-  const needle=_mkNorm(mktState.name);const days=mktState.days;
-  let cutoff='0000-00-00';
-  if(days>0){const d=new Date();d.setDate(d.getDate()-days+1);cutoff=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
-  const rows=CR_AD.filter(r=>_mkMatch(r,needle)&&(days===0||r.date>=cutoff));
-  // 소재(ad_id)별 집계
-  const byId={};
-  rows.forEach(r=>{const key=r.ad_id||(r.ad_name+'__'+r.adset_id);
-    if(!byId[key])byId[key]={ad_id:r.ad_id,ad_name:r.ad_name||'(이름없음)',adset_name:r.adset_name,campaign_name:r.campaign_name,product:r.product,created:_mkCreated(r.ad_name),imp:0,clk:0,spend:0,rev:0,profit:0,res:0,days:new Set()};
-    const t=byId[key];t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=(+r.spend||0);t.rev+=(+r.revenue||0);t.profit+=(r.profit!=null?+r.profit:((+r.revenue||0)-(+r.spend||0)));t.res+=(+r.results_meta||0)+(+r.results_mp||0);t.days.add(r.date)});
-  let list=Object.values(byId).map(t=>({...t,ndays:t.days.size,ctr:t.imp>0?t.clk/t.imp*100:0,cpm:t.imp>0?t.spend/t.imp*1000:0,roas:t.spend>0?t.rev/t.spend*100:0,cvr:t.clk>0?t.res/t.clk*100:0}));
-  const sk=mktState.sort;list.sort((a,b)=>(b[sk]||0)-(a[sk]||0));
-  // 합계
-  const T=list.reduce((a,c)=>{a.imp+=c.imp;a.clk+=c.clk;a.spend+=c.spend;a.rev+=c.rev;a.profit+=c.profit;a.res+=c.res;return a},{imp:0,clk:0,spend:0,rev:0,profit:0,res:0});
-  const Tctr=T.imp>0?T.clk/T.imp*100:0,Tcpm=T.imp>0?T.spend/T.imp*1000:0,Troas=T.spend>0?T.rev/T.spend*100:0,Tcvr=T.clk>0?T.res/T.clk*100:0;
-  // 일별 추이
-  const byDate={};rows.forEach(r=>{if(!byDate[r.date])byDate[r.date]={s:0,r:0};byDate[r.date].s+=(+r.spend||0);byDate[r.date].r+=(+r.revenue||0)});
+  const needle=_mkNorm(mktState.name);
+  const mineAll=CR_AD.filter(r=>_mkMatch(r,needle));
+  const rows=mineAll.filter(r=>r.date>=mktState.from&&r.date<=mktState.to);
+  let list=_mkAggregate(rows);const T=_mkTotals(list);
+  const ALL=_mkTotals(_mkAggregate(mineAll));
+  const sk=mktState.sortKey,sd=mktState.sortDir;
+  const sv=c=>sk==='created'?(c.created||''):sk==='ndays'?c.ndays:sk==='ad_name'?(c.ad_name||''):(c[sk]||0);
+  list.sort((a,b)=>{const x=sv(a),y=sv(b);return x<y?sd:x>y?-sd:0});
+  const byDate={};rows.forEach(r=>{if(!byDate[r.date])byDate[r.date]={s:0,r:0,p:0};const sp=+r.spend||0,rv=+r.revenue||0;byDate[r.date].s+=sp;byDate[r.date].r+=rv;byDate[r.date].p+=(r.profit!=null?+r.profit:(rv-sp))});
   const dts=Object.keys(byDate).sort();
+  const pct=(v,d)=>(v||0).toFixed(d==null?2:d)+'%';
   let h='';
-  h+='<div class="dash-filter" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px">';
-  h+='<span style="font-weight:700;font-size:14px">👤 마케터 성과</span>';
-  h+='<label style="margin-left:8px">마케터</label><select id="mktName">'+MARKETERS.map(n=>'<option value="'+n+'"'+(n===mktState.name?' selected':'')+'>'+n+'</option>').join('')+'</select>';
-  h+='<label style="margin-left:8px">기간</label><select id="mktDays">'+[[0,'전체'],[7,'7일'],[14,'14일'],[30,'30일'],[60,'60일']].map(o=>'<option value="'+o[0]+'"'+(o[0]===days?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>';
-  h+='<label style="margin-left:8px">정렬</label><select id="mktSort">'+[['spend','지출'],['roas','ROAS'],['profit','이익'],['rev','매출'],['cvr','CVR'],['ctr','CTR']].map(o=>'<option value="'+o[0]+'"'+(o[0]===sk?' selected':'')+'>'+o[1]+'↓</option>').join('')+'</select>';
-  h+='<span style="color:#888;font-size:11px;margin-left:auto">소재 '+list.length+'개 · '+(days===0?'전체기간':('최근 '+days+'일'))+' · 이름 부분일치(소재/세트/캠페인/메모)</span>';
+  // 컨트롤 (마케터 + 프리셋 + 날짜범위)
+  h+='<div class="dash-filter" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
+  h+='<span style="font-weight:700;font-size:14px">👤 마케터</span>';
+  h+='<select id="mktName">'+MARKETERS.map(n=>'<option value="'+n+'"'+(n===mktState.name?' selected':'')+'>'+n+'</option>').join('')+'</select>';
+  h+='<span style="margin-left:6px;display:inline-flex;gap:4px">'+[['all','전체'],['today','오늘'],['3d','3일'],['7d','7일'],['14d','2주'],['30d','30일']].map(p=>'<button class="mkt-preset" data-p="'+p[0]+'" style="padding:4px 9px;border:1px solid '+(mktState.preset===p[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(mktState.preset===p[0]?'#1a73e8':'#fff')+';color:'+(mktState.preset===p[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+p[1]+'</button>').join('')+'</span>';
+  h+='<input type="date" id="mktFrom" value="'+mktState.from+'" style="font-size:11px"><span style="color:#888">~</span><input type="date" id="mktTo" value="'+mktState.to+'" style="font-size:11px"><button id="mktGo" style="padding:4px 12px;border:1px solid #1a73e8;border-radius:5px;background:#1a73e8;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">조회</button>';
+  h+='<span style="color:#888;font-size:11px;margin-left:auto">소재 '+list.length+'개 · '+mktState.from+'~'+mktState.to+'</span>';
   h+='</div>';
+  // KPI 카드 (원본 8개)
   const card=(l,v,c)=>'<div class="kpi-card"><div class="k-label">'+l+'</div><div class="k-value"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div></div>';
   h+='<div class="kpi-grid">';
-  h+=card('🎬 소재수',list.length+'개','#4285f4');
-  h+=card('💸 지출',money(T.spend),'#d00');
-  h+=card('💵 매출',money(T.rev),'#2563eb');
-  h+=card('💰 순이익',money(T.profit),T.profit>=0?'#16a34a':'#dc2626');
-  h+=card('🎯 ROAS',Troas.toFixed(0)+'%',Troas>=100?'#16a34a':'#dc2626');
-  h+=card('👆 CTR',Tctr.toFixed(2)+'%','#7c3aed');
-  h+=card('📣 CPM',money(Tcpm),'#b45309');
-  h+=card('🛒 CVR',Tcvr.toFixed(2)+'%','#0891b2');
+  h+=card('총 지출',money(T.spend),'#d00')+card('총 매출',money(T.rev),'#2563eb')+card('순이익',money(T.profit),T.profit>=0?'#16a34a':'#dc2626')+card('평균 ROAS',pct(T.roas,1),T.roas>=100?'#16a34a':'#dc2626')+card('평균 CTR',pct(T.ctr),'#7c3aed')+card('평균 CPM',money(T.cpm),'#b45309')+card('평균 CVR',pct(T.cvr),'#0891b2')+card('총 노출',F(T.imp),'#555');
   h+='</div>';
-  h+='<div class="chart-card" style="margin-bottom:14px"><h3>📈 일별 지출·매출·ROAS</h3><div class="chart-wrap" style="height:260px"><canvas id="mktCh"></canvas></div></div>';
-  h+='<div class="sheet-wrap"><table id="mktTbl"><thead><tr><th style="width:28px">#</th><th style="text-align:left">소재</th><th>일수</th><th>노출</th><th>클릭</th><th>지출</th><th>매출</th><th>이익</th><th>ROAS</th><th>CTR</th><th>CPM</th><th>CVR</th></tr></thead><tbody>';
+  // 비교 섹션 (선택 기간 vs 전체 누적)
+  const ratio=(a,b)=>b>0?a/b*100:0;
+  const cmp=[['지출',money(T.spend),money(ALL.spend),pct(ratio(T.spend,ALL.spend),1)],['매출',money(T.rev),money(ALL.rev),pct(ratio(T.rev,ALL.rev),1)],['순이익',money(T.profit),money(ALL.profit),ALL.profit!==0?pct(ratio(T.profit,ALL.profit),1):'–'],['ROAS',pct(T.roas,1),pct(ALL.roas,1),ALL.roas>0?pct(T.roas/ALL.roas*100,1):'–'],['CTR',pct(T.ctr),pct(ALL.ctr),ALL.ctr>0?pct(T.ctr/ALL.ctr*100,1):'–'],['CPM',money(T.cpm),money(ALL.cpm),ALL.cpm>0?pct(T.cpm/ALL.cpm*100,1):'–'],['CVR',pct(T.cvr),pct(ALL.cvr),ALL.cvr>0?pct(T.cvr/ALL.cvr*100,1):'–'],['노출',F(T.imp),F(ALL.imp),pct(ratio(T.imp,ALL.imp),1)],['클릭',F(T.clk),F(ALL.clk),pct(ratio(T.clk,ALL.clk),1)]];
+  h+='<div class="chart-card" style="margin-bottom:12px"><h3>📊 선택 기간 vs 전체 누적 <span style="font-weight:400;color:#888;font-size:10px">(전체=로드된 최근 ~7개월)</span></h3>';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#888"><th style="text-align:left;padding:5px 8px">지표</th><th style="text-align:right;padding:5px 8px">선택 기간</th><th style="text-align:right;padding:5px 8px">전체 누적</th><th style="text-align:right;padding:5px 8px">선택÷전체</th></tr></thead><tbody>';
+  h+=cmp.map(r=>'<tr style="border-top:1px solid #eee"><td style="text-align:left;color:#888;padding:4px 8px">'+r[0]+'</td><td style="text-align:right;padding:4px 8px;font-weight:600">'+r[1]+'</td><td style="text-align:right;padding:4px 8px;color:#888">'+r[2]+'</td><td style="text-align:right;padding:4px 8px;color:#1a73e8">'+r[3]+'</td></tr>').join('');
+  h+='</tbody></table></div>';
+  // 차트 4종
+  h+='<div class="chart-card" style="margin-bottom:12px"><h3>📈 일별 추이 (지출 / 매출 / 순이익)</h3><div class="chart-wrap" style="height:260px"><canvas id="mkTrend"></canvas></div></div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
+  h+='<div class="chart-card"><h3>🎯 가성비 산점도 (지출 × ROAS, 원크기=노출)</h3><div class="chart-wrap" style="height:260px"><canvas id="mkScatter"></canvas></div></div>';
+  h+='<div class="chart-card"><h3>🥧 상품별 매출 비중</h3><div class="chart-wrap" style="height:260px"><canvas id="mkProduct"></canvas></div></div>';
+  h+='</div>';
+  h+='<div class="chart-card" style="margin-bottom:14px"><h3>🏆 Top 10 ROAS</h3><div class="chart-wrap" style="height:300px"><canvas id="mkTop"></canvas></div></div>';
+  // 표 (클릭 정렬)
+  const cols=[['ad_name','소재','left'],['created','제작일','center'],['ctr','CTR','right'],['roas','ROAS','right'],['cpm','CPM','right'],['cvr','CVR','right'],['imp','노출','right'],['spend','지출','right'],['rev','매출','right'],['profit','순이익','right'],['ndays','기간','center']];
+  h+='<div class="sheet-wrap"><table id="mktTbl"><thead><tr><th style="width:28px">#</th>'+cols.map(c=>'<th data-key="'+c[0]+'" style="cursor:pointer;text-align:'+c[2]+(mktState.sortKey===c[0]?';color:#1a73e8':'')+'">'+c[1]+(mktState.sortKey===c[0]?(mktState.sortDir<0?' ▼':' ▲'):'')+'</th>').join('')+'</tr></thead><tbody>';
   if(!list.length){h+='<tr><td colspan="12" style="text-align:center;color:#888;padding:30px">"'+mktState.name+'" 이름이 들어간 소재가 이 기간에 없습니다.</td></tr>'}
-  list.forEach((c,i)=>{const meta=[c.product,c.adset_name,(c.created?'생성 '+c.created:'')].filter(Boolean).join(' · ');
+  list.forEach((c,i)=>{const meta=[c.product,c.adset_name].filter(Boolean).join(' · ');
     h+='<tr><td style="color:#aaa;text-align:center">'+(i+1)+'</td>'
       +'<td style="text-align:left"><div style="font-weight:600">'+(c.ad_name||'')+'</div><div style="color:#999;font-size:10px">'+meta+'</div></td>'
-      +'<td style="text-align:center">'+c.ndays+'</td>'
+      +'<td style="text-align:center;color:#888;font-size:11px">'+(c.created||'–')+'</td>'
+      +'<td style="text-align:right">'+c.ctr.toFixed(2)+'%</td>'
+      +'<td class="'+RC(c.roas)+'" style="text-align:right;font-weight:600">'+c.roas.toFixed(0)+'%</td>'
+      +'<td style="text-align:right">'+money(c.cpm)+'</td>'
+      +'<td style="text-align:right">'+c.cvr.toFixed(2)+'%</td>'
       +'<td style="text-align:right">'+F(c.imp)+'</td>'
-      +'<td style="text-align:right">'+F(c.clk)+'</td>'
       +'<td style="text-align:right;color:#d00">'+money(c.spend)+'</td>'
       +'<td style="text-align:right;color:#2563eb">'+money(c.rev)+'</td>'
       +'<td style="text-align:right;color:'+(c.profit>=0?'green':'red')+'">'+money(c.profit)+'</td>'
-      +'<td class="'+RC(c.roas)+'" style="text-align:right;font-weight:600">'+c.roas.toFixed(0)+'%</td>'
-      +'<td style="text-align:right">'+c.ctr.toFixed(2)+'%</td>'
-      +'<td style="text-align:right">'+money(c.cpm)+'</td>'
-      +'<td style="text-align:right">'+c.cvr.toFixed(2)+'%</td></tr>';});
+      +'<td style="text-align:center">'+c.ndays+'</td></tr>';});
   h+='</tbody></table></div>';
   body.innerHTML=h;
+  // 리스너
   document.getElementById('mktName').addEventListener('change',e=>{mktState.name=e.target.value;renderMarketer()});
-  document.getElementById('mktDays').addEventListener('change',e=>{mktState.days=+e.target.value;renderMarketer()});
-  document.getElementById('mktSort').addEventListener('change',e=>{mktState.sort=e.target.value;renderMarketer()});
-  if(mktChart){try{mktChart.destroy()}catch(e){}mktChart=null}
-  const ctx=document.getElementById('mktCh');
-  if(ctx&&dts.length){mktChart=new Chart(ctx,{data:{labels:dts.map(d=>DK(d).slice(3)),datasets:[
-    {type:'bar',label:'지출',data:dts.map(d=>byDate[d].s),backgroundColor:'rgba(220,0,0,0.3)',borderColor:'#d00',borderWidth:1,yAxisID:'y'},
-    {type:'bar',label:'매출',data:dts.map(d=>byDate[d].r),backgroundColor:'rgba(37,99,235,0.3)',borderColor:'#2563eb',borderWidth:1,yAxisID:'y'},
-    {type:'line',label:'ROAS%',data:dts.map(d=>byDate[d].s>0?byDate[d].r/byDate[d].s*100:0),borderColor:'#16a34a',backgroundColor:'transparent',borderWidth:2,pointRadius:2,yAxisID:'y1'}
-  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-    plugins:{legend:{position:'top',labels:{font:{size:10}}},tooltip:{callbacks:{label:c=>c.dataset.yAxisID==='y1'?c.dataset.label+': '+c.raw.toFixed(0)+'%':c.dataset.label+': '+money(c.raw)}}},
-    scales:{y:{position:'left',ticks:{font:{size:9},callback:v=>'₩'+(v/10000).toFixed(0)+'만'}},y1:{position:'right',ticks:{font:{size:9},callback:v=>v+'%'},grid:{display:false}},x:{ticks:{font:{size:9},maxRotation:45}}}}});}
+  document.querySelectorAll('.mkt-preset').forEach(b=>b.addEventListener('click',()=>{const p=b.dataset.p;mktState.preset=p;const td=_mkToday();
+    if(p==='all'){mktState.from='2024-01-01';mktState.to=td}else if(p==='today'){mktState.from=td;mktState.to=td}else{const n={'3d':3,'7d':7,'14d':14,'30d':30}[p];mktState.from=_mkAddDays(-(n-1));mktState.to=td}renderMarketer()}));
+  document.getElementById('mktGo').addEventListener('click',()=>{mktState.from=document.getElementById('mktFrom').value;mktState.to=document.getElementById('mktTo').value;mktState.preset='';renderMarketer()});
+  document.querySelectorAll('#mktTbl th[data-key]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.key;if(mktState.sortKey===k)mktState.sortDir*=-1;else{mktState.sortKey=k;mktState.sortDir=-1}renderMarketer()}));
+  // 차트 렌더
+  _mkDestroy();if(typeof Chart==='undefined')return;
+  if(dts.length){mktCharts.trend=new Chart(document.getElementById('mkTrend'),{type:'line',data:{labels:dts.map(d=>DK(d).slice(3)),datasets:[
+    {label:'지출',data:dts.map(d=>Math.round(byDate[d].s)),borderColor:'#999',backgroundColor:'transparent',tension:0.3,borderWidth:1.5,pointRadius:2},
+    {label:'매출',data:dts.map(d=>Math.round(byDate[d].r)),borderColor:'#2563eb',backgroundColor:'transparent',tension:0.3,borderWidth:1.5,pointRadius:2},
+    {label:'순이익',data:dts.map(d=>Math.round(byDate[d].p)),borderColor:'#16a34a',backgroundColor:'#16a34a22',tension:0.2,borderWidth:2.5,pointRadius:3,fill:{target:{value:0},above:'#16a34a22',below:'#dc262633'}}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+money(c.parsed.y||0)}}},scales:{x:{ticks:{font:{size:9}}},y:{ticks:{font:{size:9},callback:v=>'₩'+(v/10000).toFixed(0)+'만'}}}}});}
+  const pts=list.filter(c=>c.spend>0).map(c=>({x:Math.round(c.spend),y:Math.round(c.roas),r:Math.max(3,Math.min(20,Math.sqrt(c.imp/100))),label:c.ad_name,profit:c.profit}));
+  if(pts.length){mktCharts.scatter=new Chart(document.getElementById('mkScatter'),{type:'bubble',data:{datasets:[{label:'소재',data:pts,backgroundColor:pts.map(p=>p.profit>=0?'#16a34a88':'#dc262688'),borderColor:pts.map(p=>p.profit>=0?'#16a34a':'#dc2626'),borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>[String(c.raw.label||'').slice(0,40),'지출 '+money(c.raw.x),'ROAS '+c.raw.y+'%']}}},scales:{x:{title:{display:true,text:'지출(₩)',font:{size:10}},ticks:{font:{size:9},callback:v=>'₩'+(v/10000).toFixed(0)+'만'}},y:{title:{display:true,text:'ROAS(%)',font:{size:10}},ticks:{font:{size:9}},beginAtZero:true}}}});}
+  const byProd={};list.forEach(c=>{const p=c.product||'미분류';byProd[p]=(byProd[p]||0)+c.rev});
+  const ps=Object.entries(byProd).sort((a,b)=>b[1]-a[1]);
+  if(ps.length){mktCharts.product=new Chart(document.getElementById('mkProduct'),{type:'doughnut',data:{labels:ps.map(p=>p[0]),datasets:[{data:ps.map(p=>Math.round(p[1])),backgroundColor:BRAND_COLORS,borderColor:'#fff',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:12}},tooltip:{callbacks:{label:c=>c.label+': '+money(c.parsed)}}}}});}
+  const top=[...list].sort((a,b)=>(b.roas||0)-(a.roas||0)).slice(0,10);
+  if(top.length){mktCharts.top=new Chart(document.getElementById('mkTop'),{type:'bar',data:{labels:top.map(c=>(c.ad_name||'').slice(0,28)),datasets:[{label:'ROAS(%)',data:top.map(c=>Math.round(c.roas)),backgroundColor:top.map(c=>c.roas>=100?'#16a34aaa':'#dc2626aa'),borderColor:top.map(c=>c.roas>=100?'#16a34a':'#dc2626'),borderWidth:1}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'ROAS '+c.parsed.x+'%'}}},scales:{x:{ticks:{font:{size:9},callback:v=>v+'%'},beginAtZero:true},y:{ticks:{font:{size:9}}}}}});}
 }
 
 // ===== TAB ROUTING =====
