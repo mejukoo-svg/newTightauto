@@ -255,7 +255,7 @@ const HL_CONFIG={
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+');
-let KR_AD=[],GL_AD=[],CR_AD=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
+let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
@@ -489,6 +489,7 @@ async function ensureBigTable(name){
   const D180='&date=gte.'+_dateCutoff(215);
   const tasks={
     cr:()=>sbAll('ad_creative_daily','spend',D180).then(d=>{CR_AD=d;window._CR_BY_ADSET=null;cacheSet('t_cr',{ts:Date.now(),data:d});}),
+    glcr:()=>sbAll('global_ad_creative_daily','spend_usd',D180).then(d=>{GL_CR=d;cacheSet('t_glcr',{ts:Date.now(),data:d});}),
     nsakw:()=>sbAll('naver_sa_keyword_daily','cost_vat',D180).then(d=>{NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});}),
     naverkw:()=>sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).then(d=>{NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});}),
   };
@@ -646,10 +647,11 @@ function renderKpiTable(period){
 }
 
 // ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper report 구성 복제(라이트 테마) =====
-const MARKETERS=['경민','수연','희상','혜린','본걸','지은','휘동','지연'];
+const KR_MARKETERS=['경민','수연','희상','혜린','본걸','지은','휘동','지연','정헌'];
+const GL_MARKETERS=['본걸','지은','훤기','채채'];
 const _mkToday=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const _mkAddDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-let mktState={name:'경민',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
+let mktState={region:'kr',name:'경민',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
 let mktCharts={};
 const _mkNorm=s=>(s==null?'':String(s)).normalize('NFC').toLowerCase().replace(/\s+/g,' ').trim();
 function _mkMatch(r,needle){return [r.ad_name,r.adset_name,r.campaign_name,r.memo].some(f=>f&&_mkNorm(f).includes(needle))}
@@ -657,15 +659,22 @@ function _mkCreated(adName){if(!adName)return null;const m=String(adName).match(
 function _mkAggregate(rows){const byId={};
   rows.forEach(r=>{const key=r.ad_id||(r.ad_name+'__'+r.adset_id);
     if(!byId[key])byId[key]={ad_id:r.ad_id,ad_name:r.ad_name||'(이름없음)',adset_name:r.adset_name,campaign_name:r.campaign_name,product:r.product,created:_mkCreated(r.ad_name),imp:0,clk:0,spend:0,rev:0,profit:0,res:0,days:new Set()};
-    const t=byId[key];const sp=+r.spend||0,rv=+r.revenue||0;t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=sp;t.rev+=rv;t.profit+=(r.profit!=null?+r.profit:(rv-sp));t.res+=(+r.results_meta||0)+(+r.results_mp||0);t.days.add(r.date)});
+    const t=byId[key];const sp=+(r.spend!=null?r.spend:r.spend_usd)||0,rv=+(r.revenue!=null?r.revenue:r.revenue_usd)||0,pf=(r.profit!=null?+r.profit:(r.profit_usd!=null?+r.profit_usd:(rv-sp)));t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=sp;t.rev+=rv;t.profit+=pf;t.res+=(+r.results_meta||0)+(+r.results_mp||0);t.days.add(r.date)});
   return Object.values(byId).map(t=>({...t,ndays:t.days.size,ctr:t.imp>0?t.clk/t.imp*100:0,cpm:t.imp>0?t.spend/t.imp*1000:0,roas:t.spend>0?t.rev/t.spend*100:0,cvr:t.clk>0?t.res/t.clk*100:0}));}
 function _mkTotals(list){const t={spend:0,rev:0,profit:0,imp:0,clk:0,res:0};list.forEach(c=>{t.spend+=c.spend;t.rev+=c.rev;t.profit+=c.profit;t.imp+=c.imp;t.clk+=c.clk;t.res+=c.res});t.ctr=t.imp>0?t.clk/t.imp*100:0;t.cpm=t.imp>0?t.spend/t.imp*1000:0;t.roas=t.spend>0?t.rev/t.spend*100:0;t.cvr=t.clk>0?t.res/t.clk*100:0;return t}
 function _mkDestroy(){Object.values(mktCharts).forEach(c=>{try{c.destroy()}catch(e){}});mktCharts={}}
 function renderMarketer(){
   const body=document.getElementById('mktBody');if(!body)return;
-  if(!CR_AD.length){body.innerHTML='<div style="padding:48px;text-align:center;color:#888">소재 데이터 로딩 중…</div>';ensureBigTable('cr').then(renderMarketer);return}
+  const region=mktState.region;
+  const names=region==='gl'?GL_MARKETERS:KR_MARKETERS;
+  if(!names.includes(mktState.name))mktState.name=names[0];
+  const src=region==='gl'?GL_CR:CR_AD;
+  if(!src.length){body.innerHTML='<div style="padding:48px;text-align:center;color:#888">소재 데이터 로딩 중…</div>';ensureBigTable(region==='gl'?'glcr':'cr').then(renderMarketer);return}
+  // 통화: 국내=₩, 글로벌=$ (money/axMoney 지역화 — 함수 내 money 섀도잉)
+  const money=v=>region==='gl'?('$'+Math.round(v||0).toLocaleString('en-US')):('₩'+Math.round(v||0).toLocaleString('ko-KR'));
+  const axMoney=v=>region==='gl'?('$'+(v/1000).toFixed(1)+'k'):('₩'+(v/10000).toFixed(0)+'만');
   const needle=_mkNorm(mktState.name);
-  const mineAll=CR_AD.filter(r=>_mkMatch(r,needle));
+  const mineAll=src.filter(r=>_mkMatch(r,needle));
   const rows=mineAll.filter(r=>r.date>=mktState.from&&r.date<=mktState.to);
   let list=_mkAggregate(rows);const T=_mkTotals(list);
   const ALL=_mkTotals(_mkAggregate(mineAll));
@@ -679,10 +688,11 @@ function renderMarketer(){
   // 컨트롤 (마케터 + 프리셋 + 날짜범위)
   h+='<div class="dash-filter" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
   h+='<span style="font-weight:700;font-size:14px">👤 마케터</span>';
-  h+='<select id="mktName">'+MARKETERS.map(n=>'<option value="'+n+'"'+(n===mktState.name?' selected':'')+'>'+n+'</option>').join('')+'</select>';
+  h+='<span style="display:inline-flex;gap:4px;margin-left:4px">'+[['kr','🇰🇷 국내'],['gl','🌏 글로벌']].map(rg=>'<button class="mkt-region" data-r="'+rg[0]+'" style="padding:4px 9px;border:1px solid '+(region===rg[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(region===rg[0]?'#1a73e8':'#fff')+';color:'+(region===rg[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+rg[1]+'</button>').join('')+'</span>';
+  h+='<select id="mktName">'+names.map(n=>'<option value="'+n+'"'+(n===mktState.name?' selected':'')+'>'+n+'</option>').join('')+'</select>';
   h+='<span style="margin-left:6px;display:inline-flex;gap:4px">'+[['all','전체'],['today','오늘'],['3d','3일'],['7d','7일'],['14d','2주'],['30d','30일']].map(p=>'<button class="mkt-preset" data-p="'+p[0]+'" style="padding:4px 9px;border:1px solid '+(mktState.preset===p[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(mktState.preset===p[0]?'#1a73e8':'#fff')+';color:'+(mktState.preset===p[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+p[1]+'</button>').join('')+'</span>';
   h+='<input type="date" id="mktFrom" value="'+mktState.from+'" style="font-size:11px"><span style="color:#888">~</span><input type="date" id="mktTo" value="'+mktState.to+'" style="font-size:11px"><button id="mktGo" style="padding:4px 12px;border:1px solid #1a73e8;border-radius:5px;background:#1a73e8;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">조회</button>';
-  h+='<span style="color:#888;font-size:11px;margin-left:auto">소재 '+list.length+'개 · '+mktState.from+'~'+mktState.to+'</span>';
+  h+='<span style="color:#888;font-size:11px;margin-left:auto">소재 '+list.length+'개 · '+mktState.from+'~'+mktState.to+(region==='gl'?' · USD':' · KRW')+'</span>';
   h+='</div>';
   // KPI 카드 (원본 8개)
   const card=(l,v,c)=>'<div class="kpi-card"><div class="k-label">'+l+'</div><div class="k-value"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div></div>';
@@ -724,6 +734,7 @@ function renderMarketer(){
   body.innerHTML=h;
   // 리스너
   document.getElementById('mktName').addEventListener('change',e=>{mktState.name=e.target.value;renderMarketer()});
+  document.querySelectorAll('.mkt-region').forEach(b=>b.addEventListener('click',()=>{mktState.region=b.dataset.r;const nl=mktState.region==='gl'?GL_MARKETERS:KR_MARKETERS;if(!nl.includes(mktState.name))mktState.name=nl[0];renderMarketer()}));
   document.querySelectorAll('.mkt-preset').forEach(b=>b.addEventListener('click',()=>{const p=b.dataset.p;mktState.preset=p;const td=_mkToday();
     if(p==='all'){mktState.from='2024-01-01';mktState.to=td}else if(p==='today'){mktState.from=td;mktState.to=td}else{const n={'3d':3,'7d':7,'14d':14,'30d':30}[p];mktState.from=_mkAddDays(-(n-1));mktState.to=td}renderMarketer()}));
   document.getElementById('mktGo').addEventListener('click',()=>{mktState.from=document.getElementById('mktFrom').value;mktState.to=document.getElementById('mktTo').value;mktState.preset='';renderMarketer()});
@@ -734,9 +745,9 @@ function renderMarketer(){
     {label:'지출',data:dts.map(d=>Math.round(byDate[d].s)),borderColor:'#999',backgroundColor:'transparent',tension:0.3,borderWidth:1.5,pointRadius:2},
     {label:'매출',data:dts.map(d=>Math.round(byDate[d].r)),borderColor:'#2563eb',backgroundColor:'transparent',tension:0.3,borderWidth:1.5,pointRadius:2},
     {label:'순이익',data:dts.map(d=>Math.round(byDate[d].p)),borderColor:'#16a34a',backgroundColor:'#16a34a22',tension:0.2,borderWidth:2.5,pointRadius:3,fill:{target:{value:0},above:'#16a34a22',below:'#dc262633'}}
-  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+money(c.parsed.y||0)}}},scales:{x:{ticks:{font:{size:9}}},y:{ticks:{font:{size:9},callback:v=>'₩'+(v/10000).toFixed(0)+'만'}}}}});}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+money(c.parsed.y||0)}}},scales:{x:{ticks:{font:{size:9}}},y:{ticks:{font:{size:9},callback:v=>axMoney(v)}}}}});}
   const pts=list.filter(c=>c.spend>0).map(c=>({x:Math.round(c.spend),y:Math.round(c.roas),r:Math.max(3,Math.min(20,Math.sqrt(c.imp/100))),label:c.ad_name,profit:c.profit}));
-  if(pts.length){mktCharts.scatter=new Chart(document.getElementById('mkScatter'),{type:'bubble',data:{datasets:[{label:'소재',data:pts,backgroundColor:pts.map(p=>p.profit>=0?'#16a34a88':'#dc262688'),borderColor:pts.map(p=>p.profit>=0?'#16a34a':'#dc2626'),borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>[String(c.raw.label||'').slice(0,40),'지출 '+money(c.raw.x),'ROAS '+c.raw.y+'%']}}},scales:{x:{title:{display:true,text:'지출(₩)',font:{size:10}},ticks:{font:{size:9},callback:v=>'₩'+(v/10000).toFixed(0)+'만'}},y:{title:{display:true,text:'ROAS(%)',font:{size:10}},ticks:{font:{size:9}},beginAtZero:true}}}});}
+  if(pts.length){mktCharts.scatter=new Chart(document.getElementById('mkScatter'),{type:'bubble',data:{datasets:[{label:'소재',data:pts,backgroundColor:pts.map(p=>p.profit>=0?'#16a34a88':'#dc262688'),borderColor:pts.map(p=>p.profit>=0?'#16a34a':'#dc2626'),borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>[String(c.raw.label||'').slice(0,40),'지출 '+money(c.raw.x),'ROAS '+c.raw.y+'%']}}},scales:{x:{title:{display:true,text:'지출',font:{size:10}},ticks:{font:{size:9},callback:v=>axMoney(v)}},y:{title:{display:true,text:'ROAS(%)',font:{size:10}},ticks:{font:{size:9}},beginAtZero:true}}}});}
   const byProd={};list.forEach(c=>{const p=c.product||'미분류';byProd[p]=(byProd[p]||0)+c.rev});
   const ps=Object.entries(byProd).sort((a,b)=>b[1]-a[1]);
   if(ps.length){mktCharts.product=new Chart(document.getElementById('mkProduct'),{type:'doughnut',data:{labels:ps.map(p=>p[0]),datasets:[{data:ps.map(p=>Math.round(p[1])),backgroundColor:BRAND_COLORS,borderColor:'#fff',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:12}},tooltip:{callbacks:{label:c=>c.label+': '+money(c.parsed)}}}}});}
