@@ -47,6 +47,7 @@ jobs:
           META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GlobalTT }}
           META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_ACT_9937: ${{ secrets.META_TOKEN_ACT_9937 }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
