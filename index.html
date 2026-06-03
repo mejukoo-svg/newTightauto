@@ -320,6 +320,9 @@ function MC(roas,profit,spend,revenue,cvr,cpm){
 }
 // Normalize row: global→common, creative→common (ad_id as key)
 const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
+// 글로벌 상품명 한↔영 통합: 한국어명을 영어 canonical 로 합쳐서 같은 상품으로 집계 (예: 솔로→solo, 무당→shaman)
+const GL_PRODUCT_CANON={'솔로':'solo','무당':'shaman'};
+const canonGLRows=rows=>(rows||[]).map(r=>(r&&GL_PRODUCT_CANON[r.product])?{...r,product:GL_PRODUCT_CANON[r.product]}:r);
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
   if(MODE==='vn'&&(!r.product||r.product==='etc')){
@@ -403,7 +406,7 @@ function rebuildLookups(){
 
 // ===== INIT =====
 function _applyCore(d){
-  KR_AD=d.kr||[];GL_AD=d.gl||[];VN_AD=d.vn||[];
+  KR_AD=d.kr||[];GL_AD=canonGLRows(d.gl);VN_AD=d.vn||[];
   STRIPE_DATA=d.stripe||[];TOSS_DATA=d.toss||[];
   NSA_DAILY=d.nsa||[];GOOGLE_ADS=d.google||[];GOOGLE_DG=d.googledg||[];NAVER_PL=d.naverpl||[];
   NAVER_MP=d.naver_mp||[];TOSS_DAILY=d.toss_kr||[];
@@ -489,7 +492,7 @@ async function ensureBigTable(name){
   const D180='&date=gte.'+_dateCutoff(215);
   const tasks={
     cr:()=>sbAll('ad_creative_daily','spend',D180).then(d=>{CR_AD=d;window._CR_BY_ADSET=null;cacheSet('t_cr',{ts:Date.now(),data:d});}),
-    glcr:()=>sbAll('global_ad_creative_daily','spend_usd',D180).then(d=>{GL_CR=d;cacheSet('t_glcr',{ts:Date.now(),data:d});}),
+    glcr:()=>sbAll('global_ad_creative_daily','spend_usd',D180).then(d=>{GL_CR=canonGLRows(d);cacheSet('t_glcr',{ts:Date.now(),data:GL_CR});}),
     nsakw:()=>sbAll('naver_sa_keyword_daily','cost_vat',D180).then(d=>{NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});}),
     naverkw:()=>sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).then(d=>{NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});}),
   };
@@ -1403,7 +1406,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   }
   // GL 모드: spend_usd/revenue_usd/profit_usd → spend/revenue/profit 으로 정규화
   if(isGL&&records&&records.length){
-    records=records.map(r=>({...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd}));
+    records=records.map(r=>({...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,product:GL_PRODUCT_CANON[r.product]||r.product}));
   }
   // 현재 추이차트 날짜 범위 (세트 row 와 동일하게)
   const days=parseInt(document.getElementById('tDays').value);
