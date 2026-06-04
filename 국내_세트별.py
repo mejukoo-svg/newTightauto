@@ -66,6 +66,26 @@ MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
+# =========================================================
+# Meta 채널 판별 (utm_source 화이트리스트)
+# =========================================================
+# 타 채널(google/tiktok 등) 결제가 직전 Meta 방문에서 남은 stale utm_term(세트 id)을
+# 그대로 달고 들어와 Meta 세트 매출로 잘못 합산되는 문제를 차단한다.
+# → 마지막 터치가 Meta(ig/fb/an 등)인 결제만 세트에 귀속한다.
+META_UTM_SOURCES = {"ig", "fb", "an", "msg", "instagram", "facebook", "threads", "th"}
+
+
+def is_meta_source(src):
+    s = str(src).strip().lower() if src is not None else ""
+    if not s:
+        return False
+    if s in META_UTM_SOURCES:
+        return True
+    # 미치환 매크로/변형: ig_text_*, fb-SiteLink, {{site_source_name}} 등
+    if s.startswith("ig") or s.startswith("fb") or "instagram" in s or "facebook" in s or "site_source_name" in s:
+        return True
+    return False
+
 # 실행 설정
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
@@ -491,6 +511,13 @@ def fetch_mixpanel_data(from_date, to_date):
                             ut = clean_id(str(props[k]).strip())
                             break
 
+                    # 채널 판별용 utm_source (Meta 결제만 귀속하기 위함)
+                    us = ""
+                    for k in ["utm_source", "UTM_Source", "UTM Source"]:
+                        if k in props and props[k]:
+                            us = str(props[k]).strip()
+                            break
+
                     raw_amount = props.get("amount") or props.get("결제금액")
                     raw_value = props.get("value")
 
@@ -514,6 +541,7 @@ def fetch_mixpanel_data(from_date, to_date):
                         "distinct_id": props.get("distinct_id"),
                         "date": ds,
                         "utm_term": ut or "",
+                        "utm_source": us or "",
                         "amount": amount_val,
                         "value_raw": value_val,
                         "revenue": revenue,
@@ -802,6 +830,12 @@ def main():
 
     if mp_raw:
         df = pd.DataFrame(mp_raw)
+
+        # ▼ Meta 채널 결제만 귀속 (google 등 타채널의 stale utm_term 오염 차단)
+        _before_n = len(df)
+        df = df[df["utm_source"].apply(is_meta_source)]
+        log.info(f"  🔵 Meta 소스 필터: {_before_n} → {len(df)}건 (비-Meta {_before_n - len(df)}건 제외)")
+
         df = df[df["utm_term"].notna() & (df["utm_term"] != "") & (df["utm_term"] != "None")]
 
         # utm_term 있는 이벤트 우선, 중복 제거

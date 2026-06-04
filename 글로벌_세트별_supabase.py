@@ -54,6 +54,21 @@ MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
+# Meta 채널 판별 (utm_source 화이트리스트) — 타채널(google 등) 결제가 직전 Meta 방문의
+# stale utm_term(세트 id)을 달고 들어와 Meta 세트 매출로 잘못 합산되는 것을 차단.
+META_UTM_SOURCES = {"ig", "fb", "an", "msg", "instagram", "facebook", "threads", "th"}
+
+
+def is_meta_source(src):
+    s = str(src).strip().lower() if src is not None else ""
+    if not s:
+        return False
+    if s in META_UTM_SOURCES:
+        return True
+    if s.startswith("ig") or s.startswith("fb") or "instagram" in s or "facebook" in s or "site_source_name" in s:
+        return True
+    return False
+
 # 글로벌 성과 측정 시 제외할 "한국" 국가값 (Mixpanel mp_country_code).
 # raw export(/api/2.0/export)의 mp_country_code는 ISO alpha-2 코드("KR")로 저장됨
 # (Mixpanel UI 표시값은 "South Korea"). 풀네임도 방어적으로 함께 매칭.
@@ -276,6 +291,9 @@ def fetch_mixpanel_data(from_date, to_date):
                     ut = None
                     for k in ['utm_term','UTM_Term','UTM Term']:
                         if k in props and props[k]: ut = clean_id(str(props[k]).strip()); break
+                    us = ''
+                    for k in ['utm_source','UTM_Source','UTM Source']:
+                        if k in props and props[k]: us = str(props[k]).strip(); break
                     raw_a = props.get('결제금액') or props.get('amount')
                     raw_v = props.get('value')
                     a_val = float(raw_a) if raw_a else 0.0
@@ -283,7 +301,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
                     # mp_country_code: 결제 국가 (글로벌 성과에서 한국 제외용)
                     country = props.get('mp_country_code') or ''
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','country':str(country).strip()})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','country':str(country).strip()})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -474,6 +492,10 @@ def main():
     mp_value_map = {}; mp_count_map = {}
     if mp_raw:
         df = pd.DataFrame(mp_raw)
+
+        # ▼ Meta 채널 결제만 귀속 (google 등 타채널 stale utm_term 오염 차단)
+        _bn = len(df); df = df[df['utm_source'].apply(is_meta_source)]
+        log.info(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn-len(df)}건 제외)")
 
         def _norm(x):
             s = str(x).strip() if x is not None else ''

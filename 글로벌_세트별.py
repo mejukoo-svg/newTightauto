@@ -196,6 +196,21 @@ MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
+# Meta 채널 판별 (utm_source 화이트리스트) — 타채널(google 등) 결제가 직전 Meta 방문의
+# stale utm_term(세트 id)을 달고 들어와 Meta 세트 매출로 잘못 합산되는 것을 차단.
+META_UTM_SOURCES = {"ig", "fb", "an", "msg", "instagram", "facebook", "threads", "th"}
+
+
+def is_meta_source(src):
+    s = str(src).strip().lower() if src is not None else ""
+    if not s:
+        return False
+    if s in META_UTM_SOURCES:
+        return True
+    if s.startswith("ig") or s.startswith("fb") or "instagram" in s or "facebook" in s or "site_source_name" in s:
+        return True
+    return False
+
 # =========================================================
 # 기본 설정
 # =========================================================
@@ -691,6 +706,9 @@ def fetch_mixpanel_data(from_date, to_date):
                 for k in ['utm_term','UTM_Term','UTM Term']:
                     if k in props and props[k]: ut=str(props[k]).strip(); break
                 if ut: ut=clean_id(ut)
+                us=''
+                for k in ['utm_source','UTM_Source','UTM Source']:
+                    if k in props and props[k]: us=str(props[k]).strip(); break
                 raw_결제금액=props.get('결제금액');raw_amount=props.get('amount');raw_value=props.get('value')
                 결제금액_val=float(raw_결제금액) if raw_결제금액 is not None else 0.0
                 amount_val=float(raw_amount) if raw_amount is not None else 0.0
@@ -699,7 +717,7 @@ def fetch_mixpanel_data(from_date, to_date):
                 elif amount_val > 0: revenue = amount_val
                 elif value_val > 0: revenue = value_val
                 else: revenue = 0.0
-                data.append({'distinct_id':props.get('distinct_id'),'time':ts,'date':ds,'utm_term':ut or '','revenue':revenue,'서비스':props.get('서비스','')})
+                data.append({'distinct_id':props.get('distinct_id'),'time':ts,'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스','')})
             except: pass
         print(f"  ✅ 파싱: {len(data)}건")
         return data
@@ -902,6 +920,7 @@ if today_data: mp_raw.extend(today_data)
 print(f"\n  ✅ Mixpanel 총: {len(mp_raw)}건")
 df=pd.DataFrame(mp_raw);mp_value_map_local={};mp_count_map={}
 if len(df)>0:
+    _bn=len(df); df=df[df['utm_source'].apply(is_meta_source)]; print(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn-len(df)}건 제외)")
     df=df[df['utm_term'].notna()&(df['utm_term']!='')&(df['utm_term']!='None')]
     df=df.sort_values('revenue',ascending=False);df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first')
     print(f"  중복제거: {len(df_d)}건 | 매출합(현지통화): {df_d['revenue'].sum():,.2f}")
