@@ -217,7 +217,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-chrev"><div class="filter"><label>보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 전체/메타/밴스드/네이버/구글 채널별 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
-<div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 콘텐츠(ct)별 ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=광고보고서 엑셀)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
+<div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 디멘드젠(dg_) 콘텐츠만 · ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=광고보고서 엑셀)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
 <div class="panel" id="p-kpiMonthly"><div class="sheet-wrap"><table id="kpiMTbl" class="kpi-table"></table></div></div>
@@ -2960,18 +2960,21 @@ function renderGgdgContent(){
   const days=parseInt(document.getElementById('ggdgDays').value)||30;
   const topN=parseInt(document.getElementById('ggdgTop').value)||20;
   const minRev=parseFloat(document.getElementById('ggdgMinRev').value)||0;
-  // 매출·지출 양쪽 날짜 합집합
-  const allDates=[...new Set([...GGDG_CT.map(r=>r.date),...GGDG_SP.map(r=>r.date)])].sort().reverse().slice(0,days);
+  // 매출·지출 양쪽 날짜 합집합 (디멘드젠 dg_ 콘텐츠 기준)
+  const _isDgDate=c=>/^dg_/i.test(c||'');
+  const allDates=[...new Set([...GGDG_CT.filter(r=>_isDgDate(r.content)).map(r=>r.date),...GGDG_SP.filter(r=>_isDgDate(r.content)).map(r=>r.date)])].sort().reverse().slice(0,days);
   if(!allDates.length){tbl.innerHTML='<tr><td>데이터 없음</td></tr>';return}
   const dateSet=new Set(allDates);
   const d7=allDates.slice(0,7),d7set=new Set(d7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   // 콘텐츠(ct)별 그룹화 — d[date]={r:매출, c:건수, s:지출}
+  // 디멘드젠(dg_)만 표시. sa_(검색광고) 등 다른 채널 콘텐츠는 제외.
+  const isDg=ct=>/^dg_/i.test(ct||'');
   const byC={};
   const ensure=(ct,d)=>{if(!byC[ct])byC[ct]={ct,d:{}};if(!byC[ct].d[d])byC[ct].d[d]={r:0,c:0,s:0};return byC[ct].d[d]};
-  GGDG_CT.forEach(r=>{if(!dateSet.has(r.date))return;const x=ensure(r.content||'(미지정)',r.date);x.r+=(r.revenue||0);x.c+=(r.purchase_count||0)});
-  GGDG_SP.forEach(r=>{if(!dateSet.has(r.date))return;const x=ensure(r.content||'(미지정)',r.date);x.s+=(r.spend||0)});
+  GGDG_CT.forEach(r=>{if(!dateSet.has(r.date)||!isDg(r.content))return;const x=ensure(r.content,r.date);x.r+=(r.revenue||0);x.c+=(r.purchase_count||0)});
+  GGDG_SP.forEach(r=>{if(!dateSet.has(r.date)||!isDg(r.content))return;const x=ensure(r.content,r.date);x.s+=(r.spend||0)});
   // 7일/전체 합산 + 정렬(7일 매출↓)
   let list=Object.values(byC).map(o=>{
     let r7=0,c7=0,s7=0,rt=0;
