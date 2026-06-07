@@ -217,9 +217,13 @@ def main():
         return
 
     sb = SupabaseClient(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
-    sb.delete_range(TABLE, dates[0], dates[-1])
+    # ⚠️ 기본은 upsert(merge)만 — 부분 다운로드(일부 광고그룹만)로 돌려도 다른 콘텐츠 지출 보존.
+    #    (date,content) PK 기준 덮어쓰기/추가. 전체 기간을 싹 지우고 다시 넣으려면 --replace.
+    if "--replace" in sys.argv:
+        log.warning("  🧨 --replace: 기간 전체 삭제 후 재삽입 (이 배치에 없는 콘텐츠 지출도 삭제됨)")
+        sb.delete_range(TABLE, dates[0], dates[-1])
     sb.upsert(TABLE, records)
-    log.info("✅ 완료")
+    log.info("✅ 완료 (merge upsert — 기존 다른 콘텐츠 지출 보존)")
 
 
 if __name__ == "__main__":

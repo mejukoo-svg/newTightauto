@@ -53,6 +53,17 @@ log.info(f"📅 Mixpanel(구글 디멘드젠/ch=google) 수집: {START} ~ {END}"
 
 GOOGLE_CH_VALUES = {"google"}   # lowercase 비교용 (필요시 'youtube','yt' 등 추가 가능)
 
+# 제외할 콘텐츠(ct): 구글에 실제 존재하지 않는데 ch=google 로 잘못 태깅돼 들어오는 phantom.
+#   substring 부분일치로 제외. (예: moodang_260529 광고는 구글에 없음)
+EXCLUDE_CT_SUBSTR = ["moodang_260529"]
+
+
+def is_excluded_ct(ct: str) -> bool:
+    if not ct:
+        return False
+    low = ct.lower()
+    return any(s in low for s in EXCLUDE_CT_SUBSTR)
+
 
 def is_google_event(props: dict) -> bool:
     """properties.ch 가 google 인지 (대소문자 무시)"""
@@ -162,6 +173,10 @@ def aggregate(lines):
         if not ct:
             no_ct_count += 1
             ct = "(미지정)"   # ct 없는 구글 결제도 별도 버킷으로 보존
+
+        # phantom 콘텐츠 제외 (구글에 실제 없는데 ch=google 로 들어온 것)
+        if is_excluded_ct(ct):
+            continue
 
         agg[(d_iso, ct)]["revenue"] += amt
         agg[(d_iso, ct)]["count"]   += 1
