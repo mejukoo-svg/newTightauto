@@ -107,6 +107,8 @@ def aggregate(lines):
     google_total = 0
     no_ct_count = 0
     sample_seen = 0
+    seen_ids = set()   # $insert_id 중복 제거용
+    dup_skipped = 0
 
     for line in lines:
         try:
@@ -114,6 +116,17 @@ def aggregate(lines):
         except Exception:
             continue
         props = ev.get("properties", {})
+
+        # ⚠️ Mixpanel export API 는 $insert_id 중복을 제거하지 않음 (insights/분석은 자동 dedup).
+        # 같은 결제가 여러 번 적재돼 있어 dedup 안 하면 매출/건수가 수배 과대집계됨.
+        # (event_name, $insert_id) 단위로 1건만 인정 — insights 와 동일 기준.
+        iid = props.get("$insert_id")
+        if iid is not None:
+            dk = (ev.get("event"), iid)
+            if dk in seen_ids:
+                dup_skipped += 1
+                continue
+            seen_ids.add(dk)
 
         # ch 분포 수집 (디버그)
         chv = props.get("ch")
@@ -157,7 +170,8 @@ def aggregate(lines):
             log.info(f"    📍 sample: date={d_iso} ct={ct!r} amt=₩{amt:,.0f}")
             sample_seen += 1
 
-    log.info(f"  🔍 ch 분포(Top15): {dict(sorted(ch_seen.items(), key=lambda x:-x[1])[:15])}")
+    log.info(f"  🔍 $insert_id 중복 제거: {dup_skipped}건 스킵")
+    log.info(f"  🔍 ch 분포(Top15, dedup후): {dict(sorted(ch_seen.items(), key=lambda x:-x[1])[:15])}")
     log.info(f"  🔍 google 이벤트 {google_total}건 / ct 미지정 {no_ct_count}건 / "
              f"(date,ct)조합 {len(agg)}개")
     return dict(agg)
