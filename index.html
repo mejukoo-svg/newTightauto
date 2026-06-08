@@ -132,6 +132,11 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .search-box input:focus{outline:none;border-color:#4285f4}
 .search-box .s-info{font-size:10px;color:#666;min-width:50px}
 .search-box button{width:22px;height:22px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0}
+.csv-box{display:flex;align-items:center;gap:4px;margin-right:10px}
+.csv-box input[type=date]{padding:3px 5px;border:1px solid #ccc;border-radius:3px;font-size:10px;font-family:inherit;color:#333}
+.csv-box .csv-tilde{color:#888}
+.csv-box button{width:auto;height:22px;padding:0 10px;font-size:10px;font-weight:600;color:#1a73e8;border:1px solid #1a73e8;border-radius:3px;background:#fff;cursor:pointer}
+.csv-box button:hover{background:#e8f0fe}
 mark.sh{background:#fff200;padding:0 1px;border-radius:2px}
 mark.sh.active{background:#ff6d01;color:#fff}
 /* Login */
@@ -197,6 +202,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
 <div class="search-box"><input type="text" id="searchInput" placeholder="🔍 검색" autocomplete="off"><span class="s-info" id="searchInfo"></span><button onclick="searchNav(-1)">▲</button><button onclick="searchNav(1)">▼</button><button onclick="searchClear()" style="font-size:10px">✕</button></div>
+<div class="csv-box"><span style="font-weight:600;color:#555">📥</span><input type="date" id="csvStart" title="시작일"><span class="csv-tilde">~</span><input type="date" id="csvEnd" title="종료일"><button onclick="csvDownloadRange()" title="현재 모드의 데이터를 선택한 기간으로 CSV 다운로드">CSV 다운로드</button></div>
 <button onclick="zoomChange(-10)">−</button><span class="zoom-pct" id="zoomPct">100%</span><button onclick="zoomChange(10)">+</button><button onclick="zoomReset()" style="width:auto;padding:0 6px;font-size:10px">초기화</button>
 </div>
 <!-- Panels -->
@@ -406,6 +412,51 @@ function rebuildLookups(){
   DAILY=bd;DATES=Object.keys(bd).sort().reverse();
   const bp={};AD.forEach(r=>{if(!bp[r.product])bp[r.product]=0;bp[r.product]+=r.spend});
   PRODS=Object.keys(bp).sort((a,b)=>bp[b]-bp[a]);
+  _csvDefaultDates();
+}
+
+// ===== 기간별 CSV 다운로드 =====
+// zoom-bar 의 시작/종료일을 선택하면 현재 모드(AD)의 원본 행을 해당 기간으로 필터링해 CSV 저장.
+function _csvEscape(v){
+  if(v==null)return'';
+  let s=(typeof v==='object')?JSON.stringify(v):String(v);
+  if(/[",\n\r]/.test(s))s='"'+s.replace(/"/g,'""')+'"';
+  return s;
+}
+function _csvDefaultDates(){
+  const s=document.getElementById('csvStart'),e=document.getElementById('csvEnd');
+  if(!s||!e||!DATES.length)return;
+  const max=DATES[0],min=DATES[DATES.length-1];        // DATES 는 최신순 정렬
+  s.min=e.min=min;s.max=e.max=max;
+  if(!e.value)e.value=max;                              // 기본 종료일 = 최신 데이터일
+  if(!s.value){                                         // 기본 시작일 = 최신 -29일 (최근 30일)
+    const d=new Date(max);d.setDate(d.getDate()-29);
+    const lo=d.toISOString().slice(0,10);
+    s.value=lo<min?min:lo;
+  }
+}
+function csvDownloadRange(){
+  if(!AD||!AD.length){alert('데이터가 아직 로드되지 않았습니다. 잠시 후 다시 시도하세요.');return}
+  const sv=document.getElementById('csvStart').value,ev=document.getElementById('csvEnd').value;
+  if(!sv||!ev){alert('시작일과 종료일을 선택하세요.');return}
+  const lo=sv<=ev?sv:ev, hi=sv<=ev?ev:sv;              // 순서 뒤바뀌어도 보정
+  const rows=AD.filter(r=>r.date>=lo&&r.date<=hi).sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  if(!rows.length){alert('선택한 기간('+lo+' ~ '+hi+')에 데이터가 없습니다.');return}
+  // 컬럼 순서: 주요 컬럼 우선, 나머지는 등장 순서대로 (데이터 누락 없이 전체 필드 포함)
+  const cols=[],seen=new Set();
+  ['date','product','campaign_name','campaign_id','adset_name','adset_id','ad_name','ad_id',
+   'spend','revenue','profit','results_mp','unique_clicks','impressions','budget']
+    .forEach(k=>{if(rows.some(r=>k in r)){cols.push(k);seen.add(k)}});
+  rows.forEach(r=>Object.keys(r).forEach(k=>{if(!seen.has(k)){seen.add(k);cols.push(k)}}));
+  const lines=[cols.join(',')];
+  rows.forEach(r=>lines.push(cols.map(c=>_csvEscape(r[c])).join(',')));
+  const csv='﻿'+lines.join('\r\n');          // BOM: Excel 한글 깨짐 방지
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='tightauto_'+MODE+'_'+lo+'_'+hi+'.csv';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
 // ===== INIT =====
