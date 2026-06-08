@@ -1,0 +1,47 @@
+name: Meta 시간대 분석 (상품별×시간대 판매수/CPA)
+
+# 시크릿(META_TOKEN_*)을 주입해 메타_시간대분석.py 를 실행하고, 결과 표를 로그로 출력.
+# (GitHub Secret 값은 외부로 읽을 수 없으므로 Actions 내부에서 실행)
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: '분석 범위'
+        required: false
+        default: 'kr'
+        type: choice
+        options:
+          - 'kr'
+          - 'global'
+          - 'all'
+      since:
+        description: '시작일 (YYYY-MM-DD)'
+        required: false
+        default: '2026-05-01'
+        type: string
+      until:
+        description: '종료일 (YYYY-MM-DD)'
+        required: false
+        default: '2026-06-08'
+        type: string
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Run 메타 시간대 분석
+        env:
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GLOBALTT }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_ACT_9937: ${{ secrets.META_TOKEN_ACT_9937 }}
+        run: |
+          python 메타_시간대분석.py --scope "${{ github.event.inputs.scope }}" --since "${{ github.event.inputs.since }}" --until "${{ github.event.inputs.until }}"
