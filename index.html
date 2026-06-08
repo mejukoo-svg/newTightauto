@@ -1903,14 +1903,15 @@ function renderWeekly(){
     const ctr=d.imp>0?d.uc/d.imp*100:0;
     const fw=bold?'font-weight:700;font-size:13px':'font-weight:400;font-size:12px';
     const pl=indent?'padding-left:20px':'';
-    return'<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #eee">'+
+    return'<div style="display:grid;grid-template-columns:repeat(8,1fr);border-bottom:1px solid #eee">'+
       '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">지출</div><div style="'+fw+';color:#d00">'+money(d.s)+'</div></div>'+
       '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">매출</div><div style="'+fw+';color:#00d">'+money(d.r)+'</div></div>'+
       '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">이익</div><div style="'+fw+';color:'+(d.p>=0?'#16a34a':'#dc2626')+'">'+money(d.p)+'</div></div>'+
       '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">ROAS</div><div style="'+fw+'">'+roas.toFixed(1)+'%</div></div>'+
       '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">구매</div><div style="'+fw+'">'+F(d.mp)+'</div></div>'+
       '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">CVR</div><div style="'+fw+'">'+cvr.toFixed(2)+'%</div></div>'+
-      '<div style="padding:6px;text-align:center"><div style="font-size:9px;color:#999">CTR</div><div style="'+fw+'">'+ctr.toFixed(2)+'%</div></div>'+
+      '<div style="padding:6px;text-align:center;border-right:1px solid #eee"><div style="font-size:9px;color:#999">CTR</div><div style="'+fw+'">'+ctr.toFixed(2)+'%</div></div>'+
+      '<div style="padding:6px;text-align:center"><div style="font-size:9px;color:#999">예산비중</div><div style="'+fw+'">100%</div></div>'+
     '</div>';
   }
 
@@ -1928,14 +1929,16 @@ function renderWeekly(){
       prods.forEach(pd=>{
         const pRoas=pd.s>0?pd.r/pd.s*100:0;
         const rc=pRoas>=100?'#16a34a':'#dc2626';
-        out+='<div style="display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #f0f0f0;background:#fafafa">'+
+        const pShare=d.s>0?pd.s/d.s*100:0;
+        out+='<div style="display:grid;grid-template-columns:repeat(8,1fr);border-bottom:1px solid #f0f0f0;background:#fafafa">'+
           '<div style="padding:4px 6px;text-align:left;border-right:1px solid #eee;font-size:11px;font-weight:600;color:#333;padding-left:12px;display:flex;align-items:center">📦 '+pd.prod+'</div>'+
           '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px;color:#00d">'+money(pd.r)+'</div>'+
           '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px;color:'+(pd.p>=0?'#16a34a':'#dc2626')+'">'+money(pd.p)+'</div>'+
           '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px;color:'+rc+'">'+pRoas.toFixed(0)+'%</div>'+
           '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px">'+F(pd.mp)+'</div>'+
           '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px">'+(pd.uc>0&&pd.mp>0?(pd.mp/pd.uc*100).toFixed(2)+'%':'')+'</div>'+
-          '<div style="padding:4px 6px;text-align:center;font-size:11px">'+(pd.imp>0?(pd.uc/pd.imp*100).toFixed(2)+'%':'')+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;border-right:1px solid #eee;font-size:11px">'+(pd.imp>0?(pd.uc/pd.imp*100).toFixed(2)+'%':'')+'</div>'+
+          '<div style="padding:4px 6px;text-align:center;font-size:11px;font-weight:600;color:#555">'+(pShare>0?pShare.toFixed(1)+'%':'')+'</div>'+
         '</div>';
       });
     }
