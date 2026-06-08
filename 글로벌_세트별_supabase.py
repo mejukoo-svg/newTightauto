@@ -301,7 +301,9 @@ def fetch_mixpanel_data(from_date, to_date):
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
                     # mp_country_code: 결제 국가 (글로벌 성과에서 한국 제외용)
                     country = props.get('mp_country_code') or ''
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','country':str(country).strip()})
+                    # 주문번호: 대만=merchant_uid/주문번호, 한국=order_id (없으면 imp_uid). 중복 결제 판단의 1차 키.
+                    order_no = props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip()})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -502,14 +504,31 @@ def main():
             return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
         df['utm_term'] = df['utm_term'].apply(_norm)
 
-        # 1) $insert_id 기준 dedup (Mixpanel canonical)
-        if 'insert_id' in df.columns:
-            df_iid = df[df['insert_id'].astype(str).str.len() > 0]
-            df_no_iid = df[df['insert_id'].astype(str).str.len() == 0]
-            df_iid = df_iid.drop_duplicates(subset=['insert_id'], keep='first')
-            df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
-        else:
-            df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
+        # 1) 중복 결제 dedup — 주문번호(order_no) 우선 (2026-06-08)
+        #    같은 주문번호 = 같은 주문 = 1건. Mixpanel 은 같은 결제를 다른 $insert_id 로
+        #    평균 1.7회 재기록해 $insert_id dedup 만으론 과대귀속됨 → 주문번호로 주문단위 dedup.
+        #    order_no: 대만=merchant_uid/주문번호, 한국=order_id.
+        if 'order_no' not in df.columns: df['order_no'] = ''
+        df['order_no'] = df['order_no'].fillna('').astype(str).str.strip()
+        _has_ord = df['order_no'].str.len() > 0
+        df_ord = df[_has_ord].copy()
+        df_no  = df[~_has_ord].copy()
+        n_a, n_b = len(df_ord), len(df_no)
+        # (A) 주문번호 있는 행: 주문단위 1건 — utm_term 보존 우선, 그다음 revenue 큰 행
+        if n_a:
+            df_ord['_hasutm'] = (df_ord['utm_term'].astype(str).str.len() > 0).astype(int)
+            df_ord = (df_ord.sort_values(['order_no','_hasutm','revenue'], ascending=[True, False, False])
+                            .drop_duplicates(subset=['order_no'], keep='first')
+                            .drop(columns=['_hasutm']))
+        # (B) 주문번호 없는 행(드묾): $insert_id → (date,distinct_id,revenue,서비스,utm_term) 복합키 fallback
+        if n_b:
+            if 'insert_id' in df_no.columns:
+                _a = df_no[df_no['insert_id'].astype(str).str.len() > 0].drop_duplicates(subset=['insert_id'], keep='first')
+                _b = df_no[df_no['insert_id'].astype(str).str.len() == 0]
+                df_no = pd.concat([_a, _b], ignore_index=True)
+            df_no = df_no.drop_duplicates(subset=['date','distinct_id','revenue','서비스','utm_term'], keep='first')
+        df_d = pd.concat([df_ord, df_no], ignore_index=True)
+        log.info(f"  주문번호 dedup: 주문있음 {n_a}->{len(df_ord)} · 주문없음 {n_b}->{len(df_no)} · 합계 {len(df_d)}")
 
         # === 진단: 서비스별 organic 비율 (글로벌 시장 식별용 · 결과 미변경) ===
         # 제품(서비스)별로 결제통화가 일정하므로 통화 오염 없이 organic 비율 비교 가능.
@@ -535,13 +554,9 @@ def main():
         after_rev = float(df_d['revenue'].sum())
         log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외 · 매출 {before_rev:,.0f} -> {after_rev:,.0f} local, organic drop {before_rev - after_rev:,.0f})")
 
-        # 3) Logical payment dedup (2026-05-06)
-        # 이유: Mixpanel이 같은 결제를 다른 $insert_id로 1.7회 평균 중복 기록.
-        #       insert_id dedup만으로는 미해결, 71% over-attribution 발생 확인.
-        # 키: (date, distinct_id, revenue, 서비스, utm_term) 동일하면 같은 결제로 간주.
-        before_logical = len(df_d)
-        df_d = df_d.drop_duplicates(subset=['date','distinct_id','revenue','서비스','utm_term'], keep='first')
-        log.info(f"  logical dedup: {before_logical} -> {len(df_d)} ({before_logical - len(df_d)}건 중복 결제 제거)")
+        # 3) (구) Logical payment dedup — 주문번호 dedup(1단계)으로 대체됨 (2026-06-08).
+        #    주문번호 기반이 더 정확(같은 날 같은 금액 별개 주문을 잘못 합치지 않음).
+        #    주문번호 없는 행만 1단계 (B) 에서 복합키 fallback 으로 처리.
 
         # 4) 한국(South Korea) 결제 제외 (2026-05-27)
         # 글로벌 성과는 비한국 결제만으로 측정. mp_country_code=KR(=South Korea)인 결제 제외.
