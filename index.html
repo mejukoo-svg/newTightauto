@@ -24,6 +24,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:#fff;color:#222;font-size:
 .tab.global-only{display:none}
 .tab.creative-only{display:none}
 .tab.kr-only{display:none}
+.tab.vn-only{display:none}
 .tab.kpi-only{display:none}
 /* Column filters */
 th.filterable{cursor:pointer;position:relative}
@@ -187,7 +188,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kr-only" data-t="chrev">📊 매출</div>
 <div class="tab kr-only" data-t="nsadaily">🔍 네이버SA_추이차트</div>
 <div class="tab kr-only" data-t="nsaweekly">📅 네이버SA_주간추이</div>
-<div class="tab kr-only" data-t="ggdgct">🟢 구글 디멘드젠</div>
+<div class="tab vn-only" data-t="ggdgct">🟢 구글 디멘드젠</div>
 <div class="tab kpi-only" data-t="kpiDash">📊 KPI 대시보드</div>
 <div class="tab kpi-only" data-t="kpiWeekly">📅 주간</div>
 <div class="tab kpi-only" data-t="kpiMonthly">🗓 월간</div>
@@ -202,7 +203,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
 <div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
-<div class="panel" id="p-trendp"><div class="filter"><label>최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
+<div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
 <div class="panel" id="p-trendinf"><div class="filter"><label>단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
@@ -354,6 +355,7 @@ function switchMode(m){
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
     if(t.classList.contains('kr-only')){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
+    if(t.classList.contains('vn-only')){t.style.display=(!isSpecial&&m==='vn')?'inline-block':'none';return}
     if(t.classList.contains('creative-only')){t.style.display=(!isSpecial&&m==='cr')?'inline-block':'none';return}
     t.style.display=isSpecial?'none':'inline-block';
   });
@@ -375,7 +377,7 @@ function switchMode(m){
   }
   // returning from KPI mode: if active tab is now hidden, reset to dashboard
   {const _at=document.querySelector('.tab.active');
-   if(!_at||_at.classList.contains('kpi-only')||_at.classList.contains('mkt-only')){
+   if(!_at||_at.classList.contains('kpi-only')||_at.classList.contains('mkt-only')||(_at.classList.contains('vn-only')&&m!=='vn')){
      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
      document.querySelector('.tab[data-t="dashboard"]').classList.add('active');
@@ -801,6 +803,7 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
 document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
+document.getElementById('tpUnit').addEventListener('change',renderTrendProduct);
 document.getElementById('tiUnit').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiRange').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiSearch').addEventListener('input',renderTrendInfluencer);
@@ -1587,61 +1590,68 @@ function renderTrendWeekly(){
 
 // ===== TREND PRODUCT (추이차트_상품별) =====
 function renderTrendProduct(){
+  const unit=(document.getElementById('tpUnit')||{}).value||'day';
+  const isWeek=unit==='week';
   const days=parseInt(document.getElementById('tpDays').value);
-  const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
+  const dd=DATES.slice(0,days);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  // Aggregate by product per date
-  const prodDaily={};const prodAll={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const p=r.product||'기타';
-    if(!prodDaily[p])prodDaily[p]={};if(!prodDaily[p][r.date])prodDaily[p][r.date]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
-    prodDaily[p][r.date].s+=r.spend;prodDaily[p][r.date].r+=r.revenue;prodDaily[p][r.date].p+=r.profit;
-    prodDaily[p][r.date].mp+=r.results_mp;prodDaily[p][r.date].uc+=r.unique_clicks;prodDaily[p][r.date].imp+=(r.impressions||0);
-    if(!prodAll[p])prodAll[p]={s:0,r:0,p:0,mp:0,uc:0,imp:0,yS:0};
-    prodAll[p].s+=r.spend;prodAll[p].r+=r.revenue;prodAll[p].p+=r.profit;prodAll[p].mp+=r.results_mp;prodAll[p].uc+=r.unique_clicks;prodAll[p].imp+=(r.impressions||0);
-    if(r.date===yDay)prodAll[p].yS+=r.spend;
+  const wkLabel=wk=>{const m=new Date(wk);const s=new Date(m.getTime()+6*864e5);return(m.getMonth()+1)+'/'+m.getDate()+'~'+(s.getMonth()+1)+'/'+s.getDate()};
+  const colKey=d=>isWeek?WM(d):d;
+  const cols=[...new Set(dd.map(colKey))];          // 최신순(좌측이 최근). 일간=날짜, 주간=주(월) 키
+  const sumCols=isWeek?cols:cols.slice(0,7);         // 요약열 범위: 일간=최근7일, 주간=전체주
+  const recentCol=cols[0];
+  const sumLabel=isWeek?'전체':'7일';
+  // Aggregate by product / rowId per column
+  const ensure=(o,k)=>{if(!o[k])o[k]={s:0,r:0,p:0,mp:0,uc:0,imp:0};return o[k]};
+  const prodCol={};const prodSort={};const byA={};
+  AD.forEach(r=>{if(!dd.includes(r.date))return;const ck=colKey(r.date);const p=r.product||'기타';
+    if(!prodCol[p])prodCol[p]={};const pc=ensure(prodCol[p],ck);
+    pc.s+=r.spend;pc.r+=r.revenue;pc.p+=r.profit;pc.mp+=r.results_mp;pc.uc+=r.unique_clicks;pc.imp+=(r.impressions||0);
+    if(prodSort[p]===undefined)prodSort[p]=0;
+    if(isWeek){if(ck===recentCol)prodSort[p]+=r.spend}else{if(r.date===yDay)prodSort[p]+=r.spend}
+    const rid=rowId(r);
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:p,d:{}};
+    const b=ensure(byA[rid].d,ck);
+    b.s+=r.spend;b.r+=r.revenue;b.p+=r.profit;b.mp+=r.results_mp;b.uc+=r.unique_clicks;b.imp+=(r.impressions||0);
   });
-  // Sort products by yesterday spend
-  const sortedProds=Object.keys(prodAll).sort((a,b)=>(prodAll[b].yS||0)-(prodAll[a].yS||0));
-  // Also aggregate by rowId for detail sections
-  const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product||'기타',d:{}};
-    byA[rid].d[r.date]=r});
-  const allItems=Object.values(byA).map(a=>{
-    let s7=0,r7=0,p7=0,uc7=0,mp7=0,imp7=0;d7.forEach(d=>{if(a.d[d]){s7+=a.d[d].spend;r7+=a.d[d].revenue;p7+=a.d[d].profit;uc7+=a.d[d].unique_clicks;mp7+=a.d[d].results_mp;imp7+=(a.d[d].impressions||0)}});
-    a._s=s7;a._r=r7;a._p=p7;a._roas=s7>0?r7/s7*100:0;a._cvr=uc7>0&&mp7>0?mp7/uc7*100:0;a._cpm=imp7>0?s7/imp7*1000:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  const aggCols=src=>{const o={s:0,r:0,p:0,mp:0,uc:0,imp:0};sumCols.forEach(ck=>{const t=src[ck];if(t){o.s+=t.s;o.r+=t.r;o.p+=t.p;o.mp+=t.mp;o.uc+=t.uc;o.imp+=t.imp}});return o};
+  // Sort products by recent spend (전날 / 최근주)
+  const sortedProds=Object.keys(prodCol).sort((a,b)=>(prodSort[b]||0)-(prodSort[a]||0));
+  // Detail items + summary metrics
+  const allItems=Object.values(byA).map(a=>{const sm=aggCols(a.d);a._sm=sm;a._roas=sm.s>0?sm.r/sm.s*100:0;a._cvr=sm.uc>0&&sm.mp>0?sm.mp/sm.uc*100:0;a._cpm=sm.imp>0?sm.s/sm.imp*1000:0;a._sortV=isWeek?((a.d[recentCol]&&a.d[recentCol].s)||0):((a.d[yDay]&&a.d[yDay].s)||0);return a});
+  // Cell renderer (aggregated bucket)
+  const cell=(t,ck)=>{const yd=(!isWeek&&ck===yDay)?' col-yday':'';
+    if(!t||!t.s)return'<td class="'+yd.trim()+'"></td>';
+    const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;
+    return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm)+'</td>'};
   // Headers
-  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
-  const colSpan=dd.length+4;
+  const ths=cols.map(ck=>{if(isWeek)return'<th style="min-width:90px">'+wkLabel(ck)+'</th>';const w=WD(ck);const yd=ck===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(ck)+'('+w+')</th>'}).join('');
+  const colSpan=cols.length+4;
   // Build table
-  let h='<thead><tr><th style="min-width:200px;text-align:left">상품</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th style="min-width:200px;text-align:left">상품</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>'+sumLabel+'</th>'+ths+'</tr></thead><tbody>';
   // ── 상단: 상품별 종합 성과 ──
   h+='<tr><td colspan="'+colSpan+'" class="prod-header">📊 상품별 종합 성과</td></tr>';
   sortedProds.forEach(prod=>{
-    const pa=prodAll[prod];const roas7=pa.s>0?pa.r/pa.s*100:0;const cvr7=pa.uc>0&&pa.mp>0?pa.mp/pa.uc*100:0;const cpm7=pa.imp>0?pa.s/pa.imp*1000:0;
-    const cells=dd.map(d=>{const t=prodDaily[prod]?.[d];const yd=d===yDay?' col-yday':'';
-      if(!t||!t.s)return'<td class="'+yd+'"></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;
-      return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm)+'</td>'}).join('');
-    h+='<tr class="sr" style="background:#f0f4ff"><td class="fx fx0" style="background:#f0f4ff;font-weight:700">📦 '+prod+'</td><td class="fx fx1" style="background:#f0f4ff;font-size:10px;color:#888">'+(Object.keys(byA).filter(k=>byA[k].product===prod).length)+'개</td><td></td><td class="mc '+RC(roas7)+'">'+MC(roas7,pa.p,pa.s,pa.r,cvr7,cpm7)+'</td>'+cells+'</tr>';
+    const sm=aggCols(prodCol[prod]);const roasS=sm.s>0?sm.r/sm.s*100:0;const cvrS=sm.uc>0&&sm.mp>0?sm.mp/sm.uc*100:0;const cpmS=sm.imp>0?sm.s/sm.imp*1000:0;
+    const cells=cols.map(ck=>cell(prodCol[prod][ck],ck)).join('');
+    const cnt=Object.keys(byA).filter(k=>byA[k].product===prod).length;
+    h+='<tr class="sr" style="background:#f0f4ff"><td class="fx fx0" style="background:#f0f4ff;font-weight:700">📦 '+prod+'</td><td class="fx fx1" style="background:#f0f4ff;font-size:10px;color:#888">'+cnt+'개</td><td></td><td class="mc '+RC(roasS)+'">'+MC(roasS,sm.p,sm.s,sm.r,cvrS,cpmS)+'</td>'+cells+'</tr>';
   });
   h+='<tr><td colspan="'+colSpan+'" style="height:12px"></td></tr>';
   // ── 하단: 상품별 상세 ──
   sortedProds.forEach(prod=>{
-    const items=allItems.filter(a=>a.product===prod).sort((a,b)=>b._yS-a._yS);
+    const items=allItems.filter(a=>a.product===prod).sort((a,b)=>b._sortV-a._sortV);
     if(!items.length)return;
-    const pa=prodAll[prod];const roas7=pa.s>0?pa.r/pa.s*100:0;const cpmAll=pa.imp>0?pa.s/pa.imp*1000:0;
-    h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+items.length+'개) 전날 '+money(pa.yS)+' · 7일 ROAS '+roas7.toFixed(0)+'%</td></tr>';
+    const sm=aggCols(prodCol[prod]);const roasS=sm.s>0?sm.r/sm.s*100:0;const cpmS=sm.imp>0?sm.s/sm.imp*1000:0;
+    h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+items.length+'개) '+(isWeek?'최근주':'전날')+' '+money(prodSort[prod]||0)+' · '+sumLabel+' ROAS '+roasS.toFixed(0)+'%</td></tr>';
     // Product subtotal
-    const pDaily={};dd.forEach(d=>{const t=prodDaily[prod]?.[d];if(t)pDaily[d]=t});
-    const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';
-      if(!t||!t.s)return'<td class="'+yd+'"></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;
-      return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm)+'</td>'}).join('');
-    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(roas7)+'">'+MC(roas7,pa.p,pa.s,pa.r,0,cpmAll)+'</td>'+pCells+'</tr>';
+    const pCells=cols.map(ck=>cell(prodCol[prod][ck],ck)).join('');
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(roasS)+'">'+MC(roasS,sm.p,sm.s,sm.r,0,cpmS)+'</td>'+pCells+'</tr>';
     // Individual rows
     items.forEach(a=>{
-      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm)+'</td>'}).join('');
+      const cells=cols.map(ck=>cell(a.d[ck],ck)).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
-      h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+ck+'>'+((a.an||'').slice(0,25))+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm)+'</td>'+cells+'</tr>';
+      h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.cn||'').slice(0,25))+'</td><td class="fx fx1 '+hl+ck+'>'+((a.an||'').slice(0,25))+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._sm.p,a._sm.s,a._sm.r,a._cvr,a._cpm)+'</td>'+cells+'</tr>';
     });
   });
   h+='</tbody>';document.getElementById('tpTbl').innerHTML=h;
