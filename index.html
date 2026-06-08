@@ -432,7 +432,9 @@ async function initData(){
     _applyCore(cached);
     CR_AD=cached.cr||[];
     NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];GGDG_CT=cached.ggdg_ct||[];GGDG_SP=cached.ggdg_sp||[];
-    if(GGDG_CT.length||GGDG_SP.length){if(!window._BIG_LOADED)window._BIG_LOADED={};window._BIG_LOADED.ggdgct=true;}
+    // ⚠️ _BIG_LOADED.ggdgct 를 캐시에서 true 로 두지 않는다 — 그러면 ensureBigTable 이
+    //    영영 fresh fetch 를 안 해서 새 적재(신규 날짜 지출 등)가 안 보임.
+    //    캐시는 즉시 표시용, 갱신은 renderGgdgContent 의 stale-while-revalidate 가 담당.
     window._CR_BY_ADSET=null;
     switchMode('kr'); // 캐시로 즉시 렌더
     renderedFromCache=true;
@@ -2956,12 +2958,20 @@ function renderNsaWeekly(){
 function renderGgdgContent(){
   const tbl=document.getElementById('ggdgctTbl');
   if(!tbl)return;
-  // lazy load (큰 보조 테이블 — 매출+지출 동시 로드)
+  // lazy load + stale-while-revalidate:
+  //  - 이번 세션에 fresh fetch 전(!loaded)이면 백그라운드로 최신 데이터를 가져오고,
+  //    완료되면 이 탭이 활성일 때 재렌더 → 캐시에 없던 신규 날짜 지출/매출이 반영됨.
+  //  - 캐시가 있으면 우선 그걸로 즉시 렌더(아래 진행), 없으면 로딩 표시.
   const loaded=window._BIG_LOADED&&window._BIG_LOADED.ggdgct;
-  if(!GGDG_CT.length&&!GGDG_SP.length&&!loaded){
-    tbl.innerHTML='<tr><td style="padding:24px;color:#888">구글 디멘드젠 콘텐츠 데이터 로딩 중…</td></tr>';
-    ensureBigTable('ggdgct').then(renderGgdgContent);
-    return;
+  if(!loaded){
+    ensureBigTable('ggdgct').then(()=>{
+      const at=document.querySelector('.tab.active');
+      if(at&&at.dataset.t==='ggdgct')renderGgdgContent();
+    });
+    if(!GGDG_CT.length&&!GGDG_SP.length){
+      tbl.innerHTML='<tr><td style="padding:24px;color:#888">구글 디멘드젠 콘텐츠 데이터 로딩 중…</td></tr>';
+      return;
+    }
   }
   if(!GGDG_CT.length&&!GGDG_SP.length){
     tbl.innerHTML='<tr><td style="padding:24px;color:#888">콘텐츠 데이터 없음 — <code>google_demandgen_content_mp_daily</code>(매출)/<code>google_demandgen_content_spend_daily</code>(지출) 테이블이 비어있거나 파이프라인 실행 전입니다.</td></tr>';
