@@ -2183,6 +2183,9 @@ function renderDateTab(){
 // ===== DATE PRODUCT =====
 const COUNTRY_LIST=['대만','홍콩','일본','싱가폴','싱가포르','멕시코','미국','한국','중국','베트남','태국','인도네시아','필리핀','말레이시아','인도'];
 function extractCountry(cn){if(!cn)return'기타';for(const c of COUNTRY_LIST){if(cn.startsWith(c))return c}const p=cn.split('_')[0];return p||'기타'}
+// 캠페인명이 국가 접두사로 시작하지 않으면(예: '무당_…','솔로_…') split 결과가 상품명이 됨.
+// 그 경우 레코드의 country 필드(글로벌 파이프라인이 분류한 실제 국가)로 합산한다.
+function countryOf(r){const c=extractCountry(r.campaign_name);if(COUNTRY_LIST.includes(c))return c;if(r.country&&COUNTRY_LIST.includes(r.country))return r.country;if(r.country)return r.country;return c}
 function renderDateProduct(){
   const sel=document.getElementById('dpSel');
   const per=(document.getElementById('dpPeriod')||{}).value||'day';
@@ -2209,7 +2212,7 @@ function renderDateProduct(){
   if(MODE==='gl'){
     cWrap.style.display='';pLabel.style.display='';
     const byC={};
-    rows.forEach(r=>{const c=extractCountry(r.campaign_name);if(!byC[c])byC[c]={country:c,spend:0,revenue:0,profit:0,mp:0,uc:0,imp:0,ids:new Set(),cmp:new Set()};byC[c].spend+=r.spend;byC[c].revenue+=r.revenue;byC[c].profit+=r.profit;byC[c].mp+=r.results_mp;byC[c].uc+=r.unique_clicks;byC[c].imp+=(r.impressions||0);byC[c].ids.add(r.adset_id||r.adset_name);if(r.campaign_name)byC[c].cmp.add(r.campaign_name)});
+    rows.forEach(r=>{const c=countryOf(r);if(!byC[c])byC[c]={country:c,spend:0,revenue:0,profit:0,mp:0,uc:0,imp:0,ids:new Set(),cmp:new Set()};byC[c].spend+=r.spend;byC[c].revenue+=r.revenue;byC[c].profit+=r.profit;byC[c].mp+=r.results_mp;byC[c].uc+=r.unique_clicks;byC[c].imp+=(r.impressions||0);byC[c].ids.add(r.adset_id||r.adset_name);if(r.campaign_name)byC[c].cmp.add(r.campaign_name)});
     const cList=Object.values(byC).sort((a,b)=>b.spend-a.spend);
     let ch='<thead><tr><th style="text-align:left;background:#4476b8;color:#fff">국가</th><th style="background:#4476b8;color:#fff">캠페인수</th><th style="background:#4476b8;color:#fff">세트수</th><th style="background:#4476b8;color:#fff">지출</th><th style="background:#4476b8;color:#fff">매출</th><th style="background:#4476b8;color:#fff">이익</th><th style="background:#4476b8;color:#fff">ROAS</th><th style="background:#4476b8;color:#fff">CTR</th><th style="background:#4476b8;color:#fff">CPM</th><th style="background:#4476b8;color:#fff">CVR</th><th style="background:#4476b8;color:#fff">비중</th></tr></thead><tbody>';
     cList.forEach(p=>{const roas=p.spend>0?p.revenue/p.spend*100:0;const cvr=p.uc>0&&p.mp>0?p.mp/p.uc*100:0;const ratio=totS>0?p.spend/totS*100:0;const ctr=p.imp>0?p.uc/p.imp*100:0;const cpm=p.imp>0?p.spend/p.imp*1000:0;
