@@ -272,12 +272,13 @@ def fetch_mixpanel_data(from_date, to_date):
     url = "https://data.mixpanel.com/api/2.0/export"
     params = {'from_date':from_date,'to_date':to_date,'event':json.dumps(MIXPANEL_EVENT_NAMES),'project_id':MIXPANEL_PROJECT_ID}
     log.info(f"  📡 Mixpanel: {from_date} ~ {to_date}")
+    # 반환 규약: 정상=list(빈 list 가능=실제 결제 없음) · 수집 실패=None (호출부가 기존 매출 보존하도록 구분)
     for attempt in range(4):
         try:
             resp = req_lib.get(url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300)
             if resp.status_code == 429:
                 time.sleep(30 + attempt * 30); continue
-            if resp.status_code != 200: return []
+            if resp.status_code != 200: return None
             lines = [l for l in resp.text.split('\n') if l.strip()]
             log.info(f"  📊 이벤트: {len(lines)}건")
             data = []
@@ -308,8 +309,8 @@ def fetch_mixpanel_data(from_date, to_date):
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
         except Exception as e:
-            log.error(f"  ❌ Mixpanel 오류: {e}"); return []
-    return []
+            log.error(f"  ❌ Mixpanel 오류: {e}"); return None
+    return None  # 429 4회 소진 등 — 수집 실패로 간주
 
 
 # =========================================================
@@ -389,6 +390,17 @@ class SupabaseClient:
                 row[k] = v
             clean.append(row)
         return clean
+
+    def select(self, table, query):
+        """읽기 전용 GET. 실패 시 [] 반환 (보존 로직은 빈 결과를 '보존 불가'로 자연 처리)."""
+        url = f"{self.base_url}/rest/v1/{table}?{query}"
+        try:
+            resp = req_lib.get(url, headers=self.headers, timeout=60)
+            if resp.status_code == 200: return resp.json()
+            log.error(f"  ❌ select: HTTP {resp.status_code} | {resp.text[:200]}")
+        except Exception as e:
+            log.error(f"  ❌ select 예외: {e}")
+        return []
 
     def upsert(self, table, records, chunk_size=500):
         url = f"{self.base_url}/rest/v1/{table}"
@@ -476,18 +488,32 @@ def main():
     log.info(f"\n3단계: Mixpanel ({REFRESH_DAYS}일)")
     YESTERDAY = TODAY - timedelta(days=1)
     mp_raw = []
-    if REFRESH_DAYS > 14:
-        chunk_start = DATA_REFRESH_START
-        while chunk_start <= YESTERDAY:
-            chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
-            mp_raw.extend(fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
-            chunk_start = chunk_end + timedelta(days=1)
+    # 수집 실패한 날짜(iso) 집합 — 이 날짜는 매출을 0으로 덮어쓰지 않고 기존 값 보존 (2026-06-08)
+    #   배경: 과거 구간 export 가 timeout/429/non-200 으로 실패하면 그대로 매출 0 업서트되어
+    #         '지출은 있는데 매출 0' 구간이 생김(추이차트 0). 실패와 '실제 결제 없음'을 구분해 방지.
+    uncovered = set()
+    def _mark_uncovered(s, e):
+        d = s
+        while d <= e:
+            uncovered.add(d.strftime('%Y-%m-%d')); d += timedelta(days=1)
+    # 과거 구간: 7일 청크로 분할 (대용량 응답 timeout 위험 완화 · 실패한 청크만 보존모드)
+    chunk_start = DATA_REFRESH_START
+    while chunk_start <= YESTERDAY:
+        chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
+        res = fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'))
+        if res is None:
+            log.error(f"  ❌ Mixpanel 수집 실패: {chunk_start:%Y-%m-%d}~{chunk_end:%Y-%m-%d} → 해당 날짜 기존 매출 보존")
+            _mark_uncovered(chunk_start, chunk_end)
+        else:
+            mp_raw.extend(res)
+        chunk_start = chunk_end + timedelta(days=1)
+    today_res = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
+    if today_res is None:
+        log.error(f"  ❌ Mixpanel 수집 실패: 오늘({TODAY:%Y-%m-%d}) → 기존 매출 보존")
+        _mark_uncovered(TODAY, TODAY)
     else:
-        if DATA_REFRESH_START <= YESTERDAY:
-            mp_raw.extend(fetch_mixpanel_data(DATA_REFRESH_START.strftime('%Y-%m-%d'), YESTERDAY.strftime('%Y-%m-%d')))
-    today_data = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
-    if today_data: mp_raw.extend(today_data)
-    log.info(f"✅ Mixpanel: {len(mp_raw)}건")
+        mp_raw.extend(today_res)
+    log.info(f"✅ Mixpanel: {len(mp_raw)}건" + (f" · ⚠️ 수집실패 보존 {len(uncovered)}일" if uncovered else ""))
 
     # Mixpanel 집계
     import pandas as pd
@@ -581,6 +607,17 @@ def main():
         total = sum(dates.values())
         log.info(f"  {country}: ₩{total:,.0f} KRW")
 
+    # 5-0) Mixpanel 수집 실패 날짜의 기존 매출 보존맵 로드 (0 덮어쓰기 방지)
+    prev_map = {}
+    if uncovered:
+        _dlist = ",".join(sorted(uncovered))
+        log.warning(f"  🛡️ 보존모드: {sorted(uncovered)} — 기존 매출/건수 유지(0 덮어쓰기 방지)")
+        for e in sb.select("global_ad_performance_daily",
+                           f"select=date,adset_id,revenue_usd,results_mp&date=in.({_dlist})"):
+            prev_map[(str(e.get('date')), str(e.get('adset_id')))] = (
+                float(e.get('revenue_usd') or 0.0), int(e.get('results_mp') or 0))
+        log.info(f"  🛡️ 보존맵: {len(prev_map)}행 로드")
+
     # 5) 병합
     log.info(f"\n5단계: 병합")
     records = []
@@ -607,6 +644,12 @@ def main():
             else:
                 mp_currency = "TWD"
             revenue = local_to_usd(float(mpv_local), mp_currency, dk)
+            # 🛡️ 이 날짜 Mixpanel 수집 실패 → 기존 매출/건수 보존 (0 덮어쓰기 방지). 지출은 신규 반영.
+            #    단, 기존 DB값이 0이면(과거 손상 또는 실결제 없음) 보존하지 않는다 — 0 고착 방지.
+            #    (0을 '정상값'으로 보존하면, 수집 실패가 반복되는 동안 성공 재귀속 전까지 영영 0에 갇힘)
+            if iso_date in uncovered:
+                _pv = prev_map.get((iso_date, str(asid)))
+                if _pv and _pv[0] > 0: revenue, mpc = _pv[0], _pv[1]
             profit = revenue - spend
             roas = (revenue / spend * 100) if spend > 0 else 0
             cvr = (mpc / mr['unique_clicks'] * 100) if mr['unique_clicks'] > 0 and mpc > 0 else 0
