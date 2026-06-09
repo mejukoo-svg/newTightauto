@@ -1,12 +1,13 @@
 -- ============================================================================
--- google_demandgen_content_spend_daily : 구글 디멘드젠 콘텐츠(ct)별 지출 (구글 광고 보고서 엑셀 기반)
+-- google_demandgen_content_spend_daily : 구글 디멘드젠 콘텐츠(ct)별 지출 (구글 Ads API 기반)
 -- ============================================================================
--- 구글_디멘드젠_예산_엑셀.py 가 (date, content) 단위로 upsert
---   소스: 바탕화면의 "광고 보고서*.xlsx" (구글 Ads 광고 보고서, 하루치)
---   최종 URL 의 ?ch=google&ct=<콘텐츠> 에서 ch=google 만, ct 별 비용/클릭/노출/전환 합산
+-- 구글_디멘드젠_api_supabase.py 가 (date, content) 단위로 upsert
+--   소스: 구글 Ads API (ad_group_ad, advertising_channel_type IN DEMAND_GEN/DISCOVERY)
+--   ad.final_urls 의 ?ch=google&ct=<콘텐츠> 에서 ct 별 비용/클릭/노출/전환 합산
 -- index.html 이 google_demandgen_content_mp_daily(매출) 와 (date,content) 로 조인 →
 --   콘텐츠별 ROAS/순이익/지출/매출 표시
--- (엑셀이 수동 다운로드라 cron 불가 — 로컬 수동 적재)
+-- (API 라 수동 다운로드 불필요 — supabase.yml google-dg-spend job 으로 매시 cron 자동 적재)
+-- ※ 과거: 바탕화면 "광고 보고서*.xlsx" 수동 적재(구글_디멘드젠_예산_엑셀.py) — Ads API 로 대체됨
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public.google_demandgen_content_spend_daily (

@@ -291,6 +291,31 @@ jobs:
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 구글_디멘드젠_mp_supabase.py
 
+  # ─── 구글 디멘드젠 콘텐츠별 지출 (구글 Ads API, 독립 실행) ───
+  google-dg-spend:
+    name: 🟢 구글 디멘드젠 지출(Ads API)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install google-ads requests
+      - name: Run 구글 디멘드젠 지출
+        env:
+          G_ADS_DEV_TOKEN: ${{ secrets.G_ADS_DEV_TOKEN }}
+          G_ADS_CLIENT_ID: ${{ secrets.G_ADS_CLIENT_ID }}
+          G_ADS_CLIENT_SECRET: ${{ secrets.G_ADS_CLIENT_SECRET }}
+          G_ADS_REFRESH_TOKEN: ${{ secrets.G_ADS_REFRESH_TOKEN }}
+          G_ADS_LOGIN_ID: ${{ secrets.G_ADS_LOGIN_ID }}
+          G_ADS_CUSTOMER_ID: ${{ secrets.G_ADS_CUSTOMER_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 구글_디멘드젠_api_supabase.py
+
   # ─── 지표 하이아라키 KPI (국내 세트별 + Toss 끝나면 집계) ───
   kpi:
     name: 📈 지표 KPI
