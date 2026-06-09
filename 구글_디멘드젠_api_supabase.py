@@ -173,8 +173,10 @@ def fetch_demandgen_spend(client, customer_id: str, agg: dict):
           metrics.conversions
         FROM ad_group_ad
         WHERE segments.date BETWEEN '{START.isoformat()}' AND '{END.isoformat()}'
-          AND campaign.advertising_channel_type IN ('DEMAND_GEN', 'DISCOVERY')
+          AND campaign.advertising_channel_type = 'DEMAND_GEN'
     """
+    # ※ 구 Discovery 캠페인은 Google Ads API v24 에서 enum 'DISCOVERY' 가 제거되고
+    #   모두 DEMAND_GEN 으로 통합됨. 'DISCOVERY' 를 WHERE 에 넣으면 INVALID_ARGUMENT.
     rows = skipped_ch = no_ct = 0
     ch_seen = defaultdict(int)
     try:
