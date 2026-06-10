@@ -86,8 +86,9 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .color-picker .cp-btn{width:28px;height:28px;border-radius:4px;cursor:pointer;border:2px solid transparent;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600}
 .color-picker .cp-btn:hover{border-color:#333}
 .cp-off{background:#000;color:#fff}.cp-d20{background:#ff7777;color:#fff}.cp-d10{background:#ffcccc}.cp-u10{background:#88dd88}.cp-u20{background:#66eecc}.cp-watch{background:#ff9900;color:#fff}.cp-clear{background:#fff;border:1px solid #ccc}
-.memo-input{width:120px;padding:2px 4px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:inherit}
+.memo-input{display:block;box-sizing:border-box;width:100%;min-width:130px;height:60px;padding:4px 5px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:inherit;line-height:1.4;resize:vertical;vertical-align:top;white-space:pre-wrap;overflow:auto}
 .memo-input:focus{border-color:#4285f4;outline:none;background:#f0f7ff}
+td.memo-cell{min-width:140px;padding:3px 4px;vertical-align:top}
 .memo-saved{color:#1a73e8;font-size:9px;opacity:0;transition:opacity 0.3s;margin-left:4px}
 .memo-saved.show{opacity:1}
 /* Dashboard */
@@ -1403,7 +1404,7 @@ function renderTrend(){
       // 메모: 날짜탭 기본값(단일=어제)·하이라이트와 동일하게 '어제(yDay)' 날짜에 저장 → 동일 (date,id) 키로 연동
       // 어제 데이터가 없는 행만 보유한 최신일로 폴백.
       let memoTd='';
-      if(showChg){let md=a.d[yDay]?yDay:'';if(!md){for(const k in a.d){if(k>md)md=k}}const mmv=((a.d[md]&&a.d[md].memo)||'').replace(/"/g,'&quot;');memoTd='<td><input class="memo-input" value="'+mmv+'" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td>'}
+      if(showChg){let md=a.d[yDay]?yDay:'';if(!md){for(const k in a.d){if(k>md)md=k}}const mmv=((a.d[md]&&a.d[md].memo)||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');memoTd='<td class="memo-cell"><textarea class="memo-input" rows="4" placeholder="메모" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mmv+'</textarea><span class="memo-saved">✓</span></td>'}
       // KR/GL/VN: caret 클릭 → 인라인 소재 목록 펼침
       let caretBtn='';
       if(MODE==='kr'||MODE==='gl'||MODE==='vn'){
