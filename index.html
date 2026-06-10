@@ -1991,6 +1991,14 @@ function dtSetToday(){
   renderDateTab();
 }
 
+// 뷰스루 비중 = (메타구매 - 클릭구매)/메타구매. results_meta_click 없으면(구버전 데이터) 공백.
+function _mvPct(meta, click, has){
+  meta=meta||0;
+  if(!has||meta<=0)return '';
+  let v=(meta-(click||0))/meta*100;
+  v=v<0?0:(v>100?100:v);
+  return v.toFixed(0)+'%';
+}
 function renderDateTab(){
   const selStart=document.getElementById('dtStart');
   const selEnd=document.getElementById('dtEnd');
@@ -2039,7 +2047,7 @@ function renderDateTab(){
           // 합산 지표
           spend:0,revenue:0,profit:0,
           impressions:0,reach:0,unique_clicks:0,
-          results_meta:0,results_mp:0,
+          results_meta:0,results_meta_click:0,results_mp:0,_hasClick:false,
           // 최근값 유지
           budget:r.budget||0,
           highlight:r.highlight||null,
@@ -2055,6 +2063,7 @@ function renderDateTab(){
       a.reach+=(r.reach||0);
       a.unique_clicks+=(r.unique_clicks||0);
       a.results_meta+=(r.results_meta||0);
+      a.results_meta_click+=(r.results_meta_click||0);if(r.results_meta_click!=null)a._hasClick=true;
       a.results_mp+=(r.results_mp||0);
       // 가장 최근 날짜의 값으로 예산/하이라이트/메모/이름 갱신
       if(r.date>=a._latestDate){
@@ -2092,6 +2101,8 @@ function renderDateTab(){
   const totUC=rows.reduce((a,b)=>a+(b.unique_clicks||0),0);
   const totMP=rows.reduce((a,b)=>a+(b.results_mp||0),0);
   const totMeta=rows.reduce((a,b)=>a+(b.results_meta||0),0);
+  const totMetaClick=rows.reduce((a,b)=>a+(b.results_meta_click||0),0);
+  const anyClick=rows.some(b=>b._hasClick||b.results_meta_click!=null);
   const totRoas=totS>0?totR/totS*100:0;
   const totCvr=totUC>0&&totMP>0?totMP/totUC*100:0;
   const totCpm=totImp>0?totS/totImp*1000:0;
@@ -2115,6 +2126,7 @@ function renderDateTab(){
   h+='<th class="h-meta">클릭당비용</th>';
   h+='<th class="h-meta">빈도</th>';
   h+='<th class="h-meta">결과(메타)</th>';
+  h+='<th class="h-meta" title="뷰스루 비중 = (메타구매 - 클릭구매)/메타구매. 높을수록 보기만하고 산 비중↑ (클릭전용 효율은 낮음)">뷰%</th>';
   h+='<th class="h-mp">결과(MP)</th>';
   h+='<th class="h-mp">매출</th>';
   h+='<th class="h-mp">이익</th>';
@@ -2141,6 +2153,7 @@ function renderDateTab(){
   h+='<td style="text-align:right">'+money(totCpc)+'</td>';
   h+='<td style="text-align:right">'+(totFreq?totFreq.toFixed(2):'')+'</td>';
   h+='<td style="text-align:right">'+F(totMeta)+'</td>';
+  h+='<td style="text-align:right;color:#888">'+_mvPct(totMeta,totMetaClick,anyClick)+'</td>';
   h+='<td style="text-align:right;font-weight:700">'+F(totMP)+'</td>';
   h+='<td style="text-align:right;color:#00d">'+money(totR)+'</td>';
   h+='<td style="text-align:right;color:'+(totP>=0?'green':'red')+'">'+money(totP)+'</td>';
@@ -2171,6 +2184,7 @@ function renderDateTab(){
     h+='<td style="text-align:right">'+money(r.cost_per_click)+'</td>';
     h+='<td style="text-align:right">'+(r.frequency?r.frequency.toFixed(2):'')+'</td>';
     h+='<td style="text-align:right">'+F(r.results_meta)+'</td>';
+    h+='<td style="text-align:right;color:#888">'+_mvPct(r.results_meta,r.results_meta_click,(r._hasClick||r.results_meta_click!=null))+'</td>';
     h+='<td style="text-align:right;font-weight:600">'+F(r.results_mp)+'</td>';
     h+='<td style="text-align:right;color:#00d">'+money(r.revenue)+'</td>';
     h+='<td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+money(r.profit)+'</td>';
