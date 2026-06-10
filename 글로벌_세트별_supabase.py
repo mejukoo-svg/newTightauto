@@ -221,6 +221,8 @@ def fetch_meta_insights_daily(ad_account_id, single_date):
     fields = "campaign_name,adset_name,adset_id,spend,cpm,reach,impressions,frequency,actions,cost_per_action_type,purchase_roas,unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click"
     params = {'fields':fields,'level':'adset','time_increment':1,
         'time_range':json.dumps({'since':single_date,'until':single_date}),
+        # 계정 기본 윈도우와 동일 → actions.value(=results_meta) 불변, 7d_click 키만 추가
+        'action_attribution_windows':json.dumps(['7d_click','1d_view']),
         'limit':500,'filtering':json.dumps([{'field':'spend','operator':'GREATER_THAN','value':'0'}])}
     all_results = []
     data = meta_api_get(url, params, token=get_token(ad_account_id))
@@ -241,6 +243,15 @@ def _extract_action(al, types):
     for a in al:
         if a.get('action_type','') in types:
             try: return float(a.get('value',0))
+            except: return 0
+    return 0
+
+def _extract_action_window(al, types, window_key):
+    """특정 어트리뷰션 윈도우(예: '7d_click') 값만 — 뷰스루/클릭 분리용."""
+    if not al: return 0
+    for a in al:
+        if a.get('action_type','') in types:
+            try: return float(a.get(window_key,0) or 0)
             except: return 0
     return 0
 
@@ -461,6 +472,7 @@ def main():
                         'impressions': int(float(row.get('impressions',0))),
                         'frequency': float(row.get('frequency',0)),
                         'results_meta': _extract_action(row.get('actions',[]), purchase_types),
+                        'results_meta_click': _extract_action_window(row.get('actions',[]), purchase_types, '7d_click'),
                         'cost_per_result': _extract_action(row.get('cost_per_action_type',[]), purchase_types),
                         'unique_clicks': _extract_action(row.get('unique_outbound_clicks',[]), ['outbound_click']),
                         'unique_ctr': _extract_action(row.get('unique_outbound_clicks_ctr',[]), ['outbound_click']),
@@ -667,7 +679,8 @@ def main():
                 'cpm': round(mr['cpm'], 2), 'reach': mr['reach'], 'impressions': mr['impressions'],
                 'unique_clicks': int(mr['unique_clicks']), 'unique_ctr': round(mr['unique_ctr'], 4),
                 'cost_per_click': round(mr['cost_per_click'], 2), 'frequency': round(mr['frequency'], 4),
-                'results_meta': int(mr['results_meta']), 'results_mp': mpc,
+                'results_meta': int(mr['results_meta']), 'results_meta_click': int(mr.get('results_meta_click', 0)),
+                'results_mp': mpc,
                 'revenue_usd': round(revenue, 2), 'profit_usd': round(profit, 2),
                 'roas': round(roas, 2), 'cvr': round(cvr, 4), 'budget_usd': budget_val,
             })

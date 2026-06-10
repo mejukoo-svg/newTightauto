@@ -296,6 +296,19 @@ def _extract_action_value(action_list, types):
     return 0
 
 
+def _extract_action_window(action_list, types, window_key):
+    """특정 어트리뷰션 윈도우(예: '7d_click') 값만 추출. 뷰스루/클릭 분리용."""
+    if not action_list:
+        return 0
+    for a in action_list:
+        if a.get("action_type", "") in types:
+            try:
+                return float(a.get(window_key, 0) or 0)
+            except Exception:
+                return 0
+    return 0
+
+
 def fetch_meta_insights_daily(ad_account_id, single_date):
     """단일 계정/단일 날짜의 adset-level 인사이트"""
     url = f"{META_BASE_URL}/{ad_account_id}/insights"
@@ -309,6 +322,9 @@ def fetch_meta_insights_daily(ad_account_id, single_date):
         "level": "adset",
         "time_increment": 1,
         "time_range": json.dumps({"since": single_date, "until": single_date}),
+        # 계정 기본 윈도우와 동일(7일클릭+1일조회) → actions.value(=results_meta)는 불변,
+        # 추가로 7d_click 키가 붙어 클릭만 구매수를 분리 추출 가능.
+        "action_attribution_windows": json.dumps(["7d_click", "1d_view"]),
         "limit": 500,
         "filtering": json.dumps(
             [{"field": "spend", "operator": "GREATER_THAN", "value": "0"}]
@@ -351,6 +367,7 @@ def parse_insights(rows, date_str, date_obj, ad_account_id=""):
 
         actions = row.get("actions", [])
         results = _extract_action_value(actions, purchase_types)
+        results_click = _extract_action_window(actions, purchase_types, "7d_click")
 
         cost_per_action = row.get("cost_per_action_type", [])
         cost_per_result = _extract_action_value(cost_per_action, purchase_types)
@@ -385,6 +402,7 @@ def parse_insights(rows, date_str, date_obj, ad_account_id=""):
                 "cost_per_click": cost_per_click,
                 "frequency": frequency,
                 "results_meta": results,
+                "results_meta_click": results_click,
                 "date_obj": date_obj,
                 "date_key": date_str,
             }
@@ -1006,6 +1024,7 @@ def main():
                     "cost_per_click": round(cost_per_click, 2),
                     "frequency": round(mr["frequency"], 4),
                     "results_meta": int(mr["results_meta"]),
+                    "results_meta_click": int(mr.get("results_meta_click", 0)),
                     "results_mp": mpc,
                     "revenue": round(revenue, 2),
                     "profit": round(profit, 2),
