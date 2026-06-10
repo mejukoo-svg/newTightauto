@@ -1400,9 +1400,10 @@ function renderTrend(){
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
-      // 메모: 행의 최신 날짜(date,id)에 저장 → 날짜탭 메모와 동일 키로 연동
+      // 메모: 날짜탭 기본값(단일=어제)·하이라이트와 동일하게 '어제(yDay)' 날짜에 저장 → 동일 (date,id) 키로 연동
+      // 어제 데이터가 없는 행만 보유한 최신일로 폴백.
       let memoTd='';
-      if(showChg){let md='';for(const k in a.d){if(k>md)md=k}const mmv=((a.d[md]&&a.d[md].memo)||'').replace(/"/g,'&quot;');memoTd='<td><input class="memo-input" value="'+mmv+'" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td>'}
+      if(showChg){let md=a.d[yDay]?yDay:'';if(!md){for(const k in a.d){if(k>md)md=k}}const mmv=((a.d[md]&&a.d[md].memo)||'').replace(/"/g,'&quot;');memoTd='<td><input class="memo-input" value="'+mmv+'" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td>'}
       // KR/GL/VN: caret 클릭 → 인라인 소재 목록 펼침
       let caretBtn='';
       if(MODE==='kr'||MODE==='gl'||MODE==='vn'){
