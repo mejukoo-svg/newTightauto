@@ -3,6 +3,10 @@ name: Meta 시간대 분석 (상품별×시간대 판매수/CPA)
 # 시크릿(META_TOKEN_*)을 주입해 메타_시간대분석.py 를 실행하고, 결과 표를 로그로 출력.
 # (GitHub Secret 값은 외부로 읽을 수 없으므로 Actions 내부에서 실행)
 on:
+  schedule:
+    # UTC 0-17시 매시 50분 = KST 09:50 ~ 익일 02:50 (활성 시간대만)
+    # 분(:50)은 국내(:00)·supabase백업(:07/:37)·글로벌(:30)·소재별(:40)과 겹치지 않게 stagger
+    - cron: '50 0-17 * * *'
   workflow_dispatch:
     inputs:
       scope:
@@ -25,6 +29,11 @@ on:
         default: '2026-06-08'
         type: string
 
+# 이전 실행이 30분 안에 안 끝나도 다음 정시 실행이 쌓이지 않게 함
+concurrency:
+  group: meta-hourly-analysis
+  cancel-in-progress: false
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -35,6 +44,19 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
+      - name: 파라미터 결정 (스케줄=동적 날짜, 수동=입력값)
+        id: p
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "scope=${{ github.event.inputs.scope }}" >> "$GITHUB_OUTPUT"
+            echo "since=${{ github.event.inputs.since }}" >> "$GITHUB_OUTPUT"
+            echo "until=${{ github.event.inputs.until }}" >> "$GITHUB_OUTPUT"
+          else
+            # 스케줄 실행: KST 기준 최근 30일 ~ 오늘, 전체 권역
+            echo "scope=all" >> "$GITHUB_OUTPUT"
+            echo "since=$(TZ=Asia/Seoul date -d '-29 days' +%F)" >> "$GITHUB_OUTPUT"
+            echo "until=$(TZ=Asia/Seoul date +%F)" >> "$GITHUB_OUTPUT"
+          fi
       - name: Run 메타 시간대 분석
         env:
           META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
@@ -44,4 +66,4 @@ jobs:
           META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
           META_TOKEN_ACT_9937: ${{ secrets.META_TOKEN_ACT_9937 }}
         run: |
-          python 메타_시간대분석.py --scope "${{ github.event.inputs.scope }}" --since "${{ github.event.inputs.since }}" --until "${{ github.event.inputs.until }}"
+          python 메타_시간대분석.py --scope "${{ steps.p.outputs.scope }}" --since "${{ steps.p.outputs.since }}" --until "${{ steps.p.outputs.until }}"
