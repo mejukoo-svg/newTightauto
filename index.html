@@ -217,7 +217,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>기간</label><select id="dpPeriod"><option value="day" selected>하루</option><option value="week">주간</option><option value="month">월간</option></select><label style="margin-left:10px">날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table></div></div>
-<div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
+<div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
@@ -2250,11 +2250,47 @@ function renderDateProduct(){
 // ===== STRIPE =====
 function renderStripe(){
   if(!STRIPE_DATA.length){document.getElementById('sTbl').innerHTML='<tr><td>Stripe 데이터 없음</td></tr>';return}
+  const mode=document.getElementById('sMode')?.value||'daily';
+  if(mode==='daily')return renderStripeDaily();
+  if(mode==='weekly')return renderStripeWeekly();
+  return renderStripeMonthly();
+}
+function renderStripeDaily(){
   const byDate={};STRIPE_DATA.forEach(r=>{if(!byDate[r.date])byDate[r.date]={};byDate[r.date][r.country]=r});
   const dates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort().reverse();
   let h='<thead><tr><th>날짜</th><th>요일</th><th>대만 (USD)</th><th>홍콩 (USD)</th><th>일본 (USD)</th><th>태국 (USD)</th><th>합계</th><th>USD/KRW</th></tr></thead><tbody>';
   dates.forEach(d=>{const bd=byDate[d]||{};const tw=bd['대만']?.revenue_usd||0;const hk=bd['홍콩']?.revenue_usd||0;const jp=bd['일본']?.revenue_usd||0;const th=bd['태국']?.revenue_usd||0;
   h+='<tr><td>'+DK(d)+'</td><td>'+WD(d)+'</td><td style="text-align:right">$'+F(tw)+'</td><td style="text-align:right">$'+F(hk)+'</td><td style="text-align:right">$'+F(jp)+'</td><td style="text-align:right">$'+F(th)+'</td><td style="text-align:right;font-weight:700">$'+F(tw+hk+jp+th)+'</td><td>'+(bd['대만']?.usd_krw_rate||0).toFixed(2)+'</td></tr>'});
+  h+='</tbody>';document.getElementById('sTbl').innerHTML=h;
+}
+// 주(월요일 시작) 단위로 국가별 USD 합산
+function renderStripeWeekly(){
+  const cs=['대만','홍콩','일본','태국'];
+  const grp={};
+  STRIPE_DATA.forEach(r=>{
+    const dt=new Date(r.date);const wd=dt.getDay();const diff=dt.getDate()-wd+(wd===0?-6:1);const mon=new Date(dt);mon.setDate(diff);const mk=mon.toISOString().split('T')[0];
+    if(!grp[mk])grp[mk]={대만:0,홍콩:0,일본:0,태국:0};
+    grp[mk][r.country]=(grp[mk][r.country]||0)+(r.revenue_usd||0);
+  });
+  const keys=Object.keys(grp).sort().reverse();
+  let h='<thead><tr><th>주 (월~일)</th><th>대만 (USD)</th><th>홍콩 (USD)</th><th>일본 (USD)</th><th>태국 (USD)</th><th>합계</th></tr></thead><tbody>';
+  keys.forEach(mk=>{const g=grp[mk];const sun=new Date(mk);sun.setDate(sun.getDate()+6);const sunK=sun.toISOString().split('T')[0];
+    const tot=cs.reduce((s,c)=>s+(g[c]||0),0);
+    h+='<tr><td>'+DK(mk)+' ~ '+DK(sunK)+'</td><td style="text-align:right">$'+F(g['대만'])+'</td><td style="text-align:right">$'+F(g['홍콩'])+'</td><td style="text-align:right">$'+F(g['일본'])+'</td><td style="text-align:right">$'+F(g['태국'])+'</td><td style="text-align:right;font-weight:700">$'+F(tot)+'</td></tr>'});
+  h+='</tbody>';document.getElementById('sTbl').innerHTML=h;
+}
+// 월 단위로 국가별 USD 합산
+function renderStripeMonthly(){
+  const cs=['대만','홍콩','일본','태국'];
+  const grp={};
+  STRIPE_DATA.forEach(r=>{const mk=r.date.slice(0,7);
+    if(!grp[mk])grp[mk]={대만:0,홍콩:0,일본:0,태국:0};
+    grp[mk][r.country]=(grp[mk][r.country]||0)+(r.revenue_usd||0);
+  });
+  const keys=Object.keys(grp).sort().reverse();
+  let h='<thead><tr><th>월</th><th>대만 (USD)</th><th>홍콩 (USD)</th><th>일본 (USD)</th><th>태국 (USD)</th><th>합계</th></tr></thead><tbody>';
+  keys.forEach(mk=>{const g=grp[mk];const tot=cs.reduce((s,c)=>s+(g[c]||0),0);const p=mk.split('-');
+    h+='<tr><td>'+p[0]+'/'+p[1]+'</td><td style="text-align:right">$'+F(g['대만'])+'</td><td style="text-align:right">$'+F(g['홍콩'])+'</td><td style="text-align:right">$'+F(g['일본'])+'</td><td style="text-align:right">$'+F(g['태국'])+'</td><td style="text-align:right;font-weight:700">$'+F(tot)+'</td></tr>'});
   h+='</tbody>';document.getElementById('sTbl').innerHTML=h;
 }
 
