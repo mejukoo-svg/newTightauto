@@ -53,6 +53,20 @@ MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
+# Meta 채널 판별 (utm_source 화이트리스트) — 세트 파이프라인과 동일.
+# 타채널(google 등) 결제가 직전 Meta 방문의 stale utm_content(소재 id)을 달고 들어와
+# Meta 소재 매출로 잘못 합산되는 문제 차단 → 마지막 터치가 Meta인 결제만 소재에 귀속.
+META_UTM_SOURCES = {"ig", "fb", "an", "msg", "instagram", "facebook", "threads", "th"}
+def is_meta_source(src):
+    s = str(src).strip().lower() if src is not None else ""
+    if not s:
+        return False
+    if s in META_UTM_SOURCES:
+        return True
+    if s.startswith("ig") or s.startswith("fb") or "instagram" in s or "facebook" in s or "site_source_name" in s:
+        return True
+    return False
+
 # 글로벌 성과 측정 시 제외할 "한국" 국가값 (Mixpanel mp_country_code).
 # raw export(/api/2.0/export)의 mp_country_code는 ISO alpha-2 코드("KR")로 저장됨
 # (Mixpanel UI 표시값은 "South Korea"). 풀네임도 방어적으로 함께 매칭.
@@ -252,12 +266,13 @@ def fetch_mixpanel_data(from_date, to_date):
     url = "https://data.mixpanel.com/api/2.0/export"
     params = {'from_date':from_date,'to_date':to_date,'event':json.dumps(MIXPANEL_EVENT_NAMES),'project_id':MIXPANEL_PROJECT_ID}
     log.info(f"  📡 Mixpanel: {from_date} ~ {to_date}")
+    # 반환 규약: 정상=list(빈 list 가능=실제 결제 없음) · 수집 실패=None (호출부가 기존 매출 보존하도록 구분)
     for attempt in range(4):
         try:
             resp = req_lib.get(url, params=params, auth=(MIXPANEL_USERNAME, MIXPANEL_SECRET), timeout=300)
             if resp.status_code == 429:
                 time.sleep(30 + attempt * 30); continue
-            if resp.status_code != 200: return []
+            if resp.status_code != 200: return None
             lines = [l for l in resp.text.split('\n') if l.strip()]
             log.info(f"  📊 이벤트: {len(lines)}건")
             data = []
@@ -272,6 +287,10 @@ def fetch_mixpanel_data(from_date, to_date):
                     ut = None
                     for k in ['utm_content','UTM_Content','UTM Content']:
                         if k in props and props[k]: ut = clean_id(str(props[k]).strip()); break
+                    # 채널 판별용 utm_source (Meta 결제만 귀속)
+                    us = ''
+                    for k in ['utm_source','UTM_Source','UTM Source']:
+                        if k in props and props[k]: us = str(props[k]).strip(); break
                     raw_a = props.get('결제금액') or props.get('amount')
                     raw_v = props.get('value')
                     a_val = float(raw_a) if raw_a else 0.0
@@ -281,13 +300,13 @@ def fetch_mixpanel_data(from_date, to_date):
                     country = props.get('mp_country_code') or ''
                     # 주문번호: 대만=merchant_uid/주문번호, 한국=order_id. 중복 결제 판단 1차 키.
                     order_no = props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip()})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip()})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
         except Exception as e:
-            log.error(f"  ❌ Mixpanel 오류: {e}"); return []
-    return []
+            log.error(f"  ❌ Mixpanel 오류: {e}"); return None
+    return None  # 429 4회 소진 등 — 수집 실패로 간주
 
 
 # =========================================================
@@ -312,6 +331,17 @@ class SupabaseClient:
                 row[k] = v
             clean.append(row)
         return clean
+
+    def select(self, table, query):
+        """읽기 전용 GET. 실패 시 [] 반환."""
+        url = f"{self.base_url}/rest/v1/{table}?{query}"
+        try:
+            resp = req_lib.get(url, headers=self.headers, timeout=60)
+            if resp.status_code == 200: return resp.json()
+            log.error(f"  ❌ select: HTTP {resp.status_code} | {resp.text[:200]}")
+        except Exception as e:
+            log.error(f"  ❌ select 예외: {e}")
+        return []
 
     def upsert(self, table, records, chunk_size=500):
         url = f"{self.base_url}/rest/v1/{table}"
@@ -402,18 +432,30 @@ def main():
     log.info(f"\n3단계: Mixpanel ({REFRESH_DAYS}일, utm_content 매칭)")
     YESTERDAY = TODAY - timedelta(days=1)
     mp_raw = []
-    if REFRESH_DAYS > 14:
-        chunk_start = DATA_REFRESH_START
-        while chunk_start <= YESTERDAY:
-            chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
-            mp_raw.extend(fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
-            chunk_start = chunk_end + timedelta(days=1)
+    # 수집 실패한 날짜(iso) 집합 — 매출 0 덮어쓰기 방지 (2026-06-08). 실패와 '실제 결제 없음' 구분.
+    uncovered = set()
+    def _mark_uncovered(s, e):
+        d = s
+        while d <= e:
+            uncovered.add(d.strftime('%Y-%m-%d')); d += timedelta(days=1)
+    # 과거 구간: 7일 청크로 분할 (대용량 응답 timeout 위험 완화 · 실패한 청크만 보존모드)
+    chunk_start = DATA_REFRESH_START
+    while chunk_start <= YESTERDAY:
+        chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
+        res = fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'))
+        if res is None:
+            log.error(f"  ❌ Mixpanel 수집 실패: {chunk_start:%Y-%m-%d}~{chunk_end:%Y-%m-%d} → 해당 날짜 기존 매출 보존")
+            _mark_uncovered(chunk_start, chunk_end)
+        else:
+            mp_raw.extend(res)
+        chunk_start = chunk_end + timedelta(days=1)
+    today_res = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
+    if today_res is None:
+        log.error(f"  ❌ Mixpanel 수집 실패: 오늘({TODAY:%Y-%m-%d}) → 기존 매출 보존")
+        _mark_uncovered(TODAY, TODAY)
     else:
-        if DATA_REFRESH_START <= YESTERDAY:
-            mp_raw.extend(fetch_mixpanel_data(DATA_REFRESH_START.strftime('%Y-%m-%d'), YESTERDAY.strftime('%Y-%m-%d')))
-    today_data = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
-    if today_data: mp_raw.extend(today_data)
-    log.info(f"✅ Mixpanel: {len(mp_raw)}건")
+        mp_raw.extend(today_res)
+    log.info(f"✅ Mixpanel: {len(mp_raw)}건" + (f" · ⚠️ 수집실패 보존 {len(uncovered)}일" if uncovered else ""))
 
     # Mixpanel 집계 (utm_content = ad_id)
     import pandas as pd
@@ -425,6 +467,12 @@ def main():
             s = str(x).strip() if x is not None else ''
             return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
         df['utm_content'] = df['utm_content'].apply(_norm)
+
+        # 0) Meta 채널 결제만 귀속 (google 등 타채널의 stale utm_content 오염 차단) — 세트와 동일
+        if 'utm_source' in df.columns:
+            _bn = len(df)
+            df = df[df['utm_source'].apply(is_meta_source)]
+            log.info(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn - len(df)}건 제외)")
 
         # 1) 중복 결제 dedup — 주문번호(order_no) 우선 (2026-06-08)
         #    같은 주문번호 = 같은 주문 = 1건. order_no: 대만=merchant_uid/주문번호, 한국=order_id.
@@ -472,6 +520,17 @@ def main():
         for (d, ut), c in df_d.groupby(['date','utm_content']).size().items():
             if d and ut: mp_count_map[(d, str(ut))] = c
 
+    # 4-0) Mixpanel 수집 실패 날짜의 기존 매출 보존맵 로드 (0 덮어쓰기 방지)
+    prev_map = {}
+    if uncovered:
+        _dlist = ",".join(sorted(uncovered))
+        log.warning(f"  🛡️ 보존모드: {sorted(uncovered)} — 기존 매출/건수 유지(0 덮어쓰기 방지)")
+        for e in sb.select("global_ad_creative_daily",
+                           f"select=date,ad_id,revenue_usd,results_mp&date=in.({_dlist})"):
+            prev_map[(str(e.get('date')), str(e.get('ad_id')))] = (
+                float(e.get('revenue_usd') or 0.0), int(e.get('results_mp') or 0))
+        log.info(f"  🛡️ 보존맵: {len(prev_map)}행 로드")
+
     # 4) 병합
     log.info(f"\n4단계: 병합")
     records = []
@@ -493,6 +552,10 @@ def main():
             else:
                 mp_currency = "TWD"
             revenue = local_to_usd(float(mpv_local), mp_currency, dk)
+            # 🛡️ 이 날짜 Mixpanel 수집 실패 → 기존 매출/건수 보존 (0 덮어쓰기 방지). 지출은 신규 반영.
+            if iso_date in uncovered:
+                _pv = prev_map.get((iso_date, str(ad_id)))
+                if _pv: revenue, mpc = _pv[0], _pv[1]
             profit = revenue - spend
             roas = (revenue / spend * 100) if spend > 0 else 0
             cvr = (mpc / mr['unique_clicks'] * 100) if mr['unique_clicks'] > 0 and mpc > 0 else 0

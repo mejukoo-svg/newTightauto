@@ -49,6 +49,21 @@ MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MIXPANEL_EVENT_NAMES = ["결제완료", "payment_complete"]
 
+# Meta 채널 판별 (utm_source 화이트리스트) — 세트 파이프라인과 동일.
+# 타 채널(google/tiktok 등) 결제가 직전 Meta 방문에서 남은 stale utm_content(소재 id)을
+# 그대로 달고 들어와 Meta 소재 매출로 잘못 합산되는 문제를 차단한다.
+# → 마지막 터치가 Meta(ig/fb/an 등)인 결제만 소재에 귀속한다.
+META_UTM_SOURCES = {"ig", "fb", "an", "msg", "instagram", "facebook", "threads", "th"}
+def is_meta_source(src):
+    s = str(src).strip().lower() if src is not None else ""
+    if not s:
+        return False
+    if s in META_UTM_SOURCES:
+        return True
+    if s.startswith("ig") or s.startswith("fb") or "instagram" in s or "facebook" in s or "site_source_name" in s:
+        return True
+    return False
+
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
@@ -212,12 +227,16 @@ def fetch_mixpanel_data(from_date, to_date):
                     ut = None
                     for k in ['utm_content','UTM_Content','UTM Content']:
                         if k in props and props[k]: ut = clean_id(str(props[k]).strip()); break
+                    # 채널 판별용 utm_source (Meta 결제만 귀속)
+                    us = ''
+                    for k in ['utm_source','UTM_Source','UTM Source']:
+                        if k in props and props[k]: us = str(props[k]).strip(); break
                     raw_a = props.get('amount') or props.get('결제금액')
                     raw_v = props.get('value')
                     a_val = float(raw_a) if raw_a else 0.0
                     v_val = float(raw_v) if raw_v else 0.0
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_id':props.get('order_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -357,6 +376,12 @@ def main():
             return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
         df['utm_content'] = df['utm_content'].apply(_norm)
 
+        # 0) Meta 채널 결제만 귀속 (google 등 타채널의 stale utm_content 오염 차단) — 세트와 동일
+        if 'utm_source' in df.columns:
+            _bn = len(df)
+            df = df[df['utm_source'].apply(is_meta_source)]
+            log.info(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn - len(df)}건 제외)")
+
         # 1) $insert_id 기준 dedup (Mixpanel canonical)
         if 'insert_id' in df.columns:
             df_iid = df[df['insert_id'].astype(str).str.len() > 0]
@@ -365,6 +390,24 @@ def main():
             df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
         else:
             df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
+
+        # 1.5) order_id 기준 주문 단위 dedup (결제완료/payment_complete 이중발화 방지)
+        #   한 주문이 두 이벤트명 + 재시도로 평균 ~3.3회 발화하는데, 발화마다 insert_id 가
+        #   달라 위 insert_id dedup 으로는 안 걸러진다 → groupby sum 에서 같은 주문 매출이
+        #   2~3배 중복 합산되어 특정 (date, ad_id) 귀속이 과대계상된다(소재탭 매출 부풀림).
+        #   세트 파이프라인(국내_세트별_supabase.py)과 동일 처리 — Toss 실매출 ±0.5% 검증된 집계.
+        #   같은 order_id 그룹에서 utm_content 보유 & 최대 revenue 행을 1건만 보존(귀속 유실 방지).
+        if 'order_id' in df_d.columns:
+            df_d['_oid'] = df_d['order_id'].astype(str).str.strip()
+            _has_oid = df_d['_oid'].str.len() > 0
+            _with = df_d[_has_oid].copy()
+            _without = df_d[~_has_oid]
+            _with['_hasu'] = (_with['utm_content'].astype(str).str.len() > 0).astype(int)
+            _with = (_with.sort_values(['_oid','_hasu','revenue'], ascending=[True, False, False])
+                          .drop_duplicates(subset=['_oid'], keep='first')
+                          .drop(columns=['_hasu']))
+            df_d = pd.concat([_with, _without], ignore_index=True).drop(columns=['_oid'])
+            log.info(f"  🧹 order_id 주문단위 dedup 후: {len(df_d)}건")
 
         # 2) utm_content backfill: (date, distinct_id) 그룹 내 utm_content 채움
         has_uc_mask = df_d['utm_content'].astype(str).str.len() > 0
