@@ -55,6 +55,15 @@ META_TOKENS = {
     "act_1808141386564262": META_TOKEN_B,
 }
 META_TOKEN_DEFAULT = META_TOKEN_A
+
+# 계정별 확정 통화 (Meta에서 직접 확인된 값 — 셋 다 KRW).
+# 통화 오판(특히 KRW를 USD로 가정)은 지출에 환율(~1450)이 곱해져 ROAS 알람을
+# 오발시킨다. API 조회가 실패해도 여기 값이 있으면 환율 오적용을 차단한다.
+ACCOUNT_CURRENCY = {
+    "act_1270614404675034": "KRW",  # 1분꿀잼썰
+    "act_707835224206178": "KRW",   # 2비즈니스계정 hksong
+    "act_1808141386564262": "KRW",  # 타이트사주3rd원화새계정
+}
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 ALL_AD_ACCOUNTS = list(META_TOKENS.keys())
@@ -241,11 +250,21 @@ def get_rate_for_date(rates, dk):
 # 통화 감지
 # =========================================================
 def detect_account_currency(ad_account_id):
+    # 확정 통화가 있으면 그대로 사용(이름만 best-effort 조회) → 조회 실패에 면역.
+    forced = ACCOUNT_CURRENCY.get(ad_account_id)
     url = f"{META_BASE_URL}/{ad_account_id}"
     data = meta_api_get(url, {"fields": "currency,name"}, token=get_token(ad_account_id))
+    name = data.get("name", ad_account_id) if data else ad_account_id
+    if forced:
+        if data and data.get("currency") and data.get("currency") != forced:
+            log.warning(f"  ⚠️ {ad_account_id} 통화 불일치: API={data.get('currency')} ≠ 확정={forced} → 확정값 사용")
+        return forced, name
     if data:
-        return data.get("currency", "USD"), data.get("name", ad_account_id)
-    return "USD", ad_account_id
+        return data.get("currency", "KRW"), name
+    # 조회 실패 시 국내 파이프라인 안전 기본값은 KRW.
+    # (USD로 가정하면 원화 지출에 환율 ~1450배가 곱해져 ROAS 알람을 오발시킨다.)
+    log.warning(f"  ⚠️ 통화 조회 실패 {ad_account_id} → KRW 가정(USD 오적용 방지)")
+    return "KRW", ad_account_id
 
 
 # =========================================================
