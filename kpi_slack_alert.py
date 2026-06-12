@@ -29,6 +29,10 @@ ADSET_BUDGET_MIN = 800_000   # 일예산 하한 (KRW)
 ADSET_ROAS_MAX   = 110       # ROAS 상한 (% 미만이면 알람)
 SPEND_MATURITY   = 0.15      # 오늘 지출이 일예산의 이 비율 이상인 세트만 판정(새벽 빈데이터 오알람 방지). 0=끔
 ADSET_MAX_LINES  = 30        # 한 메시지 최대 세트 수
+# 일ROAS 데이터 신뢰성 가드: 국내 일 지출이 이 상한을 넘으면 통화 오판/환율 오적용
+# 등 데이터 오염 가능성이 높다(정상 ~₩2~4천만/일). 가짜 ROAS 경고 대신 '데이터 점검'
+# 경고로 강등해 한 계정 오염이 전체 알람을 점령하지 못하게 한다.
+DAILY_SPEND_SANITY_MAX = 300_000_000   # ₩3억
 
 
 def _load_env():
@@ -161,17 +165,44 @@ def check_adset_low_roas():
 
 
 def check_daily_roas():
-    """어제 국내 광고 일ROAS < 100% (지출 > 매출)."""
+    """어제 국내 광고 일ROAS < 100% (지출 > 매출). 데이터 오염 시 ROAS 대신 점검 경고."""
     y = (TODAY - timedelta(days=1)).isoformat()
-    rows = sb_get("ad_performance_daily", f"date=eq.{y}&select=spend,revenue")
-    spend = sum(float(r.get("spend") or 0) for r in rows)
-    rev = sum(float(r.get("revenue") or 0) for r in rows)
+    rows = sb_get("ad_performance_daily", f"date=eq.{y}&select=ad_account_id,spend,revenue")
+    if not rows:
+        return None
+
+    # 계정별 집계 — 한 계정 오염/적자가 전체를 점령하는지 식별 가능하게.
+    acc = {}
+    for r in rows:
+        a = r.get("ad_account_id") or "?"
+        s, v = acc.get(a, (0.0, 0.0))
+        acc[a] = (s + float(r.get("spend") or 0), v + float(r.get("revenue") or 0))
+    spend = sum(s for s, _ in acc.values())
+    rev = sum(v for _, v in acc.values())
     if spend <= 0:
         return None
+
+    # ── 데이터 신뢰성 가드: 지출이 비현실적이면 ROAS 경고 보류 → 점검 경고로 강등 ──
+    #   (통화 KRW→USD 오판 시 환율 ~1450배 곱해져 지출이 ₩수억으로 폭증하는 케이스 차단)
+    if spend > DAILY_SPEND_SANITY_MAX:
+        top = sorted(acc.items(), key=lambda x: -x[1][0])[:3]
+        det = "  ·  ".join(f"`…{a[-6:]}` {won(s)}" for a, (s, _) in top)
+        line = (f"🛠 어제(*{y}*) 국내 일 지출 {won(spend)} — 비정상(상한 {won(DAILY_SPEND_SANITY_MAX)} 초과)\n"
+                f"↳ 통화 오판/환율 오적용 의심 → ROAS 경고 보류, 파이프라인 점검 필요\n"
+                f"↳ 지출 상위: {det}")
+        return {"title": "🛠 국내 일ROAS 데이터 점검",
+                "subtitle": "지출 이상치 — ROAS 경고 대신 데이터 점검 권고",
+                "items": [(f"daily_roas_sanity:{y}", line)]}
+
     roas = rev / spend * 100
     if rev < spend:
+        # 계정별 ROAS 분해(낮은 순) — 한 계정만 적자인지 전반 부진인지 한눈에.
+        per = [(v / s * 100, a, s, v) for a, (s, v) in acc.items() if s > 0]
+        per.sort()
+        breakdown = "".join(f"\n↳ `…{a[-6:]}` ROAS {r:.0f}%  ({won(s)}→{won(v)})" for r, a, s, v in per)
         line = (f"🔴 어제(*{y}*) 국내 전체 일ROAS *{roas:.0f}%*\n"
-                f"↳ 지출 {won(spend)} > 매출 {won(rev)}  ·  손실 *{won(spend - rev)}*")
+                f"↳ 지출 {won(spend)} > 매출 {won(rev)}  ·  손실 *{won(spend - rev)}*"
+                f"{breakdown}")
         return {"title": "🔴 국내 일ROAS 경고", "subtitle": "어제 KR 광고 지출 > 매출", "items": [(f"daily_roas:{y}", line)]}
     log.info(f"국내 일ROAS {roas:.0f}% — 정상({y})")
     return None
