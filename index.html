@@ -1620,10 +1620,11 @@ function renderTrendWeekly(){
   const totW={};weekKeys.forEach(wk=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{const w=a.w[wk];if(w){s+=w.spend;r+=w.revenue;p+=w.profit;mp+=w.mp;uc+=w.uc;imp+=w.imp||0}});totW[wk]={s,r,p,mp,uc,imp}});
   const ts=weekKeys.reduce((a,wk)=>a+(totW[wk]?.s||0),0),tr=weekKeys.reduce((a,wk)=>a+(totW[wk]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
   const timp=weekKeys.reduce((a,wk)=>a+(totW[wk]?.imp||0),0),tcpm=timp>0?ts/timp*1000:0;
+  const tmp=weekKeys.reduce((a,wk)=>a+(totW[wk]?.mp||0),0),tuc=weekKeys.reduce((a,wk)=>a+(totW[wk]?.uc||0),0),tcvr=tuc>0&&tmp>0?tmp/tuc*100:0;
   let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
   // Summary row with legend
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR</div><div class="cm">CPM</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0,tcpm)+'</td>';
-  weekKeys.forEach(wk=>{const x=totW[wk];const roas=x.s>0?x.r/x.s*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;h+='<td class="mc '+RC(roas)+'">'+MC(roas,x.p,x.s,x.r,0,cpm)+'</td>'});
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR</div><div class="cm">CPM</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm)+'</td>';
+  weekKeys.forEach(wk=>{const x=totW[wk];const roas=x.s>0?x.r/x.s*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;h+='<td class="mc '+RC(roas)+'">'+MC(roas,x.p,x.s,x.r,cvr,cpm)+'</td>'});
   h+='</tr>';
   // Group by product
   const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={items:[],recentS:0};byProd[p].items.push(a);byProd[p].recentS+=a._recentS});
@@ -1632,11 +1633,12 @@ function renderTrendWeekly(){
     const pS=g.items.reduce((a,x)=>a+x._s,0),pR=g.items.reduce((a,x)=>a+x._r,0),pRoas=pS>0?pR/pS*100:0;
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.items.length+'개) · ROAS '+pRoas.toFixed(0)+'%</td></tr>';
     // Product subtotal
-    const pWeekly={};weekKeys.forEach(wk=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;g.items.forEach(a=>{const w=a.w[wk];if(w){s+=w.spend;r+=w.revenue;p+=w.profit;mp+=w.mp;uc+=w.uc;imp+=w.imp||0}});pWeekly[wk]={s,r,p,imp,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,cpm:imp>0?s/imp*1000:0}});
+    const pWeekly={};weekKeys.forEach(wk=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;g.items.forEach(a=>{const w=a.w[wk];if(w){s+=w.spend;r+=w.revenue;p+=w.profit;mp+=w.mp;uc+=w.uc;imp+=w.imp||0}});pWeekly[wk]={s,r,p,mp,uc,imp,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,cpm:imp>0?s/imp*1000:0}});
     const pImpW=weekKeys.reduce((a,wk)=>a+(pWeekly[wk]?.imp||0),0);
     const pCpmW=pImpW>0?pS/pImpW*1000:0;
+    const pMpW=weekKeys.reduce((a,wk)=>a+(pWeekly[wk]?.mp||0),0),pUcW=weekKeys.reduce((a,wk)=>a+(pWeekly[wk]?.uc||0),0),pCvrW=pUcW>0&&pMpW>0?pMpW/pUcW*100:0;
     const pCells=weekKeys.map(wk=>{const t=pWeekly[wk];return t&&t.s?'<td class="mc '+RC(t.roas)+'">'+MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm)+'</td>':'<td></td>'}).join('');
-    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,0,pCpmW)+'</td>'+pCells+'</tr>';
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvrW,pCpmW)+'</td>'+pCells+'</tr>';
     // Individual rows
     g.items.forEach(a=>{
       const cells=weekKeys.map(wk=>{const w=a.w[wk];if(!w||!w.spend)return'<td></td>';const roas=w.spend>0?w.revenue/w.spend*100:0;const cvr=w.uc>0&&w.mp>0?w.mp/w.uc*100:0;const cpm=w.imp>0?w.spend/w.imp*1000:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,w.profit,w.spend,w.revenue,cvr,cpm)+'</td>'}).join('');
