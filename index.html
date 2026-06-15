@@ -208,10 +208,10 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 <!-- Panels -->
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
-<div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
+<div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilter').value='';renderTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
-<div class="panel" id="p-trendinf"><div class="filter"><label>단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
+<div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기협업</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
@@ -268,7 +268,9 @@ console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+')
 let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
-let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={};
+// 추이차트 전용 메모 (하이라이트 테이블 memo 컬럼 ↔ 하이라이트와 함께 전체삭제)
+let KR_HM={},GL_HM={},CR_HM={},VN_HM={};
+let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={},HL_MEMO={};
 
 // ===== HELPERS =====
 async function sbQ(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:SBH});return r.json()}
@@ -391,11 +393,11 @@ function switchMode(m){
      document.getElementById('p-dashboard').classList.add('active');
    }}
   // Switch data (lazy-load big tables)
-  if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
-  else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
-  else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;
+  if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
+  else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
+  else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM;
     if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=CR_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
-  else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
+  else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -468,10 +470,10 @@ function _applyCore(d){
   NAVER_MP=d.naver_mp||[];TOSS_DAILY=d.toss_kr||[];
   // 하이라이트: in-place merge — HIGHLIGHTS 참조 identity 유지 + 로컬 쓰기(저장 직후) 보존
   // (이전엔 KR_HL={} 으로 재할당해서 HIGHLIGHTS 가 옛 객체에 dangle → 모드 전환/refresh 시 사라짐)
-  (d.krhl||[]).forEach(x=>{KR_HL[x.adset_id]=x.highlight});
-  (d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight});
-  (d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight});
-  (d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight});
+  (d.krhl||[]).forEach(x=>{KR_HL[x.adset_id]=x.highlight;KR_HM[x.adset_id]=x.memo||null});
+  (d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight;GL_HM[x.adset_id]=x.memo||null});
+  (d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight;CR_HM[x.ad_id]=x.memo||null});
+  (d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight;VN_HM[x.adset_id]=x.memo||null});
 }
 async function initData(){
   const D180='&date=gte.'+_dateCutoff(215);
@@ -517,10 +519,10 @@ async function initData(){
     if(renderedFromCache){
       // AD 는 switchMode 시점의 스냅샷이므로 fresh VN_AD/KR_AD 갱신 후 재할당 필요
       // 안 그러면 DATES 가 stale 캐시 기준이라 today/yesterday 가 dd 윈도우에서 누락됨
-      if(MODE==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL}
-      else if(MODE==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL}
-      else if(MODE==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL}
-      else if(MODE==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL}
+      if(MODE==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
+      else if(MODE==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
+      else if(MODE==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM}
+      else if(MODE==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
       rebuildLookups();
       // 펼침 인덱스도 무효화 (다음 클릭 시 fresh 로 재구축)
       window._CR_BY_ADSET=null;
@@ -855,9 +857,11 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
   renderTab(t.dataset.t);
 })});
 document.getElementById('tDays').addEventListener('change',renderTrend);
+document.getElementById('tFilter').addEventListener('input',renderTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
 document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
 document.getElementById('tpUnit').addEventListener('change',renderTrendProduct);
+document.getElementById('tiType').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiUnit').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiRange').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiSearch').addEventListener('input',renderTrendInfluencer);
@@ -926,13 +930,17 @@ async function saveHL(id,c){
 }
 function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
-  if(!confirm('추이차트 하이라이트만 삭제됩니다.\n날짜탭에 저장된 기록은 유지됩니다.\n\n계속할까요?'))return;
-  const tbl=hlTbl();const col=hlIdCol();const ids=Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]);
-  if(!ids.length){alert('하이라이트가 없습니다.');return}
+  if(!confirm('추이차트 하이라이트와 메모가 삭제됩니다.\n날짜탭에 저장된 기록(하이라이트·메모)은 유지됩니다.\n\n계속할까요?'))return;
+  const tbl=hlTbl();const col=hlIdCol();
+  // 하이라이트 또는 추이차트 메모가 있는 모든 id (메모만 있는 행도 삭제 대상)
+  const ids=[...new Set([...Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]),...Object.keys(HL_MEMO).filter(k=>HL_MEMO[k])])];
+  if(!ids.length){alert('삭제할 하이라이트·메모가 없습니다.');return}
   for(const id of ids){
+    // 하이라이트 테이블 행 삭제 → highlight + memo 동시 제거 (추이차트에서만 사라짐)
     await fetch(SB_URL+'/rest/v1/'+tbl+'?'+col+'=eq.'+id,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
     delete HIGHLIGHTS[id];
-    // ★ perfTbl의 highlight 컬럼은 건드리지 않음 → 날짜탭 영구 유지
+    delete HL_MEMO[id];
+    // ★ perfTbl의 highlight·memo 컬럼은 건드리지 않음 → 날짜탭 영구 유지
   }
   renderTrend();
 }
@@ -940,12 +948,28 @@ document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b
 document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.target.closest('.fx.clickable'))document.getElementById('colorPicker').classList.remove('show')});
 
 // ===== MEMO =====
+// 날짜탭 메모: perfTbl.memo (해당 날짜·영구저장) — 하이라이트 전체삭제와 무관하게 유지
 async function saveMemo(date,id,memo,el){
   const tbl=perfTbl();
   const idCol=hlIdCol();
   await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&'+idCol+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo})});
   // 메모리 동기화 — 탭/모드 전환 후에도 유지
   _syncRowField(id, date, 'memo', memo);
+  const ind=el.parentNode.querySelector('.memo-saved');if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
+}
+// 추이차트 메모: 하이라이트 테이블 memo 컬럼에 저장(전체삭제 시 함께 제거) +
+//   날짜탭(perfTbl.memo)에도 해당 날짜로 영구저장 → 추이차트에서만 하이라이트와 함께 사라짐.
+async function saveTrendMemo(date,id,memo,el){
+  const m=(memo&&memo.trim())?memo:null;
+  // 1) 추이차트용 — 하이라이트 테이블 upsert (highlight 컬럼은 미포함 → 기존 하이라이트 보존)
+  const body={[hlIdCol()]:id,memo:m,updated_at:new Date().toISOString()};
+  await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
+  HL_MEMO[id]=m;
+  // 2) 날짜탭 영구저장 — perfTbl.memo (그대로 유지되는 기록)
+  if(date){
+    await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+date+'&'+hlIdCol()+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo:m})});
+    _syncRowField(id,date,'memo',m);
+  }
   const ind=el.parentNode.querySelector('.memo-saved');if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
 }
 
@@ -1365,11 +1389,14 @@ function renderTrend(){
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._cpm=imp>0?s/imp*1000:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
+  const tKw=(document.getElementById('tFilter').value||'').trim().toLowerCase();
+  if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
   // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 "개별 행"만 숨김 (DOM 부담 감소).
   //   단, 종합/소계/일별 합계는 전체 세트 기준으로 계산해야 추이차트(주간) 합과 일치한다.
   //   (예전엔 list 자체를 필터해 합계가 과거 구간에서 누락됐음)
   // 하이라이트가 걸려 있는 세트는 색 유지 위해 항상 표시.
-  const isHidden=a=>(MODE==='kr'||MODE==='gl')&&!(a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
+  const isHidden=a=>!tKw&&(MODE==='kr'||MODE==='gl')&&!(a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4+(showChg?2:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 증감+메모 2칸
   // Summary
@@ -1401,10 +1428,11 @@ function renderTrend(){
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm)+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
-      // 메모: 날짜탭 기본값(단일=어제)·하이라이트와 동일하게 '어제(yDay)' 날짜에 저장 → 동일 (date,id) 키로 연동
-      // 어제 데이터가 없는 행만 보유한 최신일로 폴백.
+      // 메모(추이차트): HL_MEMO(하이라이트 테이블)에서 읽고 saveTrendMemo로 저장.
+      //  → 하이라이트 전체삭제 시 함께 사라짐. 단 날짜탭 perfTbl.memo 에도 같은 날짜로 영구저장됨.
+      //  date-attr: 어제(yDay) 기준, 없으면 보유한 최신일로 폴백 → 날짜탭 영구저장 키.
       let memoTd='';
-      if(showChg){let md=a.d[yDay]?yDay:'';if(!md){for(const k in a.d){if(k>md)md=k}}const mmv=((a.d[md]&&a.d[md].memo)||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');memoTd='<td class="memo-cell"><textarea class="memo-input" rows="4" placeholder="메모" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mmv+'</textarea><span class="memo-saved">✓</span></td>'}
+      if(showChg){let md=a.d[yDay]?yDay:'';if(!md){for(const k in a.d){if(k>md)md=k}}const mmv=(HL_MEMO[a.id]||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');memoTd='<td class="memo-cell"><textarea class="memo-input" rows="4" placeholder="메모" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveTrendMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mmv+'</textarea><span class="memo-saved">✓</span></td>'}
       // KR/GL/VN: caret 클릭 → 인라인 소재 목록 펼침
       let caretBtn='';
       if(MODE==='kr'||MODE==='gl'||MODE==='vn'){
@@ -1757,7 +1785,37 @@ function extractInfluencer(adsetName,campaignName){
   return null;
 }
 
+// 장기협업: only sets whose name contains "장기협업". Group by the influencer name
+// adjacent to the 장기협업 marker; fall back to the generic influencer extractor.
+function extractLongterm(adsetName,campaignName){
+  if(!adsetName||!adsetName.includes('장기협업'))return null;
+  const tokens=_normTokens(adsetName);
+  let idx=-1;
+  for(let i=0;i<tokens.length;i++){if(tokens[i].includes('장기협업')){idx=i;break}}
+  // search outward from the marker (nearest neighbor first) for a Korean name
+  const order=[];
+  for(let d=1;d<tokens.length;d++){if(idx-d>=0)order.push(idx-d);if(idx+d<tokens.length)order.push(idx+d)}
+  for(const i of order){
+    const t=tokens[i].replace(/^[복제증액\-]+/,'').replace(/장기협업/g,'').trim();
+    if(!t)continue;
+    if(INF_SKIP.has(t))continue;
+    if(INF_TEAM.has(t))continue;
+    if(/^\d/.test(t))continue;
+    if(/^[가-힣]{2,5}$/.test(t))return t;
+  }
+  // fallback to the standard influencer extractor (handles "_인플" patterns)
+  return extractInfluencer(adsetName,campaignName)||'장기협업(기타)';
+}
+
 function renderTrendInfluencer(){
+  const tiType=document.getElementById('tiType').value;
+  const isLong=tiType==='longterm';
+  // membership/grouping key: 인플 = "_인플" 패턴(장기협업 제외) · 장기협업 = 세트명에 "장기협업"
+  const groupKey=(name,camp)=>{
+    if(isLong)return extractLongterm(name,camp);
+    if((name||'').includes('장기협업'))return null; // 인플 뷰에서는 장기협업 세트 제외
+    return extractInfluencer(name,camp);
+  };
   const unit=document.getElementById('tiUnit').value;
   const range=parseInt(document.getElementById('tiRange').value);
   const search=(document.getElementById('tiSearch').value||'').trim().toLowerCase();
@@ -1788,7 +1846,7 @@ function renderTrendInfluencer(){
   const byA={};
   AD.forEach(r=>{
     const k=keyOf(r.date);if(!keys.includes(k))return;
-    const inf=extractInfluencer(nameOf(r),r.campaign_name);
+    const inf=groupKey(nameOf(r),r.campaign_name);
     if(!inf)return; // skip team-member sets and unknowns
     const rid=rowId(r);
     if(!byA[rid])byA[rid]={cn:r.campaign_name,an:nameOf(r),id:rid,product:r.product||'기타',inf,k:{}};
@@ -1831,7 +1889,8 @@ function renderTrendInfluencer(){
   const totK={};keys.forEach(k=>{let s=0,r=0,p=0,mp=0,uc=0;infList.forEach(g=>{const w=g.k[k];if(w){s+=w.spend;r+=w.revenue;p+=w.profit;mp+=w.mp;uc+=w.uc}});totK[k]={s,r,p,mp,uc}});
   const ts=keys.reduce((a,k)=>a+(totK[k]?.s||0),0),tr=keys.reduce((a,k)=>a+(totK[k]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
 
-  let h='<thead><tr><th style="min-width:140px;text-align:left">인플루언서</th><th style="min-width:90px">상품</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
+  const colHdr=isLong?'인플루언서(장기협업)':'인플루언서';const rowEmoji=isLong?'🤝':'🌟';
+  let h='<thead><tr><th style="min-width:140px;text-align:left">'+colHdr+'</th><th style="min-width:90px">상품</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
   // Top summary row
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+infList.length+'명)</td><td class="fx fx1" style="background:#e8e8e8;left:140px"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출</div><div class="rv">매출</div><div class="cv">CVR</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
   keys.forEach(k=>{const x=totK[k]||{s:0,r:0,p:0};const yd=(unit==='daily'&&k===YDAY)?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,0)+'</td>'});
@@ -1841,7 +1900,7 @@ function renderTrendInfluencer(){
   infList.forEach(g=>{
     const prods=[...g.products].slice(0,3).join(',')+(g.products.size>3?'+':'');
     // Header row for the influencer
-    h+='<tr><td colspan="'+colSpan+'" class="prod-header" style="background:#5b3e8a">🌟 '+g.inf+' · '+g.adsets.length+'세트 · '+prods+' · 전체 ROAS '+g._roas.toFixed(0)+'% · 지출 '+money(g._s)+'</td></tr>';
+    h+='<tr><td colspan="'+colSpan+'" class="prod-header" style="background:#5b3e8a">'+rowEmoji+' '+g.inf+' · '+g.adsets.length+'세트 · '+prods+' · 전체 ROAS '+g._roas.toFixed(0)+'% · 지출 '+money(g._s)+'</td></tr>';
     // Influencer subtotal
     const subCells=keys.map(k=>{const w=g.k[k];const yd=(unit==='daily'&&k===YDAY)?' col-yday':'';if(!w||!w.spend)return'<td class="'+yd+'"></td>';const roas=w.spend>0?w.revenue/w.spend*100:0;const cvr=w.uc>0&&w.mp>0?w.mp/w.uc*100:0;return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,w.profit,w.spend,w.revenue,cvr)+'</td>'}).join('');
     h+='<tr class="sr"><td class="fx fx0" style="background:#efe8f7;font-weight:700">'+g.inf+' 합계</td><td class="fx fx1" style="background:#efe8f7;left:140px;font-size:10px">'+prods+'</td><td></td><td class="mc '+RC(g._roas)+'">'+MC(g._roas,g._p,g._s,g._r,g._cvr)+'</td>'+subCells+'</tr>';
@@ -1852,7 +1911,7 @@ function renderTrendInfluencer(){
       h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.an||'').slice(0,28))+'</td><td class="fx fx1" style="left:140px;font-size:10px">'+a.product+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr)+'</td>'+cells+'</tr>';
     });
   });
-  if(!infList.length)h+='<tr><td colspan="'+colSpan+'" style="padding:20px;color:#888;text-align:center">표시할 인플루언서 데이터가 없습니다. (팀원 9명 제외 · "_인플" 패턴 또는 인플 캠페인 끝 한글 이름으로 추출)</td></tr>';
+  if(!infList.length)h+='<tr><td colspan="'+colSpan+'" style="padding:20px;color:#888;text-align:center">'+(isLong?'표시할 장기협업 데이터가 없습니다. (세트명에 "장기협업"이 포함된 세트만 표시)':'표시할 인플루언서 데이터가 없습니다. (팀원 9명 제외 · "_인플" 패턴 또는 인플 캠페인 끝 한글 이름으로 추출)')+'</td></tr>';
   h+='</tbody>';
   document.getElementById('tiTbl').innerHTML=h;
 }
