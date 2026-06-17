@@ -70,9 +70,13 @@ def get_twd_krw_rate():
 TWD_KRW_RATE = get_twd_krw_rate()
 
 def is_tw_payment(props):
+    # 대만 결제 판별. mp_country_code=="TW" 1순위, 서비스명에 'tw' 포함되면(접미사 아닌 중간 포함도) 대만.
+    # (한글 서비스명에 라틴 'tw' 가 우연히 들어갈 일 없으므로 substring 매칭 안전)
     svc = props.get("서비스", "") or ""
     cc = props.get("mp_country_code", "") or ""
-    return (isinstance(svc, str) and svc.strip().lower().endswith("-tw")) or str(cc).strip().upper() == "TW"
+    if str(cc).strip().upper() == "TW":
+        return True
+    return isinstance(svc, str) and "tw" in svc.strip().lower()
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
