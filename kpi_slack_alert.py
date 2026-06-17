@@ -3,10 +3,10 @@
 kpi_slack_alert.py — Supabase 데이터 조건 검사 → Slack 알람 (중복 방지)
 ======================================================================
 조건:
-  [고예산 저ROAS 세트] 오늘(실시간) 국내 광고세트 중
-        일예산(budget) >= 800,000  AND  ROAS < 110%  (지출 기준)
+  [고예산 적자 세트] 오늘(실시간) 국내 광고세트 중
+        일예산(budget) >= 800,000  AND  적자(지출-매출) >= 50,000
         + 오전 오알람 방지: 오늘 지출이 일예산의 SPEND_MATURITY(기본 15%) 이상인 세트만
-        → ROAS 낮은 순 목록(세트ID 포함). 조건 지속 시 매시간 재알림  · ad_performance_daily
+        → 적자 큰 순 목록(세트ID 포함). 조건 지속 시 매시간 재알림  · ad_performance_daily
   [일ROAS 경고] 어제 국내 광고 일ROAS < 100% (KR 지출 > 매출)   · ad_performance_daily
 
 중복 방지: alert_log(alert_key PK).
@@ -26,7 +26,8 @@ from pathlib import Path
 
 # ── 임계값 (필요시 여기만 수정) ──
 ADSET_BUDGET_MIN = 800_000   # 일예산 하한 (KRW)
-ADSET_ROAS_MAX   = 110       # ROAS 상한 (% 미만이면 알람)
+ADSET_LOSS_MIN   = 50_000    # 적자(지출-매출) 하한 (KRW) — 이 이상이면 알람
+ADSET_ROAS_MAX   = 110       # ROAS 상한 (표시·심각도용. 트리거는 ADSET_LOSS_MIN)
 SPEND_MATURITY   = 0.15      # 오늘 지출이 일예산의 이 비율 이상인 세트만 판정(새벽 빈데이터 오알람 방지). 0=끔
 ADSET_MAX_LINES  = 30        # 한 메시지 최대 세트 수
 # 일ROAS 데이터 신뢰성 가드: 국내 일 지출이 이 상한을 넘으면 통화 오판/환율 오적용
@@ -123,7 +124,7 @@ def sev_emoji(roas):
 
 # ───────────────────── 조건 ─────────────────────
 def check_adset_low_roas():
-    """오늘(실시간) 일예산 800k↑ & ROAS<110% 광고세트 (지출 성숙도 가드)."""
+    """오늘(실시간) 일예산 800k↑ & 적자(지출-매출) 5만↑ 광고세트 (지출 성숙도 가드)."""
     d = TODAY.isoformat()
     rows = sb_get("ad_performance_daily",
                   f"date=eq.{d}&select=adset_id,adset_name,product,campaign_name,budget,spend,revenue")
@@ -136,31 +137,30 @@ def check_adset_low_roas():
             continue
         if SPEND_MATURITY > 0 and spend < budget * SPEND_MATURITY:
             continue  # 아직 일예산 대비 충분히 안 써서 판정 보류(오전 오알람 방지)
-        roas = rev / spend * 100
-        if roas < ADSET_ROAS_MAX:
-            qual.append((roas, r, budget, spend, rev))
-    qual.sort(key=lambda x: x[0])  # ROAS 낮은 순
+        loss = spend - rev
+        if loss >= ADSET_LOSS_MIN:
+            roas = rev / spend * 100
+            qual.append((loss, roas, r, budget, spend, rev))
+    qual.sort(key=lambda x: -x[0])  # 적자 큰 순
     items = []
     hh = f"{NOW:%H}"  # KST 시 — 매시간 재알림용 dedup 키 (조건 지속 시 매시간 재전송)
-    for roas, r, budget, spend, rev in qual[:ADSET_MAX_LINES]:
+    for loss, roas, r, budget, spend, rev in qual[:ADSET_MAX_LINES]:
         name = (r.get("adset_name") or r.get("adset_id") or "?")[:46]
         prod = r.get("product") or "-"
         aid = r.get("adset_id") or "?"
-        key = f"adset_low_roas:{d}T{hh}:{aid}"   # 세트별 시간당 1회 → 매시간 재알림
-        loss = spend - rev
-        pl = f"적자 *{won(loss)}*" if loss > 0 else f"이익 {won(-loss)}"
+        key = f"adset_loss:{d}T{hh}:{aid}"   # 세트별 시간당 1회 → 매시간 재알림
         line = (f"{sev_emoji(roas)} *{name}*  ·  {prod}\n"
-                f"↳ ROAS *{roas:.0f}%*  ·  지출 {won(spend)} → 매출 {won(rev)}  ·  {pl}\n"
+                f"↳ 적자 *{won(loss)}*  ·  지출 {won(spend)} → 매출 {won(rev)}  ·  ROAS {roas:.0f}%\n"
                 f"↳ 예산 {won(budget)}  ·  세트ID `{aid}`")
         items.append((key, line))
     extra = len(qual) - ADSET_MAX_LINES
     if extra > 0:
-        items.append((f"adset_low_roas_more:{d}T{hh}", f"_…외 {extra}개 세트 더 있음_"))
+        items.append((f"adset_loss_more:{d}T{hh}", f"_…외 {extra}개 세트 더 있음_"))
     if not items:
-        log.info(f"고예산 저ROAS 세트 없음 ({d})")
+        log.info(f"고예산 적자 세트 없음 ({d})")
         return None
-    return {"title": f"🚨 고예산 저ROAS 세트  ·  {len(qual)}건",
-            "subtitle": f"오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & ROAS<{ADSET_ROAS_MAX}% · ROAS 낮은 순",
+    return {"title": f"🚨 고예산 적자 세트  ·  {len(qual)}건",
+            "subtitle": f"오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & 적자 {won(ADSET_LOSS_MIN)}↑ · 적자 큰 순",
             "items": items}
 
 
