@@ -54,6 +54,27 @@ def is_meta_source(src):
         return True
     return False
 
+# 대만(-tw) 결제는 amount/결제금액이 TWD(대만달러)로 적재됨 → 지출(KRW)과 통화가 달라 ROAS 왜곡.
+# 결제 이벤트 단위로 TWD→KRW 환산. env TWD_KRW_RATE 로 고정 가능, 아니면 라이브 환율(폴백 47.85).
+def get_twd_krw_rate():
+    env = os.environ.get("TWD_KRW_RATE")
+    if env:
+        try: return float(env)
+        except: pass
+    try:
+        r = req_lib.get("https://open.er-api.com/v6/latest/TWD", timeout=20)
+        if r.status_code == 200:
+            v = r.json().get("rates", {}).get("KRW")
+            if v and float(v) > 0: return float(v)
+    except: pass
+    return 47.85
+TWD_KRW_RATE = get_twd_krw_rate()
+
+def is_tw_payment(props):
+    svc = props.get("서비스", "") or ""
+    cc = props.get("mp_country_code", "") or ""
+    return (isinstance(svc, str) and svc.strip().lower().endswith("-tw")) or str(cc).strip().upper() == "TW"
+
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
@@ -178,6 +199,7 @@ def fetch_mixpanel(from_date, to_date):
                     raw_a=props.get('amount') or props.get('결제금액'); raw_v=props.get('value')
                     a_val=float(raw_a) if raw_a else 0.0; v_val=float(raw_v) if raw_v else 0.0
                     revenue=a_val if a_val>0 else (v_val if v_val>0 else 0.0)
+                    if revenue>0 and is_tw_payment(props): revenue=revenue*TWD_KRW_RATE  # TWD→KRW
                     data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
@@ -216,6 +238,7 @@ def main():
     log.info("="*60)
     log.info(f"📅 갱신: {DATA_REFRESH_START:%Y-%m-%d} ~ 오늘 ({REFRESH_DAYS}일)")
     log.info(f"🔑 계정 {len(META_AD_ACCOUNTS)}개: {', '.join(META_AD_ACCOUNTS)}")
+    log.info(f"💱 TWD→KRW 환율: {TWD_KRW_RATE} (대만 -tw 결제 환산)")
 
     sb = SB()
 
