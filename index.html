@@ -181,6 +181,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab" data-t="trendw">추이차트(주간)</div>
 <div class="tab" data-t="trendp">추이차트_상품별</div>
 <div class="tab" data-t="trendinf">🌟 인플추이</div>
+<div class="tab vn-only" data-t="vntwtrend">🇹🇼 대만 추이차트</div>
 <div class="tab" data-t="change">증감액</div>
 <div class="tab" data-t="weekly">주간종합</div>
 <div class="tab" data-t="budget">예산</div>
@@ -209,6 +210,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <!-- Panels -->
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
 <div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilter').value='';renderTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
+<div class="panel" id="p-vntwtrend"><div class="filter"><label>최근</label><select id="tDaysTw"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilterTw" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilterTw').value='';renderVnTwTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">🇹🇼 대만 광고계정(act_1286632473622244) 전용 추이</span></div><div class="sheet-wrap"><table id="vntwTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
 <div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기협업</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
@@ -333,6 +335,8 @@ function MC(roas,profit,spend,revenue,cvr,cpm,ctr){
 }
 // Normalize row: global→common, creative→common (ad_id as key)
 const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
+// 밴스드 대만 광고계정 — 추이차트를 별도 탭(🇹🇼 대만 추이차트)으로 분리. 기존 밴스드 추이차트에선 제외.
+const VN_TW_ACC='act_1286632473622244';
 // 글로벌 상품명 한↔영 통합: 한국어명을 영어 canonical 로 합쳐서 같은 상품으로 집계 (예: 솔로→solo, 무당→shaman)
 const GL_PRODUCT_CANON={'솔로':'solo','무당':'shaman'};
 const canonGLRows=rows=>(rows||[]).map(r=>(r&&GL_PRODUCT_CANON[r.product])?{...r,product:GL_PRODUCT_CANON[r.product]}:r);
@@ -828,6 +832,7 @@ function renderMarketer(){
 function renderTab(id){
   if(id==='dashboard')renderDashboard();
   if(id==='trend')renderTrend();
+  if(id==='vntwtrend')renderVnTwTrend();
   if(id==='trendw')renderTrendWeekly();
   if(id==='trendp')renderTrendProduct();
   if(id==='trendinf')renderTrendInfluencer();
@@ -859,6 +864,8 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 })});
 document.getElementById('tDays').addEventListener('change',renderTrend);
 document.getElementById('tFilter').addEventListener('input',renderTrend);
+document.getElementById('tDaysTw').addEventListener('change',renderVnTwTrend);
+document.getElementById('tFilterTw').addEventListener('input',renderVnTwTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
 document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
 document.getElementById('tpUnit').addEventListener('change',renderTrendProduct);
@@ -927,7 +934,7 @@ async function saveHL(id,c){
   await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+yDate+'&'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
   // 메모리 동기화 — AD + 원본배열(GL_AD/VN_AD 등) 모두 갱신 → 탭 전환/모드 전환 후에도 유지
   _syncRowField(id, yDate, 'highlight', c||null);
-  renderTrend();
+  rerenderTrendView();
 }
 function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
@@ -943,7 +950,7 @@ async function clearAllHighlights(){
     delete HL_MEMO[id];
     // ★ perfTbl의 highlight·memo 컬럼은 건드리지 않음 → 날짜탭 영구 유지
   }
-  renderTrend();
+  rerenderTrendView();
 }
 document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();if(currentHlId)saveHL(currentHlId,b.dataset.c);document.getElementById('colorPicker').classList.remove('show')})});
 document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.target.closest('.fx.clickable'))document.getElementById('colorPicker').classList.remove('show')});
@@ -1377,9 +1384,16 @@ function drawMetaDailyTable(){
 }
 
 // ===== TREND (상품별 그룹) =====
-function renderTrend(){
-  console.log('[DBG] renderTrend called, MODE=',MODE);
-  const days=parseInt(document.getElementById('tDays').value);
+function renderTrend(opts){
+  // opts.tableId/daysElId/filterElId/accFilter — 대만 추이차트 등 분리 뷰용. (이벤트핸들러가 Event를 넘겨도 안전)
+  opts=(opts&&opts.tableId)?opts:{};
+  const TBL=opts.tableId||'tTbl';
+  const daysElId=opts.daysElId||'tDays';
+  const filterElId=opts.filterElId||'tFilter';
+  // accFilter: 명시 없으면 vn 모드는 대만계정 제외(기존 밴스드 추이), 그 외 모드는 전체.
+  const accFilter=opts.accFilter||(MODE==='vn'?(r=>String(r.ad_account_id||'')!==VN_TW_ACC):null);
+  console.log('[DBG] renderTrend called, MODE=',MODE,'TBL=',TBL);
+  const days=parseInt(document.getElementById(daysElId).value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   // 이틀 전(D-2): 어제 데이터의 하루 전날에 증감액(증액/감액)을 했는지 표시 (KR/GL 모드)
@@ -1388,10 +1402,10 @@ function renderTrend(){
   const chgD2={};AD.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
   const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
+  AD.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
-  const tKw=(document.getElementById('tFilter').value||'').trim().toLowerCase();
+  const tKw=(document.getElementById(filterElId).value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
   // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 "개별 행"만 숨김 (DOM 부담 감소).
   //   단, 종합/소계/일별 합계는 전체 세트 기준으로 계산해야 추이차트(주간) 합과 일치한다.
@@ -1442,13 +1456,25 @@ function renderTrend(){
       h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr)+'</td>'+cells+'</tr>';
     });
   });
-  h+='</tbody>';document.getElementById('tTbl').innerHTML=h;
+  const tblEl=document.getElementById(TBL);
+  h+='</tbody>';tblEl.innerHTML=h;
+  tblEl.dataset.daysEl=daysElId; // 소재펼침(caret)이 올바른 기간 컨트롤을 읽도록
   requestAnimationFrame(()=>{
-    const fx0=document.querySelector('#tTbl tbody td.fx0');
+    const fx0=tblEl.querySelector('tbody td.fx0');
     if(!fx0)return;
     const w=fx0.offsetWidth;
-    document.querySelectorAll('#tTbl td.fx1').forEach(td=>td.style.left=w+'px');
+    tblEl.querySelectorAll('td.fx1').forEach(td=>td.style.left=w+'px');
   });
+}
+
+// 🇹🇼 대만 추이차트 — 밴스드 대만 계정(VN_TW_ACC)만, 별도 테이블(vntwTbl)에 동일 포맷으로 렌더
+function renderVnTwTrend(){
+  renderTrend({tableId:'vntwTbl',daysElId:'tDaysTw',filterElId:'tFilterTw',accFilter:r=>String(r.ad_account_id||'')===VN_TW_ACC});
+}
+// 하이라이트/메모 변경 후 재렌더 — 대만 추이차트 탭이 떠 있으면 그 테이블을, 아니면 기본 추이차트를 갱신
+function rerenderTrendView(){
+  const tw=document.getElementById('p-vntwtrend');
+  if(tw&&tw.classList.contains('active'))renderVnTwTrend();else renderTrend();
 }
 
 // ===== TREND: Toggle 소재 (creatives) under a 세트 row (KR/GL/VN) =====
@@ -1510,8 +1536,9 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   if(isGL&&records&&records.length){
     records=records.map(r=>({...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,product:GL_PRODUCT_CANON[r.product]||r.product}));
   }
-  // 현재 추이차트 날짜 범위 (세트 row 와 동일하게)
-  const days=parseInt(document.getElementById('tDays').value);
+  // 현재 추이차트 날짜 범위 (세트 row 와 동일하게) — 앵커 테이블의 기간 컨트롤 사용(대만 탭 등 분리 뷰 대응)
+  const _daysElId=(anchorRow.closest('table')&&anchorRow.closest('table').dataset.daysEl)||'tDays';
+  const days=parseInt(document.getElementById(_daysElId).value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
@@ -1596,8 +1623,9 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   const frag=document.createDocumentFragment();
   for(let i=0;i<trs.length;i++)frag.appendChild(trs[i]);
   anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
-  // sticky fx1 의 left 오프셋을 세트 row 와 동일하게 맞춤
-  const fx0Ref=document.querySelector('#tTbl tbody td.fx0');
+  // sticky fx1 의 left 오프셋을 세트 row 와 동일하게 맞춤 — 앵커 테이블 기준(대만 탭 등 분리 뷰 대응)
+  const _tbl=anchorRow.closest('table');
+  const fx0Ref=_tbl?_tbl.querySelector('tbody td.fx0'):document.querySelector('#tTbl tbody td.fx0');
   if(fx0Ref){
     const w=fx0Ref.offsetWidth;
     trs.forEach(tr=>tr.querySelectorAll('td.fx1').forEach(td=>td.style.left=w+'px'));
