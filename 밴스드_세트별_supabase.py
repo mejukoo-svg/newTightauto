@@ -21,7 +21,16 @@ log = logging.getLogger(__name__)
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 META_TOKEN = os.environ.get("META_TOKEN_VANCED", "")
-META_AD_ACCOUNT = os.environ.get("META_AD_ACCOUNT_ID_VANCED", "act_25183853061243175")
+# 밴스드 광고 계정들 — 여러 계정 데이터를 합쳐 밴스드 탭(vanced_ad_performance_daily)에 표시.
+#   act_25183853061243175 = 타이트사주 (밴스드)
+#   act_1560037899174007  = 타이트사주 2 (밴스드)
+#   act_1286632473622244  = 타이트사주(밴스드_대만)
+# 콤마구분 env META_AD_ACCOUNT_IDS_VANCED 로 덮어쓸 수 있음.
+_DEFAULT_VANCED_ACCOUNTS = "act_25183853061243175,act_1560037899174007,act_1286632473622244"
+def _norm_acct(a):
+    a = a.strip()
+    return a if a.startswith("act_") else (f"act_{a}" if a else "")
+META_AD_ACCOUNTS = [_norm_acct(a) for a in os.environ.get("META_AD_ACCOUNT_IDS_VANCED", _DEFAULT_VANCED_ACCOUNTS).split(",") if a.strip()]
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 
@@ -105,8 +114,8 @@ def meta_api_get(url, params=None):
         except: time.sleep(15)
     return None
 
-def fetch_meta_insights(single_date):
-    url = f"{META_BASE_URL}/{META_AD_ACCOUNT}/insights"
+def fetch_meta_insights(single_date, account):
+    url = f"{META_BASE_URL}/{account}/insights"
     params = {'fields':'campaign_name,adset_name,adset_id,spend,cpm,reach,impressions,frequency,actions,cost_per_action_type,purchase_roas,unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click',
         'level':'adset','time_increment':1,'time_range':json.dumps({'since':single_date,'until':single_date}),'limit':500,
         'filtering':json.dumps([{'field':'spend','operator':'GREATER_THAN','value':'0'}])}
@@ -122,8 +131,8 @@ def fetch_meta_insights(single_date):
         else: break
     return all_results
 
-def fetch_budgets():
-    url = f"{META_BASE_URL}/{META_AD_ACCOUNT}/adsets"
+def fetch_budgets(account):
+    url = f"{META_BASE_URL}/{account}/adsets"
     params = {'fields':'id,daily_budget,campaign_id','limit':500,
         'filtering':json.dumps([{'field':'effective_status','operator':'IN','value':['ACTIVE']}])}
     results = {}
@@ -206,39 +215,46 @@ def main():
     log.info("🎯 밴스드 세트별 Meta+Mixpanel → Supabase")
     log.info("="*60)
     log.info(f"📅 갱신: {DATA_REFRESH_START:%Y-%m-%d} ~ 오늘 ({REFRESH_DAYS}일)")
-    log.info(f"🔑 계정: {META_AD_ACCOUNT}")
+    log.info(f"🔑 계정 {len(META_AD_ACCOUNTS)}개: {', '.join(META_AD_ACCOUNTS)}")
 
     sb = SB()
 
-    # 1) Meta
+    # 1) Meta (계정별 — adset_id 는 계정 간 고유하므로 한 dict 에 합산)
     log.info(f"\n1단계: Meta Insights adset level")
     meta_data = {}
-    for d in range(REFRESH_DAYS):
-        td=TODAY-timedelta(days=d); ts=td.strftime('%Y-%m-%d')
-        dk=f"{td.year%100:02d}/{td.month:02d}/{td.day:02d}"
-        rows=fetch_meta_insights(ts)
-        if rows:
-            for r in rows:
-                pr_list=r.get('purchase_roas',[])
-                meta_data[(dk,r.get('adset_id',''))]={
-                    'campaign_name':r.get('campaign_name',''),'adset_name':r.get('adset_name',''),'adset_id':r.get('adset_id',''),
-                    'spend':float(r.get('spend',0)),'cpm':float(r.get('cpm',0)),'reach':int(float(r.get('reach',0))),
-                    'impressions':int(float(r.get('impressions',0))),'frequency':float(r.get('frequency',0)),
-                    'results_meta':_extract_action(r.get('actions',[]),PURCHASE_TYPES),
-                    'cost_per_result':_extract_action(r.get('cost_per_action_type',[]),PURCHASE_TYPES),
-                    'unique_clicks':_extract_outbound(r.get('unique_outbound_clicks')),
-                    'unique_ctr':_extract_outbound(r.get('unique_outbound_clicks_ctr')),
-                    'cost_per_click':_extract_outbound(r.get('cost_per_unique_outbound_click')),
-                    'meta_roas':float(pr_list[0]['value'])*100 if pr_list else 0,
-                }
-            log.info(f"  📊 {dk}: {len(rows)}건")
-        time.sleep(1)
+    for account in META_AD_ACCOUNTS:
+        log.info(f"  🔑 {account}")
+        for d in range(REFRESH_DAYS):
+            td=TODAY-timedelta(days=d); ts=td.strftime('%Y-%m-%d')
+            dk=f"{td.year%100:02d}/{td.month:02d}/{td.day:02d}"
+            rows=fetch_meta_insights(ts, account)
+            if rows:
+                for r in rows:
+                    pr_list=r.get('purchase_roas',[])
+                    meta_data[(dk,r.get('adset_id',''))]={
+                        'campaign_name':r.get('campaign_name',''),'adset_name':r.get('adset_name',''),'adset_id':r.get('adset_id',''),
+                        'spend':float(r.get('spend',0)),'cpm':float(r.get('cpm',0)),'reach':int(float(r.get('reach',0))),
+                        'impressions':int(float(r.get('impressions',0))),'frequency':float(r.get('frequency',0)),
+                        'results_meta':_extract_action(r.get('actions',[]),PURCHASE_TYPES),
+                        'cost_per_result':_extract_action(r.get('cost_per_action_type',[]),PURCHASE_TYPES),
+                        'unique_clicks':_extract_outbound(r.get('unique_outbound_clicks')),
+                        'unique_ctr':_extract_outbound(r.get('unique_outbound_clicks_ctr')),
+                        'cost_per_click':_extract_outbound(r.get('cost_per_unique_outbound_click')),
+                        'meta_roas':float(pr_list[0]['value'])*100 if pr_list else 0,
+                        'account':account,
+                    }
+                log.info(f"    📊 {dk}: {len(rows)}건")
+            time.sleep(1)
     log.info(f"✅ Meta: {len(meta_data)}건")
 
-    # 2) Budget
+    # 2) Budget (계정별 — adset_id 고유하므로 budget_map 합산)
     log.info("\n2단계: 예산")
-    time.sleep(30)
-    budget_map = fetch_budgets()
+    budget_map = {}
+    for account in META_AD_ACCOUNTS:
+        time.sleep(30)
+        bm = fetch_budgets(account)
+        budget_map.update(bm)
+        log.info(f"  ✅ 예산 {account}: {len(bm)}개")
     log.info(f"✅ 예산: {len(budget_map)}개")
 
     # 3) Mixpanel (utm_term)
@@ -298,7 +314,7 @@ def main():
         product=adset_to_product(mr['adset_name'])
         records.append({
             'date':iso,'adset_id':asid,'campaign_name':mr['campaign_name'],'adset_name':mr['adset_name'],
-            'ad_account_id':META_AD_ACCOUNT,'product':product,
+            'ad_account_id':mr['account'],'product':product,
             'spend':round(spend,2),'cost_per_result':round(mr['cost_per_result'],2),
             'purchase_roas_meta':round(mr['meta_roas']/100,4) if mr['meta_roas'] else 0,
             'cpm':round(mr['cpm'],2),'reach':mr['reach'],'impressions':mr['impressions'],
