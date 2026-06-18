@@ -2292,7 +2292,7 @@ function renderDateTab(){
     const rid=rowId(r);const hl=r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
-    const mv=(r.memo||'').replace(/"/g,'&quot;');
+    const mv=(r.memo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const name2=(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
     h+='<tr>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td>';
@@ -2319,7 +2319,7 @@ function renderDateTab(){
     h+='<td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td>';
     // 메모는 가장 최근 날짜(r.date)에 저장됨
-    h+='<td><input class="memo-input" value="'+mv+'" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\')saveMemo(this.dataset.date,this.dataset.id,this.value,this)" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)"><span class="memo-saved">✓</span></td>';
+    h+='<td class="memo-cell"><textarea class="memo-input" placeholder="메모" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mv+'</textarea><span class="memo-saved">✓</span></td>';
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
