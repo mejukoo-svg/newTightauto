@@ -2861,7 +2861,7 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){
 
 // ===== CHANNEL REVENUE (매출 탭 - 채널별 추이차트) =====
 // 국내모드(KR)에서만 의미. 권역 드롭다운(chrScope: 전체/국내/글로벌)으로 상세 채널을 필터.
-// 맨 상단엔 항상 권역별 종합 3행(국내 종합/글로벌 종합/전체 종합) 표시.
+// 전체 종합은 항상 맨 위 고정. 국내 종합은 국내 탭, 글로벌 종합은 글로벌 탭에만 표시.
 //   국내 종합:  매출=국내 실결제[HIST_REVENUE(2026-03-31 이전, 시트 포트원+페이플+토스) / toss_daily_revenue(2026-04-01 이후)],
 //               지출=국내메타+밴스드+네이버+구글+구글디멘드젠
 //   글로벌 종합: 매출=Stripe revenue_usd × usd_krw_rate(KRW), 지출=대만밴스드+글로벌(타이트)
@@ -2902,12 +2902,10 @@ function _chrevChannels(){
   const domSpend=d=>{const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDatePL[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0};return k.s+v.s+n.s+g.s+gd.s};  // 국내메타+밴스드+네이버+구글+구글디멘드젠
   const glRev=d=>(byDateGL[d]?.r||0);  // 글로벌 매출 = Stripe revenue_usd × usd_krw_rate (KRW)
   const glSpend=d=>{const vt=byDateVNTW[d]||{s:0},gl=byDateGL[d]||{s:0};return vt.s+gl.s};  // 대만밴스드 + 글로벌(타이트). 글로벌엔 대만밴스드 미포함이라 중복 없음
-  // 맨 상단: 권역별 종합 3행 (항상 표시)
-  const summary=[
-    {name:'국내 종합', sum:true, get:d=>({s:domSpend(d),r:domRev(d)})},
-    {name:'글로벌 종합',sum:true, get:d=>({s:glSpend(d),r:glRev(d)})},
-    {name:'전체 종합', sum:true, get:d=>({s:domSpend(d)+glSpend(d),r:domRev(d)+glRev(d)})},
-  ];
+  // 권역별 종합 행. 전체 종합은 항상 맨 위 고정, 국내/글로벌 종합은 해당 권역 탭에서만 표시
+  const sumDom={name:'국내 종합', sum:true, get:d=>({s:domSpend(d),r:domRev(d)})};
+  const sumGl ={name:'글로벌 종합',sum:true, get:d=>({s:glSpend(d),r:glRev(d)})};
+  const sumAll={name:'전체 종합', sum:true, get:d=>({s:domSpend(d)+glSpend(d),r:domRev(d)+glRev(d)})};
   // 권역별 상세 채널
   const domChannels=[
     {name:'국내 메타',  get:d=>byDateKR[d]||{s:0,r:0}},
@@ -2921,9 +2919,9 @@ function _chrevChannels(){
     {name:'글로벌',get:d=>byDateGL[d]||{s:0,r:0}},  // 타이트 글로벌(GL_AD)+Stripe, KRW 환산. 대만밴스드 제외
   ];
   const scope=document.getElementById('chrScope')?.value||'all';
-  if(scope==='dom')return summary.concat(domChannels);
-  if(scope==='gl')return summary.concat(glChannels);
-  return summary.concat(domChannels,glChannels);
+  if(scope==='dom')return [sumAll,sumDom,...domChannels];
+  if(scope==='gl')return [sumAll,sumGl,...glChannels];
+  return [sumAll,...domChannels,...glChannels];
 }
 
 function _chrevDaily(channels,days){
