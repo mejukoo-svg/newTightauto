@@ -2862,9 +2862,11 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){
 // 국내모드(KR)에서만 의미. 채널별 데이터 소스:
 //   전체 매출:  HIST_REVENUE (2026-03-31 이전, 매출 대시보드 시트 - 포트원+페이플+토스 합계)
 //                + toss_daily_revenue.net_amount (2026-04-01 이후)
-//   전체 지출:  메타+밴스드+네이버+구글 광고비 합산
-//   메타:       ad_performance_daily              (KR_AD)
-//   밴스드:     vanced_ad_performance_daily       (VN_AD)
+//   전체 지출:  전 채널 합산 (국내메타+밴스드+대만밴스드+글로벌+네이버+구글+구글디멘드젠)
+//   국내 메타:  ad_performance_daily              (KR_AD)
+//   밴스드:     vanced_ad_performance_daily       (VN_AD, 대만계정 제외)
+//   대만 밴스드: vanced_ad_performance_daily       (VN_TW_ACC 단독, KRW)
+//   글로벌:     타이트 글로벌 지출(GL_AD.spend_usd) + Stripe 매출(revenue_usd), USD→KRW 환산 (대만밴스드 제외)
 //   네이버:     naver_sa_daily.cost_vat (지출) + naver_daily_mp.revenue (매출: Mixpanel attribution)
 //   구글:       google_ads_daily                  (GOOGLE_ADS)
 // HIST_REVENUE: 매출 대시보드 시트(1uiMN2bBNOt4qU9H86JzxMs_D6PeaIWOtz3IMtJqu4aI)에서 추출한
@@ -2881,18 +2883,25 @@ function renderChannelRevenue(){
 
 function _chrevChannels(){
   // 채널별 일자 합산
-  const byDateKR={},byDateVN={},byDatePL={},byDateGG={},byDateGGDG={},byDateTOSS={};
+  const byDateKR={},byDateVN={},byDateVNTW={},byDateGL={},byDatePL={},byDateGG={},byDateGGDG={},byDateTOSS={};
   KR_AD.forEach(r=>{if(!byDateKR[r.date])byDateKR[r.date]={s:0,r:0};byDateKR[r.date].s+=(r.spend||0);byDateKR[r.date].r+=(r.revenue||0)});
-  VN_AD.forEach(r=>{if(!byDateVN[r.date])byDateVN[r.date]={s:0,r:0};byDateVN[r.date].s+=(r.spend||0);byDateVN[r.date].r+=(r.revenue||0)});
+  // 밴스드: 국내 밴스드 메타(2계정)와 대만 밴스드(VN_TW_ACC)를 분리 — 대만은 해외라 별도 row 로 표시
+  VN_AD.forEach(r=>{const m=String(r.ad_account_id||'')===VN_TW_ACC?byDateVNTW:byDateVN;if(!m[r.date])m[r.date]={s:0,r:0};m[r.date].s+=(r.spend||0);m[r.date].r+=(r.revenue||0)});
+  // 글로벌: 타이트 글로벌 지출(GL_AD, spend_usd) + Stripe 매출(revenue_usd), USD→KRW 일별 환산. 대만 밴스드는 제외(별도 row 로 따로 집계).
+  GL_AD.forEach(r=>{const rate=usdKrwRateAt(r.date)||1380;if(!byDateGL[r.date])byDateGL[r.date]={s:0,r:0};byDateGL[r.date].s+=(+r.spend_usd||0)*rate});
+  STRIPE_DATA.forEach(r=>{const rate=(+r.usd_krw_rate||usdKrwRateAt(r.date))||1380;if(!byDateGL[r.date])byDateGL[r.date]={s:0,r:0};byDateGL[r.date].r+=(+r.revenue_usd||0)*rate});
   NAVER_PL.forEach(r=>{byDatePL[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});  // 네이버 파워링크 (시트: 지출=브랜드+일반, 매출=총 구매전환값 col5)
   GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
   GOOGLE_DG.forEach(r=>{byDateGGDG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});  // 구글 디멘드젠 (별도 채널)
   TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
-  function getTotalSpend(d){const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDatePL[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0};return k.s+v.s+n.s+g.s+gd.s}
+  // 전체 지출 = 모든 채널 합산 (국내메타+밴스드+대만밴스드+글로벌+네이버+구글+구글디멘드젠). 글로벌엔 대만밴스드 미포함이라 중복합산 없음.
+  function getTotalSpend(d){const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},vt=byDateVNTW[d]||{s:0},gl=byDateGL[d]||{s:0},n=byDatePL[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0};return k.s+v.s+vt.s+gl.s+n.s+g.s+gd.s}
   return [
-    {name:'전체',  get:d=>({s:getTotalSpend(d),r:(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0))})},  // rev=시트(2026-03 이전) 또는 Toss(2026-04 이후), spend=합산(메타+밴스드+네이버+구글검색+구글디멘드젠)
-    {name:'메타',  get:d=>byDateKR[d]||{s:0,r:0}},
+    {name:'전체',  get:d=>({s:getTotalSpend(d),r:(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0))})},  // rev=시트(2026-03 이전) 또는 Toss(2026-04 이후), spend=전 채널 합산
+    {name:'국내 메타',  get:d=>byDateKR[d]||{s:0,r:0}},
     {name:'밴스드',get:d=>byDateVN[d]||{s:0,r:0}},
+    {name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0}},  // VN_TW_ACC 단독 (KRW)
+    {name:'글로벌',get:d=>byDateGL[d]||{s:0,r:0}},  // 타이트 글로벌(GL_AD)+Stripe, KRW 환산. 대만밴스드 제외
     {name:'네이버',get:d=>byDatePL[d]||{s:0,r:0}},
     {name:'구글',  get:d=>byDateGG[d]||{s:0,r:0}},
     {name:'구글디멘드젠',get:d=>byDateGGDG[d]||{s:0,r:0}},
