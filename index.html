@@ -200,6 +200,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kpi-only" data-t="kpiWeekly">📅 주간</div>
 <div class="tab kpi-only" data-t="kpiMonthly">🗓 월간</div>
 <div class="tab mkt-only" data-t="mktDash">👤 마케터 성과</div>
+<div class="tab kr-only" data-t="auxmetric">📐 보조지표</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -210,6 +211,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <!-- Panels -->
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
 <div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilter').value='';renderTrendMain()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
+<div class="panel" id="p-auxmetric"><div class="filter"><label>최근</label><select id="axDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="axFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('axFilter').value='';renderAux()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">📐 셀: CTR / CVR / CPM / CPP / 구매당단가</span></div><div class="sheet-wrap"><table id="axTbl"></table></div></div>
 <div class="panel" id="p-vntwtrend"><div class="filter"><label>최근</label><select id="tDaysTw"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilterTw" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilterTw').value='';renderVnTwTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">🇹🇼 대만 광고계정(act_1286632473622244) 전용 추이</span></div><div class="sheet-wrap"><table id="vntwTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
@@ -332,6 +334,18 @@ function MC(roas,profit,spend,revenue,cvr,cpm,ctr){
   let html='<div class="r">'+roas.toFixed(0)+'</div><div class="'+pc+'">'+money(profit)+'</div><div class="s">-'+money(spend)+'</div><div class="rv">'+money(revenue)+'</div><div class="cv">'+cvTxt+'</div>';
   if(cpm)html+='<div class="cm">'+money(cpm)+'</div>';
   return html;
+}
+// 보조지표 셀 — 추이차트 MC와 동일 레이아웃, 데이터만 다름: CTR / CVR / CPM / CPP / 구매당단가
+//   ctr=클릭/노출, cvr=구매(mp)/클릭, cpm=지출/노출×1000, cpp=지출/구매, 구매당단가=매출/구매
+function MCAUX(spend,revenue,uc,mp,imp){
+  if(!spend)return'';
+  const ctr=imp>0?uc/imp*100:0, cvr=(uc>0&&mp>0)?mp/uc*100:0, cpm=imp>0?spend/imp*1000:0;
+  const cpp=mp>0?spend/mp:0, aov=mp>0?revenue/mp:0;
+  return '<div class="r">'+P(ctr)+'</div>'
+        +'<div class="cv">'+P(cvr)+'</div>'
+        +'<div class="cm">'+money(cpm)+'</div>'
+        +'<div class="s">'+(cpp?money(cpp):'')+'</div>'
+        +'<div class="rv">'+(aov?money(aov):'')+'</div>';
 }
 // Normalize row: global→common, creative→common (ad_id as key)
 const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
@@ -832,6 +846,7 @@ function renderMarketer(){
 function renderTab(id){
   if(id==='dashboard')renderDashboard();
   if(id==='trend')renderTrendMain();
+  if(id==='auxmetric')renderAux();
   if(id==='vntwtrend')renderVnTwTrend();
   if(id==='trendw')renderTrendWeekly();
   if(id==='trendp')renderTrendProduct();
@@ -864,6 +879,8 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 })});
 document.getElementById('tDays').addEventListener('change',renderTrendMain);
 document.getElementById('tFilter').addEventListener('input',renderTrendMain);
+document.getElementById('axDays').addEventListener('change',renderAux);
+document.getElementById('axFilter').addEventListener('input',renderAux);
 document.getElementById('tDaysTw').addEventListener('change',renderVnTwTrend);
 document.getElementById('tFilterTw').addEventListener('input',renderVnTwTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
@@ -1404,9 +1421,10 @@ function renderTrend(opts){
   const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
   const chgD2={};ROWS.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
+  const AUX=opts.metric==='aux';  // 보조지표 모드: 셀에 CTR/CVR/CPM/CPP/구매당단가 표시
   const byA={};
   ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
-  let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
   const tKw=(document.getElementById(filterElId).value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
@@ -1425,8 +1443,9 @@ function renderTrend(opts){
   const chgTh=showChg?'<th title="이틀 전(D-2 = '+DK(d2Day)+') 증감액 여부" style="min-width:42px">증감</th>':'';
   const memoTh=showChg?'<th class="h-memo" style="min-width:130px">메모</th>':'';
   let h='<thead><tr><th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th>'+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div></td>'+(showChg?'<td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr)+'</td>';
-  dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+MC(roas,x.p,x.s,x.r,cvr,cpm,ctr)+'</td>'});
+  const legend=AUX?'<div class="r">CTR</div><div class="cv">CVR</div><div class="cm">CPM</div><div class="s">CPP</div><div class="rv">구매단가</div>':'<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div>';
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+(showChg?'<td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+(AUX?MCAUX(ts,tr,tuc,tmp,timp):MC(troas,tp,ts,tr,tcvr,tcpm,tctr))+'</td>';
+  dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+(AUX?MCAUX(x.s,x.r,x.uc,x.mp,x.imp):MC(roas,x.p,x.s,x.r,cvr,cpm,ctr))+'</td>'});
   h+='</tr>';
   // Group by product
   const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0};byProd[p].adsets.push(a);byProd[p].yS+=a._yS});
@@ -1435,15 +1454,16 @@ function renderTrend(opts){
     const pS=g.adsets.reduce((a,x)=>a+x._s,0),pR=g.adsets.reduce((a,x)=>a+x._r,0),pRoas=pS>0?pR/pS*100:0;
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.adsets.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+pRoas.toFixed(0)+'%</td></tr>';
     // Product subtotal row
-    const pDaily={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;g.adsets.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks;imp+=(a.d[d].impressions||0)}});pDaily[d]={s,r,p,imp,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,ctr:imp>0?uc/imp*100:0,cpm:imp>0?s/imp*1000:0}});
+    const pDaily={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;g.adsets.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks;imp+=(a.d[d].impressions||0)}});pDaily[d]={s,r,p,mp,uc,imp,roas:s>0?r/s*100:0,cvr:uc>0&&mp>0?mp/uc*100:0,ctr:imp>0?uc/imp*100:0,cpm:imp>0?s/imp*1000:0}});
     const pImp=dd.reduce((a,d)=>a+(pDaily[d]?.imp||0),0);
+    const pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0);
     const pCpm=pImp>0?pS/pImp*1000:0;
-    const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm,t.ctr)+'</td>':'<td class="'+yd+'"></td>'}).join('');
-    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td><td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,0,pCpm)+'</td>'+pCells+'</tr>';
+    const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+(AUX?MCAUX(t.s,t.r,t.uc,t.mp,t.imp):MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm,t.ctr))+'</td>':'<td class="'+yd+'"></td>'}).join('');
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td><td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm))+'</td>'+pCells+'</tr>';
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
       if(isHidden(a))return;
-      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr)+'</td>'}).join('');
+      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'">'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // 메모(추이차트): HL_MEMO(하이라이트 테이블)에서 읽고 saveTrendMemo로 저장.
@@ -1456,7 +1476,7 @@ function renderTrend(opts){
       if(MODE==='kr'||MODE==='gl'||MODE==='vn'){
         caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
       }
-      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr)+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -1496,6 +1516,10 @@ function vnTwUsdRows(){
 // 밴스드 대만(VN_TW_ACC)은 여기서 제외하고 별도 탭(🇹🇼 대만 추이차트)에서만 본다.
 function renderTrendMain(){
   renderTrend();
+}
+// 보조지표 — 추이차트와 동일 구조(국내탭), 셀만 CTR/CVR/CPM/CPP/구매당단가로 렌더
+function renderAux(){
+  renderTrend({tableId:'axTbl',daysElId:'axDays',filterElId:'axFilter',metric:'aux'});
 }
 // 하이라이트/메모 변경 후 재렌더 — 대만 추이차트 탭이 떠 있으면 그 테이블을, 아니면 기본 추이차트를 갱신
 function rerenderTrendView(){
