@@ -2918,7 +2918,9 @@ function _chrevChannels(){
   ];
   const glChannels=[
     {name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0}},  // VN_TW_ACC 단독 (KRW)
-    {name:'글로벌',get:d=>byDateGL[d]||{s:0,r:0}},  // 글로벌 메타(GL_AD) 귀속 지출+매출, KRW 환산. Stripe는 글로벌 종합 매출로만
+    // 글로벌 = 글로벌 전체(종합) − 대만 밴스드. 매출=Stripe 실결제−대만밴스드귀속, 지출=글로벌 전체지출−대만밴스드지출(=GL_AD).
+    // 이렇게 해야 매출이 실결제 기준이라 종합과 일치(흑자)하고, 두 상세행 합=글로벌 종합이 정확히 맞는다.
+    {name:'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpend(d)-vt.s, r:glRev(d)-vt.r};}},
   ];
   const scope=document.getElementById('chrScope')?.value||'all';
   if(scope==='dom')return [sumAll,sumDom,...domChannels];
