@@ -133,35 +133,46 @@ def discover_customer_ids(client):
     return found
 
 
-def fetch_tight_names(client, cids):
-    """[Tight] 디멘드젠 캠페인 전체 id→name (날짜 무관, 매출만 있는 캠페인도 포함 위함)."""
+def fetch_groups_and_ads(client, cids):
+    """[Tight] 디멘드젠의 광고그룹(세트) 메타 + 광고 id→광고그룹 매핑 (날짜 무관).
+    반환:
+      group_meta[ad_group_id] = {campaign_id, campaign_name, ad_group_name}
+      ad_to_group[ad_id]      = ad_group_id
+    """
     ga = client.get_service("GoogleAdsService")
-    names = {}
-    q = ("SELECT campaign.id, campaign.name, campaign.advertising_channel_type "
-         "FROM campaign WHERE campaign.name LIKE '%Tight%' "
+    group_meta = {}
+    ad_to_group = {}
+    q = ("SELECT campaign.id, campaign.name, ad_group.id, ad_group.name, ad_group_ad.ad.id "
+         "FROM ad_group_ad WHERE campaign.name LIKE '%Tight%' "
          "AND campaign.advertising_channel_type = 'DEMAND_GEN'")
     for cid in cids:
         try:
             for b in ga.search_stream(customer_id=cid, query=q):
                 for r in b.results:
-                    cnm = r.campaign.name
-                    if TIGHT_KEY in cnm.lower():
-                        names[str(r.campaign.id)] = cnm
+                    if TIGHT_KEY not in r.campaign.name.lower():
+                        continue
+                    gid = str(r.ad_group.id)
+                    group_meta[gid] = {
+                        "campaign_id": str(r.campaign.id),
+                        "campaign_name": r.campaign.name,
+                        "ad_group_name": r.ad_group.name,
+                    }
+                    ad_to_group[str(r.ad_group_ad.ad.id)] = gid
         except GoogleAdsException as e:
-            log.error(f"  ❌ name 조회 CID={cid}")
+            log.error(f"  ❌ 광고그룹/광고 조회 CID={cid}")
             for err in getattr(e.failure, "errors", []):
                 log.error(f"     · {err.message}")
             raise
-    return names
+    return group_meta, ad_to_group
 
 
-def fetch_tight_spend(client, cids, tight_ids):
-    """[Tight] 캠페인의 (campaign_id, date) 별 지출."""
+def fetch_tight_spend(client, cids, tight_group_ids):
+    """[Tight] 디멘드젠의 (ad_group_id, date) 별 지출."""
     ga = client.get_service("GoogleAdsService")
-    spend = defaultdict(float)   # spend[(cid_camp, date)]
+    spend = defaultdict(float)   # spend[(ad_group_id, date)]
     q = f"""
-        SELECT campaign.id, segments.date, metrics.cost_micros
-        FROM campaign
+        SELECT ad_group.id, segments.date, metrics.cost_micros
+        FROM ad_group
         WHERE segments.date BETWEEN '{START_ISO}' AND '{END_ISO}'
           AND campaign.name LIKE '%Tight%'
           AND campaign.advertising_channel_type = 'DEMAND_GEN'
@@ -170,10 +181,10 @@ def fetch_tight_spend(client, cids, tight_ids):
         try:
             for b in ga.search_stream(customer_id=cid, query=q):
                 for r in b.results:
-                    camp = str(r.campaign.id)
-                    if camp not in tight_ids:
+                    gid = str(r.ad_group.id)
+                    if gid not in tight_group_ids:
                         continue
-                    spend[(camp, r.segments.date)] += r.metrics.cost_micros / 1_000_000.0
+                    spend[(gid, r.segments.date)] += r.metrics.cost_micros / 1_000_000.0
         except GoogleAdsException as e:
             log.error(f"  ❌ spend 조회 CID={cid}")
             for err in getattr(e.failure, "errors", []):
@@ -183,9 +194,10 @@ def fetch_tight_spend(client, cids, tight_ids):
 
 
 # ── Mixpanel ──────────────────────────────────────────────────────────────────
-def fetch_mp(tight_ids):
-    """utm_campaign ∈ tight_ids 결제만 (campaign_id, date) 별 매출/건수.
-    $insert_id 로 export 중복 제거, order_id 로 구매 고유화."""
+def fetch_mp(tight_camp_ids, ad_to_group, group_meta):
+    """utm_campaign ∈ tight_camp_ids 결제를 utm_content(광고id)→광고그룹으로 귀속.
+    (ad_group_id, date) 별 매출/건수. $insert_id 중복제거, order_id 구매 고유화.
+    광고id가 매핑에 없으면 캠페인 단위 합성 세트 'camp_<id>'(세트미상)로 보존."""
     if not (MP_USER and MP_SECRET):
         log.warning("  ⏭  Mixpanel 자격증명 없음 — 매출측 스킵")
         return defaultdict(float), defaultdict(int)
@@ -194,10 +206,10 @@ def fetch_mp(tight_ids):
                             "event": json.dumps(MP_EVENTS), "project_id": MP_PID},
                     auth=(MP_USER, MP_SECRET), timeout=600)
     r.raise_for_status()
-    rev = defaultdict(float)   # rev[(camp, date)]
+    rev = defaultdict(float)   # rev[(ad_group_id, date)]
     cnt = defaultdict(int)
     seen_insert, seen_order = set(), set()
-    dup_ins = dup_ord = matched = 0
+    dup_ins = dup_ord = matched = no_map = 0
     for ln in r.text.splitlines():
         if not ln.strip():
             continue
@@ -210,7 +222,7 @@ def fetch_mp(tight_ids):
             if k in seen_insert: dup_ins += 1; continue
             seen_insert.add(k)
         camp = digits(p.get("utm_campaign"))
-        if camp not in tight_ids:
+        if camp not in tight_camp_ids:
             continue
         oid = p.get("order_id") or iid
         if oid is not None:
@@ -227,11 +239,22 @@ def fetch_mp(tight_ids):
             if v is not None:
                 try: amt = float(v); break
                 except Exception: pass
-        rev[(camp, d)] += amt
-        cnt[(camp, d)] += 1
+        adid = digits(p.get("utm_content"))
+        gid = ad_to_group.get(adid)
+        if not gid:
+            no_map += 1
+            gid = f"camp_{camp}"   # 광고id 미매핑 → 세트미상 버킷 (캠페인별)
+            if gid not in group_meta:
+                # 캠페인명은 같은 캠페인의 다른 세트에서 가져옴
+                cnm = next((m["campaign_name"] for m in group_meta.values()
+                            if m["campaign_id"] == camp), camp)
+                group_meta[gid] = {"campaign_id": camp, "campaign_name": cnm,
+                                   "ad_group_name": "(세트미상)"}
+        rev[(gid, d)] += amt
+        cnt[(gid, d)] += 1
         matched += 1
-    log.info(f"  📥 Mixpanel [Tight]매칭 {matched}건 "
-             f"(insert중복 {dup_ins}/order중복 {dup_ord} 제거)")
+    log.info(f"  📥 Mixpanel [Tight]매칭 {matched}건 (세트미매핑 {no_map} "
+             f"/ insert중복 {dup_ins}/order중복 {dup_ord} 제거)")
     return rev, cnt
 
 
@@ -284,30 +307,35 @@ def main():
     if not cids:
         log.error("  ❌ 조회할 운영 계정 없음"); return
 
-    names = fetch_tight_names(client, cids)
-    if not names:
-        log.warning("  ⚠️ [Tight] 디멘드젠 캠페인을 찾지 못함 — 스킵"); return
-    tight_ids = set(names)
-    log.info(f"  🎯 [Tight] 캠페인 {len(names)}개")
-    for c, nm in names.items():
-        log.info(f"     · {c}  {nm}")
+    group_meta, ad_to_group = fetch_groups_and_ads(client, cids)
+    if not group_meta:
+        log.warning("  ⚠️ [Tight] 디멘드젠 광고그룹을 찾지 못함 — 스킵"); return
+    tight_group_ids = set(group_meta)
+    tight_camp_ids = {m["campaign_id"] for m in group_meta.values()}
+    log.info(f"  🎯 [Tight] 캠페인 {len(tight_camp_ids)}개 / 광고그룹(세트) {len(group_meta)}개 "
+             f"/ 광고 {len(ad_to_group)}개")
+    for gid, m in group_meta.items():
+        log.info(f"     · 세트 {gid}  '{m['ad_group_name']}'  ← {m['campaign_name']}")
 
-    spend = fetch_tight_spend(client, cids, tight_ids)
-    rev, cnt = fetch_mp(tight_ids)
+    spend = fetch_tight_spend(client, cids, tight_group_ids)
+    rev, cnt = fetch_mp(tight_camp_ids, ad_to_group, group_meta)
 
-    # (campaign_id, date) 합집합 — 지출/매출/구매 중 하나라도 있으면 적재
+    # (ad_group_id, date) 합집합 — 지출/매출/구매 중 하나라도 있으면 적재
     keys = set(spend) | set(rev) | set(cnt)
     records = []
-    for (camp, d) in sorted(keys):
-        s = round(spend.get((camp, d), 0.0), 2)
-        rv = round(rev.get((camp, d), 0.0), 2)
-        c = int(cnt.get((camp, d), 0))
+    for (gid, d) in sorted(keys):
+        s = round(spend.get((gid, d), 0.0), 2)
+        rv = round(rev.get((gid, d), 0.0), 2)
+        c = int(cnt.get((gid, d), 0))
         if not s and not rv and not c:
             continue
+        m = group_meta.get(gid, {})
         records.append({
             "date": d,
-            "campaign_id": camp,
-            "campaign_name": names.get(camp, "")[:300],
+            "ad_group_id": gid,
+            "ad_group_name": (m.get("ad_group_name") or "")[:300],
+            "campaign_id": m.get("campaign_id", ""),
+            "campaign_name": (m.get("campaign_name") or "")[:300],
             "spend": s,
             "revenue": rv,
             "purchase_count": c,
@@ -316,16 +344,17 @@ def main():
     if not records:
         log.warning("  ⚠️ 적재할 행 없음 (지출/매출 모두 0) — 스킵"); return
 
-    # 캠페인별 기간합계 로그
-    by_c = defaultdict(lambda: {"s": 0.0, "r": 0.0, "c": 0})
+    # 세트별 기간합계 로그
+    by_g = defaultdict(lambda: {"s": 0.0, "r": 0.0, "c": 0, "name": "", "camp": ""})
     for r in records:
-        b = by_c[r["campaign_id"]]
+        b = by_g[r["ad_group_id"]]
         b["s"] += r["spend"]; b["r"] += r["revenue"]; b["c"] += r["purchase_count"]
-    log.info(f"📦 행 {len(records)}개 / 캠페인 {len(by_c)}개")
-    for c, b in sorted(by_c.items(), key=lambda x: -x[1]["s"]):
+        b["name"] = r["ad_group_name"]; b["camp"] = r["campaign_name"]
+    log.info(f"📦 행 {len(records)}개 / 세트 {len(by_g)}개")
+    for g, b in sorted(by_g.items(), key=lambda x: -x[1]["s"]):
         roas = f"{b['r']/b['s']*100:.0f}%" if b["s"] else "-"
-        log.info(f"   · {names.get(c,c)[:34]:34s} 지출 ₩{b['s']:>11,.0f} 매출 ₩{b['r']:>11,.0f} "
-                 f"구매 {b['c']:>3} ROAS {roas}")
+        log.info(f"   · [{b['camp'][:18]:18s}] {b['name'][:24]:24s} 지출 ₩{b['s']:>10,.0f} "
+                 f"매출 ₩{b['r']:>10,.0f} 구매 {b['c']:>3} ROAS {roas}")
 
     if DRY:
         log.info("  🟡 DRY RUN — Supabase 미적재. 샘플 5건:")

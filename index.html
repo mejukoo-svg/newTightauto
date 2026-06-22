@@ -230,7 +230,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
-<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 캠페인 id × 일자 · 지출=Google Ads API / 매출=Mixpanel utm_campaign 매칭 · 최신 날짜 왼쪽</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
+<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 캠페인이름/세트이름/세트id × 일자 · 지출=Google Ads API / 매출=Mixpanel(utm_content 광고id→세트 매핑) · 최신 날짜 왼쪽</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
 <div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 디멘드젠(dg_) 콘텐츠만 · ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=Google Ads API)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
@@ -3359,9 +3359,9 @@ function renderGgdgTight(){
   const dateSet=new Set(allDates);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  // 캠페인(campaign_id)별 그룹화 — d[date]={s,r,c}
+  // 세트(ad_group_id)별 그룹화 — d[date]={s,r,c}
   const byC={};
-  GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.campaign_id;if(!byC[id])byC[id]={id,name:r.campaign_name||id,d:{}};if(r.campaign_name)byC[id].name=r.campaign_name;byC[id].d[r.date]={s:(r.spend||0),r:(r.revenue||0),c:(r.purchase_count||0)}});
+  GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.ad_group_id;if(!byC[id])byC[id]={id,camp:r.campaign_name||'',name:r.ad_group_name||id,d:{}};if(r.campaign_name)byC[id].camp=r.campaign_name;if(r.ad_group_name)byC[id].name=r.ad_group_name;byC[id].d[r.date]={s:(r.spend||0),r:(r.revenue||0),c:(r.purchase_count||0)}});
   // 기간합계 + 정렬(지출↓)
   let list=Object.values(byC).map(o=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});o._s=s;o._r=r;o._c=c;o._roas=s>0?r/s*100:0;return o});
   list=list.filter(o=>o._s>0||o._r>0);
@@ -3375,17 +3375,17 @@ function renderGgdgTight(){
     return h;
   };
   const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:104px">'+DK(d)+'('+w+')</th>'}).join('');
-  let h='<thead><tr><th class="fx fx0" style="min-width:260px;text-align:left">캠페인 ([Tight])</th><th style="min-width:120px">기간합계</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th class="fx fx0" style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">세트</th><th style="min-width:110px;text-align:left">세트ID</th><th style="min-width:120px">기간합계</th>'+ths+'</tr></thead><tbody>';
   // 종합행
   const totD={};allDates.forEach(d=>{let s=0,r=0,c=0;list.forEach(o=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});totD[d]={s,r,c}});
   const gS=list.reduce((a,o)=>a+o._s,0),gR=list.reduce((a,o)=>a+o._r,0),gC=list.reduce((a,o)=>a+o._c,0),gRoas=gS>0?gR/gS*100:0;
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'개)</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700">'+cell(gS,gR,gC)+'</td>';
+  h+='<tr class="sr"><td colspan="3" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'세트)</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700">'+cell(gS,gR,gC)+'</td>';
   allDates.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
   h+='</tr>';
-  // 캠페인별
+  // 세트(광고그룹)별
   list.forEach(o=>{
     const cells=allDates.map(d=>{const x=o.d[d];const yd=d===yDay?' col-yday':'';if(!x||(!x.s&&!x.r&&!x.c))return'<td class="'+yd+'"></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
-    h+='<tr><td class="fx fx0" style="text-align:left;font-size:11px">'+o.name+'<br><span style="color:#aaa;font-size:9px">camp_id '+o.id+'</span></td><td class="mc '+(o._s>0?RC(o._roas):'')+'" style="font-weight:700">'+cell(o._s,o._r,o._c)+'</td>'+cells+'</tr>';
+    h+='<tr><td class="fx fx0" style="text-align:left;font-size:11px">'+(o.camp||'')+'</td><td style="text-align:left;font-size:11px">'+(o.name||'')+'</td><td style="text-align:left;font-size:9px;color:#888">'+o.id+'</td><td class="mc '+(o._s>0?RC(o._roas):'')+'" style="font-weight:700">'+cell(o._s,o._r,o._c)+'</td>'+cells+'</tr>';
   });
   h+='</tbody>';tbl.innerHTML=h;
 }
