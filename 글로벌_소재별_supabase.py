@@ -48,6 +48,16 @@ META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 ALL_AD_ACCOUNTS = list(META_TOKENS.keys())
 
+# 계정별 기본 통화 — 글로벌(해외) 계정은 절대 KRW가 아니다.
+# 세트/캠페인명에 시장 키워드가 없을 때의 기본값이자, 'kr/한국/국내'(예: '한국연예인' 소구)
+# 로 인한 KRW 오판을 계정 단위에서 차단하는 안전장치. (대만 계정 = 항상 비원화)
+ACCOUNT_CURRENCY = {
+    "act_1054081590008088": "TWD",  # 대만 (타이트사주)
+    "act_2677707262628563": "TWD",  # GlobalTT
+    "act_1335040608536838": "TWD",  # GlobalTT
+    "act_993712016404855":  "TWD",  # Saju Taiwan
+}
+
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET = os.environ.get("MIXPANEL_SECRET", "")
@@ -122,17 +132,21 @@ def extract_product(adset_name, campaign_name=None):
         if candidates: return candidates[0]
     return "기타"
 
-def detect_currency(adset_name, campaign_name=None):
+def detect_currency(adset_name, campaign_name=None, account_id=None):
+    # 글로벌(해외) 파이프라인 전용 — KRW로 판별되는 일이 없어야 한다.
+    #   · 모든 글로벌 계정은 해외 계정(국내 KRW 계정과 분리)이고, 한국 결제는
+    #     mp_country_code=KR 필터로 이미 제외됨.
+    #   · 세트명에 '한국연예인' 같은 소구 문구가 섞여도 KRW로 오판하지 않도록
+    #     KRW 분기를 제거. 시장은 jp/hk/th/tw 키워드로만 판별, 없으면 계정 기본통화.
     for name in [adset_name, campaign_name]:
         if not name: continue
         n = str(name); nl = n.lower()
         parts = re.split(r'[-_\s]', nl)
         if "jp" in parts or "japan" in parts or "일본" in n: return "JPY"
         if "hk" in parts or "hongkong" in parts or "홍콩" in n: return "HKD"
-        if "kr" in parts or "korea" in parts or "한국" in n or "국내" in n: return "KRW"
         if "th" in parts or "thailand" in parts or "태국" in n: return "THB"
         if "tw" in parts or "taiwan" in parts or "대만" in n or "台灣" in n: return "TWD"
-    return "TWD"
+    return ACCOUNT_CURRENCY.get(account_id, "TWD")
 
 
 # =========================================================
@@ -540,7 +554,7 @@ def main():
             ad_id = mr['ad_id']
             if not ad_id: continue
             spend = mr['spend']  # USD
-            currency = detect_currency(mr['adset_name'], mr['campaign_name'])
+            currency = detect_currency(mr['adset_name'], mr['campaign_name'], mr.get('ad_account_id'))
             country = CURRENCY_TO_COUNTRY.get(currency, '글로벌')
             # Mixpanel 결제 amount: 시장별 현지통화 (TW/HK/JP/US=TWD base, TH=THB, KR=KRW)
             mpc = mp_count_map.get((dk, ad_id), 0)
