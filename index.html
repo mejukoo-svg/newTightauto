@@ -195,6 +195,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kr-only" data-t="chrev">📊 매출</div>
 <div class="tab kr-only" data-t="nsadaily">🔍 네이버SA_추이차트</div>
 <div class="tab kr-only" data-t="nsaweekly">📅 네이버SA_주간추이</div>
+<div class="tab kr-only" data-t="ggdgkr">🟢 구글 디멘드젠</div>
 <div class="tab vn-only" data-t="ggdgct">🟢 구글 디멘드젠</div>
 <div class="tab kpi-only" data-t="kpiDash">📊 KPI 대시보드</div>
 <div class="tab kpi-only" data-t="kpiWeekly">📅 주간</div>
@@ -229,6 +230,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
+<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 캠페인 id × 일자 · 지출=Google Ads API / 매출=Mixpanel utm_campaign 매칭 · 최신 날짜 왼쪽</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
 <div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 디멘드젠(dg_) 콘텐츠만 · ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=Google Ads API)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
@@ -270,7 +272,7 @@ const HL_CONFIG={
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+');
 let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
-let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[];
+let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[],GGDG_TIGHT=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 // 추이차트 전용 메모 (하이라이트 테이블 memo 컬럼 ↔ 하이라이트와 함께 전체삭제)
 let KR_HM={},GL_HM={},CR_HM={},VN_HM={};
@@ -381,6 +383,7 @@ function switchMode(m){
     if(t.classList.contains('mkt-only')){t.style.display=isMkt?'inline-block':'none';return}
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
+    if(t.dataset.t==='ggdgkr'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // [Tight] 디멘드젠은 국내(kr) 전용 (vn 의 ggdgct 와 라벨 중복 방지)
     if(t.classList.contains('kr-only')){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
     if(t.classList.contains('vn-only')){t.style.display=(!isSpecial&&m==='vn')?'inline-block':'none';return}
     if(t.classList.contains('creative-only')){t.style.display=(!isSpecial&&m==='cr')?'inline-block':'none';return}
@@ -496,14 +499,14 @@ function _applyCore(d){
 async function initData(){
   const D180='&date=gte.'+_dateCutoff(215);
   // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
-  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp'];
+  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp','ggdg_tight'];
   const cached={};
   await Promise.all(cKeys.map(k=>cacheGet('t_'+k).then(v=>{cached[k]=v?.data;})));
   let renderedFromCache=false;
   if(cached.kr&&cached.kr.length){
     _applyCore(cached);
     CR_AD=cached.cr||[];
-    NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];GGDG_CT=cached.ggdg_ct||[];GGDG_SP=cached.ggdg_sp||[];
+    NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];GGDG_CT=cached.ggdg_ct||[];GGDG_SP=cached.ggdg_sp||[];GGDG_TIGHT=cached.ggdg_tight||[];
     // ⚠️ _BIG_LOADED.ggdgct 를 캐시에서 true 로 두지 않는다 — 그러면 ensureBigTable 이
     //    영영 fresh fetch 를 안 해서 새 적재(신규 날짜 지출 등)가 안 보임.
     //    캐시는 즉시 표시용, 갱신은 renderGgdgContent 의 stale-while-revalidate 가 담당.
@@ -578,6 +581,7 @@ async function ensureBigTable(name){
         sbQ('google_demandgen_content_mp_daily','select=*&order=date.desc&limit=20000'+D180).catch(()=>[]),
         sbQ('google_demandgen_content_spend_daily','select=*&order=date.desc&limit=20000'+D180).catch(()=>[]),
       ]).then(([rev,sp])=>{GGDG_CT=rev||[];GGDG_SP=sp||[];cacheSet('t_ggdg_ct',{ts:Date.now(),data:GGDG_CT});cacheSet('t_ggdg_sp',{ts:Date.now(),data:GGDG_SP});}),
+    ggdgkr:()=>sbQ('google_demandgen_campaign_daily','select=*&order=date.desc&limit=20000'+D180).then(d=>{GGDG_TIGHT=d||[];cacheSet('t_ggdg_tight',{ts:Date.now(),data:GGDG_TIGHT});}),
   };
   if(!tasks[name])return;
   window._BIG_LOADING[name]=tasks[name]().then(()=>{
@@ -864,6 +868,7 @@ function renderTab(id){
   if(id==='nsadaily')renderNsaDaily();
   if(id==='nsaweekly')renderNsaWeekly();
   if(id==='ggdgct')renderGgdgContent();
+  if(id==='ggdgkr')renderGgdgTight();
   if(id==='kpiDash')renderKpiDashboard();
   if(id==='kpiWeekly')renderKpiTable('weekly');
   if(id==='kpiMonthly')renderKpiTable('monthly');
@@ -918,6 +923,7 @@ document.getElementById('nsaKwTop').addEventListener('change',renderNsaDaily);
 document.getElementById('nsaWeeks').addEventListener('change',renderNsaWeekly);
 document.getElementById('nsawMinSpend').addEventListener('change',renderNsaWeekly);
 document.getElementById('ggdgDays').addEventListener('change',renderGgdgContent);
+document.getElementById('ggdgkrDays').addEventListener('change',renderGgdgTight);
 document.getElementById('ggdgTop').addEventListener('change',renderGgdgContent);
 document.getElementById('ggdgMinRev').addEventListener('change',renderGgdgContent);
 
@@ -3320,6 +3326,66 @@ function renderGgdgContent(){
   shown.forEach(o=>{
     const cells=allDates.map(d=>{const x=o.d[d];const yd=d===yDay?' col-yday':'';if(!x||(!x.r&&!x.c&&!x.s))return'<td class="'+yd+'"></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
     h+='<tr><td class="fx fx0" style="text-align:left;font-size:11px">'+o.ct+'</td><td class="mc '+(o._s7>0?RC(o._roas7):'')+'" style="font-weight:700">'+cell(o._s7,o._r7,o._c7)+'</td>'+cells+'</tr>';
+  });
+  h+='</tbody>';tbl.innerHTML=h;
+}
+
+// ===== 구글 디멘드젠 [Tight] 캠페인별 추이 (국내 탭) =====
+// 캠페인 id × 일자. 지출=Google Ads API, 매출/구매=Mixpanel utm_campaign 매칭.
+//   단일 테이블 google_demandgen_campaign_daily (구글_디멘드젠_캠페인_supabase.py).
+//   추이차트와 동일 셀(ROAS/순이익/-지출/매출/구매건) + ROAS 색상밴드. 최신 날짜 왼쪽.
+function renderGgdgTight(){
+  const tbl=document.getElementById('ggdgkrTbl');
+  if(!tbl)return;
+  const loaded=window._BIG_LOADED&&window._BIG_LOADED.ggdgkr;
+  if(!loaded){
+    ensureBigTable('ggdgkr').then(()=>{
+      const at=document.querySelector('.tab.active');
+      if(at&&at.dataset.t==='ggdgkr')renderGgdgTight();
+    });
+    if(!GGDG_TIGHT.length){
+      tbl.innerHTML='<tr><td style="padding:24px;color:#888">구글 디멘드젠 [Tight] 데이터 로딩 중…</td></tr>';
+      return;
+    }
+  }
+  if(!GGDG_TIGHT.length){
+    tbl.innerHTML='<tr><td style="padding:24px;color:#888">데이터 없음 — <code>google_demandgen_campaign_daily</code> 테이블이 비어있거나 파이프라인(google-dg-tight) 실행 전입니다.</td></tr>';
+    return;
+  }
+  const days=parseInt(document.getElementById('ggdgkrDays').value)||30;
+  // 최신 날짜 왼쪽: 내림차순 정렬 후 days 만큼
+  const allDates=[...new Set(GGDG_TIGHT.map(r=>r.date))].sort().reverse().slice(0,days);
+  if(!allDates.length){tbl.innerHTML='<tr><td>데이터 없음</td></tr>';return}
+  const dateSet=new Set(allDates);
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // 캠페인(campaign_id)별 그룹화 — d[date]={s,r,c}
+  const byC={};
+  GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.campaign_id;if(!byC[id])byC[id]={id,name:r.campaign_name||id,d:{}};if(r.campaign_name)byC[id].name=r.campaign_name;byC[id].d[r.date]={s:(r.spend||0),r:(r.revenue||0),c:(r.purchase_count||0)}});
+  // 기간합계 + 정렬(지출↓)
+  let list=Object.values(byC).map(o=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});o._s=s;o._r=r;o._c=c;o._roas=s>0?r/s*100:0;return o});
+  list=list.filter(o=>o._s>0||o._r>0);
+  list.sort((a,b)=>b._s-a._s);
+  // 셀: 지출 있으면 ROAS/순이익/-지출/매출/건수, 없으면 매출/건수만
+  const cell=(s,r,c)=>{
+    if(!s&&!r&&!c)return'';
+    let h='';
+    if(s>0){const roas=r/s*100,p=r-s;h+='<div class="r">'+roas.toFixed(0)+'</div><div class="'+(p>=0?'p':'p neg')+'">'+moneyKRW(p)+'</div><div class="s">-'+moneyKRW(s)+'</div>'}
+    h+='<div class="rv">'+moneyKRW(r)+'</div><div class="cv" style="color:#888">'+(c||0)+'건</div>';
+    return h;
+  };
+  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:104px">'+DK(d)+'('+w+')</th>'}).join('');
+  let h='<thead><tr><th class="fx fx0" style="min-width:260px;text-align:left">캠페인 ([Tight])</th><th style="min-width:120px">기간합계</th>'+ths+'</tr></thead><tbody>';
+  // 종합행
+  const totD={};allDates.forEach(d=>{let s=0,r=0,c=0;list.forEach(o=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});totD[d]={s,r,c}});
+  const gS=list.reduce((a,o)=>a+o._s,0),gR=list.reduce((a,o)=>a+o._r,0),gC=list.reduce((a,o)=>a+o._c,0),gRoas=gS>0?gR/gS*100:0;
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'개)</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700">'+cell(gS,gR,gC)+'</td>';
+  allDates.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
+  h+='</tr>';
+  // 캠페인별
+  list.forEach(o=>{
+    const cells=allDates.map(d=>{const x=o.d[d];const yd=d===yDay?' col-yday':'';if(!x||(!x.s&&!x.r&&!x.c))return'<td class="'+yd+'"></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
+    h+='<tr><td class="fx fx0" style="text-align:left;font-size:11px">'+o.name+'<br><span style="color:#aaa;font-size:9px">camp_id '+o.id+'</span></td><td class="mc '+(o._s>0?RC(o._roas):'')+'" style="font-weight:700">'+cell(o._s,o._r,o._c)+'</td>'+cells+'</tr>';
   });
   h+='</tbody>';tbl.innerHTML=h;
 }
