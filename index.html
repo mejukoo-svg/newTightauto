@@ -213,7 +213,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-vntwtrend"><div class="filter"><label>최근</label><select id="tDaysTw"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilterTw" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilterTw').value='';renderVnTwTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">🇹🇼 대만 광고계정(act_1286632473622244) 전용 추이</span></div><div class="sheet-wrap"><table id="vntwTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
-<div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기협업</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
+<div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
@@ -1850,18 +1850,18 @@ function extractInfluencer(adsetName,campaignName){
   return null;
 }
 
-// 장기협업: only sets whose name contains "장기협업". Group by the influencer name
-// adjacent to the 장기협업 marker; fall back to the generic influencer extractor.
+// 장기: 세트명에 "장기" 키워드가 포함된 세트(장기협업 포함). "장기" 마커 옆의 인플 이름으로
+// 그룹핑하고, 없으면 일반 인플 추출기로 폴백.
 function extractLongterm(adsetName,campaignName){
-  if(!adsetName||!adsetName.includes('장기협업'))return null;
+  if(!adsetName||!adsetName.includes('장기'))return null;
   const tokens=_normTokens(adsetName);
   let idx=-1;
-  for(let i=0;i<tokens.length;i++){if(tokens[i].includes('장기협업')){idx=i;break}}
+  for(let i=0;i<tokens.length;i++){if(tokens[i].includes('장기')){idx=i;break}}
   // search outward from the marker (nearest neighbor first) for a Korean name
   const order=[];
   for(let d=1;d<tokens.length;d++){if(idx-d>=0)order.push(idx-d);if(idx+d<tokens.length)order.push(idx+d)}
   for(const i of order){
-    const t=tokens[i].replace(/^[복제증액\-]+/,'').replace(/장기협업/g,'').trim();
+    const t=tokens[i].replace(/^[복제증액\-]+/,'').replace(/장기(협업)?/g,'').trim();
     if(!t)continue;
     if(INF_SKIP.has(t))continue;
     if(INF_TEAM.has(t))continue;
@@ -1869,16 +1869,16 @@ function extractLongterm(adsetName,campaignName){
     if(/^[가-힣]{2,5}$/.test(t))return t;
   }
   // fallback to the standard influencer extractor (handles "_인플" patterns)
-  return extractInfluencer(adsetName,campaignName)||'장기협업(기타)';
+  return extractInfluencer(adsetName,campaignName)||'장기(기타)';
 }
 
 function renderTrendInfluencer(){
   const tiType=document.getElementById('tiType').value;
   const isLong=tiType==='longterm';
-  // membership/grouping key: 인플 = "_인플" 패턴(장기협업 제외) · 장기협업 = 세트명에 "장기협업"
+  // membership/grouping key: 인플 = "_인플" 패턴 + "장기" 키워드 세트 · 장기 = 세트명에 "장기"
   const groupKey=(name,camp)=>{
     if(isLong)return extractLongterm(name,camp);
-    if((name||'').includes('장기협업'))return null; // 인플 뷰에서는 장기협업 세트 제외
+    if((name||'').includes('장기'))return extractLongterm(name,camp); // 인플 뷰에도 "장기" 키워드 세트 포함
     return extractInfluencer(name,camp);
   };
   const unit=document.getElementById('tiUnit').value;
@@ -1954,7 +1954,7 @@ function renderTrendInfluencer(){
   const totK={};keys.forEach(k=>{let s=0,r=0,p=0,mp=0,uc=0;infList.forEach(g=>{const w=g.k[k];if(w){s+=w.spend;r+=w.revenue;p+=w.profit;mp+=w.mp;uc+=w.uc}});totK[k]={s,r,p,mp,uc}});
   const ts=keys.reduce((a,k)=>a+(totK[k]?.s||0),0),tr=keys.reduce((a,k)=>a+(totK[k]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
 
-  const colHdr=isLong?'인플루언서(장기협업)':'인플루언서';const rowEmoji=isLong?'🤝':'🌟';
+  const colHdr=isLong?'인플루언서(장기)':'인플루언서';const rowEmoji=isLong?'🤝':'🌟';
   let h='<thead><tr><th style="min-width:140px;text-align:left">'+colHdr+'</th><th style="min-width:90px">상품</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
   // Top summary row
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+infList.length+'명)</td><td class="fx fx1" style="background:#e8e8e8;left:140px"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출</div><div class="rv">매출</div><div class="cv">CVR</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,0)+'</td>';
@@ -1976,7 +1976,7 @@ function renderTrendInfluencer(){
       h+='<tr><td class="fx fx0 '+hl+ck+'>'+((a.an||'').slice(0,28))+'</td><td class="fx fx1" style="left:140px;font-size:10px">'+a.product+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,null,a._ctr)+'</td>'+cells+'</tr>';
     });
   });
-  if(!infList.length)h+='<tr><td colspan="'+colSpan+'" style="padding:20px;color:#888;text-align:center">'+(isLong?'표시할 장기협업 데이터가 없습니다. (세트명에 "장기협업"이 포함된 세트만 표시)':'표시할 인플루언서 데이터가 없습니다. (팀원 9명 제외 · "_인플" 패턴 또는 인플 캠페인 끝 한글 이름으로 추출)')+'</td></tr>';
+  if(!infList.length)h+='<tr><td colspan="'+colSpan+'" style="padding:20px;color:#888;text-align:center">'+(isLong?'표시할 장기 데이터가 없습니다. (세트명에 "장기"가 포함된 세트만 표시)':'표시할 인플루언서 데이터가 없습니다. (팀원 9명 제외 · "_인플" 패턴/끝 한글 이름 또는 "장기" 키워드 세트)')+'</td></tr>';
   h+='</tbody>';
   document.getElementById('tiTbl').innerHTML=h;
 }
