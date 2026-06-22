@@ -209,7 +209,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 <!-- Panels -->
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
-<div class="panel" id="p-trend"><div class="filter" id="trendFilter"><span id="tScopeWrap" style="display:none"><label>구분</label><select id="tScope"><option value="all" selected>모두</option><option value="tight">타이트</option><option value="vanced">밴스드</option></select></span><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilter').value='';renderTrendMain()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
+<div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilter').value='';renderTrendMain()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-vntwtrend"><div class="filter"><label>최근</label><select id="tDaysTw"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilterTw" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilterTw').value='';renderVnTwTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">🇹🇼 대만 광고계정(act_1286632473622244) 전용 추이</span></div><div class="sheet-wrap"><table id="vntwTbl"></table></div></div>
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
@@ -373,8 +373,6 @@ function switchMode(m){
     if(t.classList.contains('creative-only')){t.style.display=(!isSpecial&&m==='cr')?'inline-block':'none';return}
     t.style.display=isSpecial?'none':'inline-block';
   });
-  // 추이차트 타이트/밴스드/모두 드롭다운 — 글로벌 모드에서만 노출
-  {const _sw=document.getElementById('tScopeWrap');if(_sw)_sw.style.display=(!isSpecial&&m==='gl')?'inline':'none';}
   if(isMkt){
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
@@ -866,7 +864,6 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
 })});
 document.getElementById('tDays').addEventListener('change',renderTrendMain);
 document.getElementById('tFilter').addEventListener('input',renderTrendMain);
-document.getElementById('tScope').addEventListener('change',renderTrendMain);
 document.getElementById('tDaysTw').addEventListener('change',renderVnTwTrend);
 document.getElementById('tFilterTw').addEventListener('input',renderVnTwTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
@@ -1495,16 +1492,10 @@ function vnTwUsdRows(){
     return {...r, spend, revenue, profit:revenue-spend, budget:(+r.budget||0)/rate};
   });
 }
-// 추이차트(메인) 라우팅 — 글로벌 모드에선 타이트/밴스드/모두 드롭다운에 따라 데이터셋 선택.
+// 추이차트(메인) 라우팅. 글로벌 모드도 타이트 글로벌(AD)만 표시 —
+// 밴스드 대만(VN_TW_ACC)은 여기서 제외하고 별도 탭(🇹🇼 대만 추이차트)에서만 본다.
 function renderTrendMain(){
-  if(MODE==='gl'){
-    const scope=document.getElementById('tScope')?.value||'all';
-    let rows;
-    if(scope==='tight')rows=AD;
-    else if(scope==='vanced')rows=vnTwUsdRows();
-    else rows=AD.concat(vnTwUsdRows()); // 모두
-    renderTrend({tableId:'tTbl',daysElId:'tDays',filterElId:'tFilter',rows});
-  } else renderTrend();
+  renderTrend();
 }
 // 하이라이트/메모 변경 후 재렌더 — 대만 추이차트 탭이 떠 있으면 그 테이블을, 아니면 기본 추이차트를 갱신
 function rerenderTrendView(){
