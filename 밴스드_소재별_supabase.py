@@ -53,30 +53,39 @@ def is_meta_source(src):
         return True
     return False
 
-# 대만(-tw) 결제는 amount/결제금액이 TWD로 적재됨 → 지출(KRW)과 통화 불일치로 ROAS 왜곡.
-# 결제 이벤트 단위로 TWD→KRW 환산. env TWD_KRW_RATE 고정 가능, 아니면 라이브(폴백 47.85).
-def get_twd_krw_rate():
-    env = os.environ.get("TWD_KRW_RATE")
+# 통화 환산 — 광고 캠페인(/세트)명 기준으로 시장 통화를 판별해 KRW로 환산.
+#   · 모든 서비스명이 '-tw' 접미사를 공유하므로(홍콩 결제도 서비스명에 'tw' 포함) 서비스/국가
+#     기반 판별은 홍콩을 대만으로 오인 → 폐기. 통화는 '광고 캠페인명'으로만 판별한다.
+#   · 규칙: 캠페인명에 hk/홍콩 → HKD, tw/대만 → TWD, 그 외(국내) → KRW(미환산).
+#   · 지출은 KRW 계정 기준이므로 결제 매출만 KRW로 맞춘다.
+def _live_krw_rate(base, fallback):
+    env = os.environ.get(f"{base}_KRW_RATE")
     if env:
         try: return float(env)
         except: pass
     try:
-        r = req_lib.get("https://open.er-api.com/v6/latest/TWD", timeout=20)
+        r = req_lib.get(f"https://open.er-api.com/v6/latest/{base}", timeout=20)
         if r.status_code == 200:
             v = r.json().get("rates", {}).get("KRW")
             if v and float(v) > 0: return float(v)
     except: pass
-    return 47.85
-TWD_KRW_RATE = get_twd_krw_rate()
+    return fallback
+TWD_KRW_RATE = _live_krw_rate("TWD", 47.85)
+HKD_KRW_RATE = _live_krw_rate("HKD", 177.0)
 
-def is_tw_payment(props):
-    # 대만 결제 판별. mp_country_code=="TW" 1순위, 서비스명에 'tw' 포함되면(접미사 아닌 중간 포함도) 대만.
-    # (한글 서비스명에 라틴 'tw' 가 우연히 들어갈 일 없으므로 substring 매칭 안전)
-    svc = props.get("서비스", "") or ""
-    cc = props.get("mp_country_code", "") or ""
-    if str(cc).strip().upper() == "TW":
-        return True
-    return isinstance(svc, str) and "tw" in svc.strip().lower()
+def detect_market_currency(*names):
+    """광고 캠페인/세트명으로 통화 판별: hk/홍콩→HKD, tw/대만→TWD, 그 외→KRW(국내·미환산).
+    hk 를 tw 보다 먼저 검사(홍콩 우선) — 서비스명이 아닌 캠페인명 토큰만 본다."""
+    for nm in names:
+        if not nm: continue
+        s = str(nm); n = s.lower()
+        if "홍콩" in s or re.search(r'(?:^|[_\s\-])hk(?:[_\s\-]|$)', n): return "HKD"
+    for nm in names:
+        if not nm: continue
+        s = str(nm); n = s.lower()
+        if "대만" in s or re.search(r'(?:^|[_\s\-])tw(?:[_\s\-]|$)', n): return "TWD"
+    return "KRW"
+MARKET_KRW_RATE = {"HKD": HKD_KRW_RATE, "TWD": TWD_KRW_RATE, "KRW": 1.0}
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
@@ -183,8 +192,11 @@ def fetch_mixpanel(from_date, to_date):
                     raw_a=props.get('amount') or props.get('결제금액'); raw_v=props.get('value')
                     a_val=float(raw_a) if raw_a else 0.0; v_val=float(raw_v) if raw_v else 0.0
                     revenue=a_val if a_val>0 else (v_val if v_val>0 else 0.0)
-                    if revenue>0 and is_tw_payment(props): revenue=revenue*TWD_KRW_RATE  # TWD→KRW
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
+                    # 통화 환산은 여기서 하지 않는다 — 결제 이벤트엔 광고 캠페인명이 없으므로
+                    # raw(현지통화) 금액 그대로 보관하고, 병합 단계에서 ad_id→캠페인명으로 통화 판별 후 환산.
+                    # 주문번호: 같은 주문의 중복발화($insert_id 제각각)를 주문단위로 dedup 하기 위한 1차 키.
+                    order_no=props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip()})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -282,13 +294,27 @@ def main():
         if 'utm_source' in df.columns:
             _bn=len(df); df=df[df['utm_source'].apply(is_meta_source)]
             log.info(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn-len(df)}건 제외)")
-        if 'insert_id' in df.columns:
-            df_iid=df[df['insert_id'].astype(str).str.len()>0]
-            df_no=df[df['insert_id'].astype(str).str.len()==0]
-            df_iid=df_iid.drop_duplicates(subset=['insert_id'],keep='first')
-            df_d=pd.concat([df_iid,df_no],ignore_index=True)
-        else:
-            df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first')
+        # 중복 결제 dedup — 주문번호(order_no) 우선 (세트 파이프라인과 동일). Mixpanel 은 같은 결제를
+        # 다른 $insert_id 로 여러 번 재기록하므로 insert_id dedup 만으론 과대계상(주문 1건이 여러 건으로 집계).
+        # 주문번호 = 같은 주문 = 1건으로 접어 results_mp·매출 과대계상을 차단한다.
+        if 'order_no' not in df.columns: df['order_no']=''
+        df['order_no']=df['order_no'].fillna('').astype(str).str.strip()
+        _has_ord=df['order_no'].str.len()>0
+        df_ord=df[_has_ord].copy(); df_no=df[~_has_ord].copy()
+        # (A) 주문번호 있는 행: 주문단위 1건 — utm_content 보존 우선, 그다음 revenue 큰 행 유지
+        if len(df_ord):
+            df_ord['_hasutm']=(df_ord['utm_content'].astype(str).str.len()>0).astype(int)
+            df_ord=(df_ord.sort_values(['order_no','_hasutm','revenue'],ascending=[True,False,False])
+                          .drop_duplicates(subset=['order_no'],keep='first').drop(columns=['_hasutm']))
+        # (B) 주문번호 없는 행(드묾): insert_id → (date,distinct_id,revenue,서비스,utm_content) 복합키 fallback
+        if len(df_no):
+            if 'insert_id' in df_no.columns:
+                _a=df_no[df_no['insert_id'].astype(str).str.len()>0].drop_duplicates(subset=['insert_id'],keep='first')
+                _b=df_no[df_no['insert_id'].astype(str).str.len()==0]
+                df_no=pd.concat([_a,_b],ignore_index=True)
+            df_no=df_no.drop_duplicates(subset=['date','distinct_id','revenue','서비스','utm_content'],keep='first')
+        df_d=pd.concat([df_ord,df_no],ignore_index=True)
+        log.info(f"  주문번호 dedup: 주문있음 {int(_has_ord.sum())}→{len(df_ord)} · 주문없음 {int((~_has_ord).sum())}→{len(df_no)} · 합계 {len(df_d)}")
         # utm_content backfill (패키지 2번째 이벤트 attribution)
         has_mask=df_d['utm_content'].astype(str).str.len()>0
         bf_map=df_d[has_mask].groupby(['date','distinct_id'])['utm_content'].first().to_dict()
@@ -308,7 +334,9 @@ def main():
         if not ad_id: continue
         parts=dk.split('/'); iso=f"20{parts[0]}-{parts[1]}-{parts[2]}"
         spend=mr['spend']; mpc=mp_count_map.get((dk,ad_id),0); mpv=mp_value_map.get((dk,ad_id),0.0)
-        revenue=float(mpv); profit=revenue-spend
+        # 광고 캠페인명(없으면 세트명)으로 통화 판별 후 KRW 환산. hk/홍콩→HKD, tw/대만→TWD, 그 외→KRW.
+        _ccy=detect_market_currency(mr['campaign_name'], mr['adset_name'])
+        revenue=float(mpv)*MARKET_KRW_RATE[_ccy]; profit=revenue-spend
         roas=(revenue/spend*100) if spend>0 else 0
         cvr=(mpc/mr['unique_clicks']*100) if mr['unique_clicks']>0 and mpc>0 else 0
         product=adset_to_product(mr['adset_name'])
