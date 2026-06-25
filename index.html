@@ -173,6 +173,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn" data-mode="kpi" onclick="switchMode('kpi')">📈 지표KPI</div>
 <div class="mode-btn" data-mode="mkt" onclick="switchMode('mkt')">👤 마케터</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
+<select id="countrySel" onchange="onCountryChange()" style="display:none;margin-left:10px;padding:5px 8px;font-size:12px;font-weight:600;border:none;border-radius:4px;background:#fff;color:#1a2744;font-family:inherit;cursor:pointer"></select>
 </div>
 <!-- Tabs -->
 <div class="tab-bar" id="tabBar">
@@ -263,15 +264,16 @@ const MONTHLY_REVENUE_GOAL={
 };
 
 const HL_CONFIG={
-  up20:{cls:'hl-up20',pct:20,label:'+20%'},up10:{cls:'hl-up10',pct:10,label:'+10%'},
-  down10:{cls:'hl-down10',pct:-10,label:'-10%'},down20:{cls:'hl-down20',pct:-20,label:'-20%'},
-  off:{cls:'hl-off',pct:null,label:'OFF'},watch:{cls:'hl-watch',pct:0,label:'복증'},
+  up20:{cls:'hl-up20',pct:20,label:'+20%',bg:'#66eecc'},up10:{cls:'hl-up10',pct:10,label:'+10%',bg:'#88dd88'},
+  down10:{cls:'hl-down10',pct:-10,label:'-10%',bg:'#ffcccc'},down20:{cls:'hl-down20',pct:-20,label:'-20%',bg:'#ff7777'},
+  off:{cls:'hl-off',pct:null,label:'OFF',bg:'#000000'},watch:{cls:'hl-watch',pct:0,label:'복증',bg:'#ff9900'},
 };
 
 // ===== STATE =====
 let MODE='kr'; // 'kr', 'gl', or 'cr'
 console.log('[DBG] script loaded at',new Date().toISOString(),'commit=e8ecd40+');
 let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
+let COUNTRY='ALL';  // 국가 필터 (vn/gl 전용). ALL=전체(국가행을 adset당 합산)
 let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[],GGDG_TIGHT=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 // 추이차트 전용 메모 (하이라이트 테이블 memo 컬럼 ↔ 하이라이트와 함께 전체삭제)
@@ -369,6 +371,50 @@ function rowName1(r){return MODE==='cr'?(r.ad_name||'').slice(0,25):(r.adset_nam
 function rowIdLabel(){return MODE==='cr'?'소재 ID':'세트 ID'}
 function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
 
+// ===== 국가 필터 (vn/gl: country grain 데이터를 adset당 1행으로) =====
+const _COUNTRY_MODES={vn:1,gl:1};   // country 컬럼이 있는 모드
+function _modeSrc(m){return m==='kr'?KR_AD:m==='gl'?GL_AD:m==='cr'?CR_AD:VN_AD;}
+// 선택 국가로 필터 + (전체일 땐) (date,adset_id) 합산 → 기존 뷰가 1행/adset 전제이므로 호환 유지
+function _applyCountry(rows){
+  if(COUNTRY!=='ALL') return rows.filter(r=>String(r.country||'')===COUNTRY);
+  const ADDF=['spend','revenue','profit','budget','impressions','reach','results_mp','results_meta','results_meta_click','unique_clicks'];
+  const by={};
+  rows.forEach(r=>{
+    const k=r.date+'|'+(r.adset_id||'');
+    let o=by[k];
+    if(!o){o=by[k]=Object.assign({},r);ADDF.forEach(f=>o[f]=0);}
+    ADDF.forEach(f=>{const v=+r[f];if(!isNaN(v))o[f]+=v;});
+  });
+  return Object.keys(by).map(k=>{
+    const o=by[k],sp=o.spend||0,rv=o.revenue||0,im=o.impressions||0,uc=o.unique_clicks||0,rm=o.results_meta||0,re=o.reach||0,mp=o.results_mp||0;
+    o.roas=sp>0?rv/sp*100:0; o.cvr=(uc>0&&mp>0)?mp/uc*100:0; o.cpm=im>0?sp/im*1000:0;
+    o.cost_per_click=uc>0?sp/uc:0; o.cost_per_result=rm>0?sp/rm:0;
+    o.unique_ctr=im>0?uc/im*100:0; o.frequency=re>0?im/re:0;
+    o.country='ALL'; return o;
+  });
+}
+// 현재 모드의 작업용 AD 배열 생성 (norm 후 국가필터/합산)
+function buildAD(m){
+  const rows=_modeSrc(m).map(norm);
+  return _COUNTRY_MODES[m]?_applyCountry(rows):rows;
+}
+// 국가 드롭다운: 해당 모드 데이터의 실제 country 목록으로 채움
+function _populateCountrySel(m){
+  const sel=document.getElementById('countrySel'); if(!sel) return;
+  if(!_COUNTRY_MODES[m]){sel.style.display='none'; COUNTRY='ALL'; return;}
+  const set={};
+  _modeSrc(m).forEach(r=>{const c=String(r.country||'').trim(); if(c&&c!=='ALL')set[c]=(set[c]||0)+(+ (r.spend!=null?r.spend:r.spend_usd)||0);});
+  const codes=Object.keys(set).sort((a,b)=>set[b]-set[a]);   // 지출 큰 순
+  if(!codes.includes(COUNTRY)) COUNTRY='ALL';
+  sel.innerHTML='<option value="ALL">🌐 전체</option>'+codes.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
+  sel.value=COUNTRY; sel.style.display='';
+}
+function onCountryChange(){
+  COUNTRY=document.getElementById('countrySel').value||'ALL';
+  AD=buildAD(MODE); rebuildLookups();
+  const t=document.querySelector('.tab.active'); if(t)renderTab(t.dataset.t);
+}
+
 // ===== MODE SWITCH =====
 function switchMode(m){
   MODE=m;
@@ -380,6 +426,7 @@ function switchMode(m){
   const isSpecial=isKpi||isMkt;
   // Tab visibility (unified)
   document.querySelectorAll('.tab').forEach(t=>{
+    if(t.dataset.t==='vntwtrend'){t.style.display='none';return} // 레거시 대만 추이차트 — 국가 필터(countrySel)로 대체
     if(t.classList.contains('mkt-only')){t.style.display=isMkt?'inline-block':'none';return}
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
@@ -414,11 +461,12 @@ function switchMode(m){
      document.getElementById('p-dashboard').classList.add('active');
    }}
   // Switch data (lazy-load big tables)
-  if(m==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
-  else if(m==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
-  else if(m==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM;
-    if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=CR_AD.map(norm);rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
-  else if(m==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
+  _populateCountrySel(m);
+  if(m==='kr'){AD=buildAD('kr');HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
+  else if(m==='gl'){AD=buildAD('gl');HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
+  else if(m==='cr'){AD=buildAD('cr');HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM;
+    if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=buildAD('cr');rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
+  else if(m==='vn'){AD=buildAD('vn');HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -540,10 +588,11 @@ async function initData(){
     if(renderedFromCache){
       // AD 는 switchMode 시점의 스냅샷이므로 fresh VN_AD/KR_AD 갱신 후 재할당 필요
       // 안 그러면 DATES 가 stale 캐시 기준이라 today/yesterday 가 dd 윈도우에서 누락됨
-      if(MODE==='kr'){AD=KR_AD.map(norm);HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
-      else if(MODE==='gl'){AD=GL_AD.map(norm);HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
-      else if(MODE==='cr'){AD=CR_AD.map(norm);HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM}
-      else if(MODE==='vn'){AD=VN_AD.map(norm);HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
+      _populateCountrySel(MODE);
+      if(MODE==='kr'){AD=buildAD('kr');HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
+      else if(MODE==='gl'){AD=buildAD('gl');HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
+      else if(MODE==='cr'){AD=buildAD('cr');HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM}
+      else if(MODE==='vn'){AD=buildAD('vn');HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
       rebuildLookups();
       // 펼침 인덱스도 무효화 (다음 클릭 시 fresh 로 재구축)
       window._CR_BY_ADSET=null;
@@ -1413,8 +1462,8 @@ function renderTrend(opts){
   const TBL=opts.tableId||'tTbl';
   const daysElId=opts.daysElId||'tDays';
   const filterElId=opts.filterElId||'tFilter';
-  // accFilter: 명시 없으면 vn 모드는 대만계정 제외(기존 밴스드 추이), 그 외 모드는 전체.
-  const accFilter=opts.accFilter||(MODE==='vn'?(r=>String(r.ad_account_id||'')!==VN_TW_ACC):null);
+  // accFilter: 국가 구분은 상단 countrySel(국가 필터)로 처리 → 구 ad_account(대만계정) 분리 제거.
+  const accFilter=opts.accFilter||null;
   // opts.rows: 명시 시 전역 AD 대신 이 데이터셋으로 렌더(글로벌 추이차트 타이트/밴스드/모두 등)
   const ROWS=opts.rows||AD;
   console.log('[DBG] renderTrend called, MODE=',MODE,'TBL=',TBL);
@@ -1426,6 +1475,9 @@ function renderTrend(opts){
   const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
   const chgD2={};ROWS.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
+  // 증액/감액(증감액 하이라이트)한 날의 일별 셀 테두리를 퍼센트별 하이라이트 색으로 표시 (KR/GL).
+  //   box-shadow inset 링으로 칠해 기존 테두리(col-yday 3px 등)와 충돌 없이 공존.
+  const chgBorder=r=>{const h=r&&r.highlight;return (showChg&&h&&CHG_HL.has(h)&&HL_CONFIG[h])?' style="box-shadow:inset 0 0 0 3px '+HL_CONFIG[h].bg+'"':''};
   const AUX=opts.metric==='aux';  // 보조지표 모드: 셀에 CTR/CVR/CPM/CPP/구매당단가 표시
   const byA={};
   ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
@@ -1468,7 +1520,7 @@ function renderTrend(opts){
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
       if(isHidden(a))return;
-      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'">'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
+      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"'+chgBorder(r)+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+chgBorder(r)+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // 메모(추이차트): HL_MEMO(하이라이트 테이블)에서 읽고 saveTrendMemo로 저장.
