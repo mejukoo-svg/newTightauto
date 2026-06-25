@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>전 매체 성과 요약</title>
+<style>
+  body{font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',sans-serif;margin:0;background:#f4f5f7;color:#222;font-size:13px}
+  .wrap{max-width:1500px;margin:0 auto;padding:24px}
+  h1{font-size:22px;margin:0 0 4px 0;display:flex;align-items:center;gap:8px}
+  h1 .tri{color:#888;font-size:15px}
+  .sub{color:#888;font-size:12px;margin:0 0 18px 0}
+  .controls{display:flex;align-items:center;gap:14px;margin-bottom:16px;flex-wrap:wrap;background:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .controls label{font-weight:600;font-size:12px;color:#444;margin-right:4px}
+  .controls select{padding:6px 10px;font-size:13px;border:1px solid #ccc;border-radius:5px;font-family:inherit;background:#fff;cursor:pointer}
+  .controls .hint{color:#999;font-size:11px}
+  .status{color:#1a73e8;font-size:12px;margin-left:auto}
+  table{border-collapse:collapse;width:100%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);border-radius:8px;overflow:hidden}
+  th,td{padding:11px 14px;text-align:left;border-bottom:1px solid #eee;white-space:nowrap}
+  thead th{background:#fafafa;font-weight:700;font-size:12px;color:#555;border-bottom:2px solid #e0e0e0}
+  th.num,td.num{text-align:right}
+  td.label{font-weight:600}
+  tr.sub td{background:#f7f9fc;font-weight:700;border-top:1px solid #d6e0ec}
+  tr.grand td{background:#eef2f8;font-weight:800;border-top:2px solid #9bb5d4;font-size:13px}
+  tr.ref td{background:#fffdf5;color:#444}
+  tr.section td{background:#fff;padding:6px 14px;color:#1a73e8;font-weight:700;font-size:11px;letter-spacing:.04em;border-bottom:1px solid #eee}
+  .v{font-weight:600}
+  .d{font-size:10.5px;margin-left:5px}
+  .up{color:#d93636}.down{color:#2a6bd4}.flat{color:#999}.new{color:#7a3fbf;font-weight:600}
+  .mut{color:#bbb}
+  .loading{padding:60px;text-align:center;color:#888;font-size:14px}
+  .err{padding:24px;color:#c00;background:#fff0f0;border-radius:8px}
+  .foot{margin-top:14px;color:#999;font-size:11px;line-height:1.7}
+  code{background:#f0f0f0;padding:1px 5px;border-radius:3px;font-size:11px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="tri">▼</span> <span id="title">전 매체 성과 요약</span></h1>
+  <p class="sub">newTightauto 대시보드 데이터(Supabase) 실시간 집계 · 매체 세분화 · 전기간 대비 증감</p>
+  <div class="controls">
+    <div><label>단위</label><select id="gran"><option value="month">월별</option><option value="week">주별</option><option value="day">일별</option></select></div>
+    <div><label>기간</label><select id="period"></select></div>
+    <span class="hint">증감%는 직전 기간 대비 · 메타 글로벌/Stripe는 일별 USD→KRW 환율 환산 · 모든 금액 KRW</span>
+    <span class="status" id="status">데이터 로딩 중…</span>
+  </div>
+  <div id="out"><div class="loading">⏳ Supabase에서 데이터를 불러오는 중…</div></div>
+  <div class="foot" id="foot"></div>
+</div>
+<script>
+const SB='https://qkvqiorazdrhtuicnpec.supabase.co';
+const KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
+const H={'apikey':KEY,'Authorization':'Bearer '+KEY};
+const VN_TW_ACC='act_1286632473622244';          // 대만 밴스드 광고계정
+const VN_KR_ACCS=['act_25183853061243175','act_1560037899174007']; // 국내 밴스드 2계정
+const GL_COUNTRIES=['대만','홍콩','태국','일본'];  // 타이트 글로벌 메타 주요국 (한국 등 미미분 제외)
+const DAYS=400;                                    // 월별 비교용으로 넉넉히
+
+// ---------- fetch helpers ----------
+async function sbAll(t,extra){
+  let off=0,out=[];
+  while(true){
+    const url=SB+'/rest/v1/'+t+'?select=*&limit=1000&offset='+off+(extra||'');
+    const r=await fetch(url,{headers:H});
+    if(!r.ok) throw new Error(t+' '+r.status);
+    const d=await r.json();
+    out=out.concat(d);
+    if(d.length<1000) break;
+    off+=1000;
+  }
+  return out;
+}
+function cutoff(days){const d=new Date();d.setDate(d.getDate()-days);return d.toISOString().slice(0,10);}
+
+// ---------- date utils ----------
+const N=v=>{const x=+v;return isNaN(x)?0:x;};
+function fmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function mondayOf(s){const d=new Date(s+'T00:00:00');const wd=(d.getDay()+6)%7;d.setDate(d.getDate()-wd);return fmt(d);}// 월요일 시작 주
+
+// ---------- state ----------
+let RATE={};        // date -> usd_krw_rate
+let CH={};          // channelKey -> {date -> {s,r,c}}
+const ADD=(map,key,date,s,r,c)=>{
+  if(!map[key])map[key]={};
+  const m=map[key]; if(!m[date])m[date]={s:0,r:0,c:0};
+  m[date].s+=s; m[date].r+=r; m[date].c+=c;
+};
+function rateAt(date){
+  if(RATE[date])return RATE[date];
+  const ks=Object.keys(RATE).sort(); if(!ks.length)return 1500;
+  let best=null; for(const k of ks){if(k<=date)best=k;}
+  return RATE[best||ks[ks.length-1]]||1500;
+}
+
+// 채널 정의: 표시순서 + 그룹(소계 계산용) + 매출/지출/구매 사용 여부
+const CHANNELS=[
+  {key:'meta_kr', name:'메타 - 국내',        grp:'paid_dom'},
+  {key:'meta_tw', name:'메타 - 대만',        grp:'paid_gl'},
+  {key:'meta_hk', name:'메타 - 홍콩',        grp:'paid_gl'},
+  {key:'meta_th', name:'메타 - 태국',        grp:'paid_gl'},
+  {key:'meta_jp', name:'메타 - 일본',        grp:'paid_gl'},
+  {key:'google_sa', name:'구글 SA',          grp:'paid_dom', noCount:true},
+  {key:'google_dg', name:'구글 디멘드젠',    grp:'paid_dom', noCount:true},
+  {key:'naver_sa', name:'네이버 SA',         grp:'paid_dom', noCount:true},
+  {key:'vanced_kr', name:'밴스드 - 국내',    grp:'vanced'},
+  {key:'vanced_tw', name:'밴스드 - 대만',    grp:'vanced'},
+];
+
+// ---------- load + build ----------
+async function load(){
+  const ex='&date=gte.'+cutoff(DAYS);
+  const [stripe,kr,gl,vn,gads,gdg,nsa,toss]=await Promise.all([
+    sbAll('global_stripe_daily','&order=date.desc'),
+    sbAll('ad_performance_daily',ex),
+    sbAll('global_ad_performance_daily',ex).catch(()=>[]),
+    sbAll('vanced_ad_performance_daily',ex).catch(()=>[]),
+    sbAll('google_ads_daily','&order=date.desc'+ex).catch(()=>[]),
+    sbAll('google_demandgen_daily','&order=date.desc'+ex).catch(()=>[]),
+    sbAll('naver_powerlink_daily','&order=date.desc'+ex).catch(()=>[]),
+    sbAll('toss_daily_revenue','&order=date.desc'+ex).catch(()=>[]),
+  ]);
+  // 환율맵
+  stripe.forEach(r=>{if(r.usd_krw_rate&&!RATE[r.date])RATE[r.date]=N(r.usd_krw_rate);});
+  CH={};
+  // 메타 국내 — 구매=results_mp(Mixpanel 귀속)
+  kr.forEach(r=>ADD(CH,'meta_kr',r.date,N(r.spend),N(r.revenue),N(r.results_mp)));
+  // 메타 글로벌 — country별, USD→KRW
+  const cmap={'대만':'meta_tw','홍콩':'meta_hk','태국':'meta_th','일본':'meta_jp'};
+  gl.forEach(r=>{const k=cmap[r.country]; if(!k)return; const rt=rateAt(r.date);
+    ADD(CH,k,r.date,N(r.spend_usd)*rt,N(r.revenue_usd)*rt,N(r.results_mp));});
+  // 밴스드 — _PRE(계정 총계 grain)만 사용해 country 중복 합산 방지
+  vn.forEach(r=>{if(String(r.country||'')!=='_PRE')return;
+    const acc=String(r.ad_account_id||'');
+    const k=acc===VN_TW_ACC?'vanced_tw':(VN_KR_ACCS.includes(acc)?'vanced_kr':null);
+    if(!k)return;
+    ADD(CH,k,r.date,N(r.spend),N(r.revenue),N(r.results_mp));});
+  // 구글 SA / 디멘드젠 — 구매수 미적재(conversions=0) → 건수 0
+  gads.forEach(r=>ADD(CH,'google_sa',r.date,N(r.cost_vat),N(r.revenue),N(r.conversions)));
+  gdg.forEach(r=>ADD(CH,'google_dg',r.date,N(r.cost_vat),N(r.revenue),N(r.conversions)));
+  // 네이버 SA — 파워링크(공식 시트: 지출=브랜드+일반, 매출=구매전환값). 대시보드 '매출' 탭과 동일 소스.
+  // 구매수는 이 grain에 없어 '-' 처리(naver_sa_daily의 MP 전환수는 브랜드검색 과대귀속으로 ROAS 왜곡 → 미사용).
+  nsa.forEach(r=>ADD(CH,'naver_sa',r.date,N(r.cost_vat),N(r.revenue),0));
+  // 참고: 실매출 (광고 채널 아님)
+  toss.forEach(r=>ADD(CH,'_toss',r.date,0,N(r.net_amount||r.total_amount),N(r.net_count||r.total_count)));
+  stripe.forEach(r=>{if(r.date<cutoff(DAYS))return;const rt=N(r.usd_krw_rate)||rateAt(r.date);
+    ADD(CH,'_stripe',r.date,0,N(r.revenue_usd)*rt,0);});
+}
+
+// ---------- period building ----------
+function allDates(){
+  const set=new Set();
+  Object.values(CH).forEach(m=>Object.keys(m).forEach(d=>set.add(d)));
+  return [...set].sort();
+}
+function buildPeriods(gran){
+  const ds=allDates(); if(!ds.length)return [];
+  const today=fmt(new Date());
+  const within=ds.filter(d=>d<=today);
+  if(gran==='day'){
+    return within.slice().reverse().map(d=>({key:d,label:DK(d),dates:[d]}));
+  }
+  if(gran==='week'){
+    const wk={};
+    within.forEach(d=>{const m=mondayOf(d);(wk[m]=wk[m]||[]).push(d);});
+    return Object.keys(wk).sort().reverse().map(m=>{
+      const end=new Date(m+'T00:00:00');end.setDate(end.getDate()+6);
+      return {key:m,label:(m.slice(5).replace('-','/'))+'~'+fmt(end).slice(5).replace('-','/'),dates:wk[m]};
+    });
+  }
+  // month
+  const mo={};
+  within.forEach(d=>{const k=d.slice(0,7);(mo[k]=mo[k]||[]).push(d);});
+  return Object.keys(mo).sort().reverse().map(k=>({key:k,label:k.slice(2,4)+'년 '+(+k.slice(5,7))+'월',dates:mo[k]}));
+}
+function DK(d){return (+d.slice(5,7))+'/'+(+d.slice(8,10));}
+
+// 채널/그룹 기간 합산
+function sumCh(key,dates){let s=0,r=0,c=0;const m=CH[key]||{};dates.forEach(d=>{if(m[d]){s+=m[d].s;r+=m[d].r;c+=m[d].c;}});return {s,r,c};}
+function sumGrp(grp,dates){let s=0,r=0,c=0;CHANNELS.filter(ch=>ch.grp===grp).forEach(ch=>{const v=sumCh(ch.key,dates);s+=v.s;r+=v.r;c+=v.c;});return {s,r,c};}
+
+// ---------- formatting ----------
+const won=n=>(n==null||isNaN(n))?'-':'₩'+Math.round(n).toLocaleString('ko-KR');
+const cnt=n=>(n==null||isNaN(n)||n===0)?'-':Math.round(n).toLocaleString('ko-KR')+'건';
+const pct=n=>(n==null||isNaN(n))?'-':Math.round(n)+'%';
+function delta(cur,prev,inv){ // inv: 낮을수록 좋은 지표(CPA)는 표시만, 색상은 동일 규칙
+  if(prev==null||isNaN(prev)||prev===0){ if(cur>0)return '<span class="d new">(신규)</span>'; return ''; }
+  if(cur==null||isNaN(cur))return '';
+  const ch=(cur-prev)/Math.abs(prev)*100;
+  if(Math.abs(ch)<0.5)return '<span class="d flat">(–)</span>';
+  const up=ch>0; const cls=up?'up':'down'; const ar=up?'▲':'▼';
+  return '<span class="d '+cls+'">('+ar+' '+Math.abs(Math.round(ch))+'%)</span>';
+}
+function metricCells(cur,prev,noCount){
+  const roasC=cur.s>0?cur.r/cur.s*100:null, roasP=prev?(prev.s>0?prev.r/prev.s*100:null):null;
+  const cpaC=(cur.c>0&&cur.s>0)?cur.s/cur.c:null, cpaP=prev?((prev.c>0&&prev.s>0)?prev.s/prev.c:null):null;
+  const aovC=cur.c>0?cur.r/cur.c:null,       aovP=prev?(prev.c>0?prev.r/prev.c:null):null;
+  const ct=noCount?'<span class="mut">-</span>':( cur.c>0?'<span class="v">'+cnt(cur.c)+'</span>'+delta(cur.c,prev&&prev.c):'<span class="mut">-</span>');
+  return ''
+    +'<td class="num"><span class="v">'+won(cur.s)+'</span>'+delta(cur.s,prev&&prev.s)+'</td>'
+    +'<td class="num"><span class="v">'+won(cur.r)+'</span>'+delta(cur.r,prev&&prev.r)+'</td>'
+    +'<td class="num">'+ct+'</td>'
+    +'<td class="num"><span class="v">'+pct(roasC)+'</span>'+delta(roasC,roasP)+'</td>'
+    +'<td class="num">'+(noCount||cpaC==null?'<span class="mut">-</span>':'<span class="v">'+won(cpaC)+'</span>'+delta(cpaC,cpaP))+'</td>'
+    +'<td class="num">'+(noCount||aovC==null?'<span class="mut">-</span>':'<span class="v">'+won(aovC)+'</span>'+delta(aovC,aovP))+'</td>';
+}
+
+// ---------- render ----------
+function render(){
+  const gran=document.getElementById('gran').value;
+  const periods=buildPeriods(gran);
+  const psel=document.getElementById('period');
+  // populate period dropdown (preserve selection by index if possible)
+  const prevVal=psel.value;
+  psel.innerHTML=periods.map((p,i)=>'<option value="'+p.key+'">'+p.label+(i===0?' (최신)':'')+'</option>').join('');
+  if(periods.some(p=>p.key===prevVal))psel.value=prevVal;
+  const idx=Math.max(0,periods.findIndex(p=>p.key===psel.value));
+  const cur=periods[idx], prev=periods[idx+1]; // prev = 직전 기간(더 과거)
+  const cd=cur?cur.dates:[], pd=prev?prev.dates:null;
+
+  document.getElementById('title').textContent=cur?('전 매체 성과 요약 — '+cur.label):'전 매체 성과 요약';
+
+  let h='<table><thead><tr><th>구분</th><th class="num">소진 비용</th><th class="num">구매 전환값</th><th class="num">구매</th><th class="num">ROAS</th><th class="num">구매 CPA</th><th class="num">AOV</th></tr></thead><tbody>';
+  const row=(cls,label,cur,prev,noCount)=>'<tr class="'+cls+'"><td class="label">'+label+'</td>'+metricCells(cur,prev,noCount)+'</tr>';
+
+  // PAID 국내
+  h+='<tr class="section"><td colspan="7">PAID · 국내</td></tr>';
+  CHANNELS.filter(c=>c.grp==='paid_dom').forEach(c=>{
+    h+=row('',c.name,sumCh(c.key,cd),pd&&sumCh(c.key,pd),c.noCount);
+  });
+  h+=row('sub','└ Paid 국내 소계',sumGrp('paid_dom',cd),pd&&sumGrp('paid_dom',pd),true);
+  // PAID 글로벌(타이트)
+  h+='<tr class="section"><td colspan="7">PAID · 글로벌 (타이트 메타)</td></tr>';
+  CHANNELS.filter(c=>c.grp==='paid_gl').forEach(c=>{
+    h+=row('',c.name,sumCh(c.key,cd),pd&&sumCh(c.key,pd),c.noCount);
+  });
+  h+=row('sub','└ Paid 글로벌 소계',sumGrp('paid_gl',cd),pd&&sumGrp('paid_gl',pd),false);
+  // 밴스드
+  h+='<tr class="section"><td colspan="7">밴스드 운영</td></tr>';
+  CHANNELS.filter(c=>c.grp==='vanced').forEach(c=>{
+    h+=row('',c.name,sumCh(c.key,cd),pd&&sumCh(c.key,pd),c.noCount);
+  });
+  h+=row('sub','└ 밴스드 소계',sumGrp('vanced',cd),pd&&sumGrp('vanced',pd),false);
+  // 전체 Paid 총계
+  const allKeys=CHANNELS.map(c=>c.key);
+  const tot=ds=>{let s=0,r=0,c=0;allKeys.forEach(k=>{const v=sumCh(k,ds);s+=v.s;r+=v.r;c+=v.c;});return {s,r,c};};
+  h+=row('grand','■ Paid 총계 (전 매체)',tot(cd),pd&&tot(pd),true);
+  // 참고: 실매출
+  h+='<tr class="section"><td colspan="7">참고 · 실 결제 매출 (광고 귀속 아님)</td></tr>';
+  h+=row('ref','토스 — 국내 실매출',sumCh('_toss',cd),pd&&sumCh('_toss',pd),false);
+  h+=row('ref','Stripe — 글로벌 실매출',sumCh('_stripe',cd),pd&&sumCh('_stripe',pd),true);
+
+  h+='</tbody></table>';
+  document.getElementById('out').innerHTML=h;
+  document.getElementById('status').textContent=(cur?('비교: '+(prev?prev.label:'없음')+' → '+cur.label):'');
+}
+
+document.getElementById('gran').addEventListener('change',render);
+document.getElementById('period').addEventListener('change',render);
+
+document.getElementById('foot').innerHTML=
+  '· <b>구매(건)</b> = Meta 계열(국내·글로벌·밴스드)은 Mixpanel 귀속 구매수(<code>results_mp</code>). 구글 SA/디멘드젠·네이버 SA는 일자 테이블에 신뢰가능한 구매수가 없어 <b>-</b> 표시.<br>'
+ +'· <b>네이버 SA</b>는 대시보드 \'매출\' 탭과 동일하게 <code>naver_powerlink_daily</code>(브랜드+일반) 사용. <code>naver_sa_daily</code>의 MP 전환매출은 브랜드검색 과대귀속으로 ROAS가 부풀려져 미사용.<br>'
+ +'· <b>매출(구매 전환값)</b> = 각 채널의 광고귀속 매출. 토스/Stripe는 실 결제액(전 채널 합산이 아니라 별도 참고치).<br>'
+ +'· <b>밴스드</b>는 계정 총계 grain(<code>country=_PRE</code>)만 사용해 국가행 중복합산을 방지. 대만=계정 '+VN_TW_ACC.slice(4)+', 국내=나머지 2계정.<br>'
+ +'· <b>글로벌 메타·Stripe</b>는 일별 USD→KRW 환율(<code>global_stripe_daily.usd_krw_rate</code>)로 환산. · 증감%는 직전 기간 대비.';
+
+(async()=>{
+  try{
+    await load();
+    render();
+    document.getElementById('status').textContent='';
+  }catch(e){
+    document.getElementById('out').innerHTML='<div class="err">데이터 로딩 실패: '+e.message+'<br>네트워크 또는 Supabase 접근을 확인하세요.</div>';
+  }
+})();
+</script>
+</body>
+</html>

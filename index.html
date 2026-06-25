@@ -203,6 +203,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kpi-only" data-t="kpiMonthly">🗓 월간</div>
 <div class="tab mkt-only" data-t="mktDash">👤 마케터 성과</div>
 <div class="tab kr-only" data-t="auxmetric">📐 보조지표</div>
+<div class="tab kr-only" data-t="allmedia">📋 전매체요약</div>
 </div>
 <!-- Zoom+Search bar -->
 <div class="zoom-bar">
@@ -237,6 +238,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
 <div class="panel" id="p-kpiMonthly"><div class="sheet-wrap"><table id="kpiMTbl" class="kpi-table"></table></div></div>
 <div class="panel" id="p-mktDash"><div id="mktBody"></div></div>
+<div class="panel" id="p-allmedia"><iframe id="allmediaFrame" data-src="allmedia.html" style="width:100%;height:calc(100vh - 150px);min-height:600px;border:0;display:block"></iframe></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -922,6 +924,11 @@ function renderTab(id){
   if(id==='kpiWeekly')renderKpiTable('weekly');
   if(id==='kpiMonthly')renderKpiTable('monthly');
   if(id==='mktDash')renderMarketer();
+  if(id==='allmedia')renderAllMedia();
+}
+function renderAllMedia(){
+  const f=document.getElementById('allmediaFrame');
+  if(f&&!f.src&&f.dataset.src)f.src=f.dataset.src; // 첫 클릭 시에만 로드
 }
 
 document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
