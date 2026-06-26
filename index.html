@@ -376,9 +376,25 @@ function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
 // ===== 국가 필터 (vn/gl: country grain 데이터를 adset당 1행으로) =====
 const _COUNTRY_MODES={vn:1,gl:1};   // country 컬럼이 있는 모드
 function _modeSrc(m){return m==='kr'?KR_AD:m==='gl'?GL_AD:m==='cr'?CR_AD:VN_AD;}
+// 국가 코드 정규화 — 한글명/풀네임/소문자 등 변형 표기를 단일 ISO 코드로 통합(드롭다운 중복 방지).
+//   예: '홍콩','hongkong','hk' → 'HK'.  미상('','none','unknown','xx') → 'XX'.
+const _CC_CANON={'홍콩':'HK','香港':'HK','HONGKONG':'HK','HONG KONG':'HK',
+  '대만':'TW','台灣':'TW','台湾':'TW','TAIWAN':'TW','일본':'JP','日本':'JP','JAPAN':'JP',
+  '한국':'KR','대한민국':'KR','KOREA':'KR','SOUTH KOREA':'KR','미국':'US','USA':'US','UNITED STATES':'US',
+  '태국':'TH','THAILAND':'TH','베트남':'VN','VIETNAM':'VN','싱가포르':'SG','SINGAPORE':'SG',
+  '마카오':'MO','MACAU':'MO','MACAO':'MO','영국':'GB','UK':'GB','UNITED KINGDOM':'GB',
+  '호주':'AU','AUSTRALIA':'AU','말레이시아':'MY','MALAYSIA':'MY','인도네시아':'ID','INDONESIA':'ID',
+  '독일':'DE','GERMANY':'DE','프랑스':'FR','FRANCE':'FR'};
+function canonCountry(c){
+  const s=String(c==null?'':c).trim(); if(!s) return 'XX';
+  const u=s.toUpperCase();
+  if(u==='ALL') return 'ALL';
+  if(['NONE','NULL','UNDEFINED','UNKNOWN','XX','-'].includes(u)) return 'XX';
+  return _CC_CANON[s]||_CC_CANON[u]||u;
+}
 // 선택 국가로 필터 + (전체일 땐) (date,adset_id) 합산 → 기존 뷰가 1행/adset 전제이므로 호환 유지
 function _applyCountry(rows){
-  if(COUNTRY!=='ALL') return rows.filter(r=>String(r.country||'')===COUNTRY);
+  if(COUNTRY!=='ALL') return rows.filter(r=>canonCountry(r.country)===COUNTRY);
   const ADDF=['spend','revenue','profit','budget','impressions','reach','results_mp','results_meta','results_meta_click','unique_clicks'];
   const by={};
   rows.forEach(r=>{
@@ -405,7 +421,7 @@ function _populateCountrySel(m){
   const sel=document.getElementById('countrySel'); if(!sel) return;
   if(!_COUNTRY_MODES[m]){sel.style.display='none'; COUNTRY='ALL'; return;}
   const set={};
-  _modeSrc(m).forEach(r=>{const c=String(r.country||'').trim(); if(c&&c!=='ALL')set[c]=(set[c]||0)+(+ (r.spend!=null?r.spend:r.spend_usd)||0);});
+  _modeSrc(m).forEach(r=>{const c=canonCountry(r.country); if(c&&c!=='ALL'&&c!=='XX')set[c]=(set[c]||0)+(+ (r.spend!=null?r.spend:r.spend_usd)||0);});
   const codes=Object.keys(set).sort((a,b)=>set[b]-set[a]);   // 지출 큰 순
   if(!codes.includes(COUNTRY)) COUNTRY='ALL';
   sel.innerHTML='<option value="ALL">🌐 전체</option>'+codes.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
