@@ -1137,6 +1137,17 @@ function renderDashboard(){
       const barW=Math.min(100,Math.max(0,pct)).toFixed(1);
       const barColor=pct>=100?'#16a34a':(pct>=70?'#2563eb':(pct>=40?'#d97706':'#dc2626'));
       const fmt=n=>'₩'+Math.round(n).toLocaleString('ko-KR');
+      // 글로벌: 실적(Stripe KRW)을 '순수 글로벌'과 '밴스드 대만 기여'로 분리.
+      // 밴스드 대만 = vanced_ad_performance_daily(VN_TW_ACC, KRW) 당월 누적(어제까지). '글로벌 채널=Stripe−대만밴스드귀속' 정의와 동일.
+      let vncTw=0,pureRev=mtd,vncShare=0,pureShare=0;const vncColor='#9333ea';
+      if(MODE==='gl'){
+        (VN_AD||[]).forEach(r=>{if(String(r.ad_account_id||'')===VN_TW_ACC&&r.date>=yMonth+'-01'&&r.date<=yYmd)vncTw+=(+r.revenue||0);});
+        vncTw=Math.max(0,Math.min(vncTw,mtd));
+        pureRev=Math.max(0,mtd-vncTw);
+        if(mtd>0){vncShare=vncTw/mtd*100;pureShare=pureRev/mtd*100;}
+      }
+      const pureW=(barW*(mtd>0?pureRev/mtd:0)).toFixed(2);
+      const vncW=(barW*(mtd>0?vncTw/mtd:0)).toFixed(2);
       const labelFlag=MODE==='kr'?'🇰🇷 국내':'🌏 글로벌';
       const bg=MODE==='kr'?'linear-gradient(135deg,#f0f7ff,#e6f0fb)':'linear-gradient(135deg,#fef6f0,#fbe9d8)';
       const bd=MODE==='kr'?'#b8d4e8':'#e8c8a8';
@@ -1152,9 +1163,14 @@ function renderDashboard(){
         +(daysLeft>0&&remaining>0?'<span style="color:#888;font-size:11px">남은 '+daysLeft+'일 · 필요 일평균 '+fmt(needPerDay)+'</span>':'')
         +'<span style="margin-left:auto;color:'+barColor+';font-size:22px;font-weight:700">'+pct.toFixed(1)+'%</span>'
         +'</div>'
-        +'<div style="background:#e0e6ee;border-radius:4px;height:8px;margin-top:10px;overflow:hidden">'
-        +'<div style="background:'+barColor+';height:100%;width:'+barW+'%;transition:width 0.5s"></div>'
+        +'<div style="display:flex;background:#e0e6ee;border-radius:4px;height:10px;margin-top:10px;overflow:hidden">'
+        +'<div style="background:'+barColor+';height:100%;width:'+(MODE==='gl'?pureW:barW)+'%;transition:width 0.5s" title="순수 글로벌"></div>'
+        +(MODE==='gl'?'<div style="background:'+vncColor+';height:100%;width:'+vncW+'%;transition:width 0.5s" title="밴스드 대만"></div>':'')
         +'</div>'
+        +(MODE==='gl'&&vncTw>0?'<div style="display:flex;gap:18px;margin-top:9px;font-size:11.5px;flex-wrap:wrap;align-items:center">'
+          +'<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+barColor+';display:inline-block"></span><b style="color:#555">순수 글로벌</b> '+fmt(pureRev)+' <span style="color:#888">('+pureShare.toFixed(1)+'%)</span></span>'
+          +'<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+vncColor+';display:inline-block"></span><b style="color:#555">🎯 밴스드 대만 기여</b> '+fmt(vncTw)+' <span style="color:#888">('+vncShare.toFixed(1)+'%)</span></span>'
+          +'</div>':'')
         +'</div>';
     }
   }
