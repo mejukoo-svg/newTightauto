@@ -561,12 +561,9 @@ def main():
             # Mixpanel 결제 amount: 시장별 현지통화 (TW/HK/JP/US=TWD base, TH=THB, KR=KRW)
             mpc = mp_count_map.get((dk, ad_id), 0)
             mpv_local = mp_value_map.get((dk, ad_id), 0.0)
-            if currency == "KRW":
-                mp_currency = "KRW"
-            elif currency == "THB":
-                mp_currency = "THB"
-            else:
-                mp_currency = "TWD"
+            # 스토어프론트(=Stripe 청구통화) 기준 — 세트 로더와 정합.
+            # HK→HKD·JP→JPY를 TWD로 뭉개지 않음(과거 버그: HK 4배 과소·JP 과대). Stripe로 확정.
+            mp_currency = currency if currency in ("KRW", "THB", "HKD", "JPY") else "TWD"
             revenue = local_to_usd(float(mpv_local), mp_currency, dk)
             # 🛡️ 이 날짜 Mixpanel 수집 실패 → 기존 매출/건수 보존 (0 덮어쓰기 방지). 지출은 신규 반영.
             if iso_date in uncovered:
