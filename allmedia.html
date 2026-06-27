@@ -124,12 +124,12 @@ async function load(){
   CH={};
   // 메타 국내 — 구매=results_mp(Mixpanel 귀속)
   kr.forEach(r=>ADD(CH,'meta_kr',r.date,N(r.spend),N(r.revenue),N(r.results_mp)));
-  // 메타 글로벌 — country별, USD→KRW
-  const cmap={'대만':'meta_tw','홍콩':'meta_hk','태국':'meta_th','일본':'meta_jp'};
+  // 메타 글로벌 — country별(ISO 코드: TW/HK/TH/JP), USD→KRW
+  const cmap={'TW':'meta_tw','HK':'meta_hk','TH':'meta_th','JP':'meta_jp'};
   gl.forEach(r=>{const k=cmap[r.country]; if(!k)return; const rt=rateAt(r.date);
     ADD(CH,k,r.date,N(r.spend_usd)*rt,N(r.revenue_usd)*rt,N(r.results_mp));});
-  // 밴스드 — _PRE(계정 총계 grain)만 사용해 country 중복 합산 방지
-  vn.forEach(r=>{if(String(r.country||'')!=='_PRE')return;
+  // 밴스드 — 계정 단위 전체 행 합산(_PRE grain 폐지, country=ISO per-adset). index.html vnTwUsdRows()와 동일 방식.
+  vn.forEach(r=>{
     const acc=String(r.ad_account_id||'');
     const k=acc===VN_TW_ACC?'vanced_tw':(VN_KR_ACCS.includes(acc)?'vanced_kr':null);
     if(!k)return;
@@ -219,7 +219,7 @@ function render(){
 
   document.getElementById('title').textContent=cur?('전 매체 성과 요약 — '+cur.label):'전 매체 성과 요약';
 
-  let h='<table><thead><tr><th>구분</th><th class="num">소진 비용</th><th class="num">구매 전환값</th><th class="num">구매</th><th class="num">ROAS</th><th class="num">구매 CPA</th><th class="num">AOV</th></tr></thead><tbody>';
+  let h='<table><thead><tr><th>구분</th><th class="num">지출금액</th><th class="num">매출</th><th class="num">구매</th><th class="num">ROAS</th><th class="num">구매 CPA</th><th class="num">AOV</th></tr></thead><tbody>';
   const row=(cls,label,cur,prev,noCount)=>'<tr class="'+cls+'"><td class="label">'+label+'</td>'+metricCells(cur,prev,noCount)+'</tr>';
 
   // PAID 국내
@@ -260,8 +260,8 @@ document.getElementById('period').addEventListener('change',render);
 document.getElementById('foot').innerHTML=
   '· <b>구매(건)</b> = Meta 계열(국내·글로벌·밴스드)은 Mixpanel 귀속 구매수(<code>results_mp</code>). 구글 SA/디멘드젠·네이버 SA는 일자 테이블에 신뢰가능한 구매수가 없어 <b>-</b> 표시.<br>'
  +'· <b>네이버 SA</b>는 대시보드 \'매출\' 탭과 동일하게 <code>naver_powerlink_daily</code>(브랜드+일반) 사용. <code>naver_sa_daily</code>의 MP 전환매출은 브랜드검색 과대귀속으로 ROAS가 부풀려져 미사용.<br>'
- +'· <b>매출(구매 전환값)</b> = 각 채널의 광고귀속 매출. 토스/Stripe는 실 결제액(전 채널 합산이 아니라 별도 참고치).<br>'
- +'· <b>밴스드</b>는 계정 총계 grain(<code>country=_PRE</code>)만 사용해 국가행 중복합산을 방지. 대만=계정 '+VN_TW_ACC.slice(4)+', 국내=나머지 2계정.<br>'
+ +'· <b>매출</b> = 각 채널의 광고귀속 매출. 토스/Stripe는 실 결제액(전 채널 합산이 아니라 별도 참고치).<br>'
+ +'· <b>밴스드</b>는 광고계정 단위로 전체 행을 합산(계정 총계). 대만=계정 '+VN_TW_ACC.slice(4)+', 국내=나머지 2계정.<br>'
  +'· <b>글로벌 메타·Stripe</b>는 일별 USD→KRW 환율(<code>global_stripe_daily.usd_krw_rate</code>)로 환산. · 증감%는 직전 기간 대비.';
 
 (async()=>{
