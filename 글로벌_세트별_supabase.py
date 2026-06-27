@@ -335,7 +335,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     us = ''
                     for k in ['utm_source','UTM_Source','UTM Source']:
                         if k in props and props[k]: us = str(props[k]).strip(); break
-                    raw_a = props.get('결제금액') or props.get('amount')
+                    raw_a = props.get('amount') or props.get('결제금액')
                     raw_v = props.get('value')
                     a_val = float(raw_a) if raw_a else 0.0
                     v_val = float(raw_v) if raw_v else 0.0

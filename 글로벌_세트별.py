@@ -713,8 +713,8 @@ def fetch_mixpanel_data(from_date, to_date):
                 결제금액_val=float(raw_결제금액) if raw_결제금액 is not None else 0.0
                 amount_val=float(raw_amount) if raw_amount is not None else 0.0
                 value_val=float(raw_value) if raw_value is not None else 0.0
-                if 결제금액_val > 0: revenue = 결제금액_val
-                elif amount_val > 0: revenue = amount_val
+                if amount_val > 0: revenue = amount_val
+                elif 결제금액_val > 0: revenue = 결제금액_val
                 elif value_val > 0: revenue = value_val
                 else: revenue = 0.0
                 data.append({'distinct_id':props.get('distinct_id'),'time':ts,'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스','')})
