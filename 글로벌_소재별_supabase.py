@@ -100,6 +100,11 @@ DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5}
 CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국"}
 
+# country(mp_country_code) 행 단위 통화 보정 — 세트별(글로벌_세트별_supabase.py)과 동일.
+#   HK/TH 고객은 -tw 스토어프론트에서 결제해도 Stripe가 현지통화(HKD/THB)로 청구.
+#   JP/US 등은 -tw면 TWD 청구이므로 제외(엔화 5배 오환산 방지).
+COUNTRY_CURRENCY_OVERRIDE = {"HK": "HKD", "TH": "THB"}
+
 
 # =========================================================
 # 유틸리티
@@ -531,10 +536,14 @@ def main():
             df_d = df_d[~_is_kr]
             log.info(f"  한국(KR) 제외: {before_kr} -> {len(df_d)} ({before_kr - len(df_d)}건 South Korea 결제 제외)")
 
-        for (d, ut), v in df_d.groupby(['date','utm_content'])['revenue'].sum().items():
-            if d and ut: mp_value_map[(d, str(ut))] = v
-        for (d, ut), c in df_d.groupby(['date','utm_content']).size().items():
-            if d and ut: mp_count_map[(d, str(ut))] = c
+        # country(mp_country_code) 정규화 후 (date, utm_content, country) 그레인 집계
+        #   → 통화 country 보정(HK→HKD/TH→THB)을 country별로 적용하기 위함 (세트별과 정합).
+        if 'country' not in df_d.columns: df_d['country'] = ''
+        df_d['country'] = df_d['country'].fillna('').astype(str).str.strip().str.upper()
+        for (d, ut, cc), v in df_d.groupby(['date','utm_content','country'])['revenue'].sum().items():
+            if d and ut: mp_value_map[(d, str(ut), str(cc))] = v
+        for (d, ut, cc), c in df_d.groupby(['date','utm_content','country']).size().items():
+            if d and ut: mp_count_map[(d, str(ut), str(cc))] = c
 
     # 4-0) Mixpanel 수집 실패 날짜의 기존 매출 보존맵 로드 (0 덮어쓰기 방지)
     prev_map = {}
@@ -549,6 +558,11 @@ def main():
 
     # 4) 병합
     log.info(f"\n4단계: 병합")
+    # (date, ad_id) → 결제 발생 country 집합 — 매출을 country별로 쪼개 통화 보정 적용
+    mp_idx = {}
+    for (d2, a2, cc2) in mp_value_map:
+        mp_idx.setdefault((d2, a2), set()).add(cc2)
+
     records = []
     for dk, rows in meta_data.items():
         parts = dk.split('/'); iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
@@ -558,13 +572,15 @@ def main():
             spend = mr['spend']  # USD
             currency = detect_currency(mr['adset_name'], mr['campaign_name'], mr.get('ad_account_id'))
             country = CURRENCY_TO_COUNTRY.get(currency, '글로벌')
-            # Mixpanel 결제 amount: 시장별 현지통화 (TW/HK/JP/US=TWD base, TH=THB, KR=KRW)
-            mpc = mp_count_map.get((dk, ad_id), 0)
-            mpv_local = mp_value_map.get((dk, ad_id), 0.0)
-            # 스토어프론트(=Stripe 청구통화) 기준 — 세트 로더와 정합.
-            # HK→HKD·JP→JPY를 TWD로 뭉개지 않음(과거 버그: HK 4배 과소·JP 과대). Stripe로 확정.
+            # 스토어프론트(=Stripe 청구통화) 베이스 — 세트 로더와 정합.
             mp_currency = currency if currency in ("KRW", "THB", "HKD", "JPY") else "TWD"
-            revenue = local_to_usd(float(mpv_local), mp_currency, dk)
+            # 매출은 country 행 단위로 통화 보정(HK→HKD/TH→THB) 후 USD 합산 — 세트별과 동일 기준.
+            mpc = 0; revenue = 0.0
+            for cc in mp_idx.get((dk, ad_id), set()):
+                row_cur = COUNTRY_CURRENCY_OVERRIDE.get(str(cc).upper(), mp_currency)
+                v_local = mp_value_map.get((dk, ad_id, cc), 0.0)
+                revenue += local_to_usd(float(v_local), row_cur, dk)
+                mpc += mp_count_map.get((dk, ad_id, cc), 0)
             # 🛡️ 이 날짜 Mixpanel 수집 실패 → 기존 매출/건수 보존 (0 덮어쓰기 방지). 지출은 신규 반영.
             if iso_date in uncovered:
                 _pv = prev_map.get((iso_date, str(ad_id)))
