@@ -3427,8 +3427,11 @@ function renderGgdgContent(){
     o._r7=r7;o._c7=c7;o._s7=s7;o._rt=rt;o._p7=r7-s7;o._roas7=s7>0?r7/s7*100:0;
     return o;
   }).filter(o=>o._rt>=minRev||o._s7>0);
-  list.sort((a,b)=>b._r7-a._r7);
-  const shown=list.slice(0,topN);
+  // content → country: 지출 테이블 country(캠페인명 TW 태그 기준) 우선, 없으면 content 이름 tw 토큰 폴백.
+  const _twName=ct=>/(^|[_\-\s])tw([_\-\s]|$)/i.test(ct||'');
+  const ctCountry={};
+  GGDG_SP.forEach(r=>{const c=(r.country||'').toUpperCase();if(!c)return;if(c==='TW'||ctCountry[r.content]==='TW')ctCountry[r.content]='TW';else if(!ctCountry[r.content])ctCountry[r.content]=c});
+  const countryOf=ct=>ctCountry[ct]||(_twName(ct)?'TW':'KR');
   const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:104px">'+DK(d)+'('+w+')</th>'}).join('');
   // 셀: 지출 있으면 ROAS/순이익/지출/매출/건수, 없으면 매출/건수만
   const cell=(s,r,c)=>{
@@ -3439,16 +3442,22 @@ function renderGgdgContent(){
     return h;
   };
   let h='<thead><tr><th style="min-width:260px;text-align:left">콘텐츠 (ct)</th><th style="min-width:120px">7일 합계</th>'+ths+'</tr></thead><tbody>';
-  // 종합행 (표시된 콘텐츠 합)
-  const totD={};allDates.forEach(d=>{let r=0,c=0,s=0;shown.forEach(o=>{const x=o.d[d];if(x){r+=x.r;c+=x.c;s+=x.s}});totD[d]={r,c,s}});
-  const t7r=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),t7c=d7.reduce((a,d)=>a+(totD[d]?.c||0),0),t7s=d7.reduce((a,d)=>a+(totD[d]?.s||0),0);
-  const t7roas=t7s>0?t7r/t7s*100:0;
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ('+shown.length+'개 표시)</td><td class="mc '+(t7s>0?RC(t7roas):'')+'" style="background:#e8e8e8;font-weight:700">'+cell(t7s,t7r,t7c)+'</td>';
-  allDates.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
-  h+='</tr>';
-  shown.forEach(o=>{
-    const cells=allDates.map(d=>{const x=o.d[d];const yd=d===yDay?' col-yday':'';if(!x||(!x.r&&!x.c&&!x.s))return'<td class="'+yd+'"></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
-    h+='<tr><td class="fx fx0" style="text-align:left;font-size:11px">'+o.ct+'</td><td class="mc '+(o._s7>0?RC(o._roas7):'')+'" style="font-weight:700">'+cell(o._s7,o._r7,o._c7)+'</td>'+cells+'</tr>';
+  const colSpan=allDates.length+2;
+  // 국가 그룹(대만/국내) 분리 — 각 그룹 종합 + Top N 콘텐츠
+  [['TW','🇹🇼 대만 (캠페인명 TW 태그)'],['KR','🇰🇷 국내']].forEach(([cc,label])=>{
+    const g=list.filter(o=>countryOf(o.ct)===cc).sort((a,b)=>b._r7-a._r7).slice(0,topN);
+    if(!g.length)return;
+    h+='<tr><td colspan="'+colSpan+'" style="text-align:left;font-weight:700;background:#e8eefc;padding:6px 8px">'+label+' · '+g.length+'개</td></tr>';
+    const totD={};allDates.forEach(d=>{let r=0,c=0,s=0;g.forEach(o=>{const x=o.d[d];if(x){r+=x.r;c+=x.c;s+=x.s}});totD[d]={r,c,s}});
+    const t7r=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),t7c=d7.reduce((a,d)=>a+(totD[d]?.c||0),0),t7s=d7.reduce((a,d)=>a+(totD[d]?.s||0),0);
+    const t7roas=t7s>0?t7r/t7s*100:0;
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;font-weight:700;text-align:left">'+(cc==='TW'?'대만':'국내')+' 종합</td><td class="mc '+(t7s>0?RC(t7roas):'')+'" style="background:#e8e8e8;font-weight:700">'+cell(t7s,t7r,t7c)+'</td>';
+    allDates.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
+    h+='</tr>';
+    g.forEach(o=>{
+      const cells=allDates.map(d=>{const x=o.d[d];const yd=d===yDay?' col-yday':'';if(!x||(!x.r&&!x.c&&!x.s))return'<td class="'+yd+'"></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
+      h+='<tr><td class="fx fx0" style="text-align:left;font-size:11px">'+o.ct+'</td><td class="mc '+(o._s7>0?RC(o._roas7):'')+'" style="font-weight:700">'+cell(o._s7,o._r7,o._c7)+'</td>'+cells+'</tr>';
+    });
   });
   h+='</tbody>';tbl.innerHTML=h;
 }

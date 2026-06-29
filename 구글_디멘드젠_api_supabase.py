@@ -143,6 +143,16 @@ def discover_customer_ids(client) -> list[str]:
 
 
 # ───────────────────────── ct 파싱 ─────────────────────────
+def _is_tw_campaign(campaign_name: str) -> bool:
+    """캠페인명에 대만 태그(TW)가 있으면 True. 예: '[Vanced] DG_MZmoodang_VT_TW_260612'.
+    토큰 단위로 'tw'/'taiwan'/'대만'/'台' 매칭(연속문자에 묻힌 tw는 무시)."""
+    n = str(campaign_name or "")
+    parts = re.split(r'[-_\s\[\]().]+', n.lower())
+    if "tw" in parts or "taiwan" in parts:
+        return True
+    return ("대만" in n) or ("台灣" in n) or ("台湾" in n)
+
+
 def extract_ch_ct(final_urls):
     """final_urls(list) 중 ct 파라미터가 있는 첫 URL → (ch, ct).
        ch 가 google 아닌 다른 채널로 명시되면 (ch, None) 반환해 호출측이 스킵."""
@@ -160,12 +170,14 @@ def extract_ch_ct(final_urls):
 
 
 # ───────────────────────── 디멘드젠 지출 조회 ─────────────────────────
-def fetch_demandgen_spend(client, customer_id: str, agg: dict):
-    """customer_id 의 디멘드젠 광고를 (date, ct) 로 비용/클릭/노출/전환 합산해 agg 에 누적."""
+def fetch_demandgen_spend(client, customer_id: str, agg: dict, ct_country: dict):
+    """customer_id 의 디멘드젠 광고를 (date, ct) 로 비용/클릭/노출/전환 합산해 agg 에 누적.
+    캠페인명 TW 태그로 content(ct)별 country(TW/KR)를 ct_country 에 기록(TW 우선)."""
     ga = client.get_service("GoogleAdsService")
     query = f"""
         SELECT
           segments.date,
+          campaign.name,
           ad_group_ad.ad.final_urls,
           metrics.cost_micros,
           metrics.clicks,
@@ -196,6 +208,11 @@ def fetch_demandgen_spend(client, customer_id: str, agg: dict):
                 if not ct:
                     no_ct += 1
                     ct = "(미지정)"   # ct 없는 디멘드젠 지출도 버킷 보존
+                # 캠페인명 TW 태그 → content(ct) country 기록 (TW 우선, 같은 ct가 여러 캠페인이면 하나라도 TW면 TW)
+                if _is_tw_campaign(getattr(row.campaign, "name", "")):
+                    ct_country[ct] = "TW"
+                else:
+                    ct_country.setdefault(ct, "KR")
                 m = row.metrics
                 a = agg[(d_iso, ct)]
                 a["spend"]       += m.cost_micros / 1_000_000.0
@@ -263,8 +280,9 @@ def main():
 
     agg = defaultdict(lambda: {"spend": 0.0, "clicks": 0.0,
                                "impressions": 0.0, "conversions": 0.0})
+    ct_country = {}  # content(ct) → 'TW'/'KR' (캠페인명 TW 태그 기준)
     for cid in cids:
-        fetch_demandgen_spend(client, cid, agg)
+        fetch_demandgen_spend(client, cid, agg, ct_country)
 
     if not agg:
         log.warning("  ⚠️ 디멘드젠 지출 집계 결과 없음 — 스킵 "
@@ -289,6 +307,7 @@ def main():
         records.append({
             "date": d_iso,
             "content": ct[:300],
+            "country": ct_country.get(ct, "KR"),   # 캠페인명 TW 태그 → 대만(TW)/국내(KR)
             "spend": round(v["spend"], 2),
             "clicks": int(round(v["clicks"])),
             "impressions": int(round(v["impressions"])),
