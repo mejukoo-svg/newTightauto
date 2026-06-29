@@ -162,11 +162,6 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
 #   접미사 -tw → TWD, -th → THB. (HK/JP/US 등 해외 고객도 -tw 스토어프론트는 TWD 결제)
 SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD"}
 
-# country(mp_country_code) 행 단위 통화 보정: 해당 국가 고객은 -tw 스토어프론트에서 결제해도
-#   Stripe가 현지통화로 청구하므로 country 기준으로 통화를 강제한다.
-#   HK→HKD, TH→THB. (JP/US 등은 -tw 스토어프론트면 TWD 청구이므로 제외 — 엔화 5배 오환산 버그 재발 방지)
-COUNTRY_CURRENCY_OVERRIDE = {"HK": "HKD", "TH": "THB"}
-
 def market_suffix(svc):
     m = re.search(r'-([a-z]{2,3})$', str(svc or "").strip().lower())
     return m.group(1) if m else ""
@@ -708,8 +703,9 @@ def main():
             countries = set(cc_rows.keys()) | set(mp_idx.get((dk, asid), set()))
             for cc in countries:
                 if str(cc).upper() in KOREA_CC: continue  # 글로벌 = 비한국 성과
-                # 통화는 country 행 단위: HK·TH 고객은 -tw 스토어프론트여도 현지통화(HKD/THB) 청구
-                row_currency = COUNTRY_CURRENCY_OVERRIDE.get(str(cc).upper(), mp_currency)
+                # 통화는 유입 광고/상품의 국가 키워드 기준(서비스 접미사·캠페인명) — country(mp_country_code) 무시.
+                #   캠페인/서비스에 홍콩·hk→HKD, 대만·tw→TWD, 태국·th→THB, 일본·jp→JPY (mp_currency).
+                row_currency = mp_currency
                 mr = cc_rows.get(cc)
                 spend = mr['spend'] if mr else 0.0  # Already USD
                 mpc = mp_count_map.get((dk, asid, cc), 0)
