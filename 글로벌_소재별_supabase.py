@@ -23,6 +23,7 @@ from decimal import Decimal
 import requests as req_lib
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+logging.getLogger("stripe").setLevel(logging.WARNING)  # Stripe SDK 요청 로그(페이지당 2줄) 소음 억제
 log = logging.getLogger(__name__)
 
 # =========================================================
@@ -154,6 +155,69 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
         if "th" in parts or "thailand" in parts or "태국" in n: return "THB"
         if "tw" in parts or "taiwan" in parts or "대만" in n or "台灣" in n: return "TWD"
     return ACCOUNT_CURRENCY.get(account_id, "TWD")
+
+
+# =========================================================
+# 건별 실제 통화 판별 (세트별 로더와 동일 — 2026-06-29)
+#   서비스 접미사(-tw=TWD 등) + Stripe (amount,시각) 매칭으로 결제건마다 진짜 통화를 확정.
+#   country=HK 일괄 HKD(÷7.8) 강제가 -tw TWD 결제(~25%)를 ~4배 과대계상하던 문제 해결.
+# =========================================================
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100}
+KNOWN_CURRENCIES = {"TWD", "HKD", "JPY", "THB", "USD", "KRW"}
+SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD"}
+
+def market_suffix(svc):
+    m = re.search(r'-([a-z]{2,3})$', str(svc or "").strip().lower())
+    return m.group(1) if m else ""
+
+def currency_from_suffix(svc):
+    return SUFFIX_CURRENCY.get(market_suffix(svc))
+
+# Stripe charge 통화 인덱스: {amount_major: [(created_ts, currency_upper), ...]}
+stripe_cur_index = {}
+
+def build_stripe_currency_index(start_date, end_date):
+    """Stripe charge 를 페이징해 (amount_major→[(created,통화)]) 인덱스 구축.
+    MP 결제와 (amount,시각±1h) 매칭으로 건별 실제 청구통화 복원에 사용."""
+    global stripe_cur_index
+    if not STRIPE_API_KEY:
+        log.warning("  ⚠️ STRIPE_API_KEY 없음 — 통화 인덱스 생략(폴백 통화 사용)")
+        return
+    try:
+        import stripe
+    except ImportError:
+        log.warning("  ⚠️ stripe 패키지 없음 — 통화 인덱스 생략")
+        return
+    stripe.api_key = STRIPE_API_KEY
+    start_ts = int(start_date.timestamp()); end_ts = int(end_date.timestamp())
+    has_more = True; starting_after = None; n = 0
+    while has_more:
+        params = {"limit": 100, "created": {"gte": start_ts, "lte": end_ts}, "status": "succeeded"}
+        if starting_after: params["starting_after"] = starting_after
+        resp = stripe.Charge.list(**params)
+        for ch in resp.data:
+            n += 1
+            cur = (getattr(ch, 'currency', '') or '').lower()
+            if cur not in STRIPE_DIVISOR: continue
+            amt_major = round((getattr(ch, 'amount', 0) or 0) / STRIPE_DIVISOR.get(cur, 100))
+            cur_up = cur.upper()
+            if cur_up in KNOWN_CURRENCIES and amt_major > 0:
+                stripe_cur_index.setdefault(amt_major, []).append((int(ch.created), cur_up))
+        has_more = resp.has_more
+        if resp.data: starting_after = resp.data[-1].id
+    log.info(f"  💱 Stripe 통화 인덱스: {n}건 → {len(stripe_cur_index)}개 amount값")
+
+def resolve_currency_by_stripe(amount_major, ts, window=3600):
+    """amount(현지 major)·시각으로 Stripe charge 매칭 → 실제 통화. 실패 시 None."""
+    if not ts or amount_major <= 0: return None
+    cands = stripe_cur_index.get(amount_major)
+    if not cands: return None
+    best = None; best_dt = window + 1
+    for created, cur in cands:
+        dt = abs(created - ts)
+        if dt < best_dt: best_dt = dt; best = cur
+    return best if (best is not None and best_dt <= window) else None
 
 
 # =========================================================
@@ -319,9 +383,12 @@ def fetch_mixpanel_data(from_date, to_date):
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
                     # mp_country_code: 결제 국가 (글로벌 성과에서 한국 제외용)
                     country = props.get('mp_country_code') or ''
+                    # 결제 이벤트 명시 통화(있으면 최우선, 커버리지 ~12%지만 정확)
+                    cur_explicit = props.get('통화') or props.get('currency') or ''
+                    cur_explicit = str(cur_explicit).strip().upper() if cur_explicit else ''
                     # 주문번호: 대만=merchant_uid/주문번호, 한국=order_id. 중복 결제 판단 1차 키.
                     order_no = props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip()})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip(),'cur_explicit':cur_explicit})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -478,9 +545,14 @@ def main():
         mp_raw.extend(today_res)
     log.info(f"✅ Mixpanel: {len(mp_raw)}건" + (f" · ⚠️ 수집실패 보존 {len(uncovered)}일" if uncovered else ""))
 
+    # 3.5) Stripe 통화 인덱스 — MP 결제의 실제 청구통화를 (amount,시각)으로 건별 복원하기 위함
+    log.info("\n3.5단계: Stripe 통화 인덱스")
+    _sc_start = datetime(DATA_REFRESH_START.year, DATA_REFRESH_START.month, DATA_REFRESH_START.day, tzinfo=KST)
+    build_stripe_currency_index(_sc_start, datetime.now(KST))
+
     # Mixpanel 집계 (utm_content = ad_id)
     import pandas as pd
-    mp_value_map = {}; mp_count_map = {}
+    mp_value_map = {}; mp_count_map = {}   # mp_value_map: 건별 실제통화로 USD 환산된 매출
     if mp_raw:
         df = pd.DataFrame(mp_raw)
 
@@ -536,12 +608,33 @@ def main():
             df_d = df_d[~_is_kr]
             log.info(f"  한국(KR) 제외: {before_kr} -> {len(df_d)} ({before_kr - len(df_d)}건 South Korea 결제 제외)")
 
-        # country(mp_country_code) 정규화 후 (date, utm_content, country) 그레인 집계
-        #   → 통화 country 보정(HK→HKD/TH→THB)을 country별로 적용하기 위함 (세트별과 정합).
+        # country(mp_country_code) 정규화
         if 'country' not in df_d.columns: df_d['country'] = ''
         df_d['country'] = df_d['country'].fillna('').astype(str).str.strip().str.upper()
-        for (d, ut, cc), v in df_d.groupby(['date','utm_content','country'])['revenue'].sum().items():
-            if d and ut: mp_value_map[(d, str(ut), str(cc))] = v
+
+        # ★ 건별 실제 통화 확정 (2026-06-29) — 세트별 로더와 동일 체인.
+        #   ① MP '통화' 필드 → ② Stripe (amount,시각±1h) 매칭 → ③ 서비스 접미사 → ④ country 보정(HK→HKD,TH→THB) → ⑤ TWD.
+        _src_stat = {'explicit': 0, 'stripe': 0, 'suffix': 0, 'country_ovr': 0, 'default': 0}
+        def _resolve_cur(row):
+            ce = str(row.get('cur_explicit') or '').strip().upper()
+            if ce in KNOWN_CURRENCIES:
+                _src_stat['explicit'] += 1; return ce
+            sc = resolve_currency_by_stripe(round(float(row.get('revenue') or 0)), int(row.get('ts') or 0))
+            if sc in KNOWN_CURRENCIES:
+                _src_stat['stripe'] += 1; return sc
+            sf = currency_from_suffix(row.get('서비스'))
+            if sf in KNOWN_CURRENCIES:
+                _src_stat['suffix'] += 1; return sf
+            co = COUNTRY_CURRENCY_OVERRIDE.get(str(row.get('country') or '').upper())
+            if co:
+                _src_stat['country_ovr'] += 1; return co
+            _src_stat['default'] += 1; return "TWD"
+        df_d['cur_eff'] = df_d.apply(_resolve_cur, axis=1)
+        # 이벤트 단위로 USD 환산 후 (date, utm_content, country) 합산 — 이미 USD 이므로 병합단계 재환산 불필요.
+        df_d['rev_usd'] = df_d.apply(lambda r: local_to_usd(float(r.get('revenue') or 0), r['cur_eff'], r['date']), axis=1)
+        log.info(f"  💱 건별통화 출처: {_src_stat}")
+        for (d, ut, cc), v in df_d.groupby(['date','utm_content','country'])['rev_usd'].sum().items():
+            if d and ut: mp_value_map[(d, str(ut), str(cc))] = v   # ★ USD 단위
         for (d, ut, cc), c in df_d.groupby(['date','utm_content','country']).size().items():
             if d and ut: mp_count_map[(d, str(ut), str(cc))] = c
 
@@ -572,14 +665,10 @@ def main():
             spend = mr['spend']  # USD
             currency = detect_currency(mr['adset_name'], mr['campaign_name'], mr.get('ad_account_id'))
             country = CURRENCY_TO_COUNTRY.get(currency, '글로벌')
-            # 스토어프론트(=Stripe 청구통화) 베이스 — 세트 로더와 정합.
-            mp_currency = currency if currency in ("KRW", "THB", "HKD", "JPY") else "TWD"
-            # 매출은 country 행 단위로 통화 보정(HK→HKD/TH→THB) 후 USD 합산 — 세트별과 동일 기준.
+            # ★ mp_value_map 은 건별 실제통화로 이미 USD 환산됨 → country별 합산만 (재환산 없음).
             mpc = 0; revenue = 0.0
             for cc in mp_idx.get((dk, ad_id), set()):
-                row_cur = COUNTRY_CURRENCY_OVERRIDE.get(str(cc).upper(), mp_currency)
-                v_local = mp_value_map.get((dk, ad_id, cc), 0.0)
-                revenue += local_to_usd(float(v_local), row_cur, dk)
+                revenue += float(mp_value_map.get((dk, ad_id, cc), 0.0))
                 mpc += mp_count_map.get((dk, ad_id, cc), 0)
             # 🛡️ 이 날짜 Mixpanel 수집 실패 → 기존 매출/건수 보존 (0 덮어쓰기 방지). 지출은 신규 반영.
             if iso_date in uncovered:
