@@ -3175,7 +3175,7 @@ function _chrevChart(channels,periods){
   const cv=document.getElementById('chrChart');if(!cv)return;
   const mode=document.getElementById('chrChartMode')?.value||'abs';
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
-  const pers=periods.slice().reverse();                 // 오래된→최근 (왼쪽→오른쪽)
+  const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
   const COLORS={'국내 메타':'#1877F2','밴스드':'#9333ea','네이버':'#03C75A','구글':'#EA4335','구글디멘드젠':'#FBBC04','대만 밴스드':'#c084fc','글로벌':'#0ea5e9'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
