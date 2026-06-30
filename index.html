@@ -229,7 +229,15 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
+<div style="margin-top:18px;padding:0 4px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+    <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
+    <select id="chrChartMode" style="font-size:11px"><option value="abs" selected>절대값(₩)</option><option value="pct">비율(100%)</option></select>
+    <span style="color:#888;font-size:10px">막대 전체=채널 매출 합, 누적 조각=채널별 매출 → 비율 확인 · 국내 채널은 귀속 매출 기준</span>
+  </div>
+  <div style="height:360px"><canvas id="chrChart"></canvas></div>
+</div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
 <div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 캠페인이름/세트이름/세트id × 일자 · 지출=Google Ads API / 매출=Mixpanel(utm_content 광고id→세트 매핑) · 최신 날짜 왼쪽</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
@@ -986,6 +994,7 @@ document.getElementById('krDays').addEventListener('change',renderAdsetRanking);
 document.getElementById('krSort').addEventListener('change',renderAdsetRanking);
 document.getElementById('chrDays').addEventListener('change',renderChannelRevenue);
 document.getElementById('chrScope').addEventListener('change',renderChannelRevenue);
+document.getElementById('chrChartMode').addEventListener('change',renderChannelRevenue);
 document.getElementById('chrView').addEventListener('change',function(){
   const view=this.value;
   const sel=document.getElementById('chrDays');
@@ -3110,6 +3119,8 @@ function _chrevDaily(channels,days){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+  const periods=dates.map(d=>({label:DK(d)+'('+WD(d)+')',dates:[d]}));
+  _chrevChart(channels,periods);
 }
 
 // 주별/월별 — 일별과 동일한 매트릭스 (행=채널, 열=기간, 셀=ROAS/순이익/매출/지출)
@@ -3152,6 +3163,45 @@ function _chrevPeriod(channels,view,count){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+  _chrevChart(channels,periods);
+}
+
+// ===== 채널별 매출 구성 누적 막대그래프 (매출탭 하단) =====
+// 막대 1개 = 한 기간(일/주/월). 전체 높이 = 채널 매출 합, 누적 조각 = 채널별 매출 → 비율 시각화.
+// 종합(sum) 행은 제외하고 실제 채널만 누적. 권역(scope) 선택은 _chrevChannels가 이미 반영.
+let _chrevChartInst=null;
+function _chrevChart(channels,periods){
+  if(typeof Chart==='undefined')return;
+  const cv=document.getElementById('chrChart');if(!cv)return;
+  const mode=document.getElementById('chrChartMode')?.value||'abs';
+  const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
+  const pers=periods.slice().reverse();                 // 오래된→최근 (왼쪽→오른쪽)
+  const labels=pers.map(p=>p.label);
+  const COLORS={'국내 메타':'#1877F2','밴스드':'#9333ea','네이버':'#03C75A','구글':'#EA4335','구글디멘드젠':'#FBBC04','대만 밴스드':'#c084fc','글로벌':'#0ea5e9'};
+  const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
+  const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
+    data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
+  const totals=pers.map((p,idx)=>raw.reduce((s,ds)=>s+ds.data[idx],0));  // 기간별 채널 매출 합
+  const datasets=raw.map(ds=>({
+    label:ds.name,backgroundColor:ds.color,borderWidth:0,stack:'rev',
+    data:mode==='pct'?ds.data.map((v,idx)=>totals[idx]>0?v/totals[idx]*100:0):ds.data,
+    _abs:ds.data,_tot:totals,
+  }));
+  if(_chrevChartInst){try{_chrevChartInst.destroy()}catch(e){}}
+  const won=v=>'₩'+Math.round(v).toLocaleString('ko-KR');
+  const axMoney=v=>{const a=Math.abs(v);return a>=1e8?'₩'+(v/1e8).toFixed(1)+'억':a>=1e4?'₩'+Math.round(v/1e4)+'만':'₩'+Math.round(v)};
+  _chrevChartInst=new Chart(cv,{type:'bar',data:{labels,datasets},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{
+          label:ctx=>{const d=ctx.dataset,abs=d._abs[ctx.dataIndex],tot=d._tot[ctx.dataIndex],pct=tot>0?abs/tot*100:0;
+            return d.label+': '+won(abs)+' ('+pct.toFixed(1)+'%)'},
+          footer:items=>items.length?'채널 합: '+won(items[0].dataset._tot[items[0].dataIndex]):''}}},
+      scales:{
+        x:{stacked:true,ticks:{font:{size:10},maxRotation:60,minRotation:0}},
+        y:{stacked:true,beginAtZero:true,max:mode==='pct'?100:undefined,
+          ticks:{font:{size:10},callback:v=>mode==='pct'?v+'%':axMoney(v)}}}}});
 }
 // 채널별 매출 탭용 셀 (ROAS / 순이익 / 매출 / 지출)
 function MC_CH(roas,profit,spend,revenue){
