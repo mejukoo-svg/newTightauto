@@ -111,9 +111,62 @@ def fetch_mixpanel(from_date: date, to_date: date):
     return []
 
 
+# ── 결제 통화 판별 + KRW 환산 ──────────────────────────────────────────
+#   지출(Google Ads cost)은 KRW인데 해외(대만 등) 매출은 현지통화(TWD)로 적재돼
+#   ROAS가 ~48배 과소(가짜 적자)였음. 결제건마다 통화를 판별해 KRW로 환산해 통일.
+KNOWN_NONKRW = {"TWD", "HKD", "THB", "JPY", "USD"}
+SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD"}
+FALLBACK_KRW_PER = {"TWD": 48.0, "HKD": 197.0, "THB": 45.0, "JPY": 10.3, "USD": 1540.0, "KRW": 1.0}
+
+def currency_from_suffix(svc):
+    m = re.search(r'-([a-z]{2,3})$', str(svc or "").strip().lower())
+    return SUFFIX_CURRENCY.get(m.group(1)) if m else None
+
+def event_currency(props):
+    """결제 통화 판별: 통화필드 → 서비스 접미사(-tw 등) → mp_country_code → KRW(기본).
+    해외 신호가 명확할 때만 비KRW로 판정(국내 결제를 해외로 오판해 ×수십배 부풀리는 것 방지)."""
+    c = str(props.get("통화") or "").strip().upper()
+    if c in KNOWN_NONKRW:
+        return c
+    if c == "KRW":
+        return "KRW"
+    sc = currency_from_suffix(props.get("서비스"))
+    if sc:
+        return sc
+    cc = str(props.get("mp_country_code") or "").strip().upper()
+    return {"TW": "TWD", "HK": "HKD", "TH": "THB", "JP": "JPY"}.get(cc, "KRW")
+
+_krw_rates = None
+def get_krw_rates():
+    """1 단위 외화 → KRW 환율 맵. er-api(USD 기준) 1회 조회, 실패 시 폴백."""
+    global _krw_rates
+    if _krw_rates is not None:
+        return _krw_rates
+    rates = dict(FALLBACK_KRW_PER)
+    try:
+        r = req_lib.get("https://open.er-api.com/v6/latest/USD", timeout=15)
+        if r.status_code == 200:
+            usd = r.json().get("rates", {})
+            krw = usd.get("KRW")
+            if krw:
+                for cur in ("TWD", "HKD", "THB", "JPY"):
+                    per = usd.get(cur)
+                    if per:
+                        rates[cur] = krw / per
+                rates["USD"] = krw
+                rates["KRW"] = 1.0
+                log.info(f"  💱 환율(KRW/단위): TWD={rates['TWD']:.2f} HKD={rates['HKD']:.2f} "
+                         f"THB={rates['THB']:.2f} JPY={rates['JPY']:.3f}")
+    except Exception as e:
+        log.warning(f"  ⚠️ 환율 조회 실패 → 폴백 사용: {e}")
+    _krw_rates = rates
+    return rates
+
+
 def aggregate(lines):
-    """events → (date, ct) 별 revenue/count 집계 (ch=google 인 것만)"""
+    """events → (date, ct) 별 revenue(KRW 환산)/count 집계 (ch=google 인 것만)"""
     agg = defaultdict(lambda: {"revenue": 0.0, "count": 0})
+    rates = get_krw_rates()
     ch_seen = defaultdict(int)
     google_total = 0
     no_ct_count = 0
@@ -167,6 +220,11 @@ def aggregate(lines):
                     pass
         if amt <= 0:
             continue
+
+        # 통화 환산 → KRW (지출이 KRW이므로 매출도 KRW로 통일). 국내(KRW)는 그대로.
+        cur = event_currency(props)
+        if cur != "KRW":
+            amt = amt * rates.get(cur, FALLBACK_KRW_PER.get(cur, 1.0))
 
         # 콘텐츠(ct)
         ct = extract_content(props)
