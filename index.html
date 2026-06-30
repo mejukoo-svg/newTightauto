@@ -1022,13 +1022,13 @@ async function saveHL(id,c){
   const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
   HIGHLIGHTS[id]=c||null;
-  // 2) ★ 날짜탭용 영구저장 — 직전날(어제)에만 저장
+  // 2) ★ 날짜탭용 영구저장 — 증감액을 마킹한 '오늘' 날짜 셀에 저장 (어제 아님)
   const col=hlIdCol();
-  const _y=new Date();_y.setDate(_y.getDate()-1);
-  const yDate=_y.getFullYear()+'-'+String(_y.getMonth()+1).padStart(2,'0')+'-'+String(_y.getDate()).padStart(2,'0');
-  await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+yDate+'&'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
+  const _t=new Date();
+  const tDate=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
+  await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+tDate+'&'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
   // 메모리 동기화 — AD + 원본배열(GL_AD/VN_AD 등) 모두 갱신 → 탭 전환/모드 전환 후에도 유지
-  _syncRowField(id, yDate, 'highlight', c||null);
+  _syncRowField(id, tDate, 'highlight', c||null);
   rerenderTrendView();
 }
 function showCP(id,el){currentHlId=id;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
