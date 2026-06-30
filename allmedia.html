@@ -47,10 +47,15 @@
   <div id="out"><div class="loading">⏳ Supabase에서 데이터를 불러오는 중…</div></div>
   <div class="foot" id="foot"></div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const SB='https://qkvqiorazdrhtuicnpec.supabase.co';
 const KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
 const H={'apikey':KEY,'Authorization':'Bearer '+KEY};
+// 부모 대시보드(index.html)와 동일하게 로그인 세션(JWT)으로 인증 — anon 키만으론 RLS가 차단함.
+// iframe은 동일 출처라 부모가 localStorage에 저장한 Supabase 세션을 그대로 공유한다.
+const SBC=supabase.createClient(SB,KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+async function applyAuth(){const {data}=await SBC.auth.getSession();const s=data&&data.session;H.Authorization='Bearer '+(s?s.access_token:KEY);}
 const VN_TW_ACC='act_1286632473622244';          // 대만 밴스드 광고계정
 const VN_KR_ACCS=['act_25183853061243175','act_1560037899174007']; // 국내 밴스드 2계정
 const GL_COUNTRIES=['대만','홍콩','태국','일본'];  // 타이트 글로벌 메타 주요국 (한국 등 미미분 제외)
@@ -266,6 +271,7 @@ document.getElementById('foot').innerHTML=
 
 (async()=>{
   try{
+    await applyAuth();
     await load();
     render();
     document.getElementById('status').textContent='';
