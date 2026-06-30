@@ -30,7 +30,9 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # FULL_REFRESH(211일) 백필이 60분을 넘겨 upsert(마지막 단계) 전 타임아웃되는 것 방지.
+    # 평시 cron(10일)은 ~7분이라 영향 없음. 호스티드 러너 상한 360분 이내.
+    timeout-minutes: 330
 
     steps:
       - uses: actions/checkout@v4

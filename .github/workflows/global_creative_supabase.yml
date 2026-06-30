@@ -31,7 +31,8 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # FULL_REFRESH(211일) 백필이 60분 초과로 upsert 전 타임아웃되는 것 방지. 평시 cron(10일)은 ~7분.
+    timeout-minutes: 330
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +41,8 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests pandas yfinance
+        # stripe 필수 — 건별 실제통화 환산(Stripe (amount,시각) 매칭)에 사용. 없으면 통화 인덱스 미구축 → 옛 country 보정으로 폴백.
+        run: pip install requests pandas yfinance stripe
 
       - name: Run pipeline
         env:
@@ -52,6 +54,7 @@ jobs:
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
