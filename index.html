@@ -247,11 +247,19 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="cp-btn cp-clear" data-c="">✕</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ===== CONFIG =====
 const SB_URL='https://qkvqiorazdrhtuicnpec.supabase.co';
 const SB_KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
 const SBH={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY};
+// ===== Supabase Auth (대시보드 로그인) =====
+// 공유 계정 1개로 게이트. Supabase Auth에 아래 이메일로 사용자를 만들고, 그 비밀번호가 새 대시보드 암호가 됨.
+const DASH_EMAIL='dashboard@newtightauto.app';
+const SBC=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+// 로그인 세션의 access token으로 모든 읽기/쓰기를 인증 → 공개 anon 키만으론 RLS가 차단.
+// onAuthStateChange는 로그인/토큰자동갱신/로그아웃 시 SBH 헤더를 항상 최신으로 유지.
+SBC.auth.onAuthStateChange((_e,session)=>{SBH.Authorization='Bearer '+(session?session.access_token:SB_KEY);});
 
 // ===== 매월 매출 목표 (KRW, 대시보드 배너용) — 매달 새로 추가/수정 =====
 const MONTHLY_REVENUE_GOAL={
@@ -3528,13 +3536,25 @@ function applyZoom(){document.querySelectorAll('.panel').forEach(p=>{p.style.tra
 function zoomChange(d){zoomLevel=Math.max(50,Math.min(200,zoomLevel+d));applyZoom()}
 function zoomReset(){zoomLevel=100;applyZoom()}
 
-// ===== AUTH =====
-const AUTH_PW_HASH='dd1979db2aa8e9f32930b64feac30be3f5a8e34bfd31d026d462300dc72d8ba4';const AUTH_KEY='tight_unified_v1';
-async function _sha256(s){const b=new TextEncoder().encode(s);const h=await crypto.subtle.digest('SHA-256',b);return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('')}
-async function tryLogin(){const pw=document.getElementById('loginPw').value;const h=await _sha256(pw);if(h===AUTH_PW_HASH){try{localStorage.setItem(AUTH_KEY,'ok')}catch(e){}showApp()}else{document.getElementById('loginErr').textContent='비밀번호가 맞지 않습니다.'}}
+// ===== AUTH (Supabase) =====
+// 비밀번호는 더 이상 코드에 없음(해시조차). Supabase Auth가 서버에서 검증하고,
+// 성공 시 받은 access token으로만 데이터가 읽힘 → 공개 키 노출이 무해해짐.
+async function tryLogin(){
+  const pw=document.getElementById('loginPw').value;
+  document.getElementById('loginErr').textContent='확인 중…';
+  const {data,error}=await SBC.auth.signInWithPassword({email:DASH_EMAIL,password:pw});
+  if(error||!data||!data.session){document.getElementById('loginErr').textContent='비밀번호가 맞지 않습니다.';return}
+  SBH.Authorization='Bearer '+data.session.access_token;
+  showApp();
+}
 function showApp(){document.getElementById('loginScreen').style.display='none';document.getElementById('appContent').classList.add('ready');initData()}
+async function logout(){try{await SBC.auth.signOut()}catch(e){}location.reload()}
 document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin()});
-try{if(localStorage.getItem(AUTH_KEY)==='ok')showApp();else document.getElementById('loginPw').focus()}catch(e){document.getElementById('loginPw').focus()}
+// 기존 세션이 있으면 자동 로그인 (supabase-js가 세션을 localStorage에 보존·자동갱신)
+(async()=>{try{const {data:{session}}=await SBC.auth.getSession();
+  if(session){SBH.Authorization='Bearer '+session.access_token;showApp()}
+  else{document.getElementById('loginPw').focus()}
+}catch(e){document.getElementById('loginPw').focus()}})();
 </script>
 </div>
 </body>
