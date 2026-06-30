@@ -1517,6 +1517,8 @@ function renderTrend(opts){
   const days=parseInt(document.getElementById(daysElId).value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // 오늘 날짜 — 증감액 테두리는 '오늘' 셀 기준(어제 아님). 오늘 컬럼은 현재 마킹(HIGHLIGHTS)으로 그려 per-date row 누락에도 항상 표시.
+  const _td=new Date();const today=_td.getFullYear()+'-'+String(_td.getMonth()+1).padStart(2,'0')+'-'+String(_td.getDate()).padStart(2,'0');
   // 이틀 전(D-2): 어제 데이터의 하루 전날에 증감액(증액/감액)을 했는지 표시 (KR/GL 모드)
   const _d2=new Date();_d2.setDate(_d2.getDate()-2);const d2Day=_d2.getFullYear()+'-'+String(_d2.getMonth()+1).padStart(2,'0')+'-'+String(_d2.getDate()).padStart(2,'0');
   const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
@@ -1567,7 +1569,7 @@ function renderTrend(opts){
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
       if(isHidden(a))return;
-      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const cb=chgBorder(r&&r.highlight);if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
+      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const cb=chgBorder(d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight));if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // 메모(추이차트): HL_MEMO(하이라이트 테이블)에서 읽고 saveTrendMemo로 저장.
@@ -2263,6 +2265,9 @@ function renderDateTab(){
   let ed=selEnd.value||DATES[0];
   // 시작일이 종료일보다 크면 자동으로 swap
   if(sd>ed){[sd,ed]=[ed,sd];selStart.value=sd;selEnd.value=ed}
+  // 추이차트 하이라이트 동기화 — 보는 기간에 '오늘'이 포함되면 현재 마킹(HIGHLIGHTS)을 행에 반영(추이차트 오늘 셀과 동일). 과거 날짜만 보면 그날 기록(r.highlight)만 표시.
+  const _td=new Date();const todayStr=_td.getFullYear()+'-'+String(_td.getMonth()+1).padStart(2,'0')+'-'+String(_td.getDate()).padStart(2,'0');
+  const rangeHasToday=(sd<=todayStr&&todayStr<=ed);
   // 안내 문구
   const dayCount=Math.round((new Date(ed)-new Date(sd))/864e5)+1;
   const dtInfo=document.getElementById('dtInfo');
@@ -2409,7 +2414,7 @@ function renderDateTab(){
 
   // 데이터 rows
   rows.forEach(r=>{
-    const rid=rowId(r);const hl=r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
+    const rid=rowId(r);let hl=r.highlight;if(rangeHasToday&&HIGHLIGHTS[rid])hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
