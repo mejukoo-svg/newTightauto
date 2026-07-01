@@ -216,10 +216,10 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-trend"><div class="filter" id="trendFilter"><label>최근</label><select id="tDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilter').value='';renderTrendMain()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인/세트 클릭 → 하이라이트</span><button onclick="clearAllHighlights()" style="margin-left:auto;padding:4px 10px;border:1px solid #d00;border-radius:4px;background:#fff;color:#d00;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🗑 하이라이트 전체 삭제</button></div><div class="sheet-wrap"><table id="tTbl"></table></div></div>
 <div class="panel" id="p-auxmetric"><div class="filter"><label>최근</label><select id="axDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="axFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('axFilter').value='';renderAux()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">📐 셀: CTR / CVR / CPM / 구매당비용</span></div><div class="sheet-wrap"><table id="axTbl"></table></div></div>
 <div class="panel" id="p-vntwtrend"><div class="filter"><label>최근</label><select id="tDaysTw"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tFilterTw" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tFilterTw').value='';renderVnTwTrend()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">🇹🇼 대만 광고계정(act_1286632473622244) 전용 추이</span></div><div class="sheet-wrap"><table id="vntwTbl"></table></div></div>
-<div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
-<div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
+<div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="twFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('twFilter').value='';renderTrendWeekly()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
+<div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tpFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tpFilter').value='';renderTrendProduct()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
 <div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
-<div class="panel" id="p-change"><div class="sheet-wrap"><table id="cTbl"></table></div></div>
+<div class="panel" id="p-change"><div class="filter"><label>세트필터</label><input type="text" id="cFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('cFilter').value='';renderChange()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
@@ -978,8 +978,11 @@ document.getElementById('axFilter').addEventListener('input',renderAux);
 document.getElementById('tDaysTw').addEventListener('change',renderVnTwTrend);
 document.getElementById('tFilterTw').addEventListener('input',renderVnTwTrend);
 document.getElementById('twWeeks').addEventListener('change',renderTrendWeekly);
+document.getElementById('twFilter').addEventListener('input',renderTrendWeekly);
 document.getElementById('tpDays').addEventListener('change',renderTrendProduct);
 document.getElementById('tpUnit').addEventListener('change',renderTrendProduct);
+document.getElementById('tpFilter').addEventListener('input',renderTrendProduct);
+document.getElementById('cFilter').addEventListener('input',renderChange);
 document.getElementById('tiType').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiUnit').addEventListener('change',renderTrendInfluencer);
 document.getElementById('tiRange').addEventListener('change',renderTrendInfluencer);
@@ -1860,13 +1863,16 @@ function renderTrendWeekly(){
     byA[rid].w[wk].mp+=r.results_mp;byA[rid].w[wk].uc+=r.unique_clicks;byA[rid].w[wk].imp+=(r.impressions||0);
   });
   const recentWk=weekKeys[0];
-  const list=Object.values(byA).map(a=>{
+  let list=Object.values(byA).map(a=>{
     let ts=0,tr=0,tp=0,tuc=0,tmp=0,timp=0;
     weekKeys.forEach(wk=>{const w=a.w[wk];if(w){ts+=w.spend;tr+=w.revenue;tp+=w.profit;tuc+=w.uc;tmp+=w.mp;timp+=w.imp||0}});
     a._s=ts;a._r=tr;a._p=tp;a._roas=ts>0?tr/ts*100:0;a._cvr=tuc>0&&tmp>0?tmp/tuc*100:0;a._ctr=timp>0?tuc/timp*100:0;a._cpm=timp>0?ts/timp*1000:0;
     a._recentS=a.w[recentWk]?a.w[recentWk].spend:0;
     return a;
   });
+  // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (종합·소계도 필터 결과 기준)
+  const twKw=(document.getElementById('twFilter')?.value||'').trim().toLowerCase();
+  if(twKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(twKw));
   // Headers
   const ths=weekKeys.map(wk=>'<th style="min-width:90px">'+wkLabel(wk)+'</th>').join('');
   const colSpan=weekKeys.length+4;
@@ -1919,7 +1925,11 @@ function renderTrendProduct(){
   // Aggregate by product / rowId per column
   const ensure=(o,k)=>{if(!o[k])o[k]={s:0,r:0,p:0,mp:0,uc:0,imp:0};return o[k]};
   const prodCol={};const prodSort={};const byA={};
-  AD.forEach(r=>{if(!dd.includes(r.date))return;const ck=colKey(r.date);const p=r.product||'기타';
+  // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (상품별 종합·소계도 필터 결과 기준)
+  const tpKw=(document.getElementById('tpFilter')?.value||'').trim().toLowerCase();
+  AD.forEach(r=>{if(!dd.includes(r.date))return;
+    if(tpKw){const _nm=((r.campaign_name||'')+' '+(MODE==='cr'?(r.ad_name||''):(r.adset_name||''))+' '+rowId(r)).toLowerCase();if(!_nm.includes(tpKw))return}
+    const ck=colKey(r.date);const p=r.product||'기타';
     if(!prodCol[p])prodCol[p]={};const pc=ensure(prodCol[p],ck);
     pc.s+=r.spend;pc.r+=r.revenue;pc.p+=r.profit;pc.mp+=r.results_mp;pc.uc+=r.unique_clicks;pc.imp+=(r.impressions||0);
     if(prodSort[p]===undefined)prodSort[p]=0;
@@ -2146,7 +2156,10 @@ function renderTrendInfluencer(){
 function renderChange(){
   const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
-  const list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
+  let list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
+  // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (종합 합계도 필터 결과 기준)
+  const tKw=(document.getElementById('cFilter')?.value||'').trim().toLowerCase();
+  if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
   const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
   const totD={};dd.forEach(d=>{let s=0,r=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});totD[d]={s,r}});
   let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
