@@ -1565,11 +1565,12 @@ function renderTrend(opts){
   const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
   const chgD2={};ROWS.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
-  // 증감액(증액/감액) 테두리: 증감액을 마킹한 '그 날짜' 셀에 영구 표시 (per-date r.highlight = perfTbl 영구기록 기준).
-  //   과거에 증감액한 모든 날짜의 셀에 퍼센트별 색 링이 계속 유지됨(전체삭제·날짜경과와 무관). box-shadow inset 으로 col-yday 등과 공존.
-  //   off(세트 OFF)도 동일하게 '그 날짜' 셀에 검은색 링을 그림(HL_CONFIG.off.bg='#000000'). 단 '증감' ✓ 컬럼(CHG_HL)에는 포함하지 않음.
-  const BORDER_HL=new Set([...CHG_HL,'off']);
-  const chgBorder=(h)=>(showChg&&h&&BORDER_HL.has(h)&&HL_CONFIG[h])?' style="box-shadow:inset 0 0 0 3px '+HL_CONFIG[h].bg+'"':'';
+  // 증감액(증액/감액) 테두리: 실제 메타 예산(budget)의 전일 대비 변화로 자동 판정.
+  //   예산은 수동 설정값이라 값이 바뀌면 = 사람이 증액/감액한 것. 과거 보유한 모든 날짜 셀에 퍼센트별 색 링 표시.
+  //   색: +20%↑=up20, +변화=up10, -변화=down10, -20%↓=down20. |변화율|<BUD_MIN_PCT% 는 노이즈(gl/vn 국가합산·환산 흔들림)로 무시.
+  //   off(세트 OFF)는 예산 값이 그대로 남아 예산비교로 감지 불가 → 기존 수동 마킹(highlight==='off')으로 검은 링 유지.
+  const BUD_MIN_PCT=3;
+  const budBorderKey=(pct)=>pct>=20?'up20':pct>=BUD_MIN_PCT?'up10':pct<=-20?'down20':pct<=-BUD_MIN_PCT?'down10':null;
   const AUX=opts.metric==='aux';  // 보조지표 모드: 셀에 CTR/CVR/CPM/CPP/구매당단가 표시
   const byA={};
   ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
@@ -1612,7 +1613,9 @@ function renderTrend(opts){
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
       if(isHidden(a))return;
-      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const cb=chgBorder(d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight));if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
+      // 세트별 예산 변화 테두리 색 맵: 보유한 모든 날짜를 오름차순으로 전일(직전 보유일) 대비 비교.
+      const budBc={};{let pv=null;Object.keys(a.d).sort().forEach(d=>{const b=+(a.d[d].budget)||0;if(b>0){if(pv>0&&b!==pv){const k=budBorderKey((b-pv)/pv*100);if(k)budBc[d]=HL_CONFIG[k].bg}pv=b}})}
+      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const mk=d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight);let bcol=budBc[d];if(!bcol&&mk==='off')bcol=HL_CONFIG.off.bg;const cb=(showChg&&bcol)?' style="box-shadow:inset 0 0 0 3px '+bcol+'"':'';if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}
       // 메모(추이차트): HL_MEMO(하이라이트 테이블)에서 읽고 saveTrendMemo로 저장.
