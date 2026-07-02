@@ -30,6 +30,8 @@ from decimal import Decimal
 
 import requests as req_lib
 
+from budget_history import fetch_budget_events, BudgetHistory
+
 # =========================================================
 # 로깅 설정
 # =========================================================
@@ -67,6 +69,10 @@ ACCOUNT_CURRENCY = {
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 ALL_AD_ACCOUNTS = list(META_TOKENS.keys())
+
+# 세트→캠페인 매핑 (fetch_adset_budgets 가 채움). activities 의 캠페인예산(CBO) 이벤트를
+# 하위 세트에 적용할 때 사용.
+ADSET_CAMPAIGN = {}
 
 MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME = os.environ.get("MIXPANEL_USERNAME", "")
@@ -430,7 +436,8 @@ def parse_insights(rows, date_str, date_obj, ad_account_id=""):
 
 
 def fetch_adset_budgets(ad_account_id):
-    """광고 세트별 일 예산 조회 (ASC 캠페인 예산 폴백 포함)"""
+    """광고 세트별 일 예산 조회 (ASC 캠페인 예산 폴백 포함).
+       부수효과: ADSET_CAMPAIGN(세트→캠페인) 맵을 채운다 → activities CBO 이벤트 적용용."""
     url = f"{META_BASE_URL}/{ad_account_id}/adsets"
     params = {
         "fields": "id,daily_budget,campaign_id",
@@ -451,6 +458,8 @@ def fetch_adset_budgets(ad_account_id):
             campaign_id = row.get("campaign_id", "")
             if not asid:
                 continue
+            if campaign_id:
+                ADSET_CAMPAIGN[asid] = campaign_id
             try:
                 budget_int = int(float(budget)) if budget else 0
             except Exception:
@@ -812,6 +821,25 @@ def main():
     log.info(f"✅ 예산: {len(budget_map)}개 세트")
 
     # =======================================================
+    # 3.5) 예산 변경이력(activities) → 일자별 예산 재구성기
+    #   현재값만 조회하면 최근 예산이 평탄화돼 증감액 테두리가 사라진다.
+    #   activities 로 '그 날짜에 설정돼 있던 실제 예산'을 복원한다(ABO+CBO).
+    # =======================================================
+    log.info(f"\n3.5단계: 예산 변경이력(activities) 수집")
+    bud_hist = BudgetHistory(KST)
+    bud_hist.set_adset_campaign(ADSET_CAMPAIGN)
+    _act_since = (DATA_REFRESH_START - timedelta(days=2)).replace(tzinfo=KST).timestamp()
+    _act_until = (TODAY + timedelta(days=1)).replace(tzinfo=KST).timestamp()
+    _act_total = 0
+    for acc in ALL_AD_ACCOUNTS:
+        evs = fetch_budget_events(META_BASE_URL, acc, get_token(acc),
+                                  _act_since, _act_until, req_lib, log)
+        bud_hist.add_events(evs)
+        _act_total += len(evs)
+        log.info(f"  📈 {acc}: 예산변경 {len(evs)}건")
+    log.info(f"✅ 예산 변경이력: 총 {_act_total}건 (세트예산 {sum(len(v) for v in bud_hist.adset_ev.values())} · 캠페인예산 {sum(len(v) for v in bud_hist.camp_ev.values())})")
+
+    # =======================================================
     # 4) Mixpanel 수집
     # =======================================================
     log.info(f"\n4단계: Mixpanel 수집 ({REFRESH_DAYS}일)")
@@ -948,14 +976,16 @@ def main():
 
     # ── only-raise 가드용: 현재 저장된 귀속(results_mp/revenue) 미리 읽기 ──
     #   부실/부분 실패한 Mixpanel fetch 가 이미 정상인 과거 귀속을 '낮추지' 못하게 한다.
-    #   (spend/meta/budget 등 Meta-side 필드는 항상 최신값으로 갱신됨)
+    #   (spend/meta 등 Meta-side 지표는 항상 최신값으로 갱신됨)
+    #   ※ budget 은 예외 — 아래 '예산 스냅샷 보존' 참고. 과거 날짜 예산은 그날 값으로 고정.
     prev_attr = {}
+    prev_budget = {}  # (date, adset_id) → 기존 저장된 일예산 (증감액 테두리용 일자별 스냅샷 보존)
     _ps = DATA_REFRESH_START.strftime("%Y-%m-%d")
     _pe = TODAY.strftime("%Y-%m-%d")
     _off = 0
     while True:
-        _u = (f"{sb.base_url}/rest/v1/ad_performance_daily?select=date,adset_id,results_mp,revenue"
-              f"&date=gte.{_ps}&date=lte.{_pe}&limit=1000&offset={_off}")
+        _u = (f"{sb.base_url}/rest/v1/ad_performance_daily?select=date,adset_id,results_mp,revenue,budget"
+              f"&date=gte.{_ps}&date=lte.{_pe}&order=date.asc,adset_id.asc&limit=1000&offset={_off}")
         try:
             _chunk = req_lib.get(_u, headers={**sb.headers, "Prefer": ""}, timeout=60).json()
         except Exception as _e:
@@ -964,8 +994,10 @@ def main():
         if not isinstance(_chunk, list) or not _chunk:
             break
         for _row in _chunk:
-            prev_attr[(_row.get("date"), str(_row.get("adset_id")))] = (
+            _k = (_row.get("date"), str(_row.get("adset_id")))
+            prev_attr[_k] = (
                 int(_row.get("results_mp") or 0), float(_row.get("revenue") or 0.0))
+            prev_budget[_k] = int(_row.get("budget") or 0)
         if len(_chunk) < 1000:
             break
         _off += 1000
@@ -1014,9 +1046,21 @@ def main():
             roas = (revenue / spend * 100) if spend > 0 else 0
             cvr = (mpc / mr["unique_clicks"] * 100) if mr["unique_clicks"] > 0 and mpc > 0 else 0
 
-            # 예산
-            budget_raw = budget_map.get(asid, 0)
-            budget_val = round(budget_raw / bdiv * fx) if budget_raw > 0 else 0
+            # 예산 — 증감액 테두리를 위해 '그 날짜에 실제 설정돼 있던 값'으로 채운다.
+            #   1순위: activities 재구성(해당 세트에 예산 변경이력이 있으면 그 날짜값 복원).
+            #   2순위(폴백): 변경이력 없음/activities 실패 → 일자별 스냅샷 보존
+            #     (오늘만 현재값, 과거는 기존 저장값 유지 → 평탄화 방지).
+            budget_raw_cur = budget_map.get(asid, 0)
+            if bud_hist.has_events_for(asid):
+                b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
+                budget_val = round(b_raw / bdiv * fx) if b_raw > 0 else 0
+            else:
+                budget_cur = round(budget_raw_cur / bdiv * fx) if budget_raw_cur > 0 else 0
+                if iso_date == _pe:
+                    budget_val = budget_cur
+                else:
+                    _pb = prev_budget.get((iso_date, str(asid)))
+                    budget_val = _pb if _pb else budget_cur
 
             # 상품 추출
             product = extract_product(mr["adset_name"], mr["campaign_name"])

@@ -1567,13 +1567,20 @@ function renderTrend(opts){
   const showChg=MODE==='kr'||MODE==='gl';
   // 증감액(증액/감액) 테두리: 실제 메타 예산(budget)의 전일 대비 변화로 자동 판정.
   //   예산은 수동 설정값이라 값이 바뀌면 = 사람이 증액/감액한 것. 과거 보유한 모든 날짜 셀에 퍼센트별 색 링 표시.
-  //   색: +20%↑=up20, +변화=up10, -변화=down10, -20%↓=down20. |변화율|<BUD_MIN_PCT% 는 노이즈(gl/vn 국가합산·환산 흔들림)로 무시.
+  //   색: +20%↑=up20, +변화=up10, -변화=down10, -20%↓=down20. |변화율|<BUD_MIN_PCT% 는 노이즈로 무시.
+  //   BUD_MIN_PCT: KR·GL전체는 예산이 정확값(정수 KRW / country분할 합=원예산)이라 소액 변화도 실제 → 0.5%.
+  //     GL 특정국가 선택 시엔 예산이 '지출비중 분할'이라 지출흔들림 노이즈가 크므로 3% 유지.
   //   off(세트 OFF)는 예산 값이 그대로 남아 예산비교로 감지 불가 → 기존 수동 마킹(highlight==='off')으로 검은 링 유지.
-  const BUD_MIN_PCT=3;
+  const budExact=(MODE==='kr')||(MODE==='gl'&&COUNTRY==='ALL');
+  const BUD_MIN_PCT=budExact?0.5:3;
   const budBorderKey=(pct)=>pct>=20?'up20':pct>=BUD_MIN_PCT?'up10':pct<=-20?'down20':pct<=-BUD_MIN_PCT?'down10':null;
   const AUX=opts.metric==='aux';  // 보조지표 모드: 셀에 CTR/CVR/CPM/CPP/구매당단가 표시
   const byA={};
   ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
+  // 예산 변화 판정용 '전체 히스토리' 맵 (표시기간 dd 밖의 직전일도 포함해야 가장 오래된 열의 증감도 판정 가능).
+  //   dd 로만 비교하면 표시구간 첫 열은 비교 대상(직전일)이 없어 항상 테두리가 안 떴음.
+  const budHist={};
+  ROWS.forEach(r=>{if(accFilter&&!accFilter(r))return;const b=+(r.budget)||0;if(b>0){const rid=rowId(r);(budHist[rid]||(budHist[rid]={}))[r.date]=b}});
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
   const tKw=(document.getElementById(filterElId).value||'').trim().toLowerCase();
@@ -1613,8 +1620,9 @@ function renderTrend(opts){
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
       if(isHidden(a))return;
-      // 세트별 예산 변화 테두리 색 맵: 보유한 모든 날짜를 오름차순으로 전일(직전 보유일) 대비 비교.
-      const budBc={};{let pv=null;Object.keys(a.d).sort().forEach(d=>{const b=+(a.d[d].budget)||0;if(b>0){if(pv>0&&b!==pv){const k=budBorderKey((b-pv)/pv*100);if(k)budBc[d]=HL_CONFIG[k].bg}pv=b}})}
+      // 세트별 예산 변화 테두리 색 맵: 전체 히스토리(budHist)를 오름차순으로 전일(직전 보유일) 대비 비교.
+      //   테두리는 표시기간(dd) 내 날짜에만 그리되, 비교 기준일은 dd 밖(직전일)도 허용 → 첫 열 증감도 표시.
+      const budBc={};{const bh=budHist[a.id]||{};let pv=null;Object.keys(bh).sort().forEach(d=>{const b=bh[d];if(pv>0&&b!==pv){const k=budBorderKey((b-pv)/pv*100);if(k&&dd.includes(d))budBc[d]=HL_CONFIG[k].bg}pv=b})}
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const mk=d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight);let bcol=budBc[d];if(!bcol&&mk==='off')bcol=HL_CONFIG.off.bg;const cb=(showChg&&bcol)?' style="box-shadow:inset 0 0 0 3px '+bcol+'"':'';if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       let chgTd='';if(showChg){const ch=chgD2[a.id];if(ch){const cfg=HL_CONFIG[ch]||{};const isUp=cfg.pct!=null&&cfg.pct>0;const color=isUp?'#16a34a':(cfg.pct!=null&&cfg.pct<0?'#dc2626':'#2563eb');chgTd='<td style="text-align:center;font-size:13px;font-weight:700;color:'+color+'" title="'+d2Day+' '+(cfg.label||ch)+'">✓</td>'}else{chgTd='<td></td>'}}

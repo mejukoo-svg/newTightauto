@@ -23,6 +23,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
 import requests as req_lib
 
+from budget_history import fetch_budget_events, BudgetHistory
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logging.getLogger("stripe").setLevel(logging.WARNING)  # Stripe SDK 요청 로그(페이지당 2줄) 소음 억제
 log = logging.getLogger(__name__)
@@ -50,6 +52,9 @@ META_TOKEN_DEFAULT = META_TOKEN_1
 META_API_VERSION = "v21.0"
 META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 ALL_AD_ACCOUNTS = list(META_TOKENS.keys())
+
+# 세트→캠페인 매핑 (fetch_adset_budgets 가 채움). activities CBO(캠페인예산) 이벤트 적용용.
+ADSET_CAMPAIGN = {}
 
 # 계정별 기본 통화 — 글로벌(해외) 계정은 절대 KRW가 아니다.
 # 세트/캠페인명에 시장 키워드가 없을 때의 기본값이자, 'kr/한국/국내'(예: '한국연예인' 소구)
@@ -324,6 +329,8 @@ def fetch_adset_budgets(ad_account_id):
         for row in data.get('data', []):
             asid = row.get('id', '')
             budget = row.get('daily_budget', '0')
+            cid = row.get('campaign_id', '')
+            if asid and cid: ADSET_CAMPAIGN[asid] = cid  # activities CBO 이벤트 적용용
             try: results[asid] = int(float(budget)) if budget else 0
             except: results[asid] = 0
         next_url = data.get('paging', {}).get('next')
@@ -570,6 +577,21 @@ def main():
         time.sleep(1)
     log.info(f"✅ 예산: {len(budget_map)}개")
 
+    # 2.6) 예산 변경이력(activities) → 일자별 예산 재구성기 (평탄화 방지)
+    log.info("\n2.6단계: 예산 변경이력(activities) 수집")
+    bud_hist = BudgetHistory(KST)
+    bud_hist.set_adset_campaign(ADSET_CAMPAIGN)
+    _act_since = (DATA_REFRESH_START - timedelta(days=2)).replace(tzinfo=KST).timestamp()
+    _act_until = (TODAY + timedelta(days=1)).replace(tzinfo=KST).timestamp()
+    _act_total = 0
+    for acc_id in ALL_AD_ACCOUNTS:
+        evs = fetch_budget_events(META_BASE_URL, acc_id, get_token(acc_id),
+                                  _act_since, _act_until, req_lib, log)
+        bud_hist.add_events(evs)
+        _act_total += len(evs)
+        log.info(f"  📈 {acc_id}: 예산변경 {len(evs)}건")
+    log.info(f"✅ 예산 변경이력: 총 {_act_total}건")
+
     time.sleep(30)  # Meta rate limit cooldown
 
     # 3) Mixpanel
@@ -736,6 +758,27 @@ def main():
                 float(e.get('revenue_usd') or 0.0), int(e.get('results_mp') or 0))
         log.info(f"  🛡️ 보존맵: {len(prev_map)}행 로드")
 
+    # 5-0b) 예산 '일자별 스냅샷' 보존맵 — 증감액 테두리용.
+    #   Meta API 는 '현재' 예산만 주므로 오늘 날짜만 현재값으로 갱신하고,
+    #   과거 날짜는 기존 저장값을 유지한다(매 실행마다 현재값으로 덮으면 최근 예산이
+    #   평탄화돼 전일 대비 증감이 사라지고 대시보드 추이차트 테두리가 안 그려짐).
+    prev_budget = {}  # (date, adset_id, country) → 기존 저장된 country 분할 예산(USD)
+    _bs = DATA_REFRESH_START.strftime('%Y-%m-%d'); _be = TODAY.strftime('%Y-%m-%d')
+    _boff = 0
+    while True:  # PostgREST 1000행 캡 → 페이지네이션 (10일 × country 분할이면 초과 가능)
+        _bchunk = sb.select("global_ad_performance_daily",
+                            f"select=date,adset_id,country,budget_usd&date=gte.{_bs}&date=lte.{_be}"
+                            f"&order=date.asc,adset_id.asc,country.asc&limit=1000&offset={_boff}")
+        if not isinstance(_bchunk, list) or not _bchunk:
+            break
+        for e in _bchunk:
+            prev_budget[(str(e.get('date')), str(e.get('adset_id')), str(e.get('country') or ''))] = \
+                float(e.get('budget_usd') or 0.0)
+        if len(_bchunk) < 1000:
+            break
+        _boff += 1000
+    log.info(f"  🛡️ 예산 스냅샷맵: {len(prev_budget)}행 로드")
+
     # 5) 병합 — (date, adset_id, country) 그레인.
     #    지출 country = Meta breakdown(ISO), 매출 country = mp_country_code(ISO). 둘을 full-outer 합집합.
     #    통화는 서비스 접미사(스토어프론트) 기준 → USD 환산. country 는 ISO 코드 그대로 저장. 한국(KR) 제외.
@@ -779,10 +822,22 @@ def main():
                 roas = (revenue / spend * 100) if spend > 0 else 0
                 uclk = mr['unique_clicks'] if mr else 0
                 cvr = (mpc / uclk * 100) if uclk > 0 and mpc > 0 else 0
-                # 예산: adset 일예산을 country 지출 비중으로 비례배분
+                # 예산: adset 일예산(그 날짜 실제값)을 country 지출 비중으로 비례배분.
+                #   1순위: activities 재구성(변경이력 있으면 그 날짜 예산 raw=cents 복원).
+                #   2순위(폴백): 변경이력 없음/activities 실패 → 일자별 스냅샷 보존
+                #     (오늘만 현재값, 과거는 기존 저장값 유지 → 평탄화 방지).
                 tot_sp = sum(x['spend'] for x in cc_rows.values())
-                budget_raw = budget_map.get(asid, 0)
-                budget_val = round((budget_raw / 100) * (spend / tot_sp), 2) if (budget_raw > 0 and tot_sp > 0) else 0
+                budget_raw_cur = budget_map.get(asid, 0)
+                if bud_hist.has_events_for(asid):
+                    b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
+                    budget_val = round((b_raw / 100) * (spend / tot_sp), 2) if (b_raw > 0 and tot_sp > 0) else 0
+                else:
+                    budget_cur = round((budget_raw_cur / 100) * (spend / tot_sp), 2) if (budget_raw_cur > 0 and tot_sp > 0) else 0
+                    if iso_date == _be:
+                        budget_val = budget_cur
+                    else:
+                        _pb = prev_budget.get((iso_date, str(asid), str(cc)))
+                        budget_val = _pb if _pb else budget_cur
                 product = extract_product(r0['adset_name'], r0['campaign_name'])
                 records.append({
                     'date': iso_date, 'adset_id': asid,
