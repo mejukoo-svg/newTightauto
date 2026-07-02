@@ -434,8 +434,10 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
             f"[세트 데이터 · 최근 {ADVICE_DAYS}일 · 지출 큰 순]\n{sets_to_text(items, cur)}"
             f"{ctx_block}\n\n[플레이북]\n{playbook}")
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    # max_tokens는 thinking+본문을 함께 덮는 하드 상한. adaptive thinking이 수천 토큰을
+    # 쓰므로 1500은 thinking 도중 잘려 본문이 빈다(→조언 미게시). 넉넉히 16000.
     resp = client.messages.create(
-        model="claude-opus-4-8", max_tokens=1500,
+        model="claude-opus-4-8", max_tokens=16000,
         thinking={"type": "adaptive"}, output_config={"effort": "medium"},
         system=ADV_SYSTEM, messages=[{"role": "user", "content": user}])
     txt = "".join(b.text for b in resp.content if b.type == "text").strip()
