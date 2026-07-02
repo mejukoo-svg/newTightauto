@@ -310,10 +310,14 @@ ADV_SRC = {
     "gl": ("global_ad_performance_daily", "global_adset_highlights", "spend_usd", "revenue_usd", "budget_usd", "$"),
 }
 
+HIST_DAYS = 14  # 증감액 액션 이력 조회 창 (7일 성과요약보다 길게 봐야 '그 조치가 먹혔는지' 판단 가능)
+
 def gather_sets(region, dc, days=ADVICE_DAYS):
-    """최근 days일 세트별 성과 + 메모/증감액표시(highlight) 수집."""
+    """세트별 최근 7일 성과 요약 + 최근 14일 증감액 액션 이력(액션 시점 ROAS 포함) 수집.
+    이력(acts)으로 '과거 증감액이 실제로 먹혔는지'를 추세와 대조해 판단할 수 있게 한다."""
     table, hl_table, sf, rf, bf, cur = ADV_SRC[region]
-    since = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=days - 1)).isoformat()
+    win = max(days, HIST_DAYS)
+    since = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=win - 1)).isoformat()
     rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
                      f"&select=date,adset_id,adset_name,product,{bf},{sf},{rf},highlight,memo"
                      f"&order=date.asc")
@@ -321,12 +325,13 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
     for r in rows:
         aid = r.get("adset_id") or "?"
         a = agg.setdefault(aid, {"name": r.get("adset_name") or aid, "product": r.get("product") or "",
-                                 "budget": 0, "days": {}, "hl": "", "memo": ""})
+                                 "budget": 0, "days": {}, "acts": {}, "hl": "", "memo": ""})
         a["name"] = r.get("adset_name") or a["name"]
         a["product"] = r.get("product") or a["product"]
         a["budget"] = max(a["budget"], r.get(bf) or 0)
         a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0)
         if r.get("highlight"):
+            a["acts"][r["date"]] = r["highlight"]  # 날짜별 증감액 액션(중복행 대비 date로 dedup)
             a["hl"] = r["highlight"]
         if r.get("memo"):
             a["memo"] = r["memo"]
@@ -338,25 +343,36 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
                 agg[aid]["hl"] = r["highlight"]
             if r.get("memo"):
                 agg[aid]["memo"] = r["memo"]
-    # 요약 라인 생성 (지출 큰 순, 최대 40세트)
+    # 요약 라인 생성 (지출 큰 순, 최대 40세트) — 성과는 최근 7일, 이력은 최근 14일
     items = []
     for aid, a in agg.items():
         dts = sorted(a["days"])
-        sp = sum(a["days"][d][0] for d in dts)
-        rv = sum(a["days"][d][1] for d in dts)
+        last7 = dts[-ADVICE_DAYS:]
+        sp = sum(a["days"][d][0] for d in last7)
+        rv = sum(a["days"][d][1] for d in last7)
         if sp <= 0:
             continue
         roas7 = round(rv / sp * 100)
         last3 = dts[-3:]
         trend = "→".join(f"{round(a['days'][d][1]/a['days'][d][0]*100) if a['days'][d][0] else 0}" for d in last3)
+        # 증감액 액션 이력: 'MMDD액션@그날ROAS' 시간순 (조치가 먹혔는지 = 이후 추세와 대조)
+        hist = []
+        for d in sorted(a["acts"]):
+            hl = a["acts"][d]
+            sp_d, rv_d = a["days"].get(d, (0, 0))
+            roas_d = round(rv_d / sp_d * 100) if sp_d else 0
+            hist.append(f"{d[5:]}{HL_SHORT.get(hl, hl)}@{roas_d}%")
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
-                      "hl": a["hl"], "memo": a["memo"], "ndays": len(dts), "_sp": sp})
+                      "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist), "ndays": len(last7), "_sp": sp})
     items.sort(key=lambda x: -x["_sp"])
     return items[:40], cur
 
 HL_KO = {"up10": "증액10%", "up20": "증액20%", "up": "증액", "down10": "감액10%",
-         "down20": "감액20%", "down": "감액", "off": "OFF"}
+         "down20": "감액20%", "down": "감액", "off": "OFF", "watch": "관찰"}
+# 이력용 축약 라벨 (14일 액션 타임라인, 짧게)
+HL_SHORT = {"up10": "증10", "up20": "증20", "up": "증", "down10": "감10",
+            "down20": "감20", "down": "감", "off": "OFF", "watch": "관찰"}
 
 def sets_to_text(items, cur):
     lines = []
@@ -366,6 +382,8 @@ def sets_to_text(items, cur):
             tag.append("조치:" + HL_KO.get(s["hl"], s["hl"]))
         if s["memo"]:
             tag.append("메모:" + s["memo"][:50])
+        if s.get("hist"):
+            tag.append("이력:" + s["hist"])  # 최근 14일 증감액 액션@그날ROAS (조치 효과 판단용)
         tagstr = (" | " + " · ".join(tag)) if tag else ""
         lines.append(f"- {s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
                      f"{ADVICE_DAYS}일ROAS {s['roas7']}%(지출{cur}{s['sp']:,}) · "
@@ -375,18 +393,28 @@ def sets_to_text(items, cur):
 ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 [플레이북]의 기준을 그대로 적용해,
 [세트 데이터]와 각 세트의 '조치(증감액 표시)·메모'를 보고 '오늘의 증감액 조언'을 한국어로 작성한다.
 
+전체 스탠스(먼저 판단해 첫 줄에 모드를 밝힌다):
+- 종합 ROAS 전일 대비 변화로 모드를 정한다. 변화가 ±2%p 이내면 '보합'으로 진단하고 과장하지 마라(보합을 '뚜렷한 하락'으로 몰지 말 것).
+- 계정이 하락 흐름(특히 플레이북 6-3의 화~목 하락 구간)이면 '방어 모드'다. 단, 방어 모드는 '가만히 있기'가 아니다 → 증액은 억제하되 감액·OFF는 오히려 더 적극적으로 발굴해 하방을 방어한다(플레이북 '화~목 하락 → 적극적 OFF·감액').
+- 상승 흐름(목~일)이면 '공격 모드' → 증액·복증을 적극 발굴한다.
+
 규칙:
-- 형식(이모지/굵게 없이 간결한 텍스트, Slack 스레드 댓글용):
-  · 한 줄 전체 흐름 진단 (어제 종합 ROAS·추세 기반, 플레이북 '흐름 우선' 원칙)
-  · 🔺 증액 후보: 세트명 + 근거(ROAS·추세·예산) + 권고 폭(플레이북 기준: 안정 10%/상승 20%, 200%+는 복증 고려)
-  · 🔻 감액·OFF 후보: 세트명 + 근거(7일ROAS<100%+연속적자 등 OFF 3기준)
+- 형식(이모지 헤더만, 굵게 없이 간결한 텍스트, Slack 스레드 댓글용):
+  · 한 줄 전체 흐름 진단 (어제 종합 ROAS·추세 + 모드(보합/방어/공격)를 명시)
+  · 🔺 점진 증액 후보: 세트명 + 근거(ROAS·추세·예산) + 폭(플레이북: 150%대 안정 +10% / 150~200% 상승 +20%, 일예산 40만원↑ 대형은 +10%로 하향). 방어·보합기엔 질 우선으로 선별.
+  · 🔁 복제증액(복증) 후보: 7일 ROAS 200%+ (또는 190%+ & 확실한 상승) **그리고** 최근 3~4일 연속 안정 세트만. 200%+는 그냥 % 증액하면 효율이 무너지므로 복제로 스케일한다. 폭은 스윗스팟 경로(처음 2배 → 안정되면 3·4배 순차). 반드시 신중히: **복증 22개 중 20개가 원본보다 효율 하락(구조적)** → 하루 스파이크·0%가 섞인 변동 세트는 제외, 2일차 데이터만으론 금지, 즉흥 실행 말고 '회의 후 실행'으로 제안한다. 방어·하락기엔 즉시 말고 흐름 컨펌 후(금·토 공격일 권장)로 타이밍을 명시. 이미 복제본(이름 x2/x3/x4)이 효율 하락 중이면 추가 복증 말고 정리로 돌린다.
+  · 🔻 감액·OFF 후보: 세트명 + 근거. 여기는 빠뜨리지 말고 망라한다 — 7일ROAS 100~130% + 최근 3일 하락추세 = 10% 감액 후보, 7일ROAS<100% + 3일 연속 적자(OFF 3기준 C1·C2·C3 중 2개↑) = OFF 또는 20% 감액. 특히 '조치' 태그가 없는(미조치) 하락 세트를 놓치지 마라.
+  · 👀 지켜볼 것: 데이터 얇음(런칭 3일내)·이미 조치한 세트의 효과 관찰·조치와 데이터가 모순되는 세트 등
 - 끄기/증액/감액 대상 세트를 언급할 때는 **반드시 세트명과 세트ID를 함께** 표기한다. 예: `무당_260507_aiUGC정확도 (ID 120243753711540177)`. ID는 [세트 데이터]에 주어진 값을 그대로 쓴다.
-  · 👀 지켜볼 것: 데이터 얇음(런칭 3일내)·이미 조치한 세트의 효과 관찰 등
-- 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라.
+- 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
+- 각 세트의 '이력:'은 최근 14일 증감액 액션과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액, 그날 ROAS 172%·110%). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
+  · 증액 후 며칠 뒤 ROAS가 하락했으면 '증액 안 먹힘 → 되돌림/관망', 감액 후 회복했으면 '유효'.
+  · **같은 액션(예: 증액20%)을 반복했는데도 계속 하락하면** 그 패턴을 명시적으로 지적하고, 증감액 손장난 대신 다른 처방(소재 수혈·타겟 제외·OFF 등 플레이북 5·9장)을 권하라.
+  · 과거에 실패한 액션을 그대로 반복 권고하지 마라. 근거로 이력의 날짜·ROAS를 인용하라.
 - [이전 스레드 토론]이 주어지면 반드시 참고: 내가 지난 번에 한 조언과 그 뒤 사람들의 코멘트·결정을 이어받아라.
   지난 권고가 실행/반박/보류됐는지 추적하고, 사람의 피드백과 충돌하면 그 의견을 우선 존중하며, 같은 말 반복하지 말고 후속 관점을 더해라.
 - 추세로 판단(하루 반등/적자에 속지 말 것). 단정과 추정을 구분. 세트명은 실제 이름 그대로.
-- 후보가 없으면 '특이 없음'. 전체를 12줄 이내로, 스캔 가능하게."""
+- 증액은 선별적으로(질 우선), 감액·OFF는 후보를 빠뜨리지 말고 충분히(하방 방어) 담는다. 스캔 가능한 선에서 대략 20줄 이내로 하되, 후보를 억지로 줄여 누락시키지 마라. 진짜 후보가 없을 때만 '특이 없음'."""
 
 def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     if not ANTHROPIC_KEY or not playbook:
