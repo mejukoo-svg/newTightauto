@@ -2329,9 +2329,9 @@ function renderDateTab(){
   let ed=selEnd.value||DATES[0];
   // 시작일이 종료일보다 크면 자동으로 swap
   if(sd>ed){[sd,ed]=[ed,sd];selStart.value=sd;selEnd.value=ed}
-  // 추이차트 하이라이트 동기화 — 보는 기간에 '오늘'이 포함되면 현재 마킹(HIGHLIGHTS)을 행에 반영(추이차트 오늘 셀과 동일). 과거 날짜만 보면 그날 기록(r.highlight)만 표시.
-  const _td=new Date();const todayStr=_td.getFullYear()+'-'+String(_td.getMonth()+1).padStart(2,'0')+'-'+String(_td.getDate()).padStart(2,'0');
-  const rangeHasToday=(sd<=todayStr&&todayStr<=ed);
+  // 추이차트 하이라이트 동기화 — 세트 id 기준으로 추이차트와 동일하게 표시.
+  //   현재 마킹(HIGHLIGHTS[rid])을 보는 기간과 무관하게 항상 우선 사용, 없으면 그 날짜 기록(r.highlight)으로 폴백.
+  //   (이전엔 기간에 '오늘'이 포함될 때만 HIGHLIGHTS 반영 → 기본값 '어제' 뷰에선 추이차트 색과 어긋났음)
   // 안내 문구
   const dayCount=Math.round((new Date(ed)-new Date(sd))/864e5)+1;
   const dtInfo=document.getElementById('dtInfo');
@@ -2478,7 +2478,7 @@ function renderDateTab(){
 
   // 데이터 rows
   rows.forEach(r=>{
-    const rid=rowId(r);let hl=r.highlight;if(rangeHasToday&&HIGHLIGHTS[rid])hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
+    const rid=rowId(r);let hl=HIGHLIGHTS[rid]||r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
