@@ -100,6 +100,8 @@ DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 # 환율 폴백
 FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5}
 CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국"}
+# 소재(ad_id) → 캠페인명 (2단계 meta_data 로 채움). MP 결제의 통화를 캠페인명으로 판별할 때 사용.
+AD_CAMPAIGN_NAME = {}
 
 # country(mp_country_code) 행 단위 통화 보정 — 세트별(글로벌_세트별_supabase.py)과 동일.
 #   HK/TH 고객은 -tw 스토어프론트에서 결제해도 Stripe가 현지통화(HKD/THB)로 청구.
@@ -506,6 +508,14 @@ def main():
             log.info(f"  📊 {dk}: {len(day_rows)}건")
     log.info(f"✅ Meta: {sum(len(v) for v in meta_data.values())}건")
 
+    # 2.4) 소재→캠페인명 맵 — MP 결제의 통화를 캠페인명(hk/tw)으로 판별하기 위해 채운다.
+    for _rows in meta_data.values():
+        for _mr in _rows:
+            _aid = _mr.get('ad_id')
+            if _aid and _mr.get('campaign_name'):
+                AD_CAMPAIGN_NAME[str(_aid)] = _mr['campaign_name']
+    log.info(f"✅ 소재→캠페인명 맵: {len(AD_CAMPAIGN_NAME)}개")
+
     # 2.5) 예산 (adset 단위)
     log.info("\n2.5단계: 예산 조회")
     budget_map = {}
@@ -612,23 +622,18 @@ def main():
         if 'country' not in df_d.columns: df_d['country'] = ''
         df_d['country'] = df_d['country'].fillna('').astype(str).str.strip().str.upper()
 
-        # ★ 건별 실제 통화 확정 (2026-06-29) — 세트별 로더와 동일 체인.
-        #   ① MP '통화' 필드 → ② Stripe (amount,시각±1h) 매칭 → ③ 서비스 접미사 → ④ country 보정(HK→HKD,TH→THB) → ⑤ TWD.
-        _src_stat = {'explicit': 0, 'stripe': 0, 'suffix': 0, 'country_ovr': 0, 'default': 0}
+        # ★ 통화 확정 (2026-07-02 변경) — 세트별 로더와 동일: 캠페인명(hk/tw) 기준으로 통일.
+        #   우선순위: ① MP '통화' 프라퍼티(있으면 최우선) → ② 캠페인명 키워드(hk→HKD, tw→TWD, jp→JPY,
+        #            th→THB; 키워드 없으면 계정 기본 TWD). 결제의 소재(utm_content=ad_id)에 연결된 캠페인명 사용.
+        #   ★ 7월 이전 결제는 '통화' 프라퍼티가 없어 자동으로 ② 캠페인명 폴백으로 판별됨.
+        _src_stat = {'explicit': 0, 'campaign': 0}
         def _resolve_cur(row):
             ce = str(row.get('cur_explicit') or '').strip().upper()
             if ce in KNOWN_CURRENCIES:
                 _src_stat['explicit'] += 1; return ce
-            sc = resolve_currency_by_stripe(round(float(row.get('revenue') or 0)), int(row.get('ts') or 0))
-            if sc in KNOWN_CURRENCIES:
-                _src_stat['stripe'] += 1; return sc
-            sf = currency_from_suffix(row.get('서비스'))
-            if sf in KNOWN_CURRENCIES:
-                _src_stat['suffix'] += 1; return sf
-            co = COUNTRY_CURRENCY_OVERRIDE.get(str(row.get('country') or '').upper())
-            if co:
-                _src_stat['country_ovr'] += 1; return co
-            _src_stat['default'] += 1; return "TWD"
+            cn = AD_CAMPAIGN_NAME.get(str(row.get('utm_content') or ''), '')
+            _src_stat['campaign'] += 1
+            return detect_currency('', cn, None)   # 캠페인명 hk/tw → HKD/TWD (없으면 TWD)
         df_d['cur_eff'] = df_d.apply(_resolve_cur, axis=1)
         # 이벤트 단위로 USD 환산 후 (date, utm_content, country) 합산 — 이미 USD 이므로 병합단계 재환산 불필요.
         df_d['rev_usd'] = df_d.apply(lambda r: local_to_usd(float(r.get('revenue') or 0), r['cur_eff'], r['date']), axis=1)

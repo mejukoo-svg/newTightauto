@@ -109,6 +109,10 @@ DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 # 환율 폴백
 FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5}
 CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국"}
+# 통화 → country ISO 코드 (캠페인명 기반 country 분류에 사용). 캠페인 시장이 곧 country.
+CURRENCY_TO_ISO = {"TWD": "TW", "HKD": "HK", "JPY": "JP", "THB": "TH", "USD": "GLOBAL", "KRW": "KR"}
+# 세트(adset_id) → 캠페인명 (2단계 meta_data 로 채움). MP 결제의 시장/통화를 캠페인명으로 판별할 때 사용.
+ADSET_CAMPAIGN_NAME = {}
 STRIPE_CURRENCY_MAP = {"twd": "TW", "hkd": "HK", "jpy": "JP", "usd": "GLOBAL", "krw": "KR", "thb": "TH"}
 STRIPE_COUNTRY_NAMES = {"TW": "대만", "HK": "홍콩", "JP": "일본", "GLOBAL": "글로벌(USD)", "KR": "한국(KRW)", "TH": "태국"}
 STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100}
@@ -511,6 +515,18 @@ class SupabaseClient:
             time.sleep(0.5)
         return success
 
+    def delete(self, table, query):
+        """DELETE ... where <query>. query 예: 'date=eq.2026-07-01&adset_id=in.(1,2,3)'"""
+        url = f"{self.base_url}/rest/v1/{table}?{query}"
+        try:
+            resp = req_lib.delete(url, headers=self.headers, timeout=60)
+            if resp.status_code in [200, 204]:
+                return True
+            log.error(f"  ❌ delete: HTTP {resp.status_code} | {resp.text[:200]}")
+        except Exception as e:
+            log.error(f"  ❌ delete 예외: {e}")
+        return False
+
 
 # =========================================================
 # 메인
@@ -568,6 +584,14 @@ def main():
             meta_data[dk] = day_rows
             log.info(f"  📊 {dk}: {len(day_rows)}건")
     log.info(f"✅ Meta: {sum(len(v) for v in meta_data.values())}건")
+
+    # 2.4) 세트→캠페인명 맵 — MP 결제의 시장/통화를 캠페인명(hk/tw)으로 판별하기 위해 채운다.
+    for _rows in meta_data.values():
+        for _mr in _rows:
+            _asid = _mr.get('adset_id')
+            if _asid and _mr.get('campaign_name'):
+                ADSET_CAMPAIGN_NAME[str(_asid)] = _mr['campaign_name']
+    log.info(f"✅ 세트→캠페인명 맵: {len(ADSET_CAMPAIGN_NAME)}개")
 
     # 2.5) 예산
     log.info("\n2.5단계: 예산 조회")
@@ -717,25 +741,19 @@ def main():
         if 'country' not in df_d.columns: df_d['country'] = ''
         df_d['country'] = df_d['country'].fillna('').astype(str).str.strip().str.upper().replace('', 'XX')
 
-        # ★ 건별 실제 통화 확정 (2026-06-29) — country 일괄 보정(HK→HKD) 대신 결제건마다 진짜 통화로 환산.
-        #   우선순위: ① MP '통화' 필드(정확, 커버리지 ~12%) → ② Stripe (amount,시각±1h) 매칭(96%, 정확도 99%)
-        #            → ③ 서비스 접미사(-tw=TWD 등) → ④ country 보정(HK→HKD,TH→THB) → ⑤ TWD.
-        #   배경: HK 결제의 ~25%는 -tw 스토어프론트 TWD 청구라 country=HK 일괄 HKD(÷7.8)는 ~1.45배 과대.
-        _src_stat = {'explicit': 0, 'stripe': 0, 'suffix': 0, 'country_ovr': 0, 'default': 0}
+        # ★ 통화 확정 (2026-07-02 변경) — 캠페인명(hk/tw) 기준으로 통일.
+        #   우선순위: ① MP '통화' 프라퍼티(있으면 최우선, 정확) → ② 캠페인명 키워드(hk→HKD, tw→TWD,
+        #            jp→JPY, th→THB; 키워드 없으면 계정 기본 TWD).
+        #   결제의 세트(utm_term=adset_id)에 연결된 캠페인명으로 시장/통화를 판별한다.
+        #   ★ 7월 이전 결제는 '통화' 프라퍼티가 없어 자동으로 ② 캠페인명 폴백으로 판별됨(소재별과 동일).
+        _src_stat = {'explicit': 0, 'campaign': 0}
         def _resolve_cur(row):
             ce = str(row.get('cur_explicit') or '').strip().upper()
             if ce in KNOWN_CURRENCIES:
                 _src_stat['explicit'] += 1; return ce
-            sc = resolve_currency_by_stripe(round(float(row.get('revenue') or 0)), int(row.get('ts') or 0))
-            if sc in KNOWN_CURRENCIES:
-                _src_stat['stripe'] += 1; return sc
-            sf = currency_from_suffix(row.get('서비스'))
-            if sf in KNOWN_CURRENCIES:
-                _src_stat['suffix'] += 1; return sf
-            co = COUNTRY_CURRENCY_OVERRIDE.get(str(row.get('country') or '').upper())
-            if co:
-                _src_stat['country_ovr'] += 1; return co
-            _src_stat['default'] += 1; return "TWD"
+            cn = ADSET_CAMPAIGN_NAME.get(str(row.get('utm_term') or ''), '')
+            _src_stat['campaign'] += 1
+            return detect_currency('', cn, None)   # 캠페인명 hk/tw → HKD/TWD (없으면 TWD)
         df_d['cur_eff'] = df_d.apply(_resolve_cur, axis=1)
         # 이벤트 단위로 USD 환산 후 (date, utm_term, country) 합산 — 이미 USD 이므로 병합단계 재환산 불필요.
         df_d['rev_usd'] = df_d.apply(lambda r: local_to_usd(float(r.get('revenue') or 0), r['cur_eff'], r['date']), axis=1)
@@ -748,21 +766,25 @@ def main():
     # (Stripe 매출/통화인덱스는 위 4단계에서 이미 수집됨 — stripe_revenue 재사용)
 
     # 5-0) Mixpanel 수집 실패 날짜의 기존 매출 보존맵 로드 (0 덮어쓰기 방지)
+    #   country 분할 폐지(세트당 1레코드) → (date, adset_id) 그레인으로 기존 country 행들을 합산 보존.
     prev_map = {}
     if uncovered:
         _dlist = ",".join(sorted(uncovered))
         log.warning(f"  🛡️ 보존모드: {sorted(uncovered)} — 기존 매출/건수 유지(0 덮어쓰기 방지)")
+        _agg = defaultdict(lambda: [0.0, 0])
         for e in sb.select("global_ad_performance_daily",
-                           f"select=date,adset_id,country,revenue_usd,results_mp&date=in.({_dlist})"):
-            prev_map[(str(e.get('date')), str(e.get('adset_id')), str(e.get('country') or ''))] = (
-                float(e.get('revenue_usd') or 0.0), int(e.get('results_mp') or 0))
+                           f"select=date,adset_id,revenue_usd,results_mp&date=in.({_dlist})"):
+            _k = (str(e.get('date')), str(e.get('adset_id')))
+            _agg[_k][0] += float(e.get('revenue_usd') or 0.0)
+            _agg[_k][1] += int(e.get('results_mp') or 0)
+        prev_map = {k: (v[0], v[1]) for k, v in _agg.items()}
         log.info(f"  🛡️ 보존맵: {len(prev_map)}행 로드")
 
     # 5-0b) 예산 '일자별 스냅샷' 보존맵 — 증감액 테두리용.
     #   Meta API 는 '현재' 예산만 주므로 오늘 날짜만 현재값으로 갱신하고,
     #   과거 날짜는 기존 저장값을 유지한다(매 실행마다 현재값으로 덮으면 최근 예산이
     #   평탄화돼 전일 대비 증감이 사라지고 대시보드 추이차트 테두리가 안 그려짐).
-    prev_budget = {}  # (date, adset_id, country) → 기존 저장된 country 분할 예산(USD)
+    prev_budget = defaultdict(float)  # (date, adset_id) → 기존 저장 예산(USD) 합
     _bs = DATA_REFRESH_START.strftime('%Y-%m-%d'); _be = TODAY.strftime('%Y-%m-%d')
     _boff = 0
     while True:  # PostgREST 1000행 캡 → 페이지네이션 (10일 × country 분할이면 초과 가능)
@@ -772,89 +794,97 @@ def main():
         if not isinstance(_bchunk, list) or not _bchunk:
             break
         for e in _bchunk:
-            prev_budget[(str(e.get('date')), str(e.get('adset_id')), str(e.get('country') or ''))] = \
-                float(e.get('budget_usd') or 0.0)
+            prev_budget[(str(e.get('date')), str(e.get('adset_id')))] += float(e.get('budget_usd') or 0.0)
         if len(_bchunk) < 1000:
             break
         _boff += 1000
     log.info(f"  🛡️ 예산 스냅샷맵: {len(prev_budget)}행 로드")
 
-    # 5) 병합 — (date, adset_id, country) 그레인.
-    #    지출 country = Meta breakdown(ISO), 매출 country = mp_country_code(ISO). 둘을 full-outer 합집합.
-    #    통화는 서비스 접미사(스토어프론트) 기준 → USD 환산. country 는 ISO 코드 그대로 저장. 한국(KR) 제외.
-    log.info(f"\n5단계: 병합 (country 분할)")
+    # 5) 병합 — (date, adset_id) 그레인, country = 캠페인명 기반 시장(TW/HK/JP/TH).
+    #    ★ 2026-07-02 변경: country 분류를 '결제국가(mp_country_code)'가 아닌 '캠페인명 hk/tw 키워드'로 통일.
+    #      세트는 캠페인 시장 1개에 귀속되므로 country 분할 없이 세트당 1레코드로 집계한다.
+    #      · 매출: mp_value_map(건별 통화→USD 환산)을 세트 단위로 합산(mp country 무시).
+    #      · 지출/지표: Meta breakdown 행들을 비한국(KR viewer 제외)만 합산.
+    log.info(f"\n5단계: 병합 (캠페인명 기반 country)")
     records = []
-    matched_local = 0.0  # 진단용: adset_id 매칭에 성공해 귀속된 mp 매출(local) 합
-    # mp (date, adset) → [country...] 인덱스
-    mp_idx = defaultdict(set)
-    for (d2, a2, cc2) in mp_value_map:
-        mp_idx[(d2, a2)].add(cc2)
+    matched_local = 0.0  # 진단용: adset_id 매칭에 성공해 귀속된 mp 매출(USD) 합
+    # mp (date, adset) → USD 매출/건수 (mp country 무시하고 세트 단위 합산)
+    mp_rev_by_adset = defaultdict(float)
+    mp_cnt_by_adset = defaultdict(int)
+    for (d2, a2, cc2), v in mp_value_map.items():
+        mp_rev_by_adset[(d2, a2)] += v
+    for (d2, a2, cc2), c in mp_count_map.items():
+        mp_cnt_by_adset[(d2, a2)] += c
     for dk, rows in meta_data.items():
         parts = dk.split('/'); iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
-        # adset_id → {country: meta_row}, 대표행
-        by_adset = defaultdict(dict); rep = {}
+        # adset_id → [country breakdown rows], 대표행
+        by_adset = defaultdict(list); rep = {}
         for mr in rows:
             asid = mr['adset_id']
             if not asid: continue
-            by_adset[asid][mr['country']] = mr
+            by_adset[asid].append(mr)
             rep.setdefault(asid, mr)
         for asid, cc_rows in by_adset.items():
             r0 = rep[asid]
-            # 통화 라벨(정보용 currency 컬럼): 캠페인/세트명 키워드 기준. 매출 환산엔 더이상 안 쓰임
-            #   (매출은 mp_value_map 이 이미 건별 실제통화로 USD 환산된 값).
+            # ★ 통화·country 모두 캠페인명 기준: 캠페인/세트명 hk/tw 키워드 → 통화·시장 판별.
             currency = detect_currency(r0['adset_name'], r0['campaign_name'], r0.get('ad_account_id'))
-            row_currency = currency  # 저장용 라벨
-            # 지출(Meta breakdown) + 매출(mp) country 합집합
-            countries = set(cc_rows.keys()) | set(mp_idx.get((dk, asid), set()))
-            for cc in countries:
-                if str(cc).upper() in KOREA_CC: continue  # 글로벌 = 비한국 성과
-                mr = cc_rows.get(cc)
-                spend = mr['spend'] if mr else 0.0  # Already USD
-                mpc = mp_count_map.get((dk, asid, cc), 0)
-                # ★ mp_value_map 은 건별 실제통화로 이미 USD 환산됨 → 재환산 없이 그대로 사용
-                revenue = float(mp_value_map.get((dk, asid, cc), 0.0))
-                matched_local += revenue
-                # 🛡️ Mixpanel 수집 실패일 → 기존 매출/건수 보존 (0 덮어쓰기 방지)
-                if iso_date in uncovered:
-                    _pv = prev_map.get((iso_date, str(asid), str(cc)))
-                    if _pv and _pv[0] > 0: revenue, mpc = _pv[0], _pv[1]
-                profit = revenue - spend
-                roas = (revenue / spend * 100) if spend > 0 else 0
-                uclk = mr['unique_clicks'] if mr else 0
-                cvr = (mpc / uclk * 100) if uclk > 0 and mpc > 0 else 0
-                # 예산: adset 일예산(그 날짜 실제값)을 country 지출 비중으로 비례배분.
-                #   1순위: activities 재구성(변경이력 있으면 그 날짜 예산 raw=cents 복원).
-                #   2순위(폴백): 변경이력 없음/activities 실패 → 일자별 스냅샷 보존
-                #     (오늘만 현재값, 과거는 기존 저장값 유지 → 평탄화 방지).
-                tot_sp = sum(x['spend'] for x in cc_rows.values())
-                budget_raw_cur = budget_map.get(asid, 0)
-                if bud_hist.has_events_for(asid):
-                    b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
-                    budget_val = round((b_raw / 100) * (spend / tot_sp), 2) if (b_raw > 0 and tot_sp > 0) else 0
+            cc = CURRENCY_TO_ISO.get(currency, "TW")  # 캠페인 시장 = country (TW/HK/JP/TH)
+            # 지출/지표: 비한국(KR viewer 제외) breakdown 행 합산 → 세트 단위 집계
+            valid = [m for m in cc_rows if str(m['country']).upper() not in KOREA_CC]
+            spend = sum(m['spend'] for m in valid)  # Already USD
+            impressions = sum(m['impressions'] for m in valid)
+            reach = sum(m['reach'] for m in valid)
+            uclk = sum(m['unique_clicks'] for m in valid)
+            results_meta = sum(m['results_meta'] for m in valid)
+            results_meta_click = sum(m.get('results_meta_click', 0) for m in valid)
+            # 파생지표: 합산값으로 재계산 (country 분할 제거로 개별 mr 지표 못 씀)
+            cpm = (spend / impressions * 1000) if impressions > 0 else 0
+            frequency = (impressions / reach) if reach > 0 else 0
+            unique_ctr = (uclk / impressions * 100) if impressions > 0 else 0
+            cost_per_click = (spend / uclk) if uclk > 0 else 0
+            cost_per_result = (spend / results_meta) if results_meta > 0 else 0
+            meta_roas = (sum(m['meta_roas'] * m['spend'] for m in valid) / spend) if spend > 0 else 0  # 지출가중평균
+            # 매출(mp, USD, 이미 건별 통화 환산) — 세트 단위 합산
+            mpc = int(mp_cnt_by_adset.get((dk, asid), 0))
+            revenue = float(mp_rev_by_adset.get((dk, asid), 0.0))
+            matched_local += revenue
+            # 🛡️ Mixpanel 수집 실패일 → 기존 매출/건수 보존 (0 덮어쓰기 방지)
+            if iso_date in uncovered:
+                _pv = prev_map.get((iso_date, str(asid)))
+                if _pv and _pv[0] > 0: revenue, mpc = _pv[0], _pv[1]
+            profit = revenue - spend
+            roas = (revenue / spend * 100) if spend > 0 else 0
+            cvr = (mpc / uclk * 100) if uclk > 0 and mpc > 0 else 0
+            # 예산: 세트 일예산 전액(그 날짜 실제값). country 분할 없으므로 비례배분 불필요.
+            #   1순위: activities 재구성 → 2순위(폴백): 일자별 스냅샷 보존(오늘만 현재값, 과거 유지).
+            budget_raw_cur = budget_map.get(asid, 0)
+            if bud_hist.has_events_for(asid):
+                b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
+                budget_val = round(b_raw / 100, 2) if b_raw > 0 else 0
+            else:
+                budget_cur = round(budget_raw_cur / 100, 2) if budget_raw_cur > 0 else 0
+                if iso_date == _be:
+                    budget_val = budget_cur
                 else:
-                    budget_cur = round((budget_raw_cur / 100) * (spend / tot_sp), 2) if (budget_raw_cur > 0 and tot_sp > 0) else 0
-                    if iso_date == _be:
-                        budget_val = budget_cur
-                    else:
-                        _pb = prev_budget.get((iso_date, str(asid), str(cc)))
-                        budget_val = _pb if _pb else budget_cur
-                product = extract_product(r0['adset_name'], r0['campaign_name'])
-                records.append({
-                    'date': iso_date, 'adset_id': asid,
-                    'campaign_name': r0['campaign_name'], 'adset_name': r0['adset_name'],
-                    'ad_account_id': r0['ad_account_id'], 'product': product,
-                    'country': cc, 'currency': row_currency,  # 실효 환산통화(스토어프론트+HK예외)
-                    'spend_usd': round(spend, 2), 'cost_per_result': round(mr['cost_per_result'], 2) if mr else 0,
-                    'purchase_roas_meta': round(mr['meta_roas'], 4) if mr else 0,
-                    'cpm': round(mr['cpm'], 2) if mr else 0, 'reach': mr['reach'] if mr else 0, 'impressions': mr['impressions'] if mr else 0,
-                    'unique_clicks': int(uclk), 'unique_ctr': round(mr['unique_ctr'], 4) if mr else 0,
-                    'cost_per_click': round(mr['cost_per_click'], 2) if mr else 0, 'frequency': round(mr['frequency'], 4) if mr else 0,
-                    'results_meta': int(mr['results_meta']) if mr else 0, 'results_meta_click': int(mr.get('results_meta_click', 0)) if mr else 0,
-                    'results_mp': mpc,
-                    'revenue_usd': round(revenue, 2), 'profit_usd': round(profit, 2),
-                    'roas': round(roas, 2), 'cvr': round(cvr, 4), 'budget_usd': budget_val,
-                })
-    log.info(f"✅ 레코드: {len(records)}개 (country 분할)")
+                    _pb = prev_budget.get((iso_date, str(asid)))
+                    budget_val = _pb if _pb else budget_cur
+            product = extract_product(r0['adset_name'], r0['campaign_name'])
+            records.append({
+                'date': iso_date, 'adset_id': asid,
+                'campaign_name': r0['campaign_name'], 'adset_name': r0['adset_name'],
+                'ad_account_id': r0['ad_account_id'], 'product': product,
+                'country': cc, 'currency': currency,  # 캠페인명 기반 시장/통화
+                'spend_usd': round(spend, 2), 'cost_per_result': round(cost_per_result, 2),
+                'purchase_roas_meta': round(meta_roas, 4),
+                'cpm': round(cpm, 2), 'reach': int(reach), 'impressions': int(impressions),
+                'unique_clicks': int(uclk), 'unique_ctr': round(unique_ctr, 4),
+                'cost_per_click': round(cost_per_click, 2), 'frequency': round(frequency, 4),
+                'results_meta': int(results_meta), 'results_meta_click': int(results_meta_click),
+                'results_mp': mpc,
+                'revenue_usd': round(revenue, 2), 'profit_usd': round(profit, 2),
+                'roas': round(roas, 2), 'cvr': round(cvr, 4), 'budget_usd': budget_val,
+            })
+    log.info(f"✅ 레코드: {len(records)}개 (세트당 1행, 캠페인명 country)")
 
     # === 진단 로그 (귀속 손실 추적 — 결과/업로드 미변경) · mp_value_map 은 건별 실제통화 USD ===
     attributed_usd = sum(r['revenue_usd'] for r in records)
@@ -867,8 +897,22 @@ def main():
     log.info(f"  최종 귀속 매출(USD): ${attributed_usd:,.0f}")
 
     # 6) Supabase upsert — 광고 성과
+    #   ★ country 분할(구: date,adset_id,country PK) → 세트당 1행으로 전환.
+    #     같은 (date, adset_id)의 구 country 분할 행(TW/HK/US/... viewer breakdown)이 stale 로 남아
+    #     이중계상되므로, 재작성 대상 (date, adset_id) 쌍을 먼저 삭제하고 새 단일행을 upsert.
     log.info(f"\n6단계: Supabase upsert ({len(records)}행)")
     if records:
+        by_date_ids = defaultdict(set)
+        for r in records:
+            by_date_ids[r['date']].add(str(r['adset_id']))
+        _deleted_dates = 0
+        for _dt, _ids in by_date_ids.items():
+            _idl = sorted(_ids)
+            for _j in range(0, len(_idl), 100):  # in.() URL 길이 보호 위해 100개씩
+                _chunk = ",".join(_idl[_j:_j+100])
+                sb.delete("global_ad_performance_daily", f"date=eq.{_dt}&adset_id=in.({_chunk})")
+            _deleted_dates += 1
+        log.info(f"  🧹 구 country 분할 행 정리: {_deleted_dates}일 × 세트")
         sb.upsert("global_ad_performance_daily", records)
 
     # 7) Stripe → Supabase
