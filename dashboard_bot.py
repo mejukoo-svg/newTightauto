@@ -68,7 +68,9 @@ CH_GL = ENV.get("SLACK_CH_GL_MARKETING", "")
 ANTHROPIC_KEY = ENV.get("ANTHROPIC_API_KEY", "")
 NO_ADVICE = "--no-advice" in sys.argv
 NO_HL = "--no-hl" in sys.argv  # 조언→추이차트 하이라이트 자동표기 끄기
+DISTILL = "--distill-lessons" in sys.argv  # 월간 교훈 증류 모드(조언/게시 안 함)
 ADVICE_DAYS = 7  # 세트 분석에 사용할 최근 일수
+LESSON_WINDOW = 90  # 교훈 증류 시 훑는 최근 일수(14일 조언창을 넘는 장기 패턴 학습)
 # 메타 퍼포먼스 증감액 플레이북 (구글 문서 → txt export, 실패 시 로컬 캐시)
 GDOC_URL = "https://docs.google.com/document/d/1mH5_iDCqEXQbrt4dVCAJbKI-q1raYMeP5MtGskWBzu4/export?format=txt"
 PLAYBOOK_CACHE = BASE / "dashboard_bot_playbook.txt"
@@ -504,6 +506,7 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 사람이 내 권고를 반복적으로 하향/무시했고 그게 옳았으면(이후 ROAS가 사람 선택을 지지), 내 기준이 과했음을 인정하고 이번 권고의 강도·폭을 그 방향으로 조정하라.
   · 반대로 사람이 안 따랐는데 이후 ROAS가 나빠졌으면, 근거(그날 AI권고·이후 ROAS)를 들어 이번에 다시 설득하라.
   · 나와 사람이 일치했고 결과가 좋았던 패턴은 계속 신뢰하라. 요지: 내 과거 권고의 적중/빗나감을 스스로 채점해 조언을 발전시킨다(사람 선택을 무조건 추종하지도, 무시하지도 말고 결과로 판단).
+- [학습된 교훈]이 주어지면, 이 계정에서 장기간 결과로 검증된 규칙이므로 **플레이북 다음으로 강하게 반영**하라. 일반 플레이북과 이 계정 특화 교훈이 충돌하면 이 계정 교훈을 우선한다. 단, 최근 14일 [세트 데이터]가 교훈과 명백히 어긋나면 최근 데이터를 우선하고 그 사실을 짚어라.
 - [이전 스레드 토론]이 주어지면 반드시 참고: 내가 지난 번에 한 조언과 그 뒤 사람들의 코멘트·결정을 이어받아라.
   지난 권고가 실행/반박/보류됐는지 추적하고, 사람의 피드백과 충돌하면 그 의견을 우선 존중하며, 같은 말 반복하지 말고 후속 관점을 더해라.
 - 추세로 판단(하루 반등/적자에 속지 말 것). 단정과 추정을 구분. 세트명은 실제 이름 그대로.
@@ -522,10 +525,12 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     meta_roas_p = roas(p["meta_rev"], p["meta_spend"])
     meta_roas_c = roas(c["meta_rev"], c["meta_spend"])
     ctx_block = f"\n\n[이전 스레드 토론 — 과거 조언 및 사람들의 코멘트(오래된→최근)]\n{thread_ctx}" if thread_ctx else ""
+    lessons = fetch_lessons(region)
+    lessons_block = f"\n\n[학습된 교훈 — 이 계정에서 결과로 검증된 규칙(플레이북 특화)]\n{lessons}" if lessons else ""
     user = (f"[기간] {dp} → {dc} ({label})\n"
             f"[종합] 메타 ROAS {meta_roas_p}%→{meta_roas_c}% · 전체종합 ROAS {total_roas_p}%→{total_roas_c}%\n\n"
             f"[세트 데이터 · 최근 {ADVICE_DAYS}일 · 지출 큰 순]\n{sets_to_text(items, cur)}"
-            f"{ctx_block}\n\n[플레이북]\n{playbook}"
+            f"{ctx_block}\n\n[플레이북]\n{playbook}{lessons_block}"
             f"{ADV_MARKS_HINT}")
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     # max_tokens는 thinking+본문을 함께 덮는 하드 상한. adaptive thinking이 수천 토큰을
@@ -540,9 +545,128 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     return advice, marks
 
 # =====================================================================
+# 학습된 교훈 (월간 증류 → advice_lessons 테이블 → 매일 조언에 항상 주입)
+#   14일 조언창을 넘어서는 장기 패턴을, 압축된 '검증 규칙'으로 매일 반영해 복리 학습.
+# =====================================================================
+def fetch_lessons(region):
+    """advice_lessons에서 이 지역의 최신 교훈 텍스트를 읽는다(없으면 '')."""
+    try:
+        rows = sb("advice_lessons", f"region=eq.{region}&select=content&limit=1")
+        return (rows[0].get("content") or "").strip() if rows else ""
+    except Exception:
+        return ""
+
+def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
+    """학습용: 최근 window_days 세트별 '조치(사람/AI)→직후 ROAS 변화' 이벤트 목록.
+    조치가 있던 세트만(학습 신호), 지출 큰 순 상위 30. distill_lessons가 이걸 감사한다."""
+    table, hl_table, sf, rf, bf, cur = ADV_SRC[region]
+    since = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=window_days - 1)).isoformat()
+    rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
+                     f"&select=date,adset_id,adset_name,product,{sf},{rf},highlight&order=date.asc")
+    agg = {}
+    for r in rows:
+        aid = r.get("adset_id") or "?"
+        a = agg.setdefault(aid, {"name": r.get("adset_name") or aid, "product": r.get("product") or "",
+                                 "days": {}, "hacts": {}})
+        a["name"] = r.get("adset_name") or a["name"]
+        a["product"] = r.get("product") or a["product"]
+        a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0)
+        if r.get("highlight"):
+            a["hacts"][r["date"]] = r["highlight"]
+    ai = {}
+    try:
+        for r in (sb("ai_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
+                                        f"&select=date,adset_id,tag") or []):
+            aid = r.get("adset_id")
+            if aid and r.get("tag"):
+                ai.setdefault(aid, {})[r["date"]] = r["tag"]
+    except Exception:
+        ai = {}
+
+    def roas_on(a, d):
+        sp, rv = a["days"].get(d, (0, 0))
+        return round(rv / sp * 100) if sp else None
+
+    def roas_next(a, d, n=3):
+        base = datetime.date.fromisoformat(d)
+        sp = rv = 0
+        for k in range(1, n + 1):
+            s, r = a["days"].get((base + datetime.timedelta(days=k)).isoformat(), (0, 0))
+            sp += s
+            rv += r
+        return round(rv / sp * 100) if sp else None
+
+    order = sorted(agg.items(), key=lambda kv: -sum(sp for sp, _ in kv[1]["days"].values()))
+    blocks = []
+    for aid, a in order:
+        tot_sp = sum(sp for sp, _ in a["days"].values())
+        if tot_sp <= 0:
+            continue
+        events = sorted(set(a["hacts"]) | set(ai.get(aid, {})))
+        if not events:
+            continue  # 조치 없는 세트 = 학습 신호 없음
+        ev = []
+        for d in events:
+            h, m = a["hacts"].get(d), ai.get(aid, {}).get(d)
+            parts = ([("AI" + HL_SHORT.get(m, m))] if m else []) + ([("사람" + HL_SHORT.get(h, h))] if h else [])
+            r0, r3 = roas_on(a, d), roas_next(a, d)
+            ev.append(f"{d[5:]}{'·'.join(parts)}@{r0 if r0 is not None else '?'}%→3일후{r3 if r3 is not None else '?'}%")
+        blocks.append(f"- {a['name'][:40]} (ID {aid}) [{a['product']}] 총지출{cur}{round(tot_sp):,}\n    " + " ; ".join(ev))
+        if len(blocks) >= 30:
+            break
+    return "\n".join(blocks)
+
+LESSONS_SYSTEM = """너는 이 계정의 증감액 의사결정 이력을 감사하는 분석가다.
+입력은 최근 기간 세트별 '조치(사람/AI 증감액 표시)와 그 직후 3일 ROAS 변화'다.
+여기서 이 계정에 **반복적으로 검증된 교훈만** 뽑아, 앞으로의 증감액 조언을 날카롭게 하는 규칙으로 정리하라.
+
+원칙:
+- 일반 플레이북을 이 계정/상품/예산대에 맞게 **특화·보정**하는 형태로 쓴다(예: "무당 상품은 증20 직후 3일 ROAS가 반복 하락 → 무당은 +10% 상한", "일예산 80만↑ 대형은 감액이 늦으면 회복 안 됨 → 하락 2일차에 즉시 감액").
+- 사람과 AI가 갈린 지점이 있으면 **이후 ROAS로 누가 옳았는지** 판정해 규칙에 반영(사람이 반복적으로 옳았던 방향은 그쪽으로 기준을 옮긴다).
+- 각 규칙은 **근거(빈도·ROAS 수치)를 짧게** 포함. 예: "(6건 중 5건 하락)".
+- 표본이 얇거나 노이즈면 억지 규칙 만들지 말고 '아직 결론 이름'으로 남긴다. 우연을 패턴으로 과적합하지 마라.
+- 5~15개 불릿, 간결한 한국어. 세트명 나열 말고 **일반화된 규칙**으로."""
+
+def distill_lessons():
+    """월간: 계정 이력을 감사해 검증 교훈을 뽑아 advice_lessons에 저장(region별)."""
+    if not ANTHROPIC_KEY:
+        print("[교훈] ANTHROPIC_API_KEY 없음 — 생략")
+        return
+    import anthropic
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    today = datetime.datetime.now(KST).date()
+    dc = FORCE_DATES[1] if FORCE_DATES else (today - datetime.timedelta(days=1)).isoformat()
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    for region, label in (("kr", "국내"), ("gl", "글로벌")):
+        try:
+            data = gather_learning_data(region, dc, LESSON_WINDOW)
+        except Exception as e:
+            print(f"[교훈] {label}: 데이터 수집 실패 {e}")
+            continue
+        if not data.strip():
+            print(f"[교훈] {label}: 조치 이력 없음 — 생략")
+            continue
+        user = f"[계정] {label} · 최근 {LESSON_WINDOW}일\n[세트별 조치→직후 ROAS]\n{data}"
+        resp = client.messages.create(
+            model="claude-opus-4-8", max_tokens=16000,
+            thinking={"type": "adaptive"}, output_config={"effort": "high"},
+            system=LESSONS_SYSTEM, messages=[{"role": "user", "content": user}])
+        txt = "".join(b.text for b in resp.content if b.type == "text").strip()
+        if not txt:
+            print(f"[교훈] {label}: 빈 응답 — 생략")
+            continue
+        content = f"(생성 {today.isoformat()} · 최근 {LESSON_WINDOW}일 기준)\n{txt}"
+        sb_upsert("advice_lessons", {"region": region, "content": content,
+                                     "window_days": LESSON_WINDOW, "updated_at": now})
+        print(f"[교훈] {label}: {len(txt):,}자 저장 → advice_lessons({region})")
+
+# =====================================================================
 # main
 # =====================================================================
 def main():
+    if DISTILL:
+        distill_lessons()
+        return
     if FORCE_DATES:
         dp, dc = FORCE_DATES[0], FORCE_DATES[1]
     else:

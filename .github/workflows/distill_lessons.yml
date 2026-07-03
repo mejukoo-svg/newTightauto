@@ -1,0 +1,30 @@
+name: 조언 교훈 증류(월간)
+
+# 매월 1일, 계정 이력(조치→ROAS)을 감사해 '검증된 교훈'을 advice_lessons에 저장.
+# 매일 조언(오늘의퍼포먼스봇 + perf-advice 스킬)이 이 교훈을 항상 반영 → 장기 패턴 복리 학습.
+on:
+  schedule:
+    - cron: '20 1 1 * *'   # 01:20 UTC(매월 1일) = 10:20 KST. 오프아워 분+비혼잡대
+  workflow_dispatch:        # 수동 실행(원할 때 재증류)
+
+concurrency:
+  group: distill-lessons
+  cancel-in-progress: false
+
+jobs:
+  distill:
+    name: 교훈 증류
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install anthropic
+      - name: Run distill-lessons
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python dashboard_bot.py --distill-lessons
