@@ -418,10 +418,15 @@ def apply_advice_highlights(region, marks):
     updated_at=지금(UTC) → 대시보드는 '오늘' 마킹으로 렌더, 자정 지나면 기존대로 자동 삭제."""
     hl_table = ADV_SRC[region][1]
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    rows = [{"adset_id": str(m["id"]), "highlight": m["tag"], "updated_at": now}
+    rows = [{"adset_id": str(m["id"]), "highlight": m["tag"], "updated_at": now, "source": "ai"}
             for m in marks if m.get("tag") in HL_TAGS_OK and m.get("id")]
     if rows:
-        sb_upsert(hl_table, rows)
+        try:
+            sb_upsert(hl_table, rows)          # source='ai' → 추이차트에서 테두리 표시
+        except Exception:
+            for r in rows:                     # source 컬럼 미생성 등 → source 빼고 재시도(하이라이트는 최소 적용)
+                r.pop("source", None)
+            sb_upsert(hl_table, rows)
     return len(rows)
 
 def sets_to_text(items, cur):

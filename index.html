@@ -81,6 +81,8 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .hl-up10{background:#88dd88!important}
 .hl-up20{background:#66eecc!important;font-weight:600}
 .hl-watch{background:#ff9900!important;color:#fff!important;font-weight:600}
+/* AI(오늘의퍼포먼스봇) 추천 하이라이트: 네모에 테두리로 사람 마킹과 구분. 사람이 클릭하면 source=user로 바뀌어 사라짐 */
+.hl-ai{outline:2px dashed #1e293b!important;outline-offset:-3px!important}
 .color-picker{position:absolute;background:#fff;border:1px solid #888;border-radius:6px;padding:6px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1000;display:none;gap:4px}
 .color-picker.show{display:flex}
 .color-picker .cp-btn{width:28px;height:28px;border-radius:4px;cursor:pointer;border:2px solid transparent;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600}
@@ -296,9 +298,11 @@ let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let COUNTRY='ALL';  // 국가 필터 (vn/gl 전용). ALL=전체(국가행을 adset당 합산)
 let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[],GGDG_TIGHT=[];
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
+// 하이라이트 출처: 'ai'(오늘의퍼포먼스봇 조언 자동표기)면 네모에 테두리(.hl-ai), 'user'(사람 클릭)면 테두리 없음
+let KR_SRC={},GL_SRC={},CR_SRC={},VN_SRC={};
 // 추이차트 전용 메모 (하이라이트 테이블 memo 컬럼 ↔ 하이라이트와 함께 전체삭제)
 let KR_HM={},GL_HM={},CR_HM={},VN_HM={};
-let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={},HL_MEMO={};
+let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={},HL_MEMO={},HL_SRC={};
 // 추이차트 하이라이트·메모는 '오늘' 마킹만 유효 — 0시 지나면 자동 삭제(날짜탭 perfTbl 기록은 보존)
 function _hlDayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 function _hlMidnightISO(){const d=new Date();d.setHours(0,0,0,0);return d.toISOString()}
@@ -503,11 +507,11 @@ function switchMode(m){
    }}
   // Switch data (lazy-load big tables)
   _populateCountrySel(m);
-  if(m==='kr'){AD=buildAD('kr');HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
-  else if(m==='gl'){AD=buildAD('gl');HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
-  else if(m==='cr'){AD=buildAD('cr');HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM;
+  if(m==='kr'){AD=buildAD('kr');HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM;HL_SRC=KR_SRC}
+  else if(m==='gl'){AD=buildAD('gl');HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM;HL_SRC=GL_SRC}
+  else if(m==='cr'){AD=buildAD('cr');HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM;HL_SRC=CR_SRC;
     if(!CR_AD.length)ensureBigTable('cr').then(()=>{AD=buildAD('cr');rebuildLookups();const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);});}
-  else if(m==='vn'){AD=buildAD('vn');HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
+  else if(m==='vn'){AD=buildAD('vn');HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM;HL_SRC=VN_SRC}
   rebuildLookups();
   // Reset selects
   dashState.dateA=null;dashState.dateB=null;
@@ -581,10 +585,10 @@ function _applyCore(d){
   // 하이라이트: in-place merge — HIGHLIGHTS 참조 identity 유지 + 로컬 쓰기(저장 직후) 보존
   // (이전엔 KR_HL={} 으로 재할당해서 HIGHLIGHTS 가 옛 객체에 dangle → 모드 전환/refresh 시 사라짐)
   // ★ 오늘(updated_at ≥ 오늘0시) 마킹만 적용 — 지난날 것은 스킵(자동 삭제). 로컬 저장 보존 위해 delete는 안 함.
-  (d.krhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){KR_HL[x.adset_id]=x.highlight;KR_HM[x.adset_id]=x.memo||null}});
-  (d.glhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){GL_HL[x.adset_id]=x.highlight;GL_HM[x.adset_id]=x.memo||null}});
-  (d.crhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){CR_HL[x.ad_id]=x.highlight;CR_HM[x.ad_id]=x.memo||null}});
-  (d.vnhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){VN_HL[x.adset_id]=x.highlight;VN_HM[x.adset_id]=x.memo||null}});
+  (d.krhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){KR_HL[x.adset_id]=x.highlight;KR_HM[x.adset_id]=x.memo||null;KR_SRC[x.adset_id]=x.source||null}});
+  (d.glhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){GL_HL[x.adset_id]=x.highlight;GL_HM[x.adset_id]=x.memo||null;GL_SRC[x.adset_id]=x.source||null}});
+  (d.crhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){CR_HL[x.ad_id]=x.highlight;CR_HM[x.ad_id]=x.memo||null;CR_SRC[x.ad_id]=x.source||null}});
+  (d.vnhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){VN_HL[x.adset_id]=x.highlight;VN_HM[x.adset_id]=x.memo||null;VN_SRC[x.adset_id]=x.source||null}});
 }
 async function initData(){
   // 0시 롤오버 감지 → 추이차트 하이라이트·메모 자동 삭제 (탭 열려있는 상태로 자정 넘길 때)
@@ -637,10 +641,10 @@ async function initData(){
       // AD 는 switchMode 시점의 스냅샷이므로 fresh VN_AD/KR_AD 갱신 후 재할당 필요
       // 안 그러면 DATES 가 stale 캐시 기준이라 today/yesterday 가 dd 윈도우에서 누락됨
       _populateCountrySel(MODE);
-      if(MODE==='kr'){AD=buildAD('kr');HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM}
-      else if(MODE==='gl'){AD=buildAD('gl');HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM}
-      else if(MODE==='cr'){AD=buildAD('cr');HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM}
-      else if(MODE==='vn'){AD=buildAD('vn');HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM}
+      if(MODE==='kr'){AD=buildAD('kr');HIGHLIGHTS=KR_HL;HL_MEMO=KR_HM;HL_SRC=KR_SRC}
+      else if(MODE==='gl'){AD=buildAD('gl');HIGHLIGHTS=GL_HL;HL_MEMO=GL_HM;HL_SRC=GL_SRC}
+      else if(MODE==='cr'){AD=buildAD('cr');HIGHLIGHTS=CR_HL;HL_MEMO=CR_HM;HL_SRC=CR_SRC}
+      else if(MODE==='vn'){AD=buildAD('vn');HIGHLIGHTS=VN_HL;HL_MEMO=VN_HM;HL_SRC=VN_SRC}
       rebuildLookups();
       // 펼침 인덱스도 무효화 (다음 클릭 시 fresh 로 재구축)
       window._CR_BY_ADSET=null;
@@ -1040,7 +1044,7 @@ let currentHlId=null;
 const hlTbl=()=>{const m={kr:'adset_highlights',gl:'global_adset_highlights',cr:'ad_creative_highlights',vn:'vanced_adset_highlights'};return m[MODE]||'adset_highlights'};
 const hlIdCol=()=>MODE==='cr'?'ad_id':'adset_id';
 const perfTbl=()=>{const m={kr:'ad_performance_daily',gl:'global_ad_performance_daily',cr:'ad_creative_daily',vn:'vanced_ad_performance_daily'};return m[MODE]||'ad_performance_daily'};
-function hlClass(id){const h=HIGHLIGHTS[id];return h&&HL_CONFIG[h]?HL_CONFIG[h].cls:''}
+function hlClass(id){const h=HIGHLIGHTS[id];if(!h||!HL_CONFIG[h])return'';return HL_CONFIG[h].cls+(HL_SRC[id]==='ai'?' hl-ai':'')}
 // 현재 MODE의 원본 배열 반환 (norm된 AD 가 아닌 raw)
 function _srcAD(){
   return MODE==='kr'?KR_AD:(MODE==='gl'?GL_AD:(MODE==='cr'?CR_AD:VN_AD));
@@ -1053,9 +1057,10 @@ function _syncRowField(id, date, field, value){
 
 async function saveHL(id,c){
   // 1) 추이차트용 저장 (adset_highlights)
-  const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString()};
-  await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-  HIGHLIGHTS[id]=c||null;
+  const body={[hlIdCol()]:id,highlight:c||null,updated_at:new Date().toISOString(),source:'user'};
+  let _r=await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
+  if(!_r.ok){delete body.source;await fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)})} // source 컬럼 미생성 폴백
+  HIGHLIGHTS[id]=c||null;HL_SRC[id]='user'; // 사람 클릭 → 테두리 제거
   // 2) ★ 날짜탭용 영구저장 — 증감액을 마킹한 '오늘' 날짜 셀에 저장 (어제 아님)
   const col=hlIdCol();
   const _t=new Date();
@@ -1077,6 +1082,7 @@ async function clearAllHighlights(){
     await fetch(SB_URL+'/rest/v1/'+tbl+'?'+col+'=eq.'+id,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
     delete HIGHLIGHTS[id];
     delete HL_MEMO[id];
+    delete HL_SRC[id];
     // ★ perfTbl의 highlight·memo 컬럼은 건드리지 않음 → 날짜탭 영구 유지
   }
   rerenderTrendView();
@@ -1091,7 +1097,7 @@ async function purgeStaleTrendHL(){
   await Promise.all(_HL_TBLS.map(t=>fetch(SB_URL+'/rest/v1/'+t+'?updated_at=lt.'+cut,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}}).catch(()=>{})));
 }
 function _clearAllTrendHLMem(){
-  [KR_HL,GL_HL,CR_HL,VN_HL,KR_HM,GL_HM,CR_HM,VN_HM].forEach(m=>{Object.keys(m).forEach(k=>delete m[k])});
+  [KR_HL,GL_HL,CR_HL,VN_HL,KR_HM,GL_HM,CR_HM,VN_HM,KR_SRC,GL_SRC,CR_SRC,VN_SRC].forEach(m=>{Object.keys(m).forEach(k=>delete m[k])});
 }
 async function autoClearTrendHL(){
   _clearAllTrendHLMem();      // 롤오버 시점의 메모리는 전부 전날 마킹 → 전체 클리어
