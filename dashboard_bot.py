@@ -325,6 +325,20 @@ ADV_SRC = {
 
 HIST_DAYS = 14  # 증감액 액션 이력 조회 창 (7일 성과요약보다 길게 봐야 '그 조치가 먹혔는지' 판단 가능)
 
+def _load_human_marks(region, since, dc):
+    """durable 사람 마킹 로드 {adset_id: {date: tag}}. 글로벌은 perfTbl.highlight 유실이 잦아
+    (daily 늦은 적재) 이 테이블이 사람 조치의 신뢰 소스. 국내도 보강(마킹 유실 방지)."""
+    out = {}
+    try:
+        for r in (sb("human_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
+                                           f"&select=date,adset_id,tag") or []):
+            aid = r.get("adset_id")
+            if aid and r.get("tag"):
+                out.setdefault(aid, {})[r["date"]] = r["tag"]
+    except Exception:
+        pass
+    return out
+
 def gather_sets(region, dc, days=ADVICE_DAYS):
     """세트별 최근 7일 성과 요약 + 최근 14일 증감액 액션 이력(액션 시점 ROAS 포함) 수집.
     이력(acts)으로 '과거 증감액이 실제로 먹혔는지'를 추세와 대조해 판단할 수 있게 한다."""
@@ -356,6 +370,10 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
                 agg[aid]["hl"] = r["highlight"]
             if r.get("memo"):
                 agg[aid]["memo"] = r["memo"]
+    # 사람 조치 durable 병합 (글로벌은 perfTbl.highlight 유실 잦음 → 여기서 채워 국내와 동일하게 이력 확보)
+    for aid, dm in _load_human_marks(region, since, dc).items():
+        if aid in agg:
+            agg[aid]["acts"].update(dm)
     # AI 과거 추천 이력 (ai_advice_marks): 학습용 — 그날 내가(AI) 권한 증감액 vs 사람이 실제 선택한 하이라이트 비교
     ai_marks = {}
     try:
@@ -573,6 +591,10 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
         a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0)
         if r.get("highlight"):
             a["hacts"][r["date"]] = r["highlight"]
+    # 사람 조치 durable 병합 (글로벌 유실 보완 → 학습에도 국내와 동일하게 반영)
+    for aid, dm in _load_human_marks(region, since, dc).items():
+        if aid in agg:
+            agg[aid]["hacts"].update(dm)
     ai = {}
     try:
         for r in (sb("ai_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"

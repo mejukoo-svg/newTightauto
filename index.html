@@ -1067,6 +1067,11 @@ async function saveHL(id,c){
   const _t=new Date();
   const tDate=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
   await fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+tDate+'&'+col+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})});
+  // 3) ★ 사람 선택 durable 기록 (daily 행 유무와 무관 → 글로벌 유실 방지, 조언 학습용). 국내·글로벌만.
+  //    perfTbl PATCH는 '오늘 행'이 없으면 0행 갱신돼 유실되지만(특히 글로벌 늦은 적재), 여기는 항상 남는다.
+  if(MODE==='kr'||MODE==='gl'){
+    fetch(SB_URL+'/rest/v1/human_advice_marks',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({date:tDate,adset_id:id,region:MODE,tag:c||null,updated_at:new Date().toISOString()})}).catch(()=>{});
+  }
   // 메모리 동기화 — AD + 원본배열(GL_AD/VN_AD 등) 모두 갱신 → 탭 전환/모드 전환 후에도 유지
   _syncRowField(id, tDate, 'highlight', c||null);
   rerenderTrendView();
