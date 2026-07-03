@@ -299,6 +299,11 @@ let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 // 추이차트 전용 메모 (하이라이트 테이블 memo 컬럼 ↔ 하이라이트와 함께 전체삭제)
 let KR_HM={},GL_HM={},CR_HM={},VN_HM={};
 let AD=[],DATES=[],DAILY={},PRODS=[],HIGHLIGHTS={},HL_MEMO={};
+// 추이차트 하이라이트·메모는 '오늘' 마킹만 유효 — 0시 지나면 자동 삭제(날짜탭 perfTbl 기록은 보존)
+function _hlDayStr(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function _hlMidnightISO(){const d=new Date();d.setHours(0,0,0,0);return d.toISOString()}
+function _hlIsToday(iso){return !!iso&&new Date(iso).getTime()>=new Date(new Date().setHours(0,0,0,0)).getTime()}
+let HL_DAY=_hlDayStr();
 
 // ===== HELPERS =====
 async function sbQ(t,q=''){const r=await fetch(SB_URL+'/rest/v1/'+t+'?'+q,{headers:SBH});return r.json()}
@@ -575,12 +580,18 @@ function _applyCore(d){
   NAVER_MP=d.naver_mp||[];TOSS_DAILY=d.toss_kr||[];
   // 하이라이트: in-place merge — HIGHLIGHTS 참조 identity 유지 + 로컬 쓰기(저장 직후) 보존
   // (이전엔 KR_HL={} 으로 재할당해서 HIGHLIGHTS 가 옛 객체에 dangle → 모드 전환/refresh 시 사라짐)
-  (d.krhl||[]).forEach(x=>{KR_HL[x.adset_id]=x.highlight;KR_HM[x.adset_id]=x.memo||null});
-  (d.glhl||[]).forEach(x=>{GL_HL[x.adset_id]=x.highlight;GL_HM[x.adset_id]=x.memo||null});
-  (d.crhl||[]).forEach(x=>{CR_HL[x.ad_id]=x.highlight;CR_HM[x.ad_id]=x.memo||null});
-  (d.vnhl||[]).forEach(x=>{VN_HL[x.adset_id]=x.highlight;VN_HM[x.adset_id]=x.memo||null});
+  // ★ 오늘(updated_at ≥ 오늘0시) 마킹만 적용 — 지난날 것은 스킵(자동 삭제). 로컬 저장 보존 위해 delete는 안 함.
+  (d.krhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){KR_HL[x.adset_id]=x.highlight;KR_HM[x.adset_id]=x.memo||null}});
+  (d.glhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){GL_HL[x.adset_id]=x.highlight;GL_HM[x.adset_id]=x.memo||null}});
+  (d.crhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){CR_HL[x.ad_id]=x.highlight;CR_HM[x.ad_id]=x.memo||null}});
+  (d.vnhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){VN_HL[x.adset_id]=x.highlight;VN_HM[x.adset_id]=x.memo||null}});
 }
 async function initData(){
+  // 0시 롤오버 감지 → 추이차트 하이라이트·메모 자동 삭제 (탭 열려있는 상태로 자정 넘길 때)
+  HL_DAY=_hlDayStr();
+  if(!window._hlMidnightTimer){
+    window._hlMidnightTimer=setInterval(()=>{const t=_hlDayStr();if(t!==HL_DAY){HL_DAY=t;autoClearTrendHL()}},30000);
+  }
   const D180='&date=gte.'+_dateCutoff(215);
   // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
   const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp','ggdg_tight'];
@@ -621,6 +632,7 @@ async function initData(){
   });
   const applyAndRerender=async(d)=>{
     _applyCore(d);
+    purgeStaleTrendHL();  // fresh 로드 시 DB의 지난날(<오늘0시) 하이라이트 행 정리(1회)
     if(renderedFromCache){
       // AD 는 switchMode 시점의 스냅샷이므로 fresh VN_AD/KR_AD 갱신 후 재할당 필요
       // 안 그러면 DATES 가 stale 캐시 기준이라 today/yesterday 가 dd 윈도우에서 누락됨
@@ -1067,6 +1079,23 @@ async function clearAllHighlights(){
     delete HL_MEMO[id];
     // ★ perfTbl의 highlight·memo 컬럼은 건드리지 않음 → 날짜탭 영구 유지
   }
+  rerenderTrendView();
+}
+// ===== 0시 자동 삭제 =====
+// 0시가 지나면 추이차트 하이라이트·메모를 자동 삭제(모든 모드 테이블 + 메모리).
+// perfTbl(날짜탭) 기록은 건드리지 않아 영구 보존 — clearAllHighlights와 동일 원칙.
+const _HL_TBLS=['adset_highlights','global_adset_highlights','ad_creative_highlights','vanced_adset_highlights'];
+async function purgeStaleTrendHL(){
+  // updated_at < 오늘0시 인 행만 삭제 → 방금 저장한(오늘) 마킹은 안전
+  const cut=encodeURIComponent(_hlMidnightISO());
+  await Promise.all(_HL_TBLS.map(t=>fetch(SB_URL+'/rest/v1/'+t+'?updated_at=lt.'+cut,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}}).catch(()=>{})));
+}
+function _clearAllTrendHLMem(){
+  [KR_HL,GL_HL,CR_HL,VN_HL,KR_HM,GL_HM,CR_HM,VN_HM].forEach(m=>{Object.keys(m).forEach(k=>delete m[k])});
+}
+async function autoClearTrendHL(){
+  _clearAllTrendHLMem();      // 롤오버 시점의 메모리는 전부 전날 마킹 → 전체 클리어
+  await purgeStaleTrendHL();  // DB도 전날(<오늘0시) 행 삭제
   rerenderTrendView();
 }
 document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();if(currentHlId)saveHL(currentHlId,b.dataset.c);document.getElementById('colorPicker').classList.remove('show')})});
