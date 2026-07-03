@@ -354,6 +354,16 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
                 agg[aid]["hl"] = r["highlight"]
             if r.get("memo"):
                 agg[aid]["memo"] = r["memo"]
+    # AI 과거 추천 이력 (ai_advice_marks): 학습용 — 그날 내가(AI) 권한 증감액 vs 사람이 실제 선택한 하이라이트 비교
+    ai_marks = {}
+    try:
+        for r in (sb("ai_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
+                                        f"&select=date,adset_id,tag") or []):
+            aid = r.get("adset_id")
+            if aid and r.get("tag"):
+                ai_marks.setdefault(aid, {})[r["date"]] = r["tag"]
+    except Exception:
+        ai_marks = {}   # 테이블 미생성 등 → 비교 생략(무해)
     # 요약 라인 생성 (지출 큰 순, 최대 40세트) — 성과는 최근 7일, 이력은 최근 14일
     items = []
     for aid, a in agg.items():
@@ -373,9 +383,16 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
             sp_d, rv_d = a["days"].get(d, (0, 0))
             roas_d = round(rv_d / sp_d * 100) if sp_d else 0
             hist.append(f"{d[5:]}{HL_SHORT.get(hl, hl)}@{roas_d}%")
+        # AI 권고 vs 사람 선택 비교: 'MMDD AI{권고}(사람:{그날 사람선택 or —})' — 내 조언의 적중/빗나감 학습용
+        aim = ai_marks.get(aid, {})
+        airec = []
+        for d in sorted(aim):
+            hs = a["acts"].get(d)
+            airec.append(f"{d[5:]}AI{HL_SHORT.get(aim[d], aim[d])}(사람:{HL_SHORT.get(hs, hs) if hs else '—'})")
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
-                      "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist), "ndays": len(last7), "_sp": sp})
+                      "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist),
+                      "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp})
     items.sort(key=lambda x: -x["_sp"])
     return items[:40], cur
 
@@ -429,6 +446,21 @@ def apply_advice_highlights(region, marks):
             sb_upsert(hl_table, rows)
     return len(rows)
 
+def record_ai_marks(region, marks, mark_date):
+    """AI가 그날 권한 증감액을 durable하게 기록(ai_advice_marks) → 후일 '사람 선택 vs AI 권고' 학습 비교용.
+    adset_highlights(오늘 시각화·purge됨)·ad_performance_daily(사람 조치이력)와 별개 테이블이라 아무것도 오염 안 함.
+    mark_date=행동일(dc+1=보통 오늘) → 사람 saveHL이 그날로 찍는 highlight와 날짜 정렬."""
+    rows = [{"date": mark_date, "adset_id": str(m["id"]), "region": region, "tag": m["tag"]}
+            for m in marks if m.get("tag") in HL_TAGS_OK and m.get("id")]
+    if not rows:
+        return 0
+    try:
+        sb_upsert("ai_advice_marks", rows)     # PK(date,adset_id) 병합
+    except Exception as e:
+        print(f"  [ai_marks] 기록 실패(테이블 미생성?): {e}")
+        return 0
+    return len(rows)
+
 def sets_to_text(items, cur):
     lines = []
     for s in items:
@@ -439,6 +471,8 @@ def sets_to_text(items, cur):
             tag.append("메모:" + s["memo"][:50])
         if s.get("hist"):
             tag.append("이력:" + s["hist"])  # 최근 14일 증감액 액션@그날ROAS (조치 효과 판단용)
+        if s.get("airec"):
+            tag.append("AI권고이력:" + s["airec"])  # 과거 AI권고 vs 그날 사람선택 (조언 자체 보정용)
         tagstr = (" | " + " · ".join(tag)) if tag else ""
         lines.append(f"- {s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
                      f"{ADVICE_DAYS}일ROAS {s['roas7']}%(지출{cur}{s['sp']:,}) · "
@@ -466,6 +500,10 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 증액 후 며칠 뒤 ROAS가 하락했으면 '증액 안 먹힘 → 되돌림/관망', 감액 후 회복했으면 '유효'.
   · **같은 액션(예: 증액20%)을 반복했는데도 계속 하락하면** 그 패턴을 명시적으로 지적하고, 증감액 손장난 대신 다른 처방(소재 수혈·타겟 제외·OFF 등 플레이북 5·9장)을 권하라.
   · 과거에 실패한 액션을 그대로 반복 권고하지 마라. 근거로 이력의 날짜·ROAS를 인용하라.
+- 각 세트의 'AI권고이력:'은 **과거에 내가(AI) 그날 권한 증감액과, 그날 사람이 실제 선택한 하이라이트를 나란히** 보여준다(예: `07-01AI OFF(사람:—) → 07-02AI증20(사람:증10)`). `(사람:—)`=사람이 내 권고를 안 따랐거나 미표기, `(사람:증10)`=내가 증20을 권했으나 사람이 증10으로 하향 조정. **이 AI↔사람 차이를 이후 ROAS 추세와 대조해 내 조언 기준 자체를 채점·보정하라(핵심 학습 루프)**:
+  · 사람이 내 권고를 반복적으로 하향/무시했고 그게 옳았으면(이후 ROAS가 사람 선택을 지지), 내 기준이 과했음을 인정하고 이번 권고의 강도·폭을 그 방향으로 조정하라.
+  · 반대로 사람이 안 따랐는데 이후 ROAS가 나빠졌으면, 근거(그날 AI권고·이후 ROAS)를 들어 이번에 다시 설득하라.
+  · 나와 사람이 일치했고 결과가 좋았던 패턴은 계속 신뢰하라. 요지: 내 과거 권고의 적중/빗나감을 스스로 채점해 조언을 발전시킨다(사람 선택을 무조건 추종하지도, 무시하지도 말고 결과로 판단).
 - [이전 스레드 토론]이 주어지면 반드시 참고: 내가 지난 번에 한 조언과 그 뒤 사람들의 코멘트·결정을 이어받아라.
   지난 권고가 실행/반박/보류됐는지 추적하고, 사람의 피드백과 충돌하면 그 의견을 우선 존중하며, 같은 말 반복하지 말고 후속 관점을 더해라.
 - 추세로 판단(하루 반등/적자에 속지 말 것). 단정과 추정을 구분. 세트명은 실제 이름 그대로.
@@ -512,6 +550,8 @@ def main():
         dc = (today - datetime.timedelta(days=DAYS_BACK)).isoformat()
         dp = (today - datetime.timedelta(days=DAYS_BACK + 1)).isoformat()
     print(f"[구간] {dp} -> {dc}" + ("  [DRY-RUN]" if DRY else ""))
+    # AI 권고 기록 날짜 = 행동일(dc+1, 라이브에선 오늘) → 사람 highlight(그날 찍힘)와 정렬
+    mark_date = (datetime.date.fromisoformat(dc) + datetime.timedelta(days=1)).isoformat()
 
     jobs = []
     if not GL_ONLY:
@@ -550,6 +590,8 @@ def main():
                 print(f"\n  ── 추이차트 하이라이트 {len(adv_marks)}건 (미적용, 대상: {ADV_SRC[region][1]}) ──")
                 for m in adv_marks:
                     print(f"    {m['id']}  →  {HL_KO.get(m['tag'], m['tag'])}")
+            if adv_marks:
+                print(f"  ── AI권고 기록(미적용): {len(adv_marks)}건 → ai_advice_marks(date={mark_date}) ──")
             continue
 
         if not BOT:
@@ -570,6 +612,11 @@ def main():
                 print(f"  추이차트 하이라이트: {n}건 적용 → {ADV_SRC[region][1]}")
             except Exception as e:
                 print(f"  추이차트 하이라이트 적용 실패: {e}")
+        # AI 권고를 durable 기록 (학습용: 후일 '사람 최종선택 vs AI 권고' 비교) — NO_HL과 무관
+        if adv_marks:
+            nr = record_ai_marks(region, adv_marks, mark_date)
+            if nr:
+                print(f"  AI권고 기록: {nr}건 → ai_advice_marks(date={mark_date})")
 
 if __name__ == "__main__":
     main()
