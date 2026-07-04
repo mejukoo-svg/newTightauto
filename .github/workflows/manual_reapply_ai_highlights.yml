@@ -1,0 +1,66 @@
+name: (수동) 추이차트 AI조언 하이라이트 재적용
+
+# 1회성 수동 실행 전용(cron 없음).
+# 동작: 오늘 추이차트 하이라이트를 초기화하고, 오늘 AI 조언(ai_advice_marks)대로
+#       source='ai'로 재적용 → 대시보드에서 AI 세트가 점선 테두리로 표시됨. Slack 재게시 없음.
+# 대상: kr(adset_highlights), gl(global_adset_highlights).
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: manual-reapply-ai-hl
+  cancel-in-progress: false
+
+jobs:
+  reapply:
+    name: AI조언 하이라이트 재적용
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Reset & reapply AI highlights
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, sys, json, datetime, urllib.request
+          SB = os.environ["SUPABASE_URL"].rstrip("/")
+          KEY = os.environ["SUPABASE_SERVICE_KEY"]
+          AUTH = {"apikey": KEY, "Authorization": "Bearer " + KEY}
+          KST = datetime.timezone(datetime.timedelta(hours=9))
+          today = datetime.datetime.now(KST).date().isoformat()
+          now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          REGIONS = {"kr": "adset_highlights", "gl": "global_adset_highlights"}
+
+          def call(method, path, data=None):
+              headers = dict(AUTH)
+              body = None
+              if data is not None:
+                  body = json.dumps(data).encode()
+                  headers["Content-Type"] = "application/json"
+                  headers["Prefer"] = "resolution=merge-duplicates,return=minimal"
+              elif method == "DELETE":
+                  headers["Prefer"] = "return=minimal"
+              req = urllib.request.Request(f"{SB}/rest/v1/{path}", data=body, method=method, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.read().decode()
+
+          rc = 0
+          for region, tbl in REGIONS.items():
+              try:
+                  marks = json.loads(call("GET", f"ai_advice_marks?region=eq.{region}&date=eq.{today}&select=adset_id,tag") or "[]")
+                  if not marks:
+                      print(f"[{region}] 오늘 AI 권고 0건 → 초기화 스킵(안전)")
+                      continue
+                  # 1) 오늘 하이라이트 전체 초기화 (adset_id는 PK라 항상 존재 → 전체 매칭)
+                  call("DELETE", f"{tbl}?adset_id=not.is.null")
+                  # 2) AI 조언 재적용 (source='ai' → 점선 테두리)
+                  rows = [{"adset_id": str(m["adset_id"]), "highlight": m["tag"], "source": "ai", "updated_at": now} for m in marks]
+                  call("POST", tbl, rows)
+                  print(f"[{region}] 초기화 후 AI 조언 {len(rows)}건 재적용(source=ai) → {tbl}")
+              except Exception as e:
+                  print(f"[{region}] 실패: {e}")
+                  rc = 1
+          print("done")
+          sys.exit(rc)
+          PY
