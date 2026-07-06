@@ -221,7 +221,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-trendw"><div class="filter"><label>최근</label><select id="twWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="16">16주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="twFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('twFilter').value='';renderTrendWeekly()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="twTbl"></table></div></div>
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tpFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tpFilter').value='';renderTrendProduct()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
 <div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
-<div class="panel" id="p-change"><div class="filter"><label>세트필터</label><input type="text" id="cFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('cFilter').value='';renderChange()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="cTbl"></table></div></div>
+<div class="panel" id="p-change"><div class="filter"><label>보기</label><select id="cView" onchange="renderChange()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="cFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('cFilter').value='';renderChange()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
@@ -231,7 +231,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=국내 채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드는 Meta 시간대 지출로 ROAS·순이익까지, 네이버·구글디멘드젠은 매출만(Mixpanel 귀속·일별 시트값과 다를 수 있음)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드·글로벌·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·구글디멘드젠은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
@@ -2210,23 +2210,34 @@ function renderTrendInfluencer(){
 
 // ===== CHANGE =====
 function renderChange(){
-  const dd=DATES.slice(0,30);const d7=dd.slice(0,7);const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  const byA={};AD.forEach(r=>{if(!dd.includes(r.date))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,d:{}};byA[rid].d[r.date]=r});
+  // 보기: 일별(최근30일) / 주별(최근16주,월요일기준 WM) / 월별(최근6개월). 증감률=직전 기간 대비 지출 변화.
+  const view=document.getElementById('cView')?.value||'day';
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  const pkey=d=>view==='day'?d:view==='week'?WM(d):d.slice(0,7);
+  const weekLabel=mon=>{const s=new Date(mon);const e=new Date(mon);e.setDate(e.getDate()+6);return(s.getMonth()+1)+'/'+s.getDate()+'~'+(e.getMonth()+1)+'/'+e.getDate()};
+  const colLabel=k=>view==='day'?DK(k):view==='week'?weekLabel(k):k.slice(2);
+  const d7=DATES.slice(0,7);   // '7일' 요약 컬럼(고정 KPI, 보기 무관)
+  // 세트별: 기간(period)별 지출·매출 + 최근일 원본(7일 KPI용)
+  const byA={};
+  AD.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,p:{},d:{}};const o=byA[rid].p[pkey(r.date)]||(byA[rid].p[pkey(r.date)]={s:0,r:0});o.s+=r.spend;o.r+=r.revenue;byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (종합 합계도 필터 결과 기준)
   const tKw=(document.getElementById('cFilter')?.value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
-  const ths=dd.map(d=>{const yd=d===yDay?' col-yday':'';return'<th class="'+yd+'" style="min-width:90px">'+DK(d)+'</th>'}).join('');
-  const totD={};dd.forEach(d=>{let s=0,r=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue}});totD[d]={s,r}});
+  // 컬럼(기간) — 최신순
+  const limit=view==='day'?30:view==='week'?16:6;
+  const cols=(view==='day'?DATES.slice():[...new Set(AD.map(r=>pkey(r.date)))].sort().reverse()).slice(0,limit);
+  const ths=cols.map(k=>{const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+yd+'" style="min-width:92px">'+colLabel(k)+'</th>'}).join('');
+  const totP={};cols.forEach(k=>{let s=0,r=0;list.forEach(a=>{const o=a.p[k];if(o){s+=o.s;r+=o.r}});totP[k]={s,r}});
   let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
-  const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0);
+  const ts=list.reduce((a,x)=>a+x._s,0),tr=list.reduce((a,x)=>a+x._r,0);
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">증감률</div><div class="s">지출금액</div><div class="rv">매출</div></td><td class="mc">'+MC(ts>0?tr/ts*100:0,tr-ts,ts,tr,0)+'</td>';
-  dd.forEach((d,i)=>{const x=totD[d];const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<dd.length-1){const pr=totD[dd[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}const yd=d===yDay?' col-yday':'';
+  cols.forEach((k,i)=>{const x=totP[k];const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<cols.length-1){const pr=totP[cols[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}const yd=(view==='day'&&k===yDay)?' col-yday':'';
   h+='<td class="mc '+RC(roas)+yd+'"><div class="r">'+roas.toFixed(0)+'</div><div class="'+(chg>0?'p':'p neg')+'">'+(chg>0?'+':'')+chg.toFixed(1)+'%</div><div class="s">-'+money(x.s)+'</div><div class="rv">'+money(x.r)+'</div></td>'});
   h+='</tr>';
   list.forEach(a=>{
-    const cells=dd.map((d,i)=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'"></td>';const roas=r.roas;let chg=0;if(i<dd.length-1){const pr=a.d[dd[i+1]];if(pr&&pr.spend>0)chg=(r.spend-pr.spend)/pr.spend*100}
-    return'<td class="mc '+RC(roas)+yd+'"><div class="r">'+roas.toFixed(0)+'</div><div class="'+(chg>0?'p':'p neg')+'">'+(chg>0?'+':'')+chg.toFixed(1)+'%</div><div class="s">-'+money(r.spend)+'</div><div class="rv">'+money(r.revenue)+'</div></td>'}).join('');
+    const cells=cols.map((k,i)=>{const o=a.p[k];const yd=(view==='day'&&k===yDay)?' col-yday':'';if(!o||!o.s)return'<td class="'+yd+'"></td>';const roas=o.s>0?o.r/o.s*100:0;let chg=0;if(i<cols.length-1){const pr=a.p[cols[i+1]];if(pr&&pr.s>0)chg=(o.s-pr.s)/pr.s*100}
+    return'<td class="mc '+RC(roas)+yd+'"><div class="r">'+roas.toFixed(0)+'</div><div class="'+(chg>0?'p':'p neg')+'">'+(chg>0?'+':'')+chg.toFixed(1)+'%</div><div class="s">-'+money(o.s)+'</div><div class="rv">'+money(o.r)+'</div></td>'}).join('');
     h+='<tr><td class="fx fx0">'+(a.cn||'').slice(0,25)+'</td><td class="fx fx1">'+(a.an||'').slice(0,25)+'</td><td style="font-size:9px">'+a.id+'</td><td class="mc">'+MC(a._roas,a._r-a._s,a._s,a._r,0)+'</td>'+cells+'</tr>';
   });
   h+='</tbody>';document.getElementById('cTbl').innerHTML=h;
@@ -3163,16 +3174,26 @@ function ensureKrRev4h(cb){
 }
 function _chrevHourly(){
   const days=parseInt(document.getElementById('chrDays')?.value)||3;
+  const scope=document.getElementById('chrScope')?.value||'all';
   const BK=[0,4,8,12,16,20];
   const bkLabel=b=>String(b).padStart(2,'0')+'-'+String(b+4).padStart(2,'0');
-  const CH=['국내 메타','밴스드','네이버','구글디멘드젠'];
+  const DOM=['국내 메타','밴스드','네이버','구글디멘드젠'];
+  const GL=['대만 밴스드','글로벌'];
   // lut[date][bucket][channel] = {r:매출, c:건수, s:지출}
   const lut={};
   (KR_REV4H||[]).forEach(row=>{const d=row.date,b=+row.bucket,c=row.channel;if(!lut[d])lut[d]={};if(!lut[d][b])lut[d][b]={};const o=lut[d][b][c]||(lut[d][b][c]={r:0,c:0,s:0});o.r+=(+row.revenue||0);o.c+=(+row.purchase_count||0);o.s+=(+row.spend||0)});
   const cell=(d,b,c)=>((lut[d]||{})[b]||{})[c]||{r:0,c:0,s:0};
-  // 셀: 지출(메타·밴스드) 있으면 추이차트처럼 ROAS/순이익/매출/지출, 없으면(네이버·구글) 매출+건수.
+  const sumOf=(d,b,list)=>{let r=0,c=0,s=0;list.forEach(ch=>{const v=cell(d,b,ch);r+=v.r;c+=v.c;s+=v.s});return{r,c,s}};
+  // 셀: 지출 있으면 추이차트처럼 ROAS/순이익/매출/지출, 없으면(네이버·구글) 매출+건수.
   const CELLrev=(rev,cnt)=>(!rev&&!cnt)?'':'<div class="rv" style="font-size:11px;font-weight:700">'+moneyKRW(rev)+'</div><div class="cv" style="color:#888">'+(cnt||0)+'건</div>';
-  const INNER=(r,c,s)=>{if(s>0){const roas=r/s*100;return{cls:RC(roas),html:MC_CH(roas,r-s,s,r)}}return{cls:'',html:CELLrev(r,c)}};
+  const INNER=(v)=>{if(v.s>0){const roas=v.r/v.s*100;return{cls:RC(roas),html:MC_CH(roas,v.r-v.s,v.s,v.r)}}return{cls:'',html:CELLrev(v.r,v.c)}};
+  // scope 별 행 구성 (일별 _chrevChannels 와 동일 규칙): 전체종합 상단 고정 + 권역종합/채널
+  const mk=ch=>({name:ch,get:(d,b)=>cell(d,b,ch)});
+  const sumAll={name:'전체 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM.concat(GL))};
+  let rows;
+  if(scope==='dom')rows=[sumAll,{name:'국내 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM)},...DOM.map(mk)];
+  else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...GL.map(mk)];
+  else rows=[sumAll,...DOM.map(mk),...GL.map(mk)];
   // 날짜(최근→과거), 각 날짜 내 버킷도 최근(20)→과거(0) → 최신이 왼쪽(일별과 동일 방향)
   const today=new Date();const dates=[];
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}
@@ -3181,18 +3202,16 @@ function _chrevHourly(){
   // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
   const ths=cols.map(col=>'<th style="min-width:92px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
-  // 종합(채널 합) 행 — 매출·건수·지출 합
-  h+='<tr class="sr" style="border-top:2px solid #9bb5d4"><td class="fx fx0" style="background:#c5d6ea;font-weight:700;padding:4px 6px">종합</td>';
-  cols.forEach(col=>{let sr=0,sc=0,ss=0;CH.forEach(c=>{const v=cell(col.date,col.bucket,c);sr+=v.r;sc+=v.c;ss+=v.s});const ix=INNER(sr,sc,ss);h+='<td class="mc" style="background:#eef3f9;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
-  h+='</tr>';
-  CH.forEach(c=>{
-    h+='<tr><td class="fx fx0" style="background:#dce6f0;font-weight:700;padding:4px 6px">'+c+'</td>';
-    cols.forEach(col=>{const v=cell(col.date,col.bucket,c);const ix=INNER(v.r,v.c,v.s);h+='<td class="mc '+ix.cls+'" style="'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
+  rows.forEach(row=>{
+    const nameBg=row.sum?'#c5d6ea':'#dce6f0';
+    h+='<tr'+(row.sum?' class="sr" style="border-top:2px solid #9bb5d4"':'')+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+row.name+'</td>';
+    cols.forEach(col=>{const ix=INNER(row.get(col.date,col.bucket));const bg=row.sum?'background:#eef3f9;':'';h+='<td class="mc '+(row.sum?'':ix.cls)+'" style="'+bg+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
-  // 하단 누적 막대차트 (채널별 매출) — _chrevChart 재사용
-  const channels=CH.map(c=>({name:c,get:k=>{const p=k.split('#');return {s:0,r:cell(p[0],+p[1],c).r}}}));
+  // 하단 누적 막대차트 (채널별 매출) — 종합행 제외, scope 반영
+  const chList=(scope==='dom'?DOM:scope==='gl'?GL:DOM.concat(GL));
+  const channels=chList.map(c=>({name:c,get:k=>{const p=k.split('#');return {s:0,r:cell(p[0],+p[1],c).r}}}));
   const periods=cols.map(col=>({label:col.label,dates:[col.key]}));
   _chrevChart(channels,periods);
 }

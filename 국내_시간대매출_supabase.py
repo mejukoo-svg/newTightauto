@@ -37,6 +37,7 @@ import requests as req_lib
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("kr4h")
+logging.getLogger("stripe").setLevel(logging.ERROR)   # Stripe 요청 로그 억제
 
 # ---- .env 로컬 로드 (GitHub Actions 는 env 주입) ----
 def _load_env():
@@ -75,23 +76,43 @@ CH_META   = "국내 메타"
 CH_VANCED = "밴스드"
 CH_NAVER  = "네이버"
 CH_GGDG   = "구글디멘드젠"
+CH_VN_TW  = "대만 밴스드"   # 글로벌 scope
+CH_GLOBAL = "글로벌"        # 글로벌 scope (매출=Stripe−대만밴스드귀속, 지출=글로벌 타이트메타)
 
-# ── Meta 시간대 지출(국내메타·밴스드) — Mixpanel 매출과 합쳐 4시간 ROAS 산출 ──
-#   계정 광고주 타임존=KST 이므로 hourly breakdown 시각이 KST와 일치(매출 버킷과 정렬됨).
+DOMESTIC_CHANNELS = (CH_META, CH_VANCED, CH_NAVER, CH_GGDG)
+GLOBAL_CHANNELS = (CH_VN_TW, CH_GLOBAL)
+
+# ── Meta 시간대 지출 — Mixpanel 매출과 합쳐 4시간 ROAS 산출 ──
+#   계정 광고주 타임존=KST → hourly breakdown 시각이 KST(매출 버킷)와 정렬.
 #   네이버·구글디멘드젠은 시간대 지출 원천이 제한적이라 지출=0(매출만).
 META_API_VERSION = "v21.0"
 META_BASE = f"https://graph.facebook.com/{META_API_VERSION}"
 META_TOKEN_1 = os.environ.get("META_TOKEN_1", "")
 META_TOKEN_2 = os.environ.get("META_TOKEN_2", "")
 META_TOKEN_VANCED = os.environ.get("META_TOKEN_VANCED", "")
-# (계정, 토큰, 채널). 밴스드 대만(act_1286632473622244)은 국내 아님 → 제외.
+META_TOKEN_GLOBALTT = os.environ.get("META_TOKEN_GlobalTT", "") or os.environ.get("META_TOKEN_4", "") or os.environ.get("META_TOKEN_3", "")
+META_TOKEN_ACT_9937 = os.environ.get("META_TOKEN_ACT_9937", "")
+# (계정, 토큰, 채널, 지출통화). 국내·밴스드·대만밴스드 지출은 KRW 원장(밴스드 파이프라인 관례),
+#   글로벌 타이트 계정은 TWD → KRW 환산(get_krw_rates). 대만(act_...9937 등) 5계정=글로벌 지출.
 META_SPEND_ACCOUNTS = [
-    ("act_1270614404675034", META_TOKEN_1, CH_META),
-    ("act_707835224206178",  META_TOKEN_1, CH_META),
-    ("act_1808141386564262", META_TOKEN_2, CH_META),
-    ("act_25183853061243175", META_TOKEN_VANCED, CH_VANCED),
-    ("act_1560037899174007",  META_TOKEN_VANCED, CH_VANCED),
+    ("act_1270614404675034", META_TOKEN_1, CH_META, "KRW"),
+    ("act_707835224206178",  META_TOKEN_1, CH_META, "KRW"),
+    ("act_1808141386564262", META_TOKEN_2, CH_META, "KRW"),
+    ("act_25183853061243175", META_TOKEN_VANCED, CH_VANCED, "KRW"),
+    ("act_1560037899174007",  META_TOKEN_VANCED, CH_VANCED, "KRW"),
+    (VN_TW_ACC,               META_TOKEN_VANCED, CH_VN_TW, "KRW"),
+    ("act_1054081590008088", META_TOKEN_1,        CH_GLOBAL, "USD"),
+    ("act_2677707262628563", META_TOKEN_GLOBALTT, CH_GLOBAL, "USD"),
+    ("act_1335040608536838", META_TOKEN_GLOBALTT, CH_GLOBAL, "USD"),
+    ("act_993712016404855",  META_TOKEN_ACT_9937, CH_GLOBAL, "USD"),
+    ("act_1021437716898605", META_TOKEN_1,        CH_GLOBAL, "USD"),
 ]
+
+# Stripe(글로벌 실결제) — 글로벌 종합 매출(KRW). 통화별 KRW 환산은 get_krw_rates 사용.
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100}
+# 대만밴스드 매출(TWD→KRW) 환율 — 밴스드 파이프라인과 동일(기본 47.85, env override).
+TWD_KRW_RATE = float(os.environ.get("TWD_KRW_RATE") or 47.85)
 
 # =========================================================
 # 헬퍼 (기존 파이프라인에서 이식)
@@ -243,22 +264,24 @@ class SupabaseClient:
 # 채널 세트(adset_id) 로드
 # =========================================================
 def load_channel_adsets(sb):
-    """국내 메타 / 밴스드(국내) adset_id 집합을 Supabase 에서 로드."""
+    """국내메타 / 밴스드(국내) / 대만밴스드 adset_id 집합을 Supabase 에서 로드."""
     cutoff = (TODAY - timedelta(days=120)).isoformat()
     kr = set()
     for row in sb.select_rows("ad_performance_daily", "adset_id", f"&date=gte.{cutoff}"):
         aid = clean_id(row.get("adset_id"))
         if aid:
             kr.add(aid)
-    vn = set()
+    vn = set(); vn_tw = set()
     for row in sb.select_rows("vanced_ad_performance_daily", "adset_id,ad_account_id", f"&date=gte.{cutoff}"):
-        if str(row.get("ad_account_id") or "") == VN_TW_ACC:
-            continue   # 대만 밴스드 제외 → 국내 밴스드만
         aid = clean_id(row.get("adset_id"))
-        if aid:
-            vn.add(aid)
-    log.info(f"  📇 채널 세트: 국내메타 {len(kr)}개 / 밴스드(국내) {len(vn)}개 adset")
-    return kr, vn
+        if not aid:
+            continue
+        if str(row.get("ad_account_id") or "") == VN_TW_ACC:
+            vn_tw.add(aid)     # 대만 밴스드
+        else:
+            vn.add(aid)        # 국내 밴스드
+    log.info(f"  📇 채널 세트: 국내메타 {len(kr)} / 밴스드 {len(vn)} / 대만밴스드 {len(vn_tw)} adset")
+    return kr, vn, vn_tw
 
 # =========================================================
 # Mixpanel
@@ -374,17 +397,26 @@ def dedup_events(events):
     log.info(f"  🧹 dedup: {len(events)} → {len(kept)}건 (order_id {len(kept)-len(no_oid)}? / 유지 {len(kept)})")
     return kept
 
-def classify(e, kr_adsets, vn_adsets):
+def classify(e, kr_adsets, vn_adsets, vn_tw_adsets):
     """이벤트 → (channel, revenue_krw) 또는 None."""
     props = e["props"]
     ut = e["utm_term"]
     meta = is_meta_source(e["utm_source"])
-    # ① / ② Meta 계열 + adset 세트 소속
+    # ① 국내메타 / ② 밴스드(국내) / ②' 대만밴스드 — Meta 계열 + adset 세트 소속
     if meta and ut:
         if ut in kr_adsets:
             return CH_META, e["revenue"]
         if ut in vn_adsets:
             return CH_VANCED, e["revenue"]
+        if ut in vn_tw_adsets:
+            # 대만밴스드 결제통화 TWD → KRW (밴스드 파이프라인과 동일 환율). KRW 결제는 그대로.
+            cur = event_currency(props)
+            rev = e["revenue"]
+            if cur == "TWD":
+                rev = rev * TWD_KRW_RATE
+            elif cur != "KRW":
+                rev = rev * get_krw_rates().get(cur, 1.0)
+            return CH_VN_TW, rev
     # ③ 네이버
     if is_naver_event(props):
         return CH_NAVER, e["revenue"]
@@ -409,10 +441,11 @@ def _hour_of(bucket):
 def fetch_meta_hourly_spend(start_d, end_d):
     """Meta insights(level=account, hourly breakdown, time_increment=1) → (date,4h버킷,channel) 지출(KRW)."""
     spend = defaultdict(float)
-    for acc, token, channel in META_SPEND_ACCOUNTS:
+    for acc, token, channel, cur in META_SPEND_ACCOUNTS:
         if not token:
             log.warning(f"  ⚠️ META 토큰 없음 → {acc} 지출 스킵")
             continue
+        krw_mul = 1.0 if cur == "KRW" else get_krw_rates().get(cur, 1.0)   # 지출통화 → KRW
         url = f"{META_BASE}/{acc}/insights"
         params = {
             "access_token": token, "level": "account",
@@ -439,13 +472,53 @@ def fetch_meta_hourly_spend(start_d, end_d):
                 except Exception: pass
                 if sp <= 0:
                     continue
-                spend[(ds, (hr // 4) * 4, channel)] += sp
+                spend[(ds, (hr // 4) * 4, channel)] += sp * krw_mul
                 n += 1
             url = j.get("paging", {}).get("next"); params = None; page += 1
             if page > 300:
                 break
         log.info(f"  💸 {acc} ({channel}): {n} (date,hour) 지출행")
     return spend
+
+
+def fetch_stripe_hourly(start_d, end_d):
+    """Stripe 실결제(글로벌 종합 매출) → (date,4h버킷) KRW 합. 통화별 get_krw_rates 환산."""
+    total = defaultdict(float)   # (date,bucket) -> KRW
+    if not STRIPE_API_KEY:
+        log.warning("  ⚠️ STRIPE_API_KEY 없음 — 글로벌 매출 스킵")
+        return total
+    try:
+        import stripe
+    except ImportError:
+        log.warning("  ⚠️ stripe 패키지 없음 — 글로벌 매출 스킵")
+        return total
+    stripe.api_key = STRIPE_API_KEY
+    rates = get_krw_rates()
+    start_ts = int(datetime(start_d.year, start_d.month, start_d.day, tzinfo=KST).timestamp())
+    end_ts = int(datetime(end_d.year, end_d.month, end_d.day, 23, 59, 59, tzinfo=KST).timestamp())
+    has_more = True; sa = None; n = 0
+    while has_more:
+        params = {"limit": 100, "created": {"gte": start_ts, "lte": end_ts}, "status": "succeeded"}
+        if sa: params["starting_after"] = sa
+        try:
+            resp = stripe.Charge.list(**params)
+        except Exception as e:
+            log.warning(f"  ⚠️ Stripe 조회 예외: {e}"); break
+        for ch in resp.data:
+            cur = (getattr(ch, "currency", "") or "").lower()
+            if cur not in STRIPE_DIVISOR:
+                continue
+            amt_local = (getattr(ch, "amount", 0) or 0) / STRIPE_DIVISOR[cur]
+            if amt_local <= 0:
+                continue
+            krw = amt_local * (1.0 if cur == "krw" else rates.get(cur.upper(), 0))
+            dt = datetime.fromtimestamp(ch.created, tz=KST)
+            total[(dt.date().isoformat(), (dt.hour // 4) * 4)] += krw
+            n += 1
+        has_more = resp.has_more
+        if resp.data: sa = resp.data[-1].id
+    log.info(f"  💳 Stripe: {n}건 → 글로벌 종합 매출(KRW)")
+    return total
 
 
 # =========================================================
@@ -462,7 +535,7 @@ def main():
     log.info("=" * 56)
 
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
-    kr_adsets, vn_adsets = load_channel_adsets(sb)
+    kr_adsets, vn_adsets, vn_tw_adsets = load_channel_adsets(sb)
 
     fetch_from = START - timedelta(days=MP_FETCH_BUFFER_DAYS)
     lines = fetch_mixpanel(fetch_from, END)
@@ -479,7 +552,7 @@ def main():
     for e in events:
         if not (start_s <= e["date"] <= end_s):
             continue
-        res = classify(e, kr_adsets, vn_adsets)
+        res = classify(e, kr_adsets, vn_adsets, vn_tw_adsets)
         if not res:
             continue
         ch, rev = res
@@ -489,8 +562,16 @@ def main():
         classified += 1
     log.info(f"  🔎 채널 귀속: {classified}건 → {len(agg)} (date,bucket,channel) 셀")
 
-    # Meta 시간대 지출(국내메타·밴스드) — 매출 버킷과 (date,4h,channel) 정렬
+    # Meta 시간대 지출(국내메타·밴스드·대만밴스드·글로벌) — 매출 버킷과 (date,4h,channel) 정렬
     meta_spend = fetch_meta_hourly_spend(START, END)
+
+    # 글로벌 종합 매출 = Stripe 실결제(KRW). '글로벌' 채널 매출 = Stripe − 대만밴스드 귀속(chrev 정의와 동일).
+    stripe_total = fetch_stripe_hourly(START, END)
+    for (ds, bk), krw in stripe_total.items():
+        vntw_rev = agg.get((ds, bk, CH_VN_TW), (0.0, 0))[0]
+        gl_rev = krw - vntw_rev
+        cur = agg[(ds, bk, CH_GLOBAL)]
+        cur[0] += (gl_rev if gl_rev > 0 else 0)   # 음수 방지(귀속>실결제인 드문 버킷)
 
     # only-raise 가드: 기존 저장값과 비교해 큰 값 유지(transient fetch 실패로 인한 하향 방지)
     existing = {}
@@ -522,7 +603,7 @@ def main():
     per_r = defaultdict(float); per_s = defaultdict(float)
     for r in records:
         per_r[r["channel"]] += r["revenue"]; per_s[r["channel"]] += r["spend"]
-    for ch in (CH_META, CH_VANCED, CH_NAVER, CH_GGDG):
+    for ch in DOMESTIC_CHANNELS + GLOBAL_CHANNELS:
         rv, sp = per_r.get(ch, 0), per_s.get(ch, 0)
         roas = (rv / sp * 100) if sp > 0 else 0
         log.info(f"    {ch}: 매출 ₩{rv:,.0f}  지출 ₩{sp:,.0f}  ROAS {roas:.0f}%")
@@ -532,7 +613,7 @@ def main():
     for r in records:
         per_dc[(r["date"], r["channel"])] += r["revenue"]
     for ds in sorted({r["date"] for r in records}):
-        parts = [f"{ch}=₩{per_dc.get((ds,ch),0):,.0f}" for ch in (CH_META, CH_VANCED, CH_NAVER, CH_GGDG)]
+        parts = [f"{ch}=₩{per_dc.get((ds,ch),0):,.0f}" for ch in DOMESTIC_CHANNELS + GLOBAL_CHANNELS]
         log.info(f"    📅 {ds}: " + "  ".join(parts))
 
     if os.environ.get("DRY_RUN", "").lower() == "true":
