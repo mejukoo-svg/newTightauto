@@ -388,9 +388,14 @@ const GL_PRODUCT_CANON={'솔로':'solo','무당':'shaman'};
 const canonGLRows=rows=>(rows||[]).map(r=>(r&&GL_PRODUCT_CANON[r.product])?{...r,product:GL_PRODUCT_CANON[r.product]}:r);
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
-  if(MODE==='vn'&&(!r.product||r.product==='etc')){
-    const m=(r.campaign_name||'').match(/^\[Vanced\]_([^_]+)_/i);
-    if(m){const raw=m[1];return{...r,product:VANCED_PRODUCT_MAP[raw]||raw}}
+  if(MODE==='vn'){
+    // 캠페인명에 MZMUDANG 포함 → Shaman (언더바/공백/대소문자·HK/TW 변형 모두 포함)
+    if(/mzmudang/i.test(r.campaign_name||''))return{...r,product:'Shaman'};
+    if(!r.product||r.product==='etc'){
+      // 구분자 언더바·공백 모두 허용 (예: '[Vanced]_Career_' , '[Vanced] Possessive_')
+      const m=(r.campaign_name||'').match(/^\[Vanced\][_ ]([^_ ]+)[_ ]/i);
+      if(m){const raw=m[1];return{...r,product:VANCED_PRODUCT_MAP[raw.toUpperCase()]||VANCED_PRODUCT_MAP[raw]||raw}}
+    }
   }
   return r;
 }
