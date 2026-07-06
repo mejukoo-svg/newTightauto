@@ -116,6 +116,9 @@ ADSET_CAMPAIGN_NAME = {}
 STRIPE_CURRENCY_MAP = {"twd": "TW", "hkd": "HK", "jpy": "JP", "usd": "GLOBAL", "krw": "KR", "thb": "TH"}
 STRIPE_COUNTRY_NAMES = {"TW": "대만", "HK": "홍콩", "JP": "일본", "GLOBAL": "글로벌(USD)", "KR": "한국(KRW)", "TH": "태국"}
 STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100}
+# 빌링주소(ISO) → country_name. 통화-only 분류의 누락 보정용(홍콩 고객이 -tw 스토어에서 TWD로 결제해도
+#   빌링주소=HK 이면 홍콩 매출로 잡는다). 금액 환산은 결제 통화 기준 유지.
+STRIPE_BILLING_COUNTRY = {"TW": "대만", "HK": "홍콩", "JP": "일본", "TH": "태국"}
 
 
 # =========================================================
@@ -443,11 +446,23 @@ def fetch_stripe_revenue(start_date, end_date):
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-        # 통화 기준으로만 국가 분류 (billing address 국가 무시)
-        # USD/기타 통화 결제는 모두 제외 — JPY/TWD/HKD 만 집계
-        country_code = STRIPE_CURRENCY_MAP.get(currency)
-        if country_code not in STRIPE_COUNTRY_NAMES: continue
-        country_name = STRIPE_COUNTRY_NAMES[country_code]
+        # 국가 분류: ① 빌링주소(TW/HK/JP/TH) 우선 → ② 통화 폴백.
+        #   홍콩 고객이 -tw 스토어에서 TWD로 결제하는 케이스(2026-07 이후 급증)를
+        #   통화-only 분류가 대만으로 오분류해 홍콩이 과소계상되던 문제 보정.
+        #   금액 환산은 아래에서 결제 통화(currency) 기준 그대로 → 정확.
+        addr_country = None
+        bd = getattr(ch, 'billing_details', None)
+        if bd:
+            addr = getattr(bd, 'address', None)
+            if addr:
+                ac = getattr(addr, 'country', None)
+                if ac: addr_country = str(ac).strip().upper()
+        if addr_country in STRIPE_BILLING_COUNTRY:
+            country_name = STRIPE_BILLING_COUNTRY[addr_country]
+        else:
+            country_code = STRIPE_CURRENCY_MAP.get(currency)
+            if country_code not in STRIPE_COUNTRY_NAMES: continue
+            country_name = STRIPE_COUNTRY_NAMES[country_code]
         divisor = STRIPE_DIVISOR.get(currency, 100)
         amount_local = ch.amount / divisor
         # KRW 환산
