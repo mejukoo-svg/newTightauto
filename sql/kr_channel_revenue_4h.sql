@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.kr_channel_revenue_4h (
   bucket          smallint NOT NULL,          -- 4시간 구간 시작시각(KST): 0,4,8,12,16,20
   channel         text     NOT NULL,          -- '국내 메타' | '밴스드' | '네이버' | '구글디멘드젠'
   revenue         numeric  NOT NULL DEFAULT 0,
+  spend           numeric  NOT NULL DEFAULT 0, -- Meta 시간대 지출(국내메타·밴스드만). 네이버/구글=0(시간대 지출 원천 없음)
   purchase_count  integer  NOT NULL DEFAULT 0,
   updated_at      timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (date, bucket, channel)

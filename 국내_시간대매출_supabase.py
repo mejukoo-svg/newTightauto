@@ -13,6 +13,8 @@
          ③ is_naver_event → '네이버'
          ④ properties.ch=='google' → '구글디멘드젠'
          ⑤ 그 외 → 스킵
+지출   : Meta insights(level=account, hourly breakdown, time_increment=1)로 국내메타·밴스드
+         계정의 (date,4h,channel) 지출을 받아 매출과 합쳐 ROAS 산출. 네이버·구글=지출0(매출만).
 dedup  : order_id(utm_term우선·max revenue) → $insert_id → (date,distinct_id,서비스)
 통화   : 국내 KRW 그대로. 구글디멘드젠 해외결제만 KRW 환산(구글_디멘드젠_mp 로직 이식).
 가드   : only-raise — 새 집계가 기존 저장값보다 낮으면(=transient MP fetch 실패) 기존값 보존.
@@ -73,6 +75,23 @@ CH_META   = "국내 메타"
 CH_VANCED = "밴스드"
 CH_NAVER  = "네이버"
 CH_GGDG   = "구글디멘드젠"
+
+# ── Meta 시간대 지출(국내메타·밴스드) — Mixpanel 매출과 합쳐 4시간 ROAS 산출 ──
+#   계정 광고주 타임존=KST 이므로 hourly breakdown 시각이 KST와 일치(매출 버킷과 정렬됨).
+#   네이버·구글디멘드젠은 시간대 지출 원천이 제한적이라 지출=0(매출만).
+META_API_VERSION = "v21.0"
+META_BASE = f"https://graph.facebook.com/{META_API_VERSION}"
+META_TOKEN_1 = os.environ.get("META_TOKEN_1", "")
+META_TOKEN_2 = os.environ.get("META_TOKEN_2", "")
+META_TOKEN_VANCED = os.environ.get("META_TOKEN_VANCED", "")
+# (계정, 토큰, 채널). 밴스드 대만(act_1286632473622244)은 국내 아님 → 제외.
+META_SPEND_ACCOUNTS = [
+    ("act_1270614404675034", META_TOKEN_1, CH_META),
+    ("act_707835224206178",  META_TOKEN_1, CH_META),
+    ("act_1808141386564262", META_TOKEN_2, CH_META),
+    ("act_25183853061243175", META_TOKEN_VANCED, CH_VANCED),
+    ("act_1560037899174007",  META_TOKEN_VANCED, CH_VANCED),
+]
 
 # =========================================================
 # 헬퍼 (기존 파이프라인에서 이식)
@@ -381,6 +400,55 @@ def classify(e, kr_adsets, vn_adsets):
     return None
 
 # =========================================================
+# Meta 시간대 지출
+# =========================================================
+def _hour_of(bucket):
+    m = re.match(r"^(\d{1,2})", str(bucket or ""))
+    return int(m.group(1)) if m else -1
+
+def fetch_meta_hourly_spend(start_d, end_d):
+    """Meta insights(level=account, hourly breakdown, time_increment=1) → (date,4h버킷,channel) 지출(KRW)."""
+    spend = defaultdict(float)
+    for acc, token, channel in META_SPEND_ACCOUNTS:
+        if not token:
+            log.warning(f"  ⚠️ META 토큰 없음 → {acc} 지출 스킵")
+            continue
+        url = f"{META_BASE}/{acc}/insights"
+        params = {
+            "access_token": token, "level": "account",
+            "time_range": json.dumps({"since": start_d.isoformat(), "until": end_d.isoformat()}),
+            "breakdowns": "hourly_stats_aggregated_by_advertiser_time_zone",
+            "time_increment": 1, "fields": "spend", "limit": 500,
+        }
+        page = 0; n = 0
+        while url:
+            try:
+                r = req_lib.get(url, params=params if page == 0 else None, timeout=120)
+            except Exception as e:
+                log.warning(f"  ⚠️ {acc} 지출조회 예외: {e}"); break
+            if r.status_code != 200:
+                log.warning(f"  ⚠️ {acc} 지출 HTTP {r.status_code}: {r.text[:200]}"); break
+            j = r.json()
+            for row in j.get("data", []):
+                ds = row.get("date_start")
+                hr = _hour_of(row.get("hourly_stats_aggregated_by_advertiser_time_zone"))
+                if not ds or hr < 0:
+                    continue
+                sp = 0.0
+                try: sp = float(row.get("spend") or 0)
+                except Exception: pass
+                if sp <= 0:
+                    continue
+                spend[(ds, (hr // 4) * 4, channel)] += sp
+                n += 1
+            url = j.get("paging", {}).get("next"); params = None; page += 1
+            if page > 300:
+                break
+        log.info(f"  💸 {acc} ({channel}): {n} (date,hour) 지출행")
+    return spend
+
+
+# =========================================================
 # 메인
 # =========================================================
 def main():
@@ -421,34 +489,45 @@ def main():
         classified += 1
     log.info(f"  🔎 채널 귀속: {classified}건 → {len(agg)} (date,bucket,channel) 셀")
 
-    # only-raise 가드: 기존 저장값과 비교해 큰 값 유지(transient MP 실패로 인한 하향 방지)
+    # Meta 시간대 지출(국내메타·밴스드) — 매출 버킷과 (date,4h,channel) 정렬
+    meta_spend = fetch_meta_hourly_spend(START, END)
+
+    # only-raise 가드: 기존 저장값과 비교해 큰 값 유지(transient fetch 실패로 인한 하향 방지)
     existing = {}
-    for row in sb.select_rows("kr_channel_revenue_4h", "date,bucket,channel,revenue,purchase_count",
+    for row in sb.select_rows("kr_channel_revenue_4h", "date,bucket,channel,revenue,spend,purchase_count",
                               f"&date=gte.{start_s}&date=lte.{end_s}"):
         existing[(row["date"], int(row["bucket"]), row["channel"])] = (
-            float(row.get("revenue") or 0), int(row.get("purchase_count") or 0))
+            float(row.get("revenue") or 0), float(row.get("spend") or 0), int(row.get("purchase_count") or 0))
 
+    # 매출 셀 ∪ 지출 셀 (지출만 있는 초기 시간대도 포함)
+    keys = set(agg.keys()) | set(meta_spend.keys())
     records = []
     lowered = 0
-    for (ds, bk, ch), (rev, cnt) in agg.items():
-        old = existing.get((ds, bk, ch))
+    for (ds, bk, ch) in keys:
+        rev, cnt = agg.get((ds, bk, ch), (0.0, 0))
         rev_f, cnt_f = round(rev, 2), cnt
-        if old and old[0] > rev_f:
-            rev_f, cnt_f = old[0], max(cnt, old[1])   # 기존값 보존
-            lowered += 1
+        sp_f = round(meta_spend.get((ds, bk, ch), 0.0), 2)
+        old = existing.get((ds, bk, ch))
+        if old:
+            if old[0] > rev_f:                       # 매출 보존
+                rev_f, cnt_f = old[0], max(cnt_f, old[2]); lowered += 1
+            if old[1] > sp_f:                        # 지출 보존
+                sp_f = old[1]
         records.append({"date": ds, "bucket": int(bk), "channel": ch,
-                        "revenue": rev_f, "purchase_count": cnt_f})
+                        "revenue": rev_f, "spend": sp_f, "purchase_count": cnt_f})
     if lowered:
-        log.info(f"  🛡️ only-raise: {lowered}셀은 기존값이 더 커서 보존")
+        log.info(f"  🛡️ only-raise: {lowered}셀 매출 기존값 보존")
 
-    # 채널별 합계 로그
-    per_ch = defaultdict(float)
+    # 채널별 합계 로그 (매출·지출·ROAS)
+    per_r = defaultdict(float); per_s = defaultdict(float)
     for r in records:
-        per_ch[r["channel"]] += r["revenue"]
+        per_r[r["channel"]] += r["revenue"]; per_s[r["channel"]] += r["spend"]
     for ch in (CH_META, CH_VANCED, CH_NAVER, CH_GGDG):
-        log.info(f"    {ch}: ₩{per_ch.get(ch,0):,.0f}")
+        rv, sp = per_r.get(ch, 0), per_s.get(ch, 0)
+        roas = (rv / sp * 100) if sp > 0 else 0
+        log.info(f"    {ch}: 매출 ₩{rv:,.0f}  지출 ₩{sp:,.0f}  ROAS {roas:.0f}%")
 
-    # 일자별 채널 합계 (정합성 대조용 — 국내메타는 ad_performance_daily 와 근사해야 함)
+    # 일자별 채널 매출 합계 (정합성 대조용 — 국내메타는 ad_performance_daily 와 근사해야 함)
     per_dc = defaultdict(float)
     for r in records:
         per_dc[(r["date"], r["channel"])] += r["revenue"]
@@ -460,7 +539,8 @@ def main():
         log.info(f"  🧪 DRY_RUN — 업로드 스킵 ({len(records)}행)")
         _dump = sorted(records, key=lambda r: (r["date"], r["bucket"], r["channel"]))
         for r in _dump[-24:]:
-            log.info(f"      {r['date']} {r['bucket']:02d}시 {r['channel']}: ₩{r['revenue']:,.0f} ({r['purchase_count']}건)")
+            roas = (r["revenue"]/r["spend"]*100) if r["spend"] > 0 else 0
+            log.info(f"      {r['date']} {r['bucket']:02d}시 {r['channel']}: 매출₩{r['revenue']:,.0f} 지출₩{r['spend']:,.0f} ROAS{roas:.0f}% ({r['purchase_count']}건)")
         return
 
     sb.upsert("kr_channel_revenue_4h", records, on_conflict="date,bucket,channel")

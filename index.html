@@ -231,7 +231,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=국내 채널 Mixpanel 귀속 매출을 4시간(00·04·08·12·16·20 KST)으로 분할(매출만·시트기반 네이버/구글은 일별과 값 다를 수 있음)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=국내 채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드는 Meta 시간대 지출로 ROAS·순이익까지, 네이버·구글디멘드젠은 매출만(Mixpanel 귀속·일별 시트값과 다를 수 있음)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
@@ -3166,27 +3166,28 @@ function _chrevHourly(){
   const BK=[0,4,8,12,16,20];
   const bkLabel=b=>String(b).padStart(2,'0')+'-'+String(b+4).padStart(2,'0');
   const CH=['국내 메타','밴스드','네이버','구글디멘드젠'];
-  // lut[date][bucket][channel] = {r:매출, c:건수}
+  // lut[date][bucket][channel] = {r:매출, c:건수, s:지출}
   const lut={};
-  (KR_REV4H||[]).forEach(row=>{const d=row.date,b=+row.bucket,c=row.channel;if(!lut[d])lut[d]={};if(!lut[d][b])lut[d][b]={};const o=lut[d][b][c]||(lut[d][b][c]={r:0,c:0});o.r+=(+row.revenue||0);o.c+=(+row.purchase_count||0)});
-  const cell=(d,b,c)=>((lut[d]||{})[b]||{})[c]||{r:0,c:0};
-  // 추이차트 셀 스타일: 매출(rv) + 건수(작은 회색). 값 없으면 빈칸.
-  const CELL=(rev,cnt)=>(!rev&&!cnt)?'':'<div class="rv" style="font-size:11px;font-weight:700">'+moneyKRW(rev)+'</div><div class="cv" style="color:#888">'+(cnt||0)+'건</div>';
+  (KR_REV4H||[]).forEach(row=>{const d=row.date,b=+row.bucket,c=row.channel;if(!lut[d])lut[d]={};if(!lut[d][b])lut[d][b]={};const o=lut[d][b][c]||(lut[d][b][c]={r:0,c:0,s:0});o.r+=(+row.revenue||0);o.c+=(+row.purchase_count||0);o.s+=(+row.spend||0)});
+  const cell=(d,b,c)=>((lut[d]||{})[b]||{})[c]||{r:0,c:0,s:0};
+  // 셀: 지출(메타·밴스드) 있으면 추이차트처럼 ROAS/순이익/매출/지출, 없으면(네이버·구글) 매출+건수.
+  const CELLrev=(rev,cnt)=>(!rev&&!cnt)?'':'<div class="rv" style="font-size:11px;font-weight:700">'+moneyKRW(rev)+'</div><div class="cv" style="color:#888">'+(cnt||0)+'건</div>';
+  const INNER=(r,c,s)=>{if(s>0){const roas=r/s*100;return{cls:RC(roas),html:MC_CH(roas,r-s,s,r)}}return{cls:'',html:CELLrev(r,c)}};
   // 날짜(최근→과거), 각 날짜 내 버킷도 최근(20)→과거(0) → 최신이 왼쪽(일별과 동일 방향)
   const today=new Date();const dates=[];
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}
   const cols=[];
   dates.forEach(d=>{[...BK].reverse().forEach(b=>{cols.push({date:d,bucket:b,key:d+'#'+b,label:DK(d).slice(3)+' '+bkLabel(b),dayStart:b===20})})});
   // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
-  const ths=cols.map(col=>'<th style="min-width:88px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
+  const ths=cols.map(col=>'<th style="min-width:92px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
-  // 종합(채널 합) 행 — 매출·건수 합
+  // 종합(채널 합) 행 — 매출·건수·지출 합
   h+='<tr class="sr" style="border-top:2px solid #9bb5d4"><td class="fx fx0" style="background:#c5d6ea;font-weight:700;padding:4px 6px">종합</td>';
-  cols.forEach(col=>{let sr=0,sc=0;CH.forEach(c=>{const v=cell(col.date,col.bucket,c);sr+=v.r;sc+=v.c});h+='<td class="mc" style="background:#eef3f9;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+CELL(sr,sc)+'</td>'});
+  cols.forEach(col=>{let sr=0,sc=0,ss=0;CH.forEach(c=>{const v=cell(col.date,col.bucket,c);sr+=v.r;sc+=v.c;ss+=v.s});const ix=INNER(sr,sc,ss);h+='<td class="mc" style="background:#eef3f9;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
   h+='</tr>';
   CH.forEach(c=>{
     h+='<tr><td class="fx fx0" style="background:#dce6f0;font-weight:700;padding:4px 6px">'+c+'</td>';
-    cols.forEach(col=>{const v=cell(col.date,col.bucket,c);h+='<td class="mc" style="'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+CELL(v.r,v.c)+'</td>'});
+    cols.forEach(col=>{const v=cell(col.date,col.bucket,c);const ix=INNER(v.r,v.c,v.s);h+='<td class="mc '+ix.cls+'" style="'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
