@@ -231,7 +231,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드·글로벌·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·구글디멘드젠은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
@@ -3177,8 +3177,8 @@ function _chrevHourly(){
   const scope=document.getElementById('chrScope')?.value||'all';
   const BK=[0,4,8,12,16,20];
   const bkLabel=b=>String(b).padStart(2,'0')+'-'+String(b+4).padStart(2,'0');
-  const DOM=['국내 메타','밴스드','네이버','구글디멘드젠'];
-  const GL=['대만 밴스드','글로벌'];
+  const DOM=['국내 메타','밴스드 국내','네이버','디멘드젠(타이트)'];
+  const GL=['대만 밴스드','글로벌(밴스드 제외)'];
   // lut[date][bucket][channel] = {r:매출, c:건수, s:지출}
   const lut={};
   (KR_REV4H||[]).forEach(row=>{const d=row.date,b=+row.bucket,c=row.channel;if(!lut[d])lut[d]={};if(!lut[d][b])lut[d][b]={};const o=lut[d][b][c]||(lut[d][b][c]={r:0,c:0,s:0});o.r+=(+row.revenue||0);o.c+=(+row.purchase_count||0);o.s+=(+row.spend||0)});
@@ -3242,16 +3242,16 @@ function _chrevChannels(){
   // 권역별 상세 채널
   const domChannels=[
     {name:'국내 메타',  get:d=>byDateKR[d]||{s:0,r:0}},
-    {name:'밴스드',get:d=>byDateVN[d]||{s:0,r:0}},
+    {name:'밴스드 국내',get:d=>byDateVN[d]||{s:0,r:0}},
     {name:'네이버',get:d=>byDatePL[d]||{s:0,r:0}},
-    {name:'구글',  get:d=>byDateGG[d]||{s:0,r:0}},
-    {name:'구글디멘드젠',get:d=>byDateGGDG[d]||{s:0,r:0}},
+    {name:'밴스드 구글',  get:d=>byDateGG[d]||{s:0,r:0}},
+    {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}},
   ];
   const glChannels=[
     {name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0}},  // VN_TW_ACC 단독 (KRW)
-    // 글로벌 = 글로벌 전체(종합) − 대만 밴스드. 매출=Stripe 실결제−대만밴스드귀속, 지출=글로벌 전체지출−대만밴스드지출(=GL_AD).
+    // 글로벌(밴스드 제외) = 글로벌 전체(종합) − 대만 밴스드. 매출=Stripe 실결제−대만밴스드귀속, 지출=글로벌 전체지출−대만밴스드지출(=GL_AD).
     // 이렇게 해야 매출이 실결제 기준이라 종합과 일치(흑자)하고, 두 상세행 합=글로벌 종합이 정확히 맞는다.
-    {name:'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpend(d)-vt.s, r:glRev(d)-vt.r};}},
+    {name:'글로벌(밴스드 제외)',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpend(d)-vt.s, r:glRev(d)-vt.r};}},
   ];
   const scope=document.getElementById('chrScope')?.value||'all';
   if(scope==='dom')return [sumAll,sumDom,...domChannels];
@@ -3343,7 +3343,7 @@ function _chrevChart(channels,periods){
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
   const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
-  const COLORS={'국내 메타':'#1877F2','밴스드':'#9333ea','네이버':'#03C75A','구글':'#EA4335','구글디멘드젠':'#FBBC04','대만 밴스드':'#c084fc','글로벌':'#0ea5e9'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
