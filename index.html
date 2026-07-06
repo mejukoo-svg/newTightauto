@@ -231,7 +231,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>시간별</b>=국내 채널 Mixpanel 귀속 매출을 4시간(00·04·08·12·16·20 KST)으로 분할(매출만·시트기반 네이버/구글은 일별과 값 다를 수 있음)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
@@ -1022,6 +1022,7 @@ document.getElementById('chrView').addEventListener('change',function(){
   let opts,def,unit;
   if(view==='daily'){opts=[14,30,60,90,180,210];def=30;unit='일'}
   else if(view==='weekly'){opts=[4,8,12,24];def=12;unit='주'}
+  else if(view==='hourly'){opts=[2,3,5,7];def=3;unit='일'}   // 4시간 버킷: 일수 × 6 = 열
   else{opts=[3,6,12,24];def=12;unit='개월'}
   sel.innerHTML=opts.map(n=>'<option value="'+n+'"'+(n===def?' selected':'')+'>'+n+unit+'</option>').join('');
   renderChannelRevenue();
@@ -3143,10 +3144,54 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='f'){
 const HIST_REVENUE={"2025-09-01":7483000,"2025-09-02":6441600,"2025-09-03":5852000,"2025-09-04":5476500,"2025-09-05":5879500,"2025-09-06":4138400,"2025-09-07":8896000,"2025-09-08":6452100,"2025-09-09":5371200,"2025-09-10":6821400,"2025-09-11":5598900,"2025-09-12":6611500,"2025-09-13":7182100,"2025-09-14":8416700,"2025-09-15":6254600,"2025-09-16":7283800,"2025-09-17":8364500,"2025-09-18":7780600,"2025-09-19":7285800,"2025-09-20":8484600,"2025-09-21":8723000,"2025-09-22":7427100,"2025-09-23":8258910,"2025-09-24":8684906,"2025-09-25":7390027,"2025-09-26":7491000,"2025-09-27":10266000,"2025-09-28":12476110,"2025-09-29":10654200,"2025-09-30":8924500,"2025-10-01":10485500,"2025-10-02":8036000,"2025-10-03":11903900,"2025-10-04":12940300,"2025-10-05":14910000,"2025-10-06":14563800,"2025-10-07":14223100,"2025-10-08":13754100,"2025-10-09":14540700,"2025-10-10":12921300,"2025-10-11":15786700,"2025-10-12":15084000,"2025-10-13":9808000,"2025-10-14":12183300,"2025-10-15":11238000,"2025-10-16":11174700,"2025-10-17":9885500,"2025-10-18":11321700,"2025-10-19":14913400,"2025-10-20":10597600,"2025-10-21":9675700,"2025-10-22":9788500,"2025-10-23":8744400,"2025-10-24":9410400,"2025-10-25":11411600,"2025-10-26":14018800,"2025-10-27":11364300,"2025-10-28":10304200,"2025-10-29":9922300,"2025-10-30":10750388,"2025-10-31":8777688,"2025-11-01":10291366,"2025-11-02":13387686,"2025-11-03":11009398,"2025-11-04":12890810,"2025-11-05":10442476,"2025-11-06":11035208,"2025-11-07":12182154,"2025-11-08":12645842,"2025-11-09":14659730,"2025-11-10":11060918,"2025-11-11":13250918,"2025-11-12":11413064,"2025-11-13":12377242,"2025-11-14":13331520,"2025-11-15":15954686,"2025-11-16":20480174,"2025-11-17":13882286,"2025-11-18":11529142,"2025-11-19":10253054,"2025-11-20":10399410,"2025-11-21":12958698,"2025-11-22":12992588,"2025-11-23":16022286,"2025-11-24":13726206,"2025-11-25":10248974,"2025-11-26":11974020,"2025-11-27":13496310,"2025-11-28":12890510,"2025-11-29":13565688,"2025-11-30":15433264,"2025-12-01":12742084,"2025-12-02":12700120,"2025-12-03":11498760,"2025-12-04":12328430,"2025-12-05":12808310,"2025-12-06":16744196,"2025-12-07":27379040,"2025-12-08":20897280,"2025-12-09":18133380,"2025-12-10":17217126,"2025-12-11":17864594,"2025-12-12":17247642,"2025-12-13":23888816,"2025-12-14":29031350,"2025-12-15":26823690,"2025-12-16":26833820,"2025-12-17":25637308,"2025-12-18":27906094,"2025-12-19":26883278,"2025-12-20":31507950,"2025-12-21":37463586,"2025-12-22":26974730,"2025-12-23":24996220,"2025-12-24":25389208,"2025-12-25":27744568,"2025-12-26":25605376,"2025-12-27":29843948,"2025-12-28":35863234,"2025-12-29":26532358,"2025-12-30":26950008,"2025-12-31":29830862,"2026-01-01":45048664,"2026-01-02":33473488,"2026-01-03":35732118,"2026-01-04":50036734,"2026-01-05":34452915,"2026-01-06":31823992,"2026-01-07":33943848,"2026-01-08":31062336,"2026-01-09":30122222,"2026-01-10":37994052,"2026-01-11":46455368,"2026-01-12":38148264,"2026-01-13":34129222,"2026-01-14":32977196,"2026-01-15":31031874,"2026-01-16":30198316,"2026-01-17":37744146,"2026-01-18":46571042,"2026-01-19":39784314,"2026-01-20":32577406,"2026-01-21":32970392,"2026-01-22":30321722,"2026-01-23":28804026,"2026-01-24":34814196,"2026-01-25":42843947,"2026-01-26":32206386,"2026-01-27":32412938,"2026-01-28":31198624,"2026-01-29":29426508,"2026-01-30":30380534,"2026-01-31":38476036,"2026-02-01":45162278,"2026-02-02":38030440,"2026-02-03":32748636,"2026-02-04":30915336,"2026-02-05":31717142,"2026-02-06":27371024,"2026-02-07":37374600,"2026-02-08":40860766,"2026-02-09":33921942,"2026-02-10":29681976,"2026-02-11":29454007,"2026-02-12":33686593,"2026-02-13":37304407,"2026-02-14":48118986,"2026-02-15":61805984,"2026-02-16":73735492,"2026-02-17":79577124,"2026-02-18":83248004,"2026-02-19":57115298,"2026-02-20":46217732,"2026-02-21":48098678,"2026-02-22":56279730,"2026-02-23":39310572,"2026-02-24":32853254,"2026-02-25":34569902,"2026-02-26":25772054,"2026-02-27":25938354,"2026-02-28":29267578,"2026-03-01":51146742,"2026-03-02":34576538,"2026-03-03":39274582,"2026-03-04":36383805,"2026-03-05":30051238,"2026-03-06":33046923,"2026-03-07":39834161,"2026-03-08":50627354,"2026-03-09":37617534,"2026-03-10":34404694,"2026-03-11":32824700,"2026-03-12":31751188,"2026-03-13":38570448,"2026-03-14":47196672,"2026-03-15":62309874,"2026-03-16":46967070,"2026-03-17":43084451,"2026-03-18":44367597,"2026-03-19":44145878,"2026-03-20":43998480,"2026-03-21":50151914,"2026-03-22":56221862,"2026-03-23":39829976,"2026-03-24":36443656,"2026-03-25":32672296,"2026-03-26":30640700,"2026-03-27":27170608,"2026-03-28":39756230,"2026-03-29":40218408,"2026-03-30":32924460,"2026-03-31":32252564};
 function renderChannelRevenue(){
   const view=document.getElementById('chrView')?.value||'daily';
+  if(view==='hourly'){ensureKrRev4h(_chrevHourly);return}   // 시간별: 4시간 버킷(별도 데이터·매출만)
   const count=parseInt(document.getElementById('chrDays').value);
   const channels=_chrevChannels();
   if(view==='daily')_chrevDaily(channels,count);
   else _chrevPeriod(channels,view,count);
+}
+
+// ===== 시간별(4시간 버킷) 국내 채널 매출 — kr_channel_revenue_4h (Mixpanel 귀속, 매출만) =====
+// 일별/주별/월별과 달리 지출·ROAS 없음(4시간 단위 채널 지출 원천이 없음). 셀=매출(₩)만.
+// 시트기반 채널(구글검색·네이버파워링크)은 일단위라 제외 — 여기 '네이버'는 Mixpanel utm_source=naver 귀속분.
+let KR_REV4H=[],_KR_REV4H_LOADED=false;
+function ensureKrRev4h(cb){
+  if(_KR_REV4H_LOADED){cb&&cb();return}
+  sbQ('kr_channel_revenue_4h','select=*&order=date.desc,bucket.desc&limit=5000')
+    .then(d=>{KR_REV4H=d||[];_KR_REV4H_LOADED=true;cb&&cb();})
+    .catch(()=>{KR_REV4H=[];cb&&cb();});   // 실패(테이블 미생성 등)는 캐시 안 함 → 다음 선택 시 재시도
+}
+function _chrevHourly(){
+  const days=parseInt(document.getElementById('chrDays')?.value)||3;
+  const BK=[0,4,8,12,16,20];
+  const bkLabel=b=>String(b).padStart(2,'0')+'-'+String(b+4).padStart(2,'0');
+  const CH=['국내 메타','밴스드','네이버','구글디멘드젠'];
+  // lut[date][bucket][channel] = revenue
+  const lut={};
+  (KR_REV4H||[]).forEach(r=>{const d=r.date,b=+r.bucket,c=r.channel;if(!lut[d])lut[d]={};if(!lut[d][b])lut[d][b]={};lut[d][b][c]=(lut[d][b][c]||0)+(+r.revenue||0)});
+  const cell=(d,b,c)=>((lut[d]||{})[b]||{})[c]||0;
+  // 날짜(최근→과거), 각 날짜 내 버킷도 최근(20)→과거(0) → 최신이 왼쪽(일별과 동일 방향)
+  const today=new Date();const dates=[];
+  for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}
+  const cols=[];
+  dates.forEach(d=>{[...BK].reverse().forEach(b=>{cols.push({date:d,bucket:b,key:d+'#'+b,label:DK(d).slice(3)+' '+bkLabel(b),dayStart:b===20})})});
+  // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
+  const ths=cols.map(col=>'<th style="min-width:82px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
+  let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
+  // 종합(채널 합) 행
+  h+='<tr style="border-top:2px solid #9bb5d4"><td class="fx fx0" style="background:#c5d6ea;font-weight:700;padding:4px 6px">종합</td>';
+  cols.forEach(col=>{let s=0;CH.forEach(c=>s+=cell(col.date,col.bucket,c));h+='<td class="mc" style="text-align:right;font-weight:700;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+(s?moneyKRW(s):'')+'</td>'});
+  h+='</tr>';
+  CH.forEach(c=>{
+    h+='<tr><td class="fx fx0" style="background:#dce6f0;font-weight:700;padding:4px 6px">'+c+'</td>';
+    cols.forEach(col=>{const v=cell(col.date,col.bucket,c);h+='<td class="mc rv" style="text-align:right;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+(v?moneyKRW(v):'')+'</td>'});
+    h+='</tr>';
+  });
+  h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+  // 하단 누적 막대차트 (채널별 매출) — _chrevChart 재사용
+  const channels=CH.map(c=>({name:c,get:k=>{const p=k.split('#');return {s:0,r:cell(p[0],+p[1],c)}}}));
+  const periods=cols.map(col=>({label:col.label,dates:[col.key]}));
+  _chrevChart(channels,periods);
 }
 
 function _chrevChannels(){

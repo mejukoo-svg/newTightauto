@@ -1,0 +1,54 @@
+name: 🇰🇷 국내 시간대(4h) 매출 → Supabase
+
+# 하루 6개 4시간 버킷(00/04/08/12/16/20 KST) 채널별 매출을 Mixpanel 로 집계.
+# 당일 버킷은 시간이 지날수록 채워지므로 매시 갱신.
+concurrency:
+  group: kr-hourly-revenue
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '22 * * * *'   # 매시 22분 (다른 파이프라인 :07/:37 과 겹치지 않게)
+  workflow_dispatch:
+    inputs:
+      full_refresh:
+        description: '전체 기간 갱신(2025-12-01~오늘)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      refresh_days:
+        description: '갱신 기간(일)'
+        required: false
+        default: '10'
+        type: choice
+        options:
+          - '4'
+          - '7'
+          - '10'
+          - '30'
+          - '90'
+
+jobs:
+  kr-hourly-rev:
+    name: 국내 4시간 매출
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Run 국내 시간대 매출
+        env:
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 국내_시간대매출_supabase.py
