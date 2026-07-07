@@ -52,6 +52,11 @@ log = logging.getLogger(__name__)
 SB_URL = os.environ["SUPABASE_URL"].rstrip("/")
 SB_KEY = os.environ["SUPABASE_SERVICE_KEY"]
 SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json"}
+# new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)
+_sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+if _sc:
+    SBH['Accept-Profile'] = _sc
+    SBH['Content-Profile'] = _sc
 MP_USER = os.environ.get("MIXPANEL_USERNAME", "")
 MP_SECRET = os.environ.get("MIXPANEL_SECRET", "")
 MP_PROJECT = int(os.environ.get("MIXPANEL_PROJECT_ID", "3390233"))

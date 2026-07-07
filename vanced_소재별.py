@@ -144,6 +144,11 @@ class SB:
         s.url=re.sub(r'[^\x20-\x7E]','',SUPABASE_URL).strip().rstrip("/")
         if not s.url.startswith("http"): s.url=f"https://{s.url}"
         s.h={"apikey":SUPABASE_KEY,"Authorization":f"Bearer {SUPABASE_KEY}","Content-Type":"application/json","Prefer":"resolution=merge-duplicates"}
+        # new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)
+        _sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+        if _sc:
+            s.h['Accept-Profile'] = _sc
+            s.h['Content-Profile'] = _sc
     def upsert(s,t,recs,cs=500):
         total=len(recs);ok=0
         for i in range(0,total,cs):

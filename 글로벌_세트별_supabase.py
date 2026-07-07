@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 글로벌_세트별_supabase.py
 ========================
@@ -490,6 +490,11 @@ class SupabaseClient:
         self.key = key.strip()
         self.headers = {"apikey": self.key, "Authorization": f"Bearer {self.key}",
             "Content-Type": "application/json", "Prefer": "resolution=merge-duplicates"}
+        # new-tightauto: SUPABASE_DB_SCHEMA 설정 시에만 스키마 프로파일 헤더 (미설정=기존 public)
+        _sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+        if _sc:
+            self.headers['Accept-Profile'] = _sc
+            self.headers['Content-Profile'] = _sc
 
     def _sanitize(self, records):
         clean = []

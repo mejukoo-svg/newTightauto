@@ -624,6 +624,11 @@ class SupabaseClient:
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",
         }
+        # new-tightauto: SUPABASE_DB_SCHEMA 설정 시에만 스키마 프로파일 헤더 (미설정=기존 public)
+        _sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+        if _sc:
+            self.headers['Accept-Profile'] = _sc
+            self.headers['Content-Profile'] = _sc
         log.info(f"  🔗 Supabase URL length={len(self.base_url)}, repr={repr(self.base_url[:50])}")
 
     def _test_connection(self):

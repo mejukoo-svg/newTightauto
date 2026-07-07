@@ -50,6 +50,11 @@ SUPA_HEADERS = {
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Accept": "application/json",
 }
+# new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)
+_sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+if _sc:
+    SUPA_HEADERS['Accept-Profile'] = _sc
+    SUPA_HEADERS['Content-Profile'] = _sc
 
 # ───────────────────────────── baseline rules (system prompt) ─────────────────────────────
 

@@ -225,6 +225,11 @@ class SupabaseClient:
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates",
         }
+        # new-tightauto: SUPABASE_DB_SCHEMA 설정 시에만 스키마 프로파일 헤더 (미설정=기존 public)
+        _sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+        if _sc:
+            self.headers['Accept-Profile'] = _sc
+            self.headers['Content-Profile'] = _sc
     def upsert(self, table, records, chunk=500):
         if not records: return 0
         url = f"{self.base}/rest/v1/{table}"
