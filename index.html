@@ -2390,11 +2390,9 @@ function renderDateTab(){
   let ed=selEnd.value||DATES[0];
   // 시작일이 종료일보다 크면 자동으로 swap
   if(sd>ed){[sd,ed]=[ed,sd];selStart.value=sd;selEnd.value=ed}
-  // 추이차트 하이라이트 동기화 — 선택한 날짜 기준(추이차트의 그 날짜 칸과 일치).
-  //   선택 구간에 '오늘'이 포함될 때만 현재 마킹(HIGHLIGHTS) 우선(추이차트 오늘칸/이름색과 동일),
-  //   아니면 그 날짜의 실제 하이라이트(r.highlight)를 그대로 표시 → 과거 날짜 뷰가 추이차트 칸과 일치.
-  const _td=new Date();const tDay=_td.getFullYear()+'-'+String(_td.getMonth()+1).padStart(2,'0')+'-'+String(_td.getDate()).padStart(2,'0');
-  const todayInView=(sd<=tDay&&tDay<=ed);
+  // 하이라이트: 날짜탭은 추이차트 하이라이트(HIGHLIGHTS=현재 세트별 마킹)를 그대로 따라간다.
+  //   AI봇(오늘의퍼포먼스봇) 마킹은 adset_highlights(HIGHLIGHTS)에만 있고 perfTbl.highlight엔 없어서,
+  //   날짜별 r.highlight를 쓰면 추이차트와 어긋난다. → 세트별 현재 마킹만 사용(추이차트 이름색과 항상 동일).
   // 안내 문구
   const dayCount=Math.round((new Date(ed)-new Date(sd))/864e5)+1;
   const dtInfo=document.getElementById('dtInfo');
@@ -2541,7 +2539,7 @@ function renderDateTab(){
 
   // 데이터 rows
   rows.forEach(r=>{
-    const rid=rowId(r);let hl=todayInView?(HIGHLIGHTS[rid]||r.highlight):r.highlight;const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
+    const rid=rowId(r);let hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
     const mv=(r.memo||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
