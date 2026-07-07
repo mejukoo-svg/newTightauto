@@ -261,7 +261,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
     <input type="date" id="expStartB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
   <span style="color:#888;font-size:10px">💡 세트 ID 2개를 각자 기간으로 비교 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
 </div><div class="sheet-wrap"><table id="expTbl"></table></div>
-<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(설정한 기간 일수로 나눔) / ROAS·전환율·CPM=기간 비율</span></div>
+<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(설정한 기간 일수로 나눔) / ROAS·CVR·CTR·빈도·구매당비용·CPM=기간 비율</span></div>
 <div class="sheet-wrap"><table id="expAvgTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
@@ -403,8 +403,8 @@ function _expFindSet(id){
     const rr=rows.filter(r=>String(r[idf]||'')===id);if(!rr.length)return null;
     const byDate={};let name='';
     rr.forEach(r=>{const s=usd?(+r.spend_usd||0):(+r.spend||0),rv=usd?(+r.revenue_usd||0):(+r.revenue||0);
-      if(!byDate[r.date])byDate[r.date]={s:0,r:0,uc:0,mp:0,imp:0};const o=byDate[r.date];
-      o.s+=s;o.r+=rv;o.uc+=(+r.unique_clicks||0);o.mp+=(+r.results_mp||0);o.imp+=(+r.impressions||0);name=r[namef]||name});
+      if(!byDate[r.date])byDate[r.date]={s:0,r:0,uc:0,mp:0,imp:0,rch:0};const o=byDate[r.date];
+      o.s+=s;o.r+=rv;o.uc+=(+r.unique_clicks||0);o.mp+=(+r.results_mp||0);o.imp+=(+r.impressions||0);o.rch+=(+r.reach||0);name=r[namef]||name});
     return {name,cur,byDate};
   };
   return scan(KR_AD,'adset_id','adset_name','₩',false)||scan(VN_AD,'adset_id','adset_name','₩',false)
@@ -415,8 +415,8 @@ function _expSide(k){
   const s=document.getElementById('expStart'+k)?.value||'',e=document.getElementById('expEnd'+k)?.value||'';
   const set=_expFindSet(id);
   if(!set)return {id,name:'',cur:'₩',range:{},tot:null,calDays:0};
-  const range={},tot={s:0,r:0,uc:0,mp:0,imp:0};
-  Object.keys(set.byDate).forEach(d=>{if((!s||d>=s)&&(!e||d<=e)){const o=set.byDate[d];range[d]=o;tot.s+=o.s;tot.r+=o.r;tot.uc+=o.uc;tot.mp+=o.mp;tot.imp+=o.imp}});
+  const range={},tot={s:0,r:0,uc:0,mp:0,imp:0,rch:0};
+  Object.keys(set.byDate).forEach(d=>{if((!s||d>=s)&&(!e||d<=e)){const o=set.byDate[d];range[d]=o;tot.s+=o.s;tot.r+=o.r;tot.uc+=o.uc;tot.mp+=o.mp;tot.imp+=o.imp;tot.rch+=(o.rch||0)}});
   // 평균 분모 = 설정한 기간의 달력 일수(start~end 포함). 기간 미지정 시 데이터 범위(min~max).
   let calDays=0;
   if(s&&e)calDays=Math.round((new Date(e)-new Date(s))/864e5)+1;
@@ -460,24 +460,29 @@ function renderExperiment(){
   h+='</tbody>';document.getElementById('expTbl').innerHTML=h;
   _expRenderAvg(A,B);
 }
-// 지정 기간 평균 표 — 지출·매출·순이익=하루 평균(데이터 있는 일수), ROAS·전환율·CPM=기간 비율. 열 순서=추이차트.
+// 지정 기간 평균 표 — 지출·매출·순이익=하루 평균(설정 기간 일수), 나머지=기간 비율.
+//   CVR=구매/클릭, CTR=클릭/노출, 빈도=노출/도달, 구매당비용=지출/구매(CPA).
 function _expRenderAvg(A,B){
   const row=(lab,S,col)=>{
-    const days=S.calDays||0,t=S.tot||{s:0,r:0,uc:0,mp:0,imp:0};
+    const days=S.calDays||0,t=S.tot||{s:0,r:0,uc:0,mp:0,imp:0,rch:0};
     const nm='<td class="fx fx0" style="text-align:left;font-size:11px"><b style="color:'+col+'">'+lab+'</b> '+(S.name||'-')+(S.cur?' <span style="color:#999">'+S.cur+'</span>':'')+'</td>';
-    if(!days||!t.s)return '<tr>'+nm+'<td style="text-align:center;color:#999">0</td><td colspan="6" style="color:#999">데이터 없음</td></tr>';
-    const roas=t.s>0?t.r/t.s*100:0,pf=(t.r-t.s)/days,cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0,ctr=t.imp>0?t.uc/t.imp*100:0,cpm=t.imp>0?t.s/t.imp*1000:0,cur=S.cur;
+    if(!days||!t.s)return '<tr>'+nm+'<td style="text-align:center;color:#999">0</td><td colspan="9" style="color:#999">데이터 없음</td></tr>';
+    const roas=t.s>0?t.r/t.s*100:0,pf=(t.r-t.s)/days,cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0,ctr=t.imp>0?t.uc/t.imp*100:0,
+      cpm=t.imp>0?t.s/t.imp*1000:0,freq=t.rch>0?t.imp/t.rch:0,cpa=t.mp>0?t.s/t.mp:0,cur=S.cur;
     return '<tr>'+nm
       +'<td style="text-align:center">'+days+'일</td>'
       +'<td class="'+RC(roas)+'" style="text-align:right;font-weight:700">'+roas.toFixed(0)+'%</td>'
       +'<td style="text-align:right;color:'+(pf>=0?'#1a6b1a':'#d00')+'">'+_expMoney(pf,cur)+'</td>'
       +'<td style="text-align:right;color:#d00">'+_expMoney(t.s/days,cur)+'</td>'
       +'<td style="text-align:right;color:#0000dd">'+_expMoney(t.r/days,cur)+'</td>'
-      +'<td style="text-align:right">'+P(cvr)+'('+P(ctr)+')</td>'
+      +'<td style="text-align:right">'+P(cvr)+'</td>'
+      +'<td style="text-align:right">'+P(ctr)+'</td>'
+      +'<td style="text-align:right">'+(freq?freq.toFixed(2):'')+'</td>'
+      +'<td style="text-align:right">'+(cpa?_expMoney(cpa,cur):'')+'</td>'
       +'<td style="text-align:right">'+_expMoney(cpm,cur)+'</td></tr>';
   };
   const h='<thead><tr><th class="fx fx0" style="min-width:170px;text-align:left">세트</th><th style="min-width:52px">일수</th>'+
-    '<th>ROAS</th><th>순이익/일</th><th>지출/일</th><th>매출/일</th><th>전환율(클릭률)</th><th>CPM</th></tr></thead>'+
+    '<th>ROAS</th><th>순이익/일</th><th>지출/일</th><th>매출/일</th><th>CVR</th><th>CTR</th><th>빈도</th><th>구매당비용</th><th>CPM</th></tr></thead>'+
     '<tbody>'+row('A',A,'#1a73e8')+row('B',B,'#d81b60')+'</tbody>';
   document.getElementById('expAvgTbl').innerHTML=h;
 }
