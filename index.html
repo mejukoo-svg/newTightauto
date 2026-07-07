@@ -260,7 +260,9 @@ mark.sh.active{background:#ff6d01;color:#fff}
     <span id="expNameB" style="font-size:11px;color:#d81b60;font-weight:600;min-width:90px"></span>
     <input type="date" id="expStartB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
   <span style="color:#888;font-size:10px">💡 세트 ID 2개를 각자 기간으로 비교 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
-</div><div class="sheet-wrap"><table id="expTbl"></table></div></div>
+</div><div class="sheet-wrap"><table id="expTbl"></table></div>
+<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(데이터 있는 일수 기준) / ROAS·전환율·CPM=기간 비율</span></div>
+<div class="sheet-wrap"><table id="expAvgTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -443,6 +445,28 @@ function renderExperiment(){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('expTbl').innerHTML=h;
+  _expRenderAvg(A,B);
+}
+// 지정 기간 평균 표 — 지출·매출·순이익=하루 평균(데이터 있는 일수), ROAS·전환율·CPM=기간 비율. 열 순서=추이차트.
+function _expRenderAvg(A,B){
+  const row=(lab,S,col)=>{
+    const days=Object.keys(S.range).length,t=S.tot||{s:0,r:0,uc:0,mp:0,imp:0};
+    const nm='<td class="fx fx0" style="text-align:left;font-size:11px"><b style="color:'+col+'">'+lab+'</b> '+(S.name||'-')+(S.cur?' <span style="color:#999">'+S.cur+'</span>':'')+'</td>';
+    if(!days||!t.s)return '<tr>'+nm+'<td style="text-align:center;color:#999">0</td><td colspan="6" style="color:#999">데이터 없음</td></tr>';
+    const roas=t.s>0?t.r/t.s*100:0,pf=(t.r-t.s)/days,cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0,ctr=t.imp>0?t.uc/t.imp*100:0,cpm=t.imp>0?t.s/t.imp*1000:0,cur=S.cur;
+    return '<tr>'+nm
+      +'<td style="text-align:center">'+days+'일</td>'
+      +'<td class="'+RC(roas)+'" style="text-align:right;font-weight:700">'+roas.toFixed(0)+'%</td>'
+      +'<td style="text-align:right;color:'+(pf>=0?'#1a6b1a':'#d00')+'">'+_expMoney(pf,cur)+'</td>'
+      +'<td style="text-align:right;color:#d00">'+_expMoney(t.s/days,cur)+'</td>'
+      +'<td style="text-align:right;color:#0000dd">'+_expMoney(t.r/days,cur)+'</td>'
+      +'<td style="text-align:right">'+P(cvr)+'('+P(ctr)+')</td>'
+      +'<td style="text-align:right">'+_expMoney(cpm,cur)+'</td></tr>';
+  };
+  const h='<thead><tr><th class="fx fx0" style="min-width:170px;text-align:left">세트</th><th style="min-width:52px">일수</th>'+
+    '<th>ROAS</th><th>순이익/일</th><th>지출/일</th><th>매출/일</th><th>전환율(클릭률)</th><th>CPM</th></tr></thead>'+
+    '<tbody>'+row('A',A,'#1a73e8')+row('B',B,'#d81b60')+'</tbody>';
+  document.getElementById('expAvgTbl').innerHTML=h;
 }
 // 보조지표 셀 — 추이차트 MC와 동일 레이아웃, 데이터만 다름: CTR / CVR / CPM / 구매당비용
 //   ctr=클릭/노출, cvr=구매(mp)/클릭, cpm=지출/노출×1000, 구매당비용=지출/구매(=CPP)
