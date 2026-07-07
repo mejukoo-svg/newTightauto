@@ -49,9 +49,9 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const SB='https://qkvqiorazdrhtuicnpec.supabase.co';
-const KEY='sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g';
-const H={'apikey':KEY,'Authorization':'Bearer '+KEY};
+const SB='https://grtglwavqhvlqcocahao.supabase.co';
+const KEY='sb_publishable_EwuoG13apMFGKp973Rv8vA_3yNVpHwm';
+const H={'apikey':KEY,'Authorization':'Bearer '+KEY,'Accept-Profile':'new-tightauto','Content-Profile':'new-tightauto'};
 // 부모 대시보드(index.html)와 동일하게 로그인 세션(JWT)으로 인증 — anon 키만으론 RLS가 차단함.
 // iframe은 동일 출처라 부모가 localStorage에 저장한 Supabase 세션을 그대로 공유한다.
 const SBC=supabase.createClient(SB,KEY,{auth:{persistSession:true,autoRefreshToken:true}});
