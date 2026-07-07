@@ -172,6 +172,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn" data-mode="gl" onclick="switchMode('gl')">🌏 글로벌</div>
 <div class="mode-btn" data-mode="cr" onclick="switchMode('cr')">🎨 국내소재</div>
 <div class="mode-btn" data-mode="vn" onclick="switchMode('vn')">🎯 밴스드</div>
+<div class="mode-btn" data-mode="exp" onclick="switchMode('exp')">🧪 실험</div>
 <div class="mode-btn" data-mode="kpi" onclick="switchMode('kpi')">📈 지표KPI</div>
 <div class="mode-btn" data-mode="mkt" onclick="switchMode('mkt')">👤 마케터</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
@@ -249,6 +250,17 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-kpiMonthly"><div class="sheet-wrap"><table id="kpiMTbl" class="kpi-table"></table></div></div>
 <div class="panel" id="p-mktDash"><div id="mktBody"></div></div>
 <div class="panel" id="p-allmedia"><iframe id="allmediaFrame" data-src="allmedia.html" style="width:100%;height:calc(100vh - 150px);min-height:600px;border:0;display:block"></iframe></div>
+<div class="panel" id="p-exp"><div class="filter" style="flex-wrap:wrap;gap:10px;align-items:center">
+  <div style="display:flex;align-items:center;gap:6px"><b style="color:#1a73e8;font-size:13px">A</b>
+    <input id="expIdA" placeholder="세트 ID" onchange="expLookup('A')" style="width:160px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px">
+    <span id="expNameA" style="font-size:11px;color:#1a73e8;font-weight:600;min-width:90px"></span>
+    <input type="date" id="expStartA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
+  <div style="display:flex;align-items:center;gap:6px"><b style="color:#d81b60;font-size:13px">B</b>
+    <input id="expIdB" placeholder="세트 ID" onchange="expLookup('B')" style="width:160px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px">
+    <span id="expNameB" style="font-size:11px;color:#d81b60;font-weight:600;min-width:90px"></span>
+    <input type="date" id="expStartB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
+  <span style="color:#888;font-size:10px">💡 세트 ID 2개를 각자 기간으로 비교 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
+</div><div class="sheet-wrap"><table id="expTbl"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -368,6 +380,70 @@ function MC(roas,profit,spend,revenue,cvr,cpm,ctr){
   if(cpm)html+='<div class="cm">'+money(cpm)+'</div>';
   return html;
 }
+
+// ===== 🧪 실험탭 — 세트 A/B 비교 (각자 세트ID·기간 지정) =====
+// 셀 순서=추이차트 MC: ROAS / 순이익 / 지출 / 매출 / 전환율(클릭률) / CPM. 통화는 세트 소속(국내·밴스드=₩, 글로벌=$).
+function _expMoney(n,cur){if(n==null||n===0)return'';return cur+Math.round(n).toLocaleString(cur==='$'?'en-US':'ko-KR')}
+function _expCell(o,cur){        // o={s,r,uc,mp,imp}
+  if(!o||!o.s)return'';
+  const roas=o.s>0?o.r/o.s*100:0,profit=o.r-o.s;
+  const cvr=o.uc>0&&o.mp>0?o.mp/o.uc*100:0,ctr=o.imp>0?o.uc/o.imp*100:0,cpm=o.imp>0?o.s/o.imp*1000:0;
+  const pc=profit>=0?'p':'p neg';
+  let h='<div class="r">'+roas.toFixed(0)+'</div><div class="'+pc+'">'+_expMoney(profit,cur)+'</div><div class="s">-'+_expMoney(o.s,cur)+'</div><div class="rv">'+_expMoney(o.r,cur)+'</div><div class="cv">'+P(cvr)+'('+P(ctr)+')</div>';
+  if(cpm)h+='<div class="cm">'+_expMoney(cpm,cur)+'</div>';
+  return h;
+}
+// 입력 ID 를 KR/밴스드/글로벌(세트) → 소재(ad) 순으로 검색해 정규화. 반환 {name,cur,byDate:{date:{s,r,uc,mp,imp}}}
+function _expFindSet(id){
+  id=String(id||'').trim();if(!id)return null;
+  const scan=(rows,idf,namef,cur,usd)=>{
+    if(!rows||!rows.length)return null;
+    const rr=rows.filter(r=>String(r[idf]||'')===id);if(!rr.length)return null;
+    const byDate={};let name='';
+    rr.forEach(r=>{const s=usd?(+r.spend_usd||0):(+r.spend||0),rv=usd?(+r.revenue_usd||0):(+r.revenue||0);
+      if(!byDate[r.date])byDate[r.date]={s:0,r:0,uc:0,mp:0,imp:0};const o=byDate[r.date];
+      o.s+=s;o.r+=rv;o.uc+=(+r.unique_clicks||0);o.mp+=(+r.results_mp||0);o.imp+=(+r.impressions||0);name=r[namef]||name});
+    return {name,cur,byDate};
+  };
+  return scan(KR_AD,'adset_id','adset_name','₩',false)||scan(VN_AD,'adset_id','adset_name','₩',false)
+       ||scan(GL_AD,'adset_id','adset_name','$',true)||scan(CR_AD,'ad_id','ad_name','₩',false);
+}
+function _expSide(k){
+  const id=(document.getElementById('expId'+k)?.value||'').trim();
+  const s=document.getElementById('expStart'+k)?.value||'',e=document.getElementById('expEnd'+k)?.value||'';
+  const set=_expFindSet(id);
+  if(!set)return {id,name:'',cur:'₩',range:{},tot:null};
+  const range={},tot={s:0,r:0,uc:0,mp:0,imp:0};
+  Object.keys(set.byDate).forEach(d=>{if((!s||d>=s)&&(!e||d<=e)){const o=set.byDate[d];range[d]=o;tot.s+=o.s;tot.r+=o.r;tot.uc+=o.uc;tot.mp+=o.mp;tot.imp+=o.imp}});
+  return {id,name:set.name,cur:set.cur,range,tot};
+}
+function expLookup(k){
+  const set=_expFindSet(document.getElementById('expId'+k).value);
+  const idv=(document.getElementById('expId'+k).value||'').trim();
+  document.getElementById('expName'+k).textContent=set?(set.name||'(이름없음)'):(idv?'(세트 없음)':'');
+  if(set){const dts=Object.keys(set.byDate).sort();const sEl=document.getElementById('expStart'+k),eEl=document.getElementById('expEnd'+k);
+    if(!sEl.value&&dts.length)sEl.value=dts[0];if(!eEl.value&&dts.length)eEl.value=dts[dts.length-1]}
+  renderExperiment();
+}
+function renderExperiment(){
+  const A=_expSide('A'),B=_expSide('B');
+  document.getElementById('expNameA').textContent=A.name||((document.getElementById('expIdA').value||'').trim()?'(세트 없음)':'');
+  document.getElementById('expNameB').textContent=B.name||((document.getElementById('expIdB').value||'').trim()?'(세트 없음)':'');
+  const dates=[...new Set([...Object.keys(A.range),...Object.keys(B.range)])].sort().reverse();
+  const ths=dates.map(d=>'<th style="min-width:96px">'+DK(d)+'('+WD(d)+')</th>').join('');
+  let h='<thead><tr><th class="fx fx0" style="min-width:170px;text-align:left">세트'+
+    '<div style="font-size:8px;font-weight:400;color:#999;line-height:1.3">셀: ROAS / 순이익 / 지출 / 매출 / 전환율(클릭률) / CPM</div></th>'+
+    '<th style="min-width:112px;background:#eef3f9">전체</th>'+ths+'</tr></thead><tbody>';
+  [['A',A,'#1a73e8'],['B',B,'#d81b60']].forEach(([lab,S,col])=>{
+    const tot=S.tot||{s:0};const roasT=tot.s>0?tot.r/tot.s*100:0;
+    h+='<tr><td class="fx fx0" style="text-align:left;font-size:10px;background:#f7f9fc"><b style="color:'+col+';font-size:12px">'+lab+'</b> <b>'+(S.name||'-')+'</b>'+
+       '<br><span style="color:#999;font-size:9px">'+(S.id||'')+(S.cur?' · '+S.cur:'')+'</span></td>'+
+       '<td class="mc '+(tot.s?RC(roasT):'')+'" style="background:#eef3f9">'+_expCell(tot,S.cur)+'</td>';
+    dates.forEach(d=>{const o=S.range[d];if(!o||!o.s){h+='<td></td>';return}const roas=o.s>0?o.r/o.s*100:0;h+='<td class="mc '+RC(roas)+'">'+_expCell(o,S.cur)+'</td>'});
+    h+='</tr>';
+  });
+  h+='</tbody>';document.getElementById('expTbl').innerHTML=h;
+}
 // 보조지표 셀 — 추이차트 MC와 동일 레이아웃, 데이터만 다름: CTR / CVR / CPM / 구매당비용
 //   ctr=클릭/노출, cvr=구매(mp)/클릭, cpm=지출/노출×1000, 구매당비용=지출/구매(=CPP)
 function MCAUX(spend,revenue,uc,mp,imp){
@@ -469,11 +545,12 @@ function onCountryChange(){
 function switchMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
-  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI',mkt:'👤 마케터별 소재 성과'};
+  const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI',mkt:'👤 마케터별 소재 성과',exp:'🧪 실험 · 세트 A/B 비교'};
   document.getElementById('modeLabel').textContent=mLabels[m]||m;
   const isKpi=(m==='kpi');
   const isMkt=(m==='mkt');
-  const isSpecial=isKpi||isMkt;
+  const isExp=(m==='exp');
+  const isSpecial=isKpi||isMkt||isExp;
   // Tab visibility (unified)
   document.querySelectorAll('.tab').forEach(t=>{
     if(t.dataset.t==='vntwtrend'){t.style.display='none';return} // 레거시 대만 추이차트 — 국가 필터(countrySel)로 대체
@@ -500,6 +577,14 @@ function switchMode(m){
     document.querySelector('.tab[data-t="kpiDash"]').classList.add('active');
     document.getElementById('p-kpiDash').classList.add('active');
     ensureKpiData().then(()=>renderTab('kpiDash'));
+    return;
+  }
+  if(isExp){
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+    document.getElementById('p-exp').classList.add('active');
+    if(!CR_AD.length)ensureBigTable('cr').then(()=>renderExperiment());  // 소재(ad_id) 조회용 lazy 로드
+    renderExperiment();
     return;
   }
   // returning from KPI mode: if active tab is now hidden, reset to dashboard
