@@ -57,6 +57,7 @@ jobs:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 글로벌_소재별_supabase.py

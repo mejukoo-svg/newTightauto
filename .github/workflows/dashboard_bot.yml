@@ -25,6 +25,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CH_KR_MARKETING: ${{ secrets.SLACK_CH_KR_MARKETING }}
           SLACK_CH_GL_MARKETING: ${{ secrets.SLACK_CH_GL_MARKETING }}

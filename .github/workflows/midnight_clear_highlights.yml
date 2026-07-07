@@ -1,0 +1,50 @@
+name: 추이차트 하이라이트 자정 초기화
+
+# 매일 0시(KST) 추이차트 하이라이트·메모·AI테두리(source)를 서버에서 확실히 삭제.
+# 클라이언트(index.html) 자정 clear는 브라우저가 열려있어야만 동작 → 서버 cron으로 보장.
+# 삭제 대상: updated_at < 오늘0시(KST) 인 행만 → 자정 직후 사람이 새로 찍은 마킹은 보존.
+# 이후 10:10 KST 오늘의퍼포먼스봇이 그날 조언을 source='ai'로 재마킹 → 대시보드에 점선 테두리로 표시.
+on:
+  schedule:
+    - cron: '0 15 * * *'   # 15:00 UTC = 00:00 KST
+  workflow_dispatch:        # 수동 실행 버튼
+
+concurrency:
+  group: midnight-clear-highlights
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    name: 하이라이트 자정 삭제
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Purge stale trend highlights
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
+        run: |
+          python3 - <<'PY'
+          import os, sys, datetime, urllib.request, urllib.parse
+          SB = os.environ["SUPABASE_URL"].rstrip("/")
+          KEY = os.environ["SUPABASE_SERVICE_KEY"]
+          H = {"apikey": KEY, "Authorization": "Bearer " + KEY, "Prefer": "return=minimal"}
+          KST = datetime.timezone(datetime.timedelta(hours=9))
+          # 오늘 0시(KST)를 UTC ISO로 → 그 이전 updated_at 행만 삭제(오늘 새 마킹 보존)
+          midnight_kst = datetime.datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0)
+          cut = urllib.parse.quote(midnight_kst.astimezone(datetime.timezone.utc).isoformat())
+          tables = ["adset_highlights", "global_adset_highlights",
+                    "ad_creative_highlights", "vanced_adset_highlights"]
+          rc = 0
+          for t in tables:
+              url = f"{SB}/rest/v1/{t}?updated_at=lt.{cut}"
+              req = urllib.request.Request(url, method="DELETE", headers=H)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      print(f"OK   {t}: {r.status}")
+              except Exception as e:
+                  print(f"FAIL {t}: {e}")
+                  rc = 1
+          sys.exit(rc)
+          PY

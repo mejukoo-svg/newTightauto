@@ -21,6 +21,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
         run: |
           python3 - <<'PY'
           import os, sys, json, datetime, urllib.request
