@@ -262,7 +262,9 @@ mark.sh.active{background:#ff6d01;color:#fff}
   <span style="color:#888;font-size:10px">💡 세트 ID 2개를 각자 기간으로 비교 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
 </div><div class="sheet-wrap"><table id="expTbl"></table></div>
 <div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(설정한 기간 일수로 나눔) / ROAS·CVR·CTR·빈도·구매당비용·CPM=기간 비율</span></div>
-<div class="sheet-wrap"><table id="expAvgTbl"></table></div></div>
+<div class="sheet-wrap"><table id="expAvgTbl"></table></div>
+<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">🔻 퍼널 (노출→도달→클릭→구매) <span style="color:#888;font-weight:400;font-size:10px">· 전환=바로 윗단계 대비 % · 구매=Mixpanel 귀속 · 선택 기간 합</span></div>
+<div class="sheet-wrap"><table id="expFunnelTbl" style="max-width:640px"></table></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -459,6 +461,27 @@ function renderExperiment(){
   });
   h+='</tbody>';document.getElementById('expTbl').innerHTML=h;
   _expRenderAvg(A,B);
+  _expRenderFunnel(A,B);
+}
+// 퍼널: 노출→도달→클릭→구매. 전환=바로 윗단계 대비. A vs B 나란히. 값은 선택 기간 합.
+function _expRenderFunnel(A,B){
+  const stages=S=>{const t=S.tot||{imp:0,rch:0,uc:0,mp:0};const imp=t.imp||0,rch=t.rch||0,clk=t.uc||0,buy=t.mp||0;
+    return [{n:'노출',v:imp,rate:null},{n:'도달',v:rch,rate:imp>0?rch/imp*100:null},
+            {n:'클릭',v:clk,rate:rch>0?clk/rch*100:null},{n:'구매',v:buy,rate:clk>0?buy/clk*100:null}];};
+  const aOK=A.tot&&A.tot.imp,bOK=B.tot&&B.tot.imp;
+  const aS=stages(A),bS=stages(B);
+  let h='<thead><tr><th style="min-width:70px;text-align:left">단계</th>'+
+    '<th style="color:#1a73e8">A 값</th><th style="color:#1a73e8">A 전환</th>'+
+    '<th style="color:#d81b60">B 값</th><th style="color:#d81b60">B 전환</th></tr></thead><tbody>';
+  for(let i=0;i<4;i++){
+    const a=aS[i],b=bS[i];
+    h+='<tr><td style="text-align:left;font-weight:600">'+a.n+'</td>'+
+       '<td style="text-align:right">'+(aOK?F(a.v):'')+'</td>'+
+       '<td style="text-align:right;color:#888">'+(aOK&&a.rate!=null?a.rate.toFixed(1)+'%':(i===0&&aOK?'-':''))+'</td>'+
+       '<td style="text-align:right">'+(bOK?F(b.v):'')+'</td>'+
+       '<td style="text-align:right;color:#888">'+(bOK&&b.rate!=null?b.rate.toFixed(1)+'%':(i===0&&bOK?'-':''))+'</td></tr>';
+  }
+  h+='</tbody>';document.getElementById('expFunnelTbl').innerHTML=h;
 }
 // 지정 기간 평균 표 — 지출·매출·순이익=하루 평균(설정 기간 일수), 나머지=기간 비율.
 //   CVR=구매/클릭, CTR=클릭/노출, 빈도=노출/도달, 구매당비용=지출/구매(CPA).
