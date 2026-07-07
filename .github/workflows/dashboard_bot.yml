@@ -1,9 +1,9 @@
 name: 오늘의퍼포먼스봇
 
-# 매일 오전 10시 10분(KST) 국내·글로벌 퍼포먼스 표 + 플레이북 조언을 Slack 채널에 게시
+# 매일 오전 6시 10분(KST) 국내·글로벌 퍼포먼스 표 + 플레이북 조언을 Slack 채널에 게시
 on:
   schedule:
-    - cron: '10 1 * * *'   # 01:10 UTC = 10:10 KST. 오프아워 분(:10)+비혼잡대(01시)로 GitHub cron 드롭 완화
+    - cron: '10 21 * * *'   # 21:10 UTC = 06:10 KST. 오프아워 분(:10)로 GitHub cron 드롭 완화 (GitHub 스케줄은 수시간 지연될 수 있음)
   workflow_dispatch:        # 수동 실행 버튼
 
 concurrency:
