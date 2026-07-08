@@ -557,13 +557,25 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
             f"{ADV_MARKS_HINT}")
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     # max_tokens는 thinking+본문을 함께 덮는 하드 상한. adaptive thinking이 수천 토큰을
-    # 쓰므로 1500은 thinking 도중 잘려 본문이 빈다(→조언 미게시). 넉넉히 16000.
-    resp = client.messages.create(
-        model="claude-opus-4-8", max_tokens=16000,
-        thinking={"type": "adaptive"}, output_config={"effort": "medium"},
-        system=ADV_SYSTEM, messages=[{"role": "user", "content": user}])
-    txt = "".join(b.text for b in resp.content if b.type == "text").strip()
+    # 쓰므로 상한이 낮으면 thinking 도중 잘려 본문이 빈다(→조언 미게시, 2026-07-07 국내 재발).
+    # 프롬프트가 커질수록(교훈·이력 레이어) thinking이 길어져 여유가 더 필요 → 32000.
+    # stop_reason이 max_tokens면 thinking에 다 먹혀 본문이 빈 것이므로 한 번 더 키워 재시도한다.
+    def _call(max_toks):
+        resp = client.messages.create(
+            model="claude-opus-4-8", max_tokens=max_toks,
+            thinking={"type": "adaptive"}, output_config={"effort": "medium"},
+            system=ADV_SYSTEM, messages=[{"role": "user", "content": user}])
+        txt = "".join(b.text for b in resp.content if b.type == "text").strip()
+        return txt, resp.stop_reason
+    txt, stop = _call(32000)
+    if not txt:
+        # 본문 0자 = thinking이 상한을 다 먹음(stop=max_tokens) 또는 빈 응답 → 상한 키워 1회 재시도
+        print(f"  [조언] {label} 본문 비어 재시도 (stop={stop})")
+        txt, stop = _call(48000)
     body, marks = _extract_marks(txt)  # 기계용 marks 블록 분리 (Slack엔 body만)
+    if not body:
+        # 여기까지 비면 조용히 넘기지 말고 남긴다(예전엔 무로그 스킵 → 원인 추적 불가했음)
+        print(f"  [조언] {label} 본문 생성 실패 — 조언 미게시 (stop={stop}, txt={len(txt)}자)")
     advice = f"🧠 *오늘의 증감액 조언* ({label} · 플레이북 기준)\n{body}" if body else None
     return advice, marks
 
