@@ -529,11 +529,110 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 사람이 내 권고를 반복적으로 하향/무시했고 그게 옳았으면(이후 ROAS가 사람 선택을 지지), 내 기준이 과했음을 인정하고 이번 권고의 강도·폭을 그 방향으로 조정하라.
   · 반대로 사람이 안 따랐는데 이후 ROAS가 나빠졌으면, 근거(그날 AI권고·이후 ROAS)를 들어 이번에 다시 설득하라.
   · 나와 사람이 일치했고 결과가 좋았던 패턴은 계속 신뢰하라. 요지: 내 과거 권고의 적중/빗나감을 스스로 채점해 조언을 발전시킨다(사람 선택을 무조건 추종하지도, 무시하지도 말고 결과로 판단).
+- [보정 지표]가 주어지면 이는 위 AI↔사람 채점을 **계정 전체로 정량 집계한 최근 요약**이다(개별 세트 airec의 상위 통계). 이번 권고 강도를 여기에 맞춰 **먼저 캘리브레이션**하라:
+  · 'AI 증액 권고 중 인간 하향/취소 비율'이 높고(예: 절반↑) '인간이 하향한 건의 직후 3일 ROAS 하락'이 다수면 = **내 증액 권고가 구조적으로 과하다는 신호** → 이번엔 증액 폭을 한 단계 낮추고(증20→증10) 후보 선별을 더 보수적으로.
+  · 반대로 '인간이 상향한 건의 직후 ROAS 상승'이 다수면 = 내 감액이 과했다는 신호 → 감액·OFF를 약간 완화하고 증액 후보를 놓치지 마라.
+  · 표본이 적으면(건수 작음) 약한 신호로만 취급하고 과적합하지 마라. 이 지표는 방향 보정용이지 개별 세트 판단을 대체하지 않는다.
 - [학습된 교훈]이 주어지면, 이 계정에서 장기간 결과로 검증된 규칙이므로 **플레이북 다음으로 강하게 반영**하라. 일반 플레이북과 이 계정 특화 교훈이 충돌하면 이 계정 교훈을 우선한다. 단, 최근 14일 [세트 데이터]가 교훈과 명백히 어긋나면 최근 데이터를 우선하고 그 사실을 짚어라.
 - [이전 스레드 토론]이 주어지면 반드시 참고: 내가 지난 번에 한 조언과 그 뒤 사람들의 코멘트·결정을 이어받아라.
   지난 권고가 실행/반박/보류됐는지 추적하고, 사람의 피드백과 충돌하면 그 의견을 우선 존중하며, 같은 말 반복하지 말고 후속 관점을 더해라.
 - 추세로 판단(하루 반등/적자에 속지 말 것). 단정과 추정을 구분. 세트명은 실제 이름 그대로.
 - 증액은 선별적으로(질 우선), 감액·OFF는 후보를 빠뜨리지 말고 충분히(하방 방어) 담는다. 스캔 가능한 선에서 대략 20줄 이내로 하되, 후보를 억지로 줄여 누락시키지 마라. 진짜 후보가 없을 때만 '특이 없음'."""
+
+# =====================================================================
+# 보정 지표 (매일 자동계산): AI 권고 vs 인간 실제선택 차이 + 직후 ROAS로 '누가 옳았나'
+#   개별 세트 airec를 계정 전체로 정량 집계 → 조언 강도를 매일 먼저 캘리브레이션.
+#   새 테이블/워크플로 없이 기존 ai_advice_marks·highlight·human_advice_marks·daily만 사용.
+# =====================================================================
+CALIB_DAYS = 30  # 보정 집계 창(14일 조언창보다 길게 봐야 AI↔인간 표본 확보)
+# aggressiveness 스케일: OFF(끄기)=가장 보수적 … 증20=가장 공격적. 인간vs AI 강도 비교용.
+CALIB_VAL = {"off": -3, "down20": -2, "down10": -1, "watch": 0, "up10": 1, "up20": 2}
+
+def compute_calibration(region, dc, window_days=CALIB_DAYS):
+    """최근 window_days에서 'AI 권고 vs 인간 실제선택'의 차이와 그 직후 3일 ROAS 결과를
+    정량 집계한 보정 지표 텍스트를 반환(표본 얇으면 ''). ADV_SYSTEM이 이걸로 권고 강도를 보정."""
+    table, hl_table, sf, rf, bf, cur = ADV_SRC[region]
+    since = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=window_days - 1)).isoformat()
+    days, hact = {}, {}
+    try:
+        rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
+                         f"&select=date,adset_id,{sf},{rf},highlight&order=date.asc")
+    except Exception:
+        return ""
+    for r in rows:
+        aid = r.get("adset_id") or "?"
+        days.setdefault(aid, {})[r["date"]] = (r.get(sf) or 0, r.get(rf) or 0)
+        if r.get("highlight"):
+            hact.setdefault(aid, {})[r["date"]] = r["highlight"]
+    for aid, dm in _load_human_marks(region, since, dc).items():
+        hact.setdefault(aid, {}).update(dm)  # 인간 실제선택 durable 병합(글로벌 유실 보완)
+    ai = {}
+    try:
+        for r in (sb("ai_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
+                                        f"&select=date,adset_id,tag") or []):
+            aid = r.get("adset_id")
+            if aid and r.get("tag"):
+                ai.setdefault(aid, {})[r["date"]] = r["tag"]
+    except Exception:
+        return ""  # AI 이력 테이블 없음 → 보정 생략(무해)
+    if not ai:
+        return ""
+
+    def roas_on(aid, d):
+        sp, rv = days.get(aid, {}).get(d, (0, 0))
+        return round(rv / sp * 100) if sp else None
+
+    def roas_next(aid, d, n=3):
+        base = datetime.date.fromisoformat(d)
+        sp = rv = 0
+        for k in range(1, n + 1):
+            s, r = days.get(aid, {}).get((base + datetime.timedelta(days=k)).isoformat(), (0, 0))
+            sp += s
+            rv += r
+        return round(rv / sp * 100) if sp else None
+
+    n_ai = match = softer = harder = none = 0
+    up_reco = up_softened = 0
+    softer_val = softer_tot = harder_val = harder_tot = 0
+    for aid, dm in ai.items():
+        for d, tag_ai in dm.items():
+            va = CALIB_VAL.get(tag_ai)
+            if va is None:
+                continue
+            n_ai += 1
+            if tag_ai in ("up10", "up20"):
+                up_reco += 1
+            tag_h = hact.get(aid, {}).get(d)
+            if tag_h is None:
+                none += 1
+                continue
+            vh = CALIB_VAL.get(tag_h, 0)
+            if vh == va:
+                match += 1
+            elif vh < va:  # 인간이 AI보다 더 보수적(하향/OFF)
+                softer += 1
+                if tag_ai in ("up10", "up20"):
+                    up_softened += 1
+            else:          # 인간이 AI보다 더 공격적
+                harder += 1
+            r0, r3 = roas_on(aid, d), roas_next(aid, d)
+            if r0 is not None and r3 is not None:
+                if vh < va:      # 보수 선택 → 직후 ROAS 하락이면 '보수가 옳았다(AI 과함)'
+                    softer_tot += 1
+                    softer_val += 1 if r3 < r0 else 0
+                elif vh > va:    # 공격 선택 → 직후 ROAS 상승이면 '공격이 옳았다(AI 감액 과함)'
+                    harder_tot += 1
+                    harder_val += 1 if r3 > r0 else 0
+    if n_ai < 4:
+        return ""  # 표본 얇음 → 억지 보정 금지
+    lines = [f"최근 {window_days}일 AI 권고 {n_ai}건 → 인간 반응: 일치 {match} · 하향(더 보수적) {softer} · 상향 {harder} · 미실행/미표기 {none}"]
+    if up_reco:
+        lines.append(f"AI 증액 권고 {up_reco}건 중 인간이 하향/취소 {up_softened}건({round(up_softened / up_reco * 100)}%)")
+    if softer_tot:
+        lines.append(f"인간이 하향한 건 직후 3일 ROAS 하락 {softer_val}/{softer_tot} (하락 다수 = AI 증액이 과했다는 신호)")
+    if harder_tot:
+        lines.append(f"인간이 상향한 건 직후 3일 ROAS 상승 {harder_val}/{harder_tot} (상승 다수 = AI 감액이 과했다는 신호)")
+    return "\n".join(lines)
 
 def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     if not ANTHROPIC_KEY or not playbook:
@@ -550,10 +649,16 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     ctx_block = f"\n\n[이전 스레드 토론 — 과거 조언 및 사람들의 코멘트(오래된→최근)]\n{thread_ctx}" if thread_ctx else ""
     lessons = fetch_lessons(region)
     lessons_block = f"\n\n[학습된 교훈 — 이 계정에서 결과로 검증된 규칙(플레이북 특화)]\n{lessons}" if lessons else ""
+    try:
+        calib = compute_calibration(region, dc)
+    except Exception as e:
+        print(f"  [조언] 보정 지표 계산 실패(무시): {e}")
+        calib = ""
+    calib_block = f"\n\n[보정 지표 — 최근 {CALIB_DAYS}일 내 권고 vs 인간 실제선택·결과 정량요약]\n{calib}" if calib else ""
     user = (f"[기간] {dp} → {dc} ({label})\n"
             f"[종합] 메타 ROAS {meta_roas_p}%→{meta_roas_c}% · 전체종합 ROAS {total_roas_p}%→{total_roas_c}%\n\n"
             f"[세트 데이터 · 최근 {ADVICE_DAYS}일 · 지출 큰 순]\n{sets_to_text(items, cur)}"
-            f"{ctx_block}\n\n[플레이북]\n{playbook}{lessons_block}"
+            f"{ctx_block}\n\n[플레이북]\n{playbook}{lessons_block}{calib_block}"
             f"{ADV_MARKS_HINT}")
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     # max_tokens는 thinking+본문을 함께 덮는 하드 상한. adaptive thinking이 수천 토큰을
