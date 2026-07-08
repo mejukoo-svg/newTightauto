@@ -254,11 +254,13 @@ mark.sh.active{background:#ff6d01;color:#fff}
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#1a73e8;font-size:13px">A</b>
     <span id="expIdsA" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID" onchange="expLookup('A')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
     <button onclick="expAddId('A')" title="세트 ID 추가(여러 세트 합산)" style="padding:1px 8px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
+    <button onclick="expDelId('A')" title="마지막 세트 ID 제거" style="padding:1px 8px;border:1px solid #999;border-radius:4px;background:#fff;color:#666;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">−</button>
     <span id="expNameA" style="font-size:11px;color:#1a73e8;font-weight:600;min-width:70px"></span>
     <input type="date" id="expStartA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#d81b60;font-size:13px">B</b>
     <span id="expIdsB" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID" onchange="expLookup('B')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
     <button onclick="expAddId('B')" title="세트 ID 추가(여러 세트 합산)" style="padding:1px 8px;border:1px solid #d81b60;border-radius:4px;background:#fff;color:#d81b60;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
+    <button onclick="expDelId('B')" title="마지막 세트 ID 제거" style="padding:1px 8px;border:1px solid #999;border-radius:4px;background:#fff;color:#666;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">−</button>
     <span id="expNameB" style="font-size:11px;color:#d81b60;font-weight:600;min-width:70px"></span>
     <input type="date" id="expStartB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
   <span style="color:#888;font-size:10px">💡 A/B에 세트 ID 여러 개(+로 추가) 넣으면 합산 비교 · 각자 기간 지정 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
@@ -444,6 +446,13 @@ function expAddId(k){
   inp.style.cssText='width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px';
   inp.addEventListener('change',()=>expLookup(k));
   c.appendChild(inp);inp.focus();
+}
+function expDelId(k){
+  const c=document.getElementById('expIds'+k);
+  const inputs=c.querySelectorAll('input.exp-id');
+  if(inputs.length>1)c.removeChild(inputs[inputs.length-1]);   // 마지막 입력창 제거
+  else inputs[0].value='';                                     // 하나만 남으면 값만 비움
+  expLookup(k);
 }
 function expLookup(k){
   const agg=_expAgg(k);
