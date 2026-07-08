@@ -560,11 +560,14 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     # 쓰므로 상한이 낮으면 thinking 도중 잘려 본문이 빈다(→조언 미게시, 2026-07-07 국내 재발).
     # 프롬프트가 커질수록(교훈·이력 레이어) thinking이 길어져 여유가 더 필요 → 32000.
     # stop_reason이 max_tokens면 thinking에 다 먹혀 본문이 빈 것이므로 한 번 더 키워 재시도한다.
+    # max_tokens가 크면 SDK가 비스트리밍 호출을 거부한다("Streaming is required …
+    # longer than 10 minutes"). 스트리밍으로 받으면 그 가드가 없어 높은 상한을 그대로 쓴다.
     def _call(max_toks):
-        resp = client.messages.create(
+        with client.messages.stream(
             model="claude-opus-4-8", max_tokens=max_toks,
             thinking={"type": "adaptive"}, output_config={"effort": "medium"},
-            system=ADV_SYSTEM, messages=[{"role": "user", "content": user}])
+            system=ADV_SYSTEM, messages=[{"role": "user", "content": user}]) as stream:
+            resp = stream.get_final_message()
         txt = "".join(b.text for b in resp.content if b.type == "text").strip()
         return txt, resp.stop_reason
     txt, stop = _call(32000)
