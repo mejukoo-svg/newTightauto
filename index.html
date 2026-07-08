@@ -251,15 +251,17 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-mktDash"><div id="mktBody"></div></div>
 <div class="panel" id="p-allmedia"><iframe id="allmediaFrame" data-src="allmedia.html" style="width:100%;height:calc(100vh - 150px);min-height:600px;border:0;display:block"></iframe></div>
 <div class="panel" id="p-exp"><div class="filter" style="flex-wrap:wrap;gap:10px;align-items:center">
-  <div style="display:flex;align-items:center;gap:6px"><b style="color:#1a73e8;font-size:13px">A</b>
-    <input id="expIdA" placeholder="세트 ID" onchange="expLookup('A')" style="width:160px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px">
-    <span id="expNameA" style="font-size:11px;color:#1a73e8;font-weight:600;min-width:90px"></span>
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#1a73e8;font-size:13px">A</b>
+    <span id="expIdsA" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID" onchange="expLookup('A')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
+    <button onclick="expAddId('A')" title="세트 ID 추가(여러 세트 합산)" style="padding:1px 8px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
+    <span id="expNameA" style="font-size:11px;color:#1a73e8;font-weight:600;min-width:70px"></span>
     <input type="date" id="expStartA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
-  <div style="display:flex;align-items:center;gap:6px"><b style="color:#d81b60;font-size:13px">B</b>
-    <input id="expIdB" placeholder="세트 ID" onchange="expLookup('B')" style="width:160px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px">
-    <span id="expNameB" style="font-size:11px;color:#d81b60;font-weight:600;min-width:90px"></span>
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#d81b60;font-size:13px">B</b>
+    <span id="expIdsB" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID" onchange="expLookup('B')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
+    <button onclick="expAddId('B')" title="세트 ID 추가(여러 세트 합산)" style="padding:1px 8px;border:1px solid #d81b60;border-radius:4px;background:#fff;color:#d81b60;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
+    <span id="expNameB" style="font-size:11px;color:#d81b60;font-weight:600;min-width:70px"></span>
     <input type="date" id="expStartB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
-  <span style="color:#888;font-size:10px">💡 세트 ID 2개를 각자 기간으로 비교 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
+  <span style="color:#888;font-size:10px">💡 A/B에 세트 ID 여러 개(+로 추가) 넣으면 합산 비교 · 각자 기간 지정 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
 </div><div class="sheet-wrap"><table id="expTbl"></table></div>
 <div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(설정한 기간 일수로 나눔) / ROAS·CVR·CTR·빈도·구매당비용·CPM=기간 비율</span></div>
 <div class="sheet-wrap"><table id="expAvgTbl"></table></div>
@@ -412,32 +414,51 @@ function _expFindSet(id){
   return scan(KR_AD,'adset_id','adset_name','₩',false)||scan(VN_AD,'adset_id','adset_name','₩',false)
        ||scan(GL_AD,'adset_id','adset_name','$',true)||scan(CR_AD,'ad_id','ad_name','₩',false);
 }
+// 사이드 k 의 모든 ID(여러 개) 를 합산 — 날짜 필터 전. {ids,names,cur,byDate}
+function _expAgg(k){
+  const ids=[...document.querySelectorAll('#expIds'+k+' input.exp-id')].map(el=>(el.value||'').trim()).filter(Boolean);
+  const byDate={},names=[];let cur=null;
+  ids.forEach(id=>{const set=_expFindSet(id);if(!set)return;if(cur==null)cur=set.cur;names.push(set.name||id);
+    Object.keys(set.byDate).forEach(d=>{const o=set.byDate[d];const b=byDate[d]||(byDate[d]={s:0,r:0,uc:0,mp:0,imp:0,rch:0});
+      b.s+=o.s;b.r+=o.r;b.uc+=o.uc;b.mp+=o.mp;b.imp+=o.imp;b.rch+=(o.rch||0)})});
+  return {ids,names,cur:cur||'₩',byDate};
+}
 function _expSide(k){
-  const id=(document.getElementById('expId'+k)?.value||'').trim();
+  const agg=_expAgg(k);
   const s=document.getElementById('expStart'+k)?.value||'',e=document.getElementById('expEnd'+k)?.value||'';
-  const set=_expFindSet(id);
-  if(!set)return {id,name:'',cur:'₩',range:{},tot:null,calDays:0};
+  if(!agg.names.length)return {id:agg.ids.join(','),name:'',cur:'₩',range:{},tot:null,calDays:0,count:0};
   const range={},tot={s:0,r:0,uc:0,mp:0,imp:0,rch:0};
-  Object.keys(set.byDate).forEach(d=>{if((!s||d>=s)&&(!e||d<=e)){const o=set.byDate[d];range[d]=o;tot.s+=o.s;tot.r+=o.r;tot.uc+=o.uc;tot.mp+=o.mp;tot.imp+=o.imp;tot.rch+=(o.rch||0)}});
+  Object.keys(agg.byDate).forEach(d=>{if((!s||d>=s)&&(!e||d<=e)){const o=agg.byDate[d];range[d]=o;tot.s+=o.s;tot.r+=o.r;tot.uc+=o.uc;tot.mp+=o.mp;tot.imp+=o.imp;tot.rch+=o.rch}});
   // 평균 분모 = 설정한 기간의 달력 일수(start~end 포함). 기간 미지정 시 데이터 범위(min~max).
   let calDays=0;
   if(s&&e)calDays=Math.round((new Date(e)-new Date(s))/864e5)+1;
   else{const ks=Object.keys(range).sort();if(ks.length)calDays=Math.round((new Date(ks[ks.length-1])-new Date(ks[0]))/864e5)+1}
   if(calDays<1)calDays=Object.keys(range).length;   // 폴백
-  return {id,name:set.name,cur:set.cur,range,tot,calDays};
+  const name=agg.names.length===1?agg.names[0]:(agg.names.length+'개 합산: '+agg.names.join(' + '));
+  return {id:agg.ids.join(', '),name,cur:agg.cur,range,tot,calDays,count:agg.names.length};
+}
+function expAddId(k){
+  const c=document.getElementById('expIds'+k);
+  const inp=document.createElement('input');
+  inp.className='exp-id';inp.placeholder='세트 ID';
+  inp.style.cssText='width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px';
+  inp.addEventListener('change',()=>expLookup(k));
+  c.appendChild(inp);inp.focus();
 }
 function expLookup(k){
-  const set=_expFindSet(document.getElementById('expId'+k).value);
-  const idv=(document.getElementById('expId'+k).value||'').trim();
-  document.getElementById('expName'+k).textContent=set?(set.name||'(이름없음)'):(idv?'(세트 없음)':'');
-  // ID 입력 시 그 세트의 '데이터 있는 기간'으로 자동 설정 → 항상 데이터가 보이게(이후 좁히기 가능)
-  if(set){const dts=Object.keys(set.byDate).sort();if(dts.length){document.getElementById('expStart'+k).value=dts[0];document.getElementById('expEnd'+k).value=dts[dts.length-1]}}
+  const agg=_expAgg(k);
+  const anyInput=[...document.querySelectorAll('#expIds'+k+' input.exp-id')].some(el=>(el.value||'').trim());
+  document.getElementById('expName'+k).textContent=agg.names.length?(agg.names.length===1?agg.names[0]:agg.names.length+'개 세트'):(anyInput?'(세트 없음)':'');
+  // ID 입력 시 합산 세트의 '데이터 있는 기간'으로 자동 설정 → 항상 데이터가 보이게(이후 좁히기 가능)
+  const dts=Object.keys(agg.byDate).sort();
+  if(dts.length){document.getElementById('expStart'+k).value=dts[0];document.getElementById('expEnd'+k).value=dts[dts.length-1]}
   renderExperiment();
 }
 function renderExperiment(){
   const A=_expSide('A'),B=_expSide('B');
-  document.getElementById('expNameA').textContent=A.name||((document.getElementById('expIdA').value||'').trim()?'(세트 없음)':'');
-  document.getElementById('expNameB').textContent=B.name||((document.getElementById('expIdB').value||'').trim()?'(세트 없음)':'');
+  const _nm=(k,S)=>{const any=[...document.querySelectorAll('#expIds'+k+' input.exp-id')].some(el=>(el.value||'').trim());
+    document.getElementById('expName'+k).textContent=S.count?(S.count===1?S.name:S.count+'개 세트'):(any?'(세트 없음)':'')};
+  _nm('A',A);_nm('B',B);
   // A·B 각자 자기 날짜(최신순, 왼쪽=최신). 세트마다 '날짜 row' + '데이터 row' 를 따로 둠(기간 달라도 각자 표시).
   const aDates=Object.keys(A.range).sort().reverse();
   const bDates=Object.keys(B.range).sort().reverse();
