@@ -3574,9 +3574,25 @@ function _chrevChannels(){
     {name:'글로벌(밴스드 제외)',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpend(d)-vt.s, r:glRev(d)-vt.r};}},
   ];
   const scope=document.getElementById('chrScope')?.value||'all';
-  if(scope==='dom')return [sumAll,sumDom,...domChannels];
-  if(scope==='gl')return [sumAll,sumGl,...glChannels];
-  return [sumAll,...domChannels,...glChannels];
+  // 권역별 상세 채널 + 종합매출 함수
+  let head,detail,totalRev;
+  if(scope==='dom'){head=[sumAll,sumDom];detail=domChannels;totalRev=domRev;}
+  else if(scope==='gl'){head=[sumAll,sumGl];detail=glChannels;totalRev=glRev;}
+  else{head=[sumAll];detail=domChannels.concat(glChannels);totalRev=d=>domRev(d)+glRev(d);}
+  // 오가닉 = 종합 실결제 매출(국내=Toss/시트, 글로벌=Stripe) − 채널 귀속 매출 합 = 미귀속·직접유입.
+  // 지출 없음(s:0). 채널 맨 아래에 표시. (글로벌은 글로벌(밴스드제외)가 잔여라 오가닉≈0)
+  // 글로벌 단독은 '글로벌(밴스드 제외)'가 이미 잔여라 오가닉≈0 → 생략. 국내/전체만 오가닉 추가.
+  if(scope==='gl')return [...head,...detail];
+  const organic={name:'오가닉',revOnly:true,get:d=>{let r=0;detail.forEach(c=>{r+=(c.get(d).r||0)});return {s:0,r:totalRev(d)-r};}};
+  return [...head,...detail,organic];
+}
+
+// 채널 매트릭스 셀 1개 렌더. revOnly(오가닉 등 지출 없는 채널)=매출만·중립색(ROAS/지출 미표시).
+function _chrCell(v,revOnly,avg){
+  if(!v.r&&!v.s)return avg?'<td class="mc"></td>':'<td></td>';
+  if(revOnly)return '<td class="mc"'+(avg?' style="font-weight:700"':'')+'><div class="rv" style="font-weight:700">'+moneyKRW(v.r)+'</div></td>';
+  const roas=v.s>0?v.r/v.s*100:0,p=v.r-v.s;
+  return '<td class="mc '+RC(roas)+'"'+(avg?' style="font-weight:700"':'')+'>'+MC_CH(roas,p,v.s,v.r)+'</td>';
 }
 
 function _chrevDaily(channels,days){
@@ -3595,12 +3611,9 @@ function _chrevDaily(channels,days){
     const a7roas=a7s>0?a7r/a7s*100:0,a7p=a7r-a7s;
     const nameBg=ch.sum?'#c5d6ea':'#dce6f0';
     h+='<tr'+(ch.sum?' style="border-top:2px solid #9bb5d4"':'')+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
-    h+='<td class="mc '+RC(a7roas)+'" style="font-weight:700">'+MC_CH(a7roas,a7p,a7s,a7r)+'</td>';
+    h+=_chrCell({s:a7s,r:a7r},ch.revOnly,true);
     dates.forEach(d=>{
-      const v=ch.get(d);
-      const roas=v.s>0?v.r/v.s*100:0,p=v.r-v.s;
-      if(v.s===0&&v.r===0){h+='<td></td>';return}
-      h+='<td class="mc '+RC(roas)+'">'+MC_CH(roas,p,v.s,v.r)+'</td>';
+      h+=_chrCell(ch.get(d),ch.revOnly,false);
     });
     h+='</tr>';
   });
@@ -3642,9 +3655,7 @@ function _chrevPeriod(channels,view,count){
     periods.forEach(per=>{
       let s=0,r=0;
       per.dates.forEach(d=>{const v=ch.get(d);s+=v.s;r+=v.r});
-      if(s===0&&r===0){h+='<td></td>';return}
-      const roas=s>0?r/s*100:0,p=r-s;
-      h+='<td class="mc '+RC(roas)+'">'+MC_CH(roas,p,s,r)+'</td>';
+      h+=_chrCell({s,r},ch.revOnly,false);
     });
     h+='</tr>';
   });
@@ -3663,7 +3674,7 @@ function _chrevChart(channels,periods){
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
   const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
