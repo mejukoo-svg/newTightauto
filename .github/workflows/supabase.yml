@@ -357,6 +357,27 @@ jobs:
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 구글_디멘드젠_캠페인_supabase.py
 
+  # ─── 알림톡 CRM (독립 실행) ───
+  # 알림톡 대시보드(tightsaju-alimtalk) 일별 캠페인 매출·발송비용 → 매출탭 'CRM' 채널.
+  # stdlib(urllib)만 사용 → pip 불필요. upsert라 매시 재실행 안전(최근 발송 지연분도 보정).
+  alimtalk-crm:
+    name: 💬 알림톡 CRM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run 알림톡 CRM
+        env:
+          ALIMTALK_USER: ${{ secrets.ALIMTALK_USER }}
+          ALIMTALK_PASS: ${{ secrets.ALIMTALK_PASS }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
+        run: python load_alimtalk.py
+
   # ─── 지표 하이아라키 KPI (국내 세트별 + Toss 끝나면 집계) ───
   kpi:
     name: 📈 지표 KPI
