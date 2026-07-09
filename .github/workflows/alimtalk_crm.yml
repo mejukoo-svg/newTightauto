@@ -1,0 +1,34 @@
+name: 💬 알림톡 CRM → Supabase
+
+# 알림톡(CRM) 대시보드(tightsaju-alimtalk.vercel.app)의 일별 캠페인 매출·발송비용을
+# new-tightauto 스키마에 적재. 매출탭 'CRM' 채널의 원천. upsert라 재실행 안전.
+# 최근 며칠은 발송(sent) 원천이 늦게 들어오므로 매일 재적재하면 과거분도 자동 보정됨.
+concurrency:
+  group: alimtalk-crm
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '40 1 * * *'   # 매일 10:40 KST (다른 파이프라인 :07/:22/:37 과 겹치지 않게)
+  workflow_dispatch:
+
+jobs:
+  alimtalk-crm:
+    name: 알림톡 CRM 적재
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run 알림톡 CRM 적재
+        env:
+          # 알림톡 대시보드 Basic Auth (신규 시크릿 — 등록 필요)
+          ALIMTALK_USER: ${{ secrets.ALIMTALK_USER }}
+          ALIMTALK_PASS: ${{ secrets.ALIMTALK_PASS }}
+          # Supabase 타깃 (기존 파이프라인과 동일한 공용 시크릿 재사용)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
+        run: python load_alimtalk.py
