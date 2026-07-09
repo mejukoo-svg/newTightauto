@@ -269,7 +269,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="sheet-wrap"><table id="expAvgTbl"></table></div>
 <div style="font-weight:700;font-size:12px;margin:16px 4px 6px">🔻 퍼널 (노출→도달→클릭→구매) <span style="color:#888;font-weight:400;font-size:10px">· 전환=바로 윗단계 대비 % · 구매=Mixpanel 귀속 · 선택 기간 합</span></div>
 <div class="sheet-wrap"><table id="expFunnelTbl" style="max-width:640px"></table></div>
-<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📈 추이 그래프 <select id="expChartMetric" onchange="renderExperiment()" style="font-size:11px;margin-left:6px"><option value="roas" selected>ROAS(%)</option><option value="profit">순이익</option><option value="spend">지출</option><option value="revenue">매출</option><option value="cvr">CVR(%)</option><option value="cpm">CPM</option></select> <span style="color:#888;font-weight:400;font-size:10px">· 날짜별 A(파랑)/B(빨강) 선 · 위 표(추이)를 그래프로 · 금액계열은 A·B 통화가 다르면 축 혼용 주의(ROAS·CVR은 %라 안전)</span></div>
+<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📈 추이 그래프 <select id="expChartMetric" onchange="renderExperiment()" style="font-size:11px;margin-left:6px"><option value="roas" selected>ROAS(%)</option><option value="profit">순이익</option><option value="spend">지출</option><option value="revenue">매출</option><option value="cvr">CVR(%)</option><option value="ctr">CTR(%)</option><option value="freq">빈도</option><option value="cpa">구매당비용</option><option value="cpm">CPM</option></select> <span style="color:#888;font-weight:400;font-size:10px">· 날짜별 A(파랑)/B(빨강) 선 · 위 표(추이)를 그래프로 · 금액계열은 A·B 통화가 다르면 축 혼용 주의(ROAS·CVR은 %라 안전)</span></div>
 <div style="height:320px;padding:0 4px 14px"><canvas id="expChart"></canvas></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
@@ -402,17 +402,22 @@ function _expRenderChart(A,B){
   expChart=null;
   if(typeof Chart==='undefined')return;
   const metric=(document.getElementById('expChartMetric')||{}).value||'roas';
-  const isPct=metric==='roas'||metric==='cvr';
-  const mval=o=>{if(!o)return null;const s=o.s||0,r=o.r||0,uc=o.uc||0,mp=o.mp||0,imp=o.imp||0;
+  // 지정 기간 평균 표와 동일 항목. kind: pct(%)/ratio(빈도)/money(그 외, 통화표기)
+  const kind=(metric==='roas'||metric==='cvr'||metric==='ctr')?'pct':(metric==='freq'?'ratio':'money');
+  const mval=o=>{if(!o)return null;const s=o.s||0,r=o.r||0,uc=o.uc||0,mp=o.mp||0,imp=o.imp||0,rch=o.rch||0;
     switch(metric){
       case 'roas':return s>0?+(r/s*100).toFixed(1):null;
       case 'profit':return Math.round(r-s);
       case 'spend':return Math.round(s);
       case 'revenue':return Math.round(r);
       case 'cvr':return (uc>0&&mp>0)?+(mp/uc*100).toFixed(2):null;
+      case 'ctr':return imp>0?+(uc/imp*100).toFixed(2):null;
+      case 'freq':return rch>0?+(imp/rch).toFixed(2):null;
+      case 'cpa':return mp>0?Math.round(s/mp):null;
       case 'cpm':return imp>0?Math.round(s/imp*1000):null;
     }return null};
-  const dates=[...new Set([...Object.keys(A.range||{}),...Object.keys(B.range||{})])].sort();
+  // 왼쪽=최신: 날짜 내림차순(표의 '◀최신'과 동일 방향)
+  const dates=[...new Set([...Object.keys(A.range||{}),...Object.keys(B.range||{})])].sort().reverse();
   if(!dates.length)return;
   const labels=dates.map(d=>DK(d).slice(3)+'('+WD(d)+')');
   const dataA=dates.map(d=>mval((A.range||{})[d]));
@@ -421,11 +426,12 @@ function _expRenderChart(A,B){
   const nmB='B'+(B.name?(' · '+B.name.slice(0,18)):'');
   const cur=A.cur||B.cur||'₩';
   const moneyAxis=v=>{const a=Math.abs(v);if(cur==='$')return '$'+(a>=1000?(v/1000).toFixed(1)+'k':Math.round(v));return '₩'+(a>=10000?Math.round(v/10000)+'만':Math.round(v).toLocaleString('ko-KR'))};
-  const fmt=v=>v==null?'':(isPct?v+'%':cur+Math.round(v).toLocaleString(cur==='$'?'en-US':'ko-KR'));
+  const fmt=v=>{if(v==null)return'';if(kind==='pct')return v+'%';if(kind==='ratio')return v.toFixed(2);return cur+Math.round(v).toLocaleString(cur==='$'?'en-US':'ko-KR')};
+  const axisCb=v=>kind==='pct'?v+'%':(kind==='ratio'?v:moneyAxis(v));
   expChart=new Chart(cv,{type:'line',data:{labels,datasets:[
     {label:nmA,data:dataA,borderColor:'#1a73e8',backgroundColor:'transparent',tension:0.3,borderWidth:2,pointRadius:2,spanGaps:true},
     {label:nmB,data:dataB,borderColor:'#d81b60',backgroundColor:'transparent',tension:0.3,borderWidth:2,pointRadius:2,spanGaps:true}
-  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.parsed.y)}}},scales:{x:{ticks:{font:{size:9}}},y:{beginAtZero:!isPct,ticks:{font:{size:9},callback:v=>isPct?v+'%':moneyAxis(v)}}}}});
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.parsed.y)}}},scales:{x:{ticks:{font:{size:9}}},y:{beginAtZero:kind!=='pct',ticks:{font:{size:9},callback:axisCb}}}}});
 }
 function _expMoney(n,cur){if(n==null||n===0)return'';return cur+Math.round(n).toLocaleString(cur==='$'?'en-US':'ko-KR')}
 function _expCell(o,cur){        // o={s,r,uc,mp,imp}
