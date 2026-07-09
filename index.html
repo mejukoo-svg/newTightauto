@@ -268,7 +268,9 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(설정한 기간 일수로 나눔) / ROAS·CVR·CTR·빈도·구매당비용·CPM=기간 비율</span></div>
 <div class="sheet-wrap"><table id="expAvgTbl"></table></div>
 <div style="font-weight:700;font-size:12px;margin:16px 4px 6px">🔻 퍼널 (노출→도달→클릭→구매) <span style="color:#888;font-weight:400;font-size:10px">· 전환=바로 윗단계 대비 % · 구매=Mixpanel 귀속 · 선택 기간 합</span></div>
-<div class="sheet-wrap"><table id="expFunnelTbl" style="max-width:640px"></table></div></div>
+<div class="sheet-wrap"><table id="expFunnelTbl" style="max-width:640px"></table></div>
+<div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📈 추이 그래프 <select id="expChartMetric" onchange="renderExperiment()" style="font-size:11px;margin-left:6px"><option value="roas" selected>ROAS(%)</option><option value="profit">순이익</option><option value="spend">지출</option><option value="revenue">매출</option><option value="cvr">CVR(%)</option><option value="cpm">CPM</option></select> <span style="color:#888;font-weight:400;font-size:10px">· 날짜별 A(파랑)/B(빨강) 선 · 위 표(추이)를 그래프로 · 금액계열은 A·B 통화가 다르면 축 혼용 주의(ROAS·CVR은 %라 안전)</span></div>
+<div style="height:320px;padding:0 4px 14px"><canvas id="expChart"></canvas></div></div>
 <!-- Color picker -->
 <div class="color-picker" id="colorPicker">
 <div class="cp-btn cp-u20" data-c="up20">+20</div><div class="cp-btn cp-u10" data-c="up10">+10</div>
@@ -391,6 +393,40 @@ function MC(roas,profit,spend,revenue,cvr,cpm,ctr){
 
 // ===== 🧪 실험탭 — 세트 A/B 비교 (각자 세트ID·기간 지정) =====
 // 셀 순서=추이차트 MC: ROAS / 순이익 / 지출 / 매출 / 전환율(클릭률) / CPM. 통화는 세트 소속(국내·밴스드=₩, 글로벌=$).
+let expChart=null;
+// 실험탭 하단 추이 선그래프 — 위 A/B 추이표(range={date:{s,r,uc,mp,imp}})를 날짜축 선그래프로.
+//   A=파랑·B=빨강, 지표 선택(#expChartMetric). 금액계열은 통화 혼용 주의(ROAS·CVR은 %).
+function _expRenderChart(A,B){
+  const cv=document.getElementById('expChart');if(!cv)return;
+  try{if(expChart)expChart.destroy()}catch(e){}
+  expChart=null;
+  if(typeof Chart==='undefined')return;
+  const metric=(document.getElementById('expChartMetric')||{}).value||'roas';
+  const isPct=metric==='roas'||metric==='cvr';
+  const mval=o=>{if(!o)return null;const s=o.s||0,r=o.r||0,uc=o.uc||0,mp=o.mp||0,imp=o.imp||0;
+    switch(metric){
+      case 'roas':return s>0?+(r/s*100).toFixed(1):null;
+      case 'profit':return Math.round(r-s);
+      case 'spend':return Math.round(s);
+      case 'revenue':return Math.round(r);
+      case 'cvr':return (uc>0&&mp>0)?+(mp/uc*100).toFixed(2):null;
+      case 'cpm':return imp>0?Math.round(s/imp*1000):null;
+    }return null};
+  const dates=[...new Set([...Object.keys(A.range||{}),...Object.keys(B.range||{})])].sort();
+  if(!dates.length)return;
+  const labels=dates.map(d=>DK(d).slice(3)+'('+WD(d)+')');
+  const dataA=dates.map(d=>mval((A.range||{})[d]));
+  const dataB=dates.map(d=>mval((B.range||{})[d]));
+  const nmA='A'+(A.name?(' · '+A.name.slice(0,18)):'');
+  const nmB='B'+(B.name?(' · '+B.name.slice(0,18)):'');
+  const cur=A.cur||B.cur||'₩';
+  const moneyAxis=v=>{const a=Math.abs(v);if(cur==='$')return '$'+(a>=1000?(v/1000).toFixed(1)+'k':Math.round(v));return '₩'+(a>=10000?Math.round(v/10000)+'만':Math.round(v).toLocaleString('ko-KR'))};
+  const fmt=v=>v==null?'':(isPct?v+'%':cur+Math.round(v).toLocaleString(cur==='$'?'en-US':'ko-KR'));
+  expChart=new Chart(cv,{type:'line',data:{labels,datasets:[
+    {label:nmA,data:dataA,borderColor:'#1a73e8',backgroundColor:'transparent',tension:0.3,borderWidth:2,pointRadius:2,spanGaps:true},
+    {label:nmB,data:dataB,borderColor:'#d81b60',backgroundColor:'transparent',tension:0.3,borderWidth:2,pointRadius:2,spanGaps:true}
+  ]},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{size:11}}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.parsed.y)}}},scales:{x:{ticks:{font:{size:9}}},y:{beginAtZero:!isPct,ticks:{font:{size:9},callback:v=>isPct?v+'%':moneyAxis(v)}}}}});
+}
 function _expMoney(n,cur){if(n==null||n===0)return'';return cur+Math.round(n).toLocaleString(cur==='$'?'en-US':'ko-KR')}
 function _expCell(o,cur){        // o={s,r,uc,mp,imp}
   if(!o||!o.s)return'';
@@ -492,6 +528,7 @@ function renderExperiment(){
   h+='</tbody>';document.getElementById('expTbl').innerHTML=h;
   _expRenderAvg(A,B);
   _expRenderFunnel(A,B);
+  _expRenderChart(A,B);
 }
 // 퍼널: 노출→도달→클릭→구매. 전환=바로 윗단계 대비. A vs B 나란히. 값은 선택 기간 합.
 function _expRenderFunnel(A,B){
