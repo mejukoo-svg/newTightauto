@@ -562,12 +562,16 @@ function _expRenderAvg(A,B){
   const row=(lab,S,col)=>{
     const days=S.calDays||0,t=S.tot||{s:0,r:0,uc:0,mp:0,imp:0,rch:0};
     const nm='<td class="fx fx0" style="text-align:left;font-size:11px;min-width:230px;max-width:230px;white-space:normal;overflow:visible;text-overflow:clip;word-break:break-all;line-height:1.35"><b style="color:'+col+'">'+lab+'</b> '+(S.name||'-')+(S.cur?' <span style="color:#999">'+S.cur+'</span>':'')+'</td>';
-    if(!days||!t.s)return '<tr>'+nm+'<td style="text-align:center;color:#999">0</td><td colspan="9" style="color:#999">데이터 없음</td></tr>';
+    if(!days||!t.s)return '<tr>'+nm+'<td style="text-align:center;color:#999">0</td><td colspan="10" style="color:#999">데이터 없음</td></tr>';
     const roas=t.s>0?t.r/t.s*100:0,pf=(t.r-t.s)/days,cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0,ctr=t.imp>0?t.uc/t.imp*100:0,
       cpm=t.imp>0?t.s/t.imp*1000:0,freq=t.rch>0?t.imp/t.rch:0,cpa=t.mp>0?t.s/t.mp:0,cur=S.cur;
+    // ROAS 편차 = 지출 있는 날의 일별 ROAS 표준편차(모집단). 변동성이 클수록 값이 큼.
+    const rd=Object.values(S.range||{}).filter(o=>o.s>0).map(o=>o.r/o.s*100);
+    let sd=null;if(rd.length>=2){const mn=rd.reduce((a,x)=>a+x,0)/rd.length;sd=Math.sqrt(rd.reduce((a,x)=>a+(x-mn)*(x-mn),0)/rd.length)}else if(rd.length===1)sd=0;
     return '<tr>'+nm
       +'<td style="text-align:center">'+days+'일</td>'
       +'<td class="'+RC(roas)+'" style="text-align:right;font-weight:700">'+roas.toFixed(0)+'%</td>'
+      +'<td style="text-align:right;color:#666" title="지출 있는 날의 일별 ROAS 표준편차('+rd.length+'일)">'+(sd==null?'':'±'+sd.toFixed(0))+'</td>'
       +'<td style="text-align:right;color:'+(pf>=0?'#1a6b1a':'#d00')+'">'+_expMoney(pf,cur)+'</td>'
       +'<td style="text-align:right;color:#d00">'+_expMoney(t.s/days,cur)+'</td>'
       +'<td style="text-align:right;color:#0000dd">'+_expMoney(t.r/days,cur)+'</td>'
@@ -578,7 +582,7 @@ function _expRenderAvg(A,B){
       +'<td style="text-align:right">'+_expMoney(cpm,cur)+'</td></tr>';
   };
   const h='<thead><tr><th class="fx fx0" style="min-width:230px;max-width:230px;text-align:left">세트</th><th style="min-width:52px">일수</th>'+
-    '<th>ROAS</th><th>순이익/일</th><th>지출/일</th><th>매출/일</th><th>CVR</th><th>CTR</th><th>빈도</th><th>구매당비용</th><th>CPM</th></tr></thead>'+
+    '<th>ROAS</th><th title="일별 ROAS 표준편차 — 변동성">편차</th><th>순이익/일</th><th>지출/일</th><th>매출/일</th><th>CVR</th><th>CTR</th><th>빈도</th><th>구매당비용</th><th>CPM</th></tr></thead>'+
     '<tbody>'+row('A',A,'#1a73e8')+row('B',B,'#d81b60')+'</tbody>';
   document.getElementById('expAvgTbl').innerHTML=h;
 }
