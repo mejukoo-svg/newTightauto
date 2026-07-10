@@ -1412,7 +1412,7 @@ async function saveTrendMemo(date,id,memo,el){
 
 // ===== DASHBOARD =====
 let dashCharts={};
-let dashState={dateA:null,dateB:null,metric:'profit'};
+let dashState={dateA:null,dateB:null,metric:'profit',goalMonth:null};
 
 // 단일 기간 집계 — 두 날짜 드롭다운을 [lo,hi] 구간으로 해석 (순서 무관)
 function aggregatePeriod(start,end){
@@ -1438,9 +1438,13 @@ function renderDashboard(){
     const yest=new Date();yest.setDate(yest.getDate()-1);
     const yYmd=yest.getFullYear()+'-'+pad(yest.getMonth()+1)+'-'+pad(yest.getDate());
     const curMonth=now.getFullYear()+'-'+pad(now.getMonth()+1);
-    // 날짜 필터 종료일(dateA/dateB 중 더 늦은 날짜)의 월을 대상 월로 사용
-    const dLate=(dashState.dateA&&dashState.dateB)?(dashState.dateA>dashState.dateB?dashState.dateA:dashState.dateB):(dashState.dateA||dashState.dateB||yYmd);
-    const yMonth=dLate.slice(0,7);
+    // 대상 월: 월 드롭다운(goalMonth) 선택값 우선, 없으면 현재월. 목표설정월 ∪ 현재월을 최신순 리스트로.
+    const allGoalMonths=new Set();['kr','gl'].forEach(m=>Object.keys(MONTHLY_REVENUE_GOAL[m]||{}).forEach(k=>allGoalMonths.add(k)));
+    allGoalMonths.add(curMonth);
+    let minM=curMonth;allGoalMonths.forEach(m=>{if(m<minM)minM=m});
+    const monthList=[];{let yy=+minM.slice(0,4),mm=+minM.slice(5,7);const cy=+curMonth.slice(0,4),cm=+curMonth.slice(5,7);while(yy<cy||(yy===cy&&mm<=cm)){monthList.push(yy+'-'+pad(mm));mm++;if(mm>12){mm=1;yy++}}}
+    monthList.reverse();
+    const yMonth=(dashState.goalMonth&&monthList.includes(dashState.goalMonth))?dashState.goalMonth:curMonth;
     const yr=+yMonth.slice(0,4),mo=+yMonth.slice(5,7);
     const totalDaysInMonth=new Date(yr,mo,0).getDate();
     const monthStart=yMonth+'-01';
@@ -1491,7 +1495,9 @@ function renderDashboard(){
     const dateLabel=!hasData?'해당 월 데이터 없음'
       :(isCurMonth?(elapsed>0?'기준일: '+DK(endYmd)+' (어제까지 누적)':'이번 달 집계 시작 전 (어제까지 데이터 없음)')
         :'기준일: '+DK(monthEnd)+' (월 마감)');
-    const titleHtml='<span style="font-size:14px;font-weight:700">🎯 '+labelFlag+' '+yMonth.slice(0,4)+'년 '+parseInt(yMonth.slice(5))+'월 매출 목표 달성률</span>';
+    const monthOpts=monthList.map(m=>'<option value="'+m+'"'+(m===yMonth?' selected':'')+'>'+m.slice(0,4)+'년 '+parseInt(m.slice(5))+'월</option>').join('');
+    const titleHtml='<span style="font-size:14px;font-weight:700">🎯 '+labelFlag+' 매출 목표 달성률</span>'
+      +'<select id="goalMonthSel" style="font-size:12px;margin-left:8px;padding:2px 6px;border:1px solid '+bd+';border-radius:4px;font-family:inherit;cursor:pointer">'+monthOpts+'</select>';
     if(goal){
       const pct=goal>0?(mtd/goal*100):0;
       const remaining=goal-mtd;
@@ -1604,6 +1610,8 @@ function renderDashboard(){
   el.innerHTML=h;
 
   // Wire dropdowns
+  const _gms=document.getElementById('goalMonthSel');
+  if(_gms)_gms.addEventListener('change',e=>{dashState.goalMonth=e.target.value;renderDashboard()});
   document.getElementById('dA').value=dashState.dateA;
   document.getElementById('dB').value=dashState.dateB;
   document.getElementById('dBarMetric').value=dashState.metric;
