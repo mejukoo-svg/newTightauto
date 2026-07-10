@@ -89,10 +89,14 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 <div class="panel" id="p-stripe"><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>날짜</label><select id="dtSel"></select></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const SB_URL='https://grtglwavqhvlqcocahao.supabase.co';
 const SB_KEY='sb_publishable_EwuoG13apMFGKp973Rv8vA_3yNVpHwm';
 const H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Accept-Profile':'new-tightauto','Content-Profile':'new-tightauto'};
+const DASH_EMAIL='dashboard@newtightauto.app';
+const SBC=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+SBC.auth.onAuthStateChange((_e,session)=>{H.Authorization='Bearer '+(session?session.access_token:SB_KEY);});
 const USD=n=>n==null||n===0?'':'$'+Math.round(n).toLocaleString('en-US');
 const KRW=n=>n==null||n===0?'':'₩'+Math.round(n).toLocaleString('ko-KR');
 const P=(n,d)=>n==null?'':n.toFixed(d||1)+'%';
@@ -273,16 +277,21 @@ h+='<tr><td style="text-align:left">'+(r.campaign_name||'').slice(0,30)+'</td><t
 h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
 }
 
-// ===== Auth =====
-const AUTH_PW='tkwnrndgkq!';
-const AUTH_KEY='tight_global_auth_v1';
-function tryLogin(){
+// ===== Auth (Supabase) — index.html과 동일: 로그인 세션 토큰으로만 RLS 통과(anon 차단) =====
+async function tryLogin(){
 const pw=document.getElementById('loginPw').value;
-if(pw===AUTH_PW){try{localStorage.setItem(AUTH_KEY,'ok')}catch(e){}showApp()}
-else{document.getElementById('loginErr').textContent='비밀번호가 맞지 않습니다.'}}
+document.getElementById('loginErr').textContent='확인 중…';
+const {data,error}=await SBC.auth.signInWithPassword({email:DASH_EMAIL,password:pw});
+if(error||!data||!data.session){document.getElementById('loginErr').textContent='비밀번호가 맞지 않습니다.';return}
+H.Authorization='Bearer '+data.session.access_token;showApp();
+}
 function showApp(){document.getElementById('loginScreen').style.display='none';document.getElementById('appContent').classList.add('ready');init()}
+async function logout(){try{await SBC.auth.signOut()}catch(e){}location.reload()}
 document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin()});
-try{if(localStorage.getItem(AUTH_KEY)==='ok')showApp();else document.getElementById('loginPw').focus()}catch(e){document.getElementById('loginPw').focus()}
+(async()=>{try{const {data:{session}}=await SBC.auth.getSession();
+if(session){H.Authorization='Bearer '+session.access_token;showApp()}
+else{document.getElementById('loginPw').focus()}
+}catch(e){document.getElementById('loginPw').focus()}})();
 </script>
 </div>
 </body>
