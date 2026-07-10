@@ -2816,7 +2816,7 @@ function renderDateTab(){
   h+='<th class="h-mp">이익</th>';
   h+='<th class="h-mp">ROAS</th>';
   h+='<th class="h-mp">CVR</th>';
-  h+='<th class="h-budget">예산</th>';
+  h+='<th class="h-budget" title="현재 메타 예산(각 세트 최신일 스냅샷) — 선택한 날짜와 무관하게 지금 값">예산</th>';
   h+='<th class="h-rate">증액률</th>';
   h+='<th class="h-result">변동예산</th>';
   h+='<th class="h-memo">메모</th>';
@@ -2846,11 +2846,18 @@ function renderDateTab(){
   h+='<td></td><td></td><td></td><td></td>';
   h+='</tr>';
 
+  // 예산 컬럼 = '현재 메타 예산' — 각 세트의 최신일 예산 스냅샷(선택일과 무관하게 현재값 표시).
+  //   과거일의 그날 예산이 아니라 지금 메타 값을 보여줘 Ads Manager와 일치. (추이차트의 일자별
+  //   과거 예산 복원은 증감 테두리용으로 그대로 유지 → 날짜탭 표시만 변경)
+  const curBud={};
+  AD.forEach(r=>{const rid=rowId(r);if(!rid)return;const p=curBud[rid];if(!p||r.date>p.d)curBud[rid]={d:r.date,b:+r.budget||0}});
+
   // 데이터 rows
   rows.forEach(r=>{
     const rid=rowId(r);let hl=HIGHLIGHTS[rid];const hlCls=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].cls:'';
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
-    let resultB='';if(r.budget&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(r.budget*(1+hlPct/100)))}
+    const cbud=curBud[rid]?curBud[rid].b:(+r.budget||0);  // 현재(최신일) 예산
+    let resultB='';if(cbud&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(cbud*(1+hlPct/100)))}
     // durable(daily_memos) 우선, 없으면 perfTbl.memo — 글로벌 지연적재로 perfTbl에 안 써진 메모도 표시.
     const _dm=DMEMO[_dmKey(MODE,r.date,rid)];
     const mv=((_dm!=null?_dm:r.memo)||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -2876,7 +2883,7 @@ function renderDateTab(){
     h+='<td style="text-align:right;color:'+(r.profit>=0?'green':'red')+'">'+money(r.profit)+'</td>';
     h+='<td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td>';
     h+='<td>'+P(r.cvr,2)+'</td>';
-    h+='<td style="text-align:right">'+money(r.budget)+'</td>';
+    h+='<td style="text-align:right" title="현재 메타 예산(최신 스냅샷)">'+money(cbud)+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td>';
     // 메모는 가장 최근 날짜(r.date)에 저장됨
