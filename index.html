@@ -1079,11 +1079,11 @@ function renderKpiTable(period){
 }
 
 // ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper report 구성 복제(라이트 테마) =====
-const KR_MARKETERS=['경민','수연','희상','혜린','본걸','지은','휘동','지연','정헌','연희','지영'];
+const KR_MARKETERS=['수연','희상','혜린','본걸','지은','휘동','지연','정헌','연희','지영','야베스','하루'];
 const GL_MARKETERS=['본걸','지은','훤기','채채'];
 const _mkToday=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const _mkAddDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
-let mktState={region:'kr',name:'경민',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
+let mktState={region:'kr',name:'수연',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
 let mktCharts={};
 const _mkNorm=s=>(s==null?'':String(s)).normalize('NFC').toLowerCase().replace(/\s+/g,' ').trim();
 function _mkMatch(r,needle){return [r.ad_name,r.adset_name,r.campaign_name,r.memo].some(f=>f&&_mkNorm(f).includes(needle))}
