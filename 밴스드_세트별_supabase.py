@@ -87,9 +87,12 @@ def market_suffix(svc):
     return m.group(1) if m else ""
 
 def payment_currency(svc, cc=None):
+    # amount 통화 = 스토어프론트(서비스 접미사) 통화. HK 고객이 -tw 스토어프론트에서 결제해도
+    #   MP amount 는 TWD(표시가격, 예 결제금액=1490)로 기록되므로 TWD 로 환산해야 한다.
+    #   (구버전은 cc=='HK' 를 HKD 로 강제 → TWD amount 를 HKD 환율(×178)로 곱해
+    #    홍콩 매출·ROAS 를 TWD 대비 ~3.7배 부풀렸다. cc 오버라이드 제거로 수정.)
     sfx = market_suffix(svc)
-    if sfx in ("th", "jp", "hk"): return SUFFIX_CURRENCY[sfx]   # 스토어프론트 통화 우선
-    if str(cc or "").upper() == "HK": return "HKD"             # HK 고객은 -tw 에서도 HKD
+    if sfx in ("th", "jp", "hk"): return SUFFIX_CURRENCY[sfx]   # 실제 -th/-jp/-hk 스토어프론트만
     if sfx == "tw": return "TWD"
     return "KRW"
 

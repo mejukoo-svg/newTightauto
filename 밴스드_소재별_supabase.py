@@ -74,16 +74,15 @@ TWD_KRW_RATE = _live_krw_rate("TWD", 47.85)
 HKD_KRW_RATE = _live_krw_rate("HKD", 177.0)
 
 def detect_market_currency(*names):
-    """광고 캠페인/세트명으로 통화 판별: hk/홍콩→HKD, tw/대만→TWD, 그 외→KRW(국내·미환산).
-    hk 를 tw 보다 먼저 검사(홍콩 우선) — 서비스명이 아닌 캠페인명 토큰만 본다."""
+    """광고 캠페인/세트명으로 amount 통화 판별. 밴스드 글로벌은 전부 -tw 스토어프론트라
+    대만·홍콩 시장 모두 MP amount 가 TWD(표시가격)다 → 홍콩도 TWD 로 환산한다.
+    (구버전은 hk/홍콩→HKD 로 판정해 TWD amount 를 HKD 환율(×177)로 곱해 홍콩 매출을
+     TWD 대비 ~3.7배 부풀렸다. HKD 강제 제거로 수정.)"""
     for nm in names:
         if not nm: continue
         s = str(nm); n = s.lower()
-        if "홍콩" in s or re.search(r'(?:^|[_\s\-])hk(?:[_\s\-]|$)', n): return "HKD"
-    for nm in names:
-        if not nm: continue
-        s = str(nm); n = s.lower()
-        if "대만" in s or re.search(r'(?:^|[_\s\-])tw(?:[_\s\-]|$)', n): return "TWD"
+        if "홍콩" in s or "대만" in s or re.search(r'(?:^|[_\s\-])(hk|tw)(?:[_\s\-]|$)', n):
+            return "TWD"
     return "KRW"
 MARKET_KRW_RATE = {"HKD": HKD_KRW_RATE, "TWD": TWD_KRW_RATE, "KRW": 1.0}
 
