@@ -85,6 +85,17 @@ def detect_market_currency(*names):
             return "TWD"
     return "KRW"
 MARKET_KRW_RATE = {"HKD": HKD_KRW_RATE, "TWD": TWD_KRW_RATE, "KRW": 1.0}
+JPY_KRW_RATE = _live_krw_rate("JPY", 9.1)
+THB_KRW_RATE = _live_krw_rate("THB", 42.0)
+# 건별 결제통화 → KRW. MP '통화' 프로퍼티(TWD/HKD/JPY/THB, 국내는 빈값=KRW)를 그대로 쓴다.
+CURRENCY_KRW = {"TWD": TWD_KRW_RATE, "HKD": HKD_KRW_RATE, "JPY": JPY_KRW_RATE, "THB": THB_KRW_RATE, "KRW": 1.0}
+def amount_currency(props, svc=""):
+    """결제 amount 의 통화. MP '통화' 프로퍼티(실제 결제통화, ground truth) 우선,
+    없으면(=국내 또는 누락) 서비스 접미사(-tw/-hk/-jp/-th)로 추론, 그것도 없으면 KRW."""
+    c = str(props.get('통화') or '').strip().upper()
+    if c in CURRENCY_KRW: return c
+    m = re.search(r'-([a-z]{2,3})$', str(svc or '').lower())
+    return {'tw': 'TWD', 'hk': 'HKD', 'jp': 'JPY', 'th': 'THB'}.get(m.group(1) if m else '', 'KRW')
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None)
@@ -191,8 +202,11 @@ def fetch_mixpanel(from_date, to_date):
                     raw_a=props.get('amount') or props.get('결제금액'); raw_v=props.get('value')
                     a_val=float(raw_a) if raw_a else 0.0; v_val=float(raw_v) if raw_v else 0.0
                     revenue=a_val if a_val>0 else (v_val if v_val>0 else 0.0)
-                    # 통화 환산은 여기서 하지 않는다 — 결제 이벤트엔 광고 캠페인명이 없으므로
-                    # raw(현지통화) 금액 그대로 보관하고, 병합 단계에서 ad_id→캠페인명으로 통화 판별 후 환산.
+                    # 통화 = MP '통화' 프로퍼티(실제 결제통화) 우선 → 건별 KRW 환산.
+                    #   해외결제는 통화가 항상 채워지고 국내(KRW)만 비어있음. HK 고객의 -tw(TWD)/진짜 HKD 를 정확 구분.
+                    #   (구버전은 병합에서 캠페인명으로 일괄판별 → HK 캠페인=HKD 강제로 TWD 결제를 ~3.7배 과대계상)
+                    if revenue>0:
+                        revenue = revenue * CURRENCY_KRW[amount_currency(props, props.get('서비스',''))]
                     # 주문번호: 같은 주문의 중복발화($insert_id 제각각)를 주문단위로 dedup 하기 위한 1차 키.
                     order_no=props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
                     data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip()})
@@ -338,9 +352,8 @@ def main():
         if not ad_id: continue
         parts=dk.split('/'); iso=f"20{parts[0]}-{parts[1]}-{parts[2]}"
         spend=mr['spend']; mpc=mp_count_map.get((dk,ad_id),0); mpv=mp_value_map.get((dk,ad_id),0.0)
-        # 광고 캠페인명(없으면 세트명)으로 통화 판별 후 KRW 환산. hk/홍콩→HKD, tw/대만→TWD, 그 외→KRW.
-        _ccy=detect_market_currency(mr['campaign_name'], mr['adset_name'])
-        revenue=float(mpv)*MARKET_KRW_RATE[_ccy]; profit=revenue-spend
+        # revenue(mpv)는 파싱 단계에서 이미 건별 '통화' 프로퍼티로 KRW 환산됨 → 그대로 사용.
+        revenue=float(mpv); profit=revenue-spend
         roas=(revenue/spend*100) if spend>0 else 0
         cvr=(mpc/mr['unique_clicks']*100) if mr['unique_clicks']>0 and mpc>0 else 0
         product=adset_to_product(mr['adset_name'])

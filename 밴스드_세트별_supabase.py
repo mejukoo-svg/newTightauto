@@ -234,7 +234,14 @@ def fetch_mixpanel(from_date, to_date):
                     raw_a=props.get('amount') or props.get('결제금액'); raw_v=props.get('value')
                     a_val=float(raw_a) if raw_a else 0.0; v_val=float(raw_v) if raw_v else 0.0
                     revenue=a_val if a_val>0 else (v_val if v_val>0 else 0.0)
-                    if revenue>0: revenue=to_krw(revenue, svc, _cc)  # 결제통화(접미사+HK예외) → KRW
+                    if revenue>0:
+                        # 통화 = MP '통화' 프로퍼티(실제 결제통화, ground truth) 우선.
+                        #   해외결제는 통화가 항상 채워지고(TWD/HKD/JPY/THB), 국내(KRW)만 비어있음.
+                        #   → HK 고객이 -tw 에서 TWD 결제하든 진짜 HKD 결제하든 통화값 그대로 정확 환산.
+                        #   통화 누락/미지원 시에만 서비스접미사 추론(payment_currency) 폴백.
+                        mp_cur = str(props.get('통화') or '').strip().upper()
+                        cur = mp_cur if mp_cur in CURRENCY_KRW else payment_currency(svc, _cc)
+                        revenue = revenue * CURRENCY_KRW.get(cur, 1.0)
                     data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':svc,'country':_cc,'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
