@@ -3501,10 +3501,13 @@ const HIST_REVENUE={"2025-09-01":7483000,"2025-09-02":6441600,"2025-09-03":58520
 function renderChannelRevenue(){
   const view=document.getElementById('chrView')?.value||'daily';
   if(view==='hourly'){ensureKrRev4h(_chrevHourly);return}   // 시간별: 4시간 버킷(별도 데이터·매출만)
-  const count=parseInt(document.getElementById('chrDays').value);
-  const channels=_chrevChannels();
-  if(view==='daily')_chrevDaily(channels,count);
-  else _chrevPeriod(channels,view,count);
+  // CRM 채널에 MP ch=kakao 매출을 합치려면 kr_channel_revenue_4h(채널='카카오')가 필요 → 먼저 로드.
+  ensureKrRev4h(()=>{
+    const count=parseInt(document.getElementById('chrDays').value);
+    const channels=_chrevChannels();
+    if(view==='daily')_chrevDaily(channels,count);
+    else _chrevPeriod(channels,view,count);
+  });
 }
 
 // ===== 시간별(4시간 버킷) 국내 채널 매출 — kr_channel_revenue_4h (Mixpanel 귀속, 매출만) =====
@@ -3513,7 +3516,7 @@ function renderChannelRevenue(){
 let KR_REV4H=[],_KR_REV4H_LOADED=false;
 function ensureKrRev4h(cb){
   if(_KR_REV4H_LOADED){cb&&cb();return}
-  sbQ('kr_channel_revenue_4h','select=*&order=date.desc,bucket.desc&limit=5000')
+  sbQ('kr_channel_revenue_4h','select=*&order=date.desc,bucket.desc&limit=20000')
     .then(d=>{KR_REV4H=d||[];_KR_REV4H_LOADED=true;cb&&cb();})
     .catch(()=>{KR_REV4H=[];cb&&cb();});   // 실패(테이블 미생성 등)는 캐시 안 함 → 다음 선택 시 재시도
 }
@@ -3577,6 +3580,8 @@ function _chrevChannels(){
   // CRM(알림톡): alimtalk_daily_campaign 을 일자별로 합산. 매출=Σrev(귀속), 지출=Σcost(발송비용=sent×13원).
   const byDateCRM={};
   ALIMTALK.forEach(r=>{if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].s+=(+r.cost||0);byDateCRM[r.date].r+=(+r.rev||0)});
+  // MP ch=kakao 매출도 CRM 에 포함 — kr_channel_revenue_4h 채널='카카오' 를 일자별 합산(매출만, 지출 0).
+  (KR_REV4H||[]).forEach(r=>{if(r.channel==='카카오'){if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].r+=(+r.revenue||0)}});
   TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
   // 권역별 종합 — 매출은 실 결제액(국내=시트/Toss, 글로벌=Stripe), 지출은 해당 권역 채널 합산
   const domRev=d=>(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0));

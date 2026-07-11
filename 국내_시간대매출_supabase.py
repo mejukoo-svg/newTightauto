@@ -76,10 +76,11 @@ CH_META   = "국내 메타"
 CH_VANCED = "밴스드 국내"
 CH_NAVER  = "네이버"
 CH_GGDG   = "디멘드젠(타이트)"
+CH_KAKAO  = "카카오"               # CRM(ch=kakao) — 대시보드에서 CRM(알림톡)에 합산. 매출만(지출0)
 CH_VN_TW  = "대만 밴스드"          # 글로벌 scope
 CH_GLOBAL = "글로벌(밴스드 제외)"  # 글로벌 scope (매출=Stripe−대만밴스드귀속, 지출=글로벌 타이트메타)
 
-DOMESTIC_CHANNELS = (CH_META, CH_VANCED, CH_NAVER, CH_GGDG)
+DOMESTIC_CHANNELS = (CH_META, CH_VANCED, CH_NAVER, CH_GGDG, CH_KAKAO)
 GLOBAL_CHANNELS = (CH_VN_TW, CH_GLOBAL)
 
 # ── Meta 시간대 지출 — Mixpanel 매출과 합쳐 4시간 ROAS 산출 ──
@@ -170,6 +171,9 @@ EXCLUDE_CT_SUBSTR = ["moodang_260529"]
 def is_google_event(props):
     v = props.get("ch")
     return v is not None and str(v).strip().lower() in GOOGLE_CH_VALUES
+def is_kakao_event(props):
+    v = props.get("ch")
+    return v is not None and str(v).strip().lower() == "kakao"
 def is_excluded_ct(ct):
     if not ct:
         return False
@@ -434,6 +438,13 @@ def classify(e, kr_adsets, vn_adsets, vn_tw_adsets):
         if cur != "KRW":
             rev = rev * get_krw_rates().get(cur, 1.0)
         return CH_GGDG, rev
+    # ⑤ 카카오(CRM) — ch=kakao. 현재 미분류(드롭)라 순수 가산. 해외통화는 KRW 환산.
+    if is_kakao_event(props):
+        cur = event_currency(props)
+        rev = e["revenue"]
+        if cur != "KRW":
+            rev = rev * get_krw_rates().get(cur, 1.0)
+        return CH_KAKAO, rev
     return None
 
 # =========================================================
