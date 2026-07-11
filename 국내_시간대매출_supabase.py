@@ -168,6 +168,8 @@ def is_naver_event(props):
 
 GOOGLE_CH_VALUES = {"google"}
 EXCLUDE_CT_SUBSTR = ["moodang_260529"]
+# 카카오(ch=kakao) 중 알림톡 CRM 과 중복되는 ct(포함매칭) → 카카오 매출서 제외(이중계상 방지)
+KAKAO_DEDUP_CT = ("reviewcoupon", "crm_upsell", "couponremind")
 def is_google_event(props):
     v = props.get("ch")
     return v is not None and str(v).strip().lower() in GOOGLE_CH_VALUES
@@ -440,6 +442,9 @@ def classify(e, kr_adsets, vn_adsets, vn_tw_adsets):
         return CH_GGDG, rev
     # ⑤ 카카오(CRM) — ch=kakao. 현재 미분류(드롭)라 순수 가산. 해외통화는 KRW 환산.
     if is_kakao_event(props):
+        ct = str(props.get("ct") or "").lower()
+        if any(s in ct for s in KAKAO_DEDUP_CT):
+            return None   # reviewcoupon/crm_upsell/couponremind = 알림톡과 중복 → 제외
         cur = event_currency(props)
         rev = e["revenue"]
         if cur != "KRW":
