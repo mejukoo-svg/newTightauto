@@ -223,7 +223,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-trendp"><div class="filter"><label>단위</label><select id="tpUnit"><option value="day" selected>일간</option><option value="week">주간</option></select><label style="margin-left:10px">최근</label><select id="tpDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="tpFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('tpFilter').value='';renderTrendProduct()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="tpTbl"></table></div></div>
 <div class="panel" id="p-trendinf"><div class="filter"><label>구분</label><select id="tiType"><option value="infl" selected>인플</option><option value="longterm">장기</option></select><label style="margin-left:10px">단위</label><select id="tiUnit"><option value="weekly" selected>주간</option><option value="daily">일간</option></select><label style="margin-left:10px">기간</label><select id="tiRange"><option value="4">4주/14일</option><option value="8" selected>8주/30일</option><option value="13">13주/60일</option><option value="26">26주/180일</option><option value="30">30주/210일</option></select><label style="margin-left:10px">검색</label><input type="text" id="tiSearch" placeholder="인플 이름..." style="width:120px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><label style="margin-left:10px">최소지출</label><input type="number" id="tiMinSpend" value="0" style="width:90px"><span style="color:#888;margin-left:12px;font-size:10px">💡 adset_name에서 인플 자동 추출 · 팀원 9명 제외</span></div><div class="sheet-wrap"><table id="tiTbl"></table></div></div>
 <div class="panel" id="p-change"><div class="filter"><label>보기</label><select id="cView" onchange="renderChange()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="cFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('cFilter').value='';renderChange()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="cTbl"></table></div></div>
-<div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
+<div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select><label style="margin-left:10px">소스</label><select id="wSource"><option value="kr" selected>국내 메타</option><option value="dg">디멘드젠(타이트)</option><option value="both">국내 종합(메타+디멘드젠)</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 디멘드젠=google_demandgen_campaign_daily(지출=Google Ads·매출=MP귀속). 디멘드젠은 클릭·노출 없어 CVR/CTR 공백</span></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>기간</label><select id="dpPeriod"><option value="day" selected>하루</option><option value="week">주간</option><option value="month">월간</option></select><label style="margin-left:10px">날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table><div id="dpCPWrap" style="display:none;margin-top:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏×📦 나라별 · 상품별 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">국가 × 상품 교차 — 지출순 정렬</span></div><table id="dpCPTbl"></table></div></div></div>
@@ -1259,6 +1259,7 @@ document.getElementById('tiRange').addEventListener('change',renderTrendInfluenc
 document.getElementById('tiSearch').addEventListener('input',renderTrendInfluencer);
 document.getElementById('tiMinSpend').addEventListener('change',renderTrendInfluencer);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
+document.getElementById('wSource').addEventListener('change',renderWeekly);
 document.getElementById('dtStart').addEventListener('change',renderDateTab);
 document.getElementById('dtEnd').addEventListener('change',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
@@ -2580,11 +2581,30 @@ function renderChange(){
 }
 
 // ===== WEEKLY =====
+// 디멘드젠 ad_group/캠페인명 → 상품 추출 (주간종합 상품 분해용). 매칭 없으면 '기타'.
+const _DG_PROD_KW=['무당','무녀','29금궁합','속궁합','29금','궁합','솔로','재회','환승','도화','커리어','팩폭','재물','임신','집착','바람기','구미호','욕망','신점','관상','사주'];
+function _dgProduct(name){const s=String(name||'');for(const p of _DG_PROD_KW){if(s.includes(p))return p}return '기타'}
+// 디멘드젠(GGDG_TIGHT) → AD 유사 행 (spend/revenue/profit/results_mp/product, 클릭·노출 없음)
+function _dgRows(){return (GGDG_TIGHT||[]).map(r=>{const s=+r.spend||0,rv=+r.revenue||0;return {date:r.date,spend:s,revenue:rv,profit:rv-s,results_mp:+r.purchase_count||0,unique_clicks:0,impressions:0,product:_dgProduct(r.ad_group_name||r.campaign_name)}})}
 function renderWeekly(){
   const mode=document.getElementById('wMode').value;
+  const src=(document.getElementById('wSource')||{}).value||'kr';
+  // 소스 데이터셋: 국내메타=AD, 디멘드젠=GGDG_TIGHT, 종합=둘 합산.
+  //   디멘드젠 테이블은 lazy 로드 → 없으면 로딩 트리거 후 재렌더.
+  let ROWS;
+  if(src==='dg'||src==='both'){
+    if(!GGDG_TIGHT.length&&!(window._BIG_LOADED&&window._BIG_LOADED.ggdgkr)){
+      ensureBigTable('ggdgkr').then(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='weekly')renderWeekly()});
+      document.getElementById('wBlocks').innerHTML='<div style="padding:24px;color:#888;text-align:center">구글 디멘드젠 데이터 로딩 중…</div>';
+      return;
+    }
+    ROWS=(src==='dg')?_dgRows():AD.concat(_dgRows());
+  }else{
+    ROWS=AD;
+  }
   // Aggregate by week, month, and also by product
   const byW={},byM={},byWP={},byMP={};
-  AD.forEach(r=>{
+  ROWS.forEach(r=>{
     const wk=WM(r.date),mk=r.date.slice(0,7),prod=r.product||'기타';
     const uc=r.unique_clicks||0,imp=r.impressions||0,mp=r.results_mp||0;
     // Week total
