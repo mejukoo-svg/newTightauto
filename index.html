@@ -4165,11 +4165,11 @@ function renderGgdgTight(){
     if(view==='week'){const s=new Date(k),e=new Date(k);e.setDate(e.getDate()+6);return(s.getMonth()+1)+'/'+s.getDate()+'~'+(e.getMonth()+1)+'/'+e.getDate()}
     return DK(k)+'('+WD(k)+')'};
   const setCol=(o,k)=>{let s=0,r=0,c=0;colOf[k].forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});return{s,r,c}};
-  // 기간합계 + 검색필터 + 정렬(지출↓)
-  let list=Object.values(byC).map(o=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});o._s=s;o._r=r;o._c=c;o._roas=s>0?r/s*100:0;return o});
+  // 기간합계 + 검색필터 + 정렬(어제 지출↓, 동률이면 기간합계 지출↓)
+  let list=Object.values(byC).map(o=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});o._s=s;o._r=r;o._c=c;o._roas=s>0?r/s*100:0;o._sy=o.d[yDay]?.s||0;return o});
   list=list.filter(o=>o._s>0||o._r>0);
   if(kw)list=list.filter(o=>((o.camp||'')+' '+(o.name||'')+' '+(o.id||'')).toLowerCase().includes(kw));
-  list.sort((a,b)=>b._s-a._s);
+  list.sort((a,b)=>(b._sy-a._sy)||(b._s-a._s));
   // 셀: 지출 있으면 ROAS/순이익/-지출/매출/건수, 없으면 매출/건수만
   const cell=(s,r,c)=>{
     if(!s&&!r&&!c)return'';
