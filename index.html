@@ -1098,12 +1098,14 @@ const _mkAddDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.getFul
 let mktState={region:'kr',name:'수연',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
 let mktCharts={};
 const _mkNorm=s=>(s==null?'':String(s)).normalize('NFC').toLowerCase().replace(/\s+/g,' ').trim();
-function _mkMatch(r,needle){return [r.ad_name,r.adset_name,r.campaign_name,r.memo].some(f=>f&&_mkNorm(f).includes(needle))}
+// 소재 제작자는 ad_name(소재명)에 태깅된다. 세트/캠페인/메모까지 매칭하면 그 세트에 있는 '남의/무명
+//   소재'까지 그 마케터로 귀속돼 과대계상(예: 본걸·연희 +15~18%) → ad_name 기준으로만 귀속.
+function _mkMatch(r,needle){return r.ad_name&&_mkNorm(r.ad_name).includes(needle)}
 function _mkCreated(adName){if(!adName)return null;const m=String(adName).match(/_(\d{6})(?:_|$|x|\b)/);if(!m)return null;const s=m[1];const mm=+s.slice(2,4),dd=+s.slice(4,6);if(mm<1||mm>12||dd<1||dd>31)return null;return '20'+s.slice(0,2)+'-'+s.slice(2,4)+'-'+s.slice(4,6)}
 function _mkAggregate(rows){const byId={};
   rows.forEach(r=>{const key=r.ad_id||(r.ad_name+'__'+r.adset_id);
     if(!byId[key])byId[key]={ad_id:r.ad_id,ad_name:r.ad_name||'(이름없음)',adset_name:r.adset_name,campaign_name:r.campaign_name,product:r.product,created:_mkCreated(r.ad_name),imp:0,clk:0,spend:0,rev:0,profit:0,res:0,days:new Set()};
-    const t=byId[key];const sp=+(r.spend!=null?r.spend:r.spend_usd)||0,rv=+(r.revenue!=null?r.revenue:r.revenue_usd)||0,pf=(r.profit!=null?+r.profit:(r.profit_usd!=null?+r.profit_usd:(rv-sp)));t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=sp;t.rev+=rv;t.profit+=pf;t.res+=(+r.results_meta||0)+(+r.results_mp||0);t.days.add(r.date)});
+    const t=byId[key];const sp=+(r.spend!=null?r.spend:r.spend_usd)||0,rv=+(r.revenue!=null?r.revenue:r.revenue_usd)||0,pf=(r.profit!=null?+r.profit:(r.profit_usd!=null?+r.profit_usd:(rv-sp)));t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=sp;t.rev+=rv;t.profit+=pf;t.res+=(+r.results_mp||0);t.days.add(r.date)});
   return Object.values(byId).map(t=>({...t,ndays:t.days.size,ctr:t.imp>0?t.clk/t.imp*100:0,cpm:t.imp>0?t.spend/t.imp*1000:0,roas:t.spend>0?t.rev/t.spend*100:0,cvr:t.clk>0?t.res/t.clk*100:0}));}
 function _mkTotals(list){const t={spend:0,rev:0,profit:0,imp:0,clk:0,res:0};list.forEach(c=>{t.spend+=c.spend;t.rev+=c.rev;t.profit+=c.profit;t.imp+=c.imp;t.clk+=c.clk;t.res+=c.res});t.ctr=t.imp>0?t.clk/t.imp*100:0;t.cpm=t.imp>0?t.spend/t.imp*1000:0;t.roas=t.spend>0?t.rev/t.spend*100:0;t.cvr=t.clk>0?t.res/t.clk*100:0;return t}
 function _mkDestroy(){Object.values(mktCharts).forEach(c=>{try{c.destroy()}catch(e){}});mktCharts={}}
