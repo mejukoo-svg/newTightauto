@@ -2597,8 +2597,9 @@ function renderChange(){
 // 디멘드젠 ad_group/캠페인명 → 상품 추출 (주간종합 상품 분해용). 매칭 없으면 '기타'.
 const _DG_PROD_KW=['무당','무녀','29금궁합','속궁합','29금','궁합','솔로','재회','환승','도화','커리어','팩폭','재물','임신','집착','바람기','구미호','욕망','신점','관상','사주'];
 function _dgProduct(name){const s=String(name||'');for(const p of _DG_PROD_KW){if(s.includes(p))return p}return '기타'}
-// 디멘드젠(GGDG_TIGHT) → AD 유사 행 (spend/revenue/profit/results_mp/product, 클릭·노출 없음)
-function _dgRows(){return (GGDG_TIGHT||[]).map(r=>{const s=+r.spend||0,rv=+r.revenue||0;return {date:r.date,spend:s,revenue:rv,profit:rv-s,results_mp:+r.purchase_count||0,unique_clicks:0,impressions:0,product:_dgProduct(r.ad_group_name||r.campaign_name)}})}
+// 디멘드젠(GGDG_TIGHT) → AD 유사 행 (spend/revenue/profit/results_mp/product/클릭·노출)
+//   클릭·노출=Google Ads API clicks/impressions (메타의 unique_clicks 와 달리 전체 클릭 — CVR/CTR 계산용)
+function _dgRows(){return (GGDG_TIGHT||[]).map(r=>{const s=+r.spend||0,rv=+r.revenue||0;return {date:r.date,spend:s,revenue:rv,profit:rv-s,results_mp:+r.purchase_count||0,unique_clicks:+r.clicks||0,impressions:+r.impressions||0,product:_dgProduct(r.ad_group_name||r.campaign_name)}})}
 function renderWeekly(){
   const mode=document.getElementById('wMode').value;
   const src=(document.getElementById('wSource')||{}).value||'kr';

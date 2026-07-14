@@ -5,8 +5,8 @@
 구글 디멘드젠 **[Tight] 캠페인**의 캠페인 id × 일자 성과를
 google_demandgen_campaign_daily 테이블에 upsert.
 
-  · 지출 = 구글 Ads API (campaign, advertising_channel_type=DEMAND_GEN,
-           campaign.name 에 '[Tight]' 포함) → campaign.id × segments.date × cost
+  · 지출/클릭/노출 = 구글 Ads API (campaign, advertising_channel_type=DEMAND_GEN,
+           campaign.name 에 '[Tight]' 포함) → campaign.id × segments.date × cost/clicks/impressions
   · 매출 = Mixpanel export (payment_complete) properties.utm_campaign(=구글 campaign.id)
            매칭 → $insert_id + order_id dedup 후 (date_KST, campaign_id) 별 매출/건수
   ※ Mixpanel 결제 이벤트의 utm_campaign 값이 구글 캠페인 숫자 id 와 동일.
@@ -167,11 +167,14 @@ def fetch_groups_and_ads(client, cids):
 
 
 def fetch_tight_spend(client, cids, tight_group_ids):
-    """[Tight] 디멘드젠의 (ad_group_id, date) 별 지출."""
+    """[Tight] 디멘드젠의 (ad_group_id, date) 별 지출/클릭/노출."""
     ga = client.get_service("GoogleAdsService")
     spend = defaultdict(float)   # spend[(ad_group_id, date)]
+    clicks = defaultdict(int)    # clicks[(ad_group_id, date)]
+    imps = defaultdict(int)      # imps[(ad_group_id, date)]
     q = f"""
-        SELECT ad_group.id, segments.date, metrics.cost_micros
+        SELECT ad_group.id, segments.date, metrics.cost_micros,
+               metrics.clicks, metrics.impressions
         FROM ad_group
         WHERE segments.date BETWEEN '{START_ISO}' AND '{END_ISO}'
           AND campaign.name LIKE '%Tight%'
@@ -184,13 +187,16 @@ def fetch_tight_spend(client, cids, tight_group_ids):
                     gid = str(r.ad_group.id)
                     if gid not in tight_group_ids:
                         continue
-                    spend[(gid, r.segments.date)] += r.metrics.cost_micros / 1_000_000.0
+                    k = (gid, r.segments.date)
+                    spend[k] += r.metrics.cost_micros / 1_000_000.0
+                    clicks[k] += int(r.metrics.clicks)
+                    imps[k] += int(r.metrics.impressions)
         except GoogleAdsException as e:
             log.error(f"  ❌ spend 조회 CID={cid}")
             for err in getattr(e.failure, "errors", []):
                 log.error(f"     · {err.message}")
             raise
-    return spend
+    return spend, clicks, imps
 
 
 # ── Mixpanel ──────────────────────────────────────────────────────────────────
@@ -322,7 +328,7 @@ def main():
     for gid, m in group_meta.items():
         log.info(f"     · 세트 {gid}  '{m['ad_group_name']}'  ← {m['campaign_name']}")
 
-    spend = fetch_tight_spend(client, cids, tight_group_ids)
+    spend, clicks, imps = fetch_tight_spend(client, cids, tight_group_ids)
     rev, cnt = fetch_mp(tight_camp_ids, ad_to_group, group_meta)
 
     # (ad_group_id, date) 합집합 — 지출/매출/구매 중 하나라도 있으면 적재
@@ -344,6 +350,8 @@ def main():
             "spend": s,
             "revenue": rv,
             "purchase_count": c,
+            "clicks": int(clicks.get((gid, d), 0)),
+            "impressions": int(imps.get((gid, d), 0)),
         })
 
     if not records:
