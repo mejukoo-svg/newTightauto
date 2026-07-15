@@ -792,11 +792,20 @@ def main():
         _dlist = ",".join(sorted(uncovered))
         log.warning(f"  🛡️ 보존모드: {sorted(uncovered)} — 기존 매출/건수 유지(0 덮어쓰기 방지)")
         _agg = defaultdict(lambda: [0.0, 0])
-        for e in sb.select("global_ad_performance_daily",
-                           f"select=date,adset_id,revenue_usd,results_mp&date=in.({_dlist})"):
-            _k = (str(e.get('date')), str(e.get('adset_id')))
-            _agg[_k][0] += float(e.get('revenue_usd') or 0.0)
-            _agg[_k][1] += int(e.get('results_mp') or 0)
+        _poff = 0
+        while True:  # PostgREST 1000행 캡 → 페이지네이션 (장기 백필 시 uncovered 42일×세트수 초과 — 2026-07-13 사고 원인)
+            _pchunk = sb.select("global_ad_performance_daily",
+                                f"select=date,adset_id,revenue_usd,results_mp&date=in.({_dlist})"
+                                f"&order=date.asc,adset_id.asc,country.asc&limit=1000&offset={_poff}")
+            if not isinstance(_pchunk, list) or not _pchunk:
+                break
+            for e in _pchunk:
+                _k = (str(e.get('date')), str(e.get('adset_id')))
+                _agg[_k][0] += float(e.get('revenue_usd') or 0.0)
+                _agg[_k][1] += int(e.get('results_mp') or 0)
+            if len(_pchunk) < 1000:
+                break
+            _poff += 1000
         prev_map = {k: (v[0], v[1]) for k, v in _agg.items()}
         log.info(f"  🛡️ 보존맵: {len(prev_map)}행 로드")
 

@@ -653,10 +653,19 @@ def main():
     if uncovered:
         _dlist = ",".join(sorted(uncovered))
         log.warning(f"  🛡️ 보존모드: {sorted(uncovered)} — 기존 매출/건수 유지(0 덮어쓰기 방지)")
-        for e in sb.select("global_ad_creative_daily",
-                           f"select=date,ad_id,revenue_usd,results_mp&date=in.({_dlist})"):
-            prev_map[(str(e.get('date')), str(e.get('ad_id')))] = (
-                float(e.get('revenue_usd') or 0.0), int(e.get('results_mp') or 0))
+        _poff = 0
+        while True:  # PostgREST 1000행 캡 → 페이지네이션 (장기 백필 시 uncovered 일수×소재수 초과 — 2026-07-13 세트별 사고와 동일 패턴)
+            _pchunk = sb.select("global_ad_creative_daily",
+                                f"select=date,ad_id,revenue_usd,results_mp&date=in.({_dlist})"
+                                f"&order=date.asc,ad_id.asc&limit=1000&offset={_poff}")
+            if not isinstance(_pchunk, list) or not _pchunk:
+                break
+            for e in _pchunk:
+                prev_map[(str(e.get('date')), str(e.get('ad_id')))] = (
+                    float(e.get('revenue_usd') or 0.0), int(e.get('results_mp') or 0))
+            if len(_pchunk) < 1000:
+                break
+            _poff += 1000
         log.info(f"  🛡️ 보존맵: {len(prev_map)}행 로드")
 
     # 4) 병합
