@@ -10,9 +10,11 @@
 버킷   : time + 9h(KST) → hour//4*4 ∈ {0,4,8,12,16,20}
 채널   : ① utm_term(adset_id)∈국내메타세트 & utm_source=Meta → '국내 메타'
          ② utm_term(adset_id)∈밴스드(국내)세트 & utm_source=Meta → '밴스드'
-         ③ is_naver_event → '네이버'
-         ④ properties.ch=='google' → '구글디멘드젠'
-         ⑤ 그 외 → 스킵
+         ③ is_naver_event(utm/referrer/ch=naver) → '네이버'
+         ④ properties.ch=='google' → '구글디멘드젠'  ⑤ ch=='kakao' → '카카오'
+         ⑥ Meta 흔적(utm=Meta계열+세트미매칭 / ch=meta·ins / 후행24h 크로스셀)·KRW → '메타(기타)'
+            단 선행24h 메타결제 보유분은 세트별 백필이 이미 국내메타 귀속 → 제외(이중계상 방지)
+         ⑦ 그 외 → 스킵(오가닉)
 지출   : Meta insights(level=account, hourly breakdown, time_increment=1)로 국내메타·밴스드
          계정의 (date,4h,channel) 지출을 받아 매출과 합쳐 ROAS 산출. 네이버·구글=지출0(매출만).
 dedup  : order_id(utm_term우선·max revenue) → $insert_id → (date,distinct_id,서비스)
@@ -77,10 +79,11 @@ CH_VANCED = "밴스드 국내"
 CH_NAVER  = "네이버"
 CH_GGDG   = "디멘드젠(타이트)"
 CH_KAKAO  = "카카오"               # CRM(ch=kakao) — 대시보드에서 CRM(알림톡)에 합산. 매출만(지출0)
+CH_META_ETC = "메타(기타)"         # Meta 광고 흔적은 명확하나 세트 귀속 불가(만료세트/utm소실). 매출만(지출0)
 CH_VN_TW  = "대만 밴스드"          # 글로벌 scope
 CH_GLOBAL = "글로벌(밴스드 제외)"  # 글로벌 scope (매출=Stripe−대만밴스드귀속, 지출=글로벌 타이트메타)
 
-DOMESTIC_CHANNELS = (CH_META, CH_VANCED, CH_NAVER, CH_GGDG, CH_KAKAO)
+DOMESTIC_CHANNELS = (CH_META, CH_VANCED, CH_NAVER, CH_GGDG, CH_KAKAO, CH_META_ETC)
 GLOBAL_CHANNELS = (CH_VN_TW, CH_GLOBAL)
 
 # ── Meta 시간대 지출 — Mixpanel 매출과 합쳐 4시간 ROAS 산출 ──
@@ -140,6 +143,9 @@ def clean_id(val):
     return numeric_only if numeric_only else s
 
 META_UTM_SOURCES = {"ig", "fb", "an", "msg", "instagram", "facebook", "threads", "th"}
+# 자사 Meta 광고 랜딩의 자체 채널 태그(ch=). 광고 귀속(국내메타) 결제의 93%가 ch=meta 동반 —
+#   utm 이 소실돼도 이 태그가 남으면 Meta 광고 유입으로 본다(2026-07-17 오가닉 여정 분석).
+META_CH_TAGS = {"meta", "ins", "ig", "fb", "instagram", "facebook", "insta", "threads"}
 def is_meta_source(src):
     s = str(src).strip().lower() if src is not None else ""
     if not s:
@@ -152,6 +158,12 @@ def is_meta_source(src):
 
 NAVER_UTM_VALUES = {"naver", "네이버"}
 def is_naver_event(props):
+    # 자체 채널 태그 ch=naver — 네이버 광고(nbs 브랜드검색/nsa 검색광고) 랜딩 태그.
+    #   utm/referrer 가 없어도 이 태그가 남은 결제가 월 ~4천건(₩1.4억)으로, 종전엔 전부
+    #   오가닉으로 새고 있었다(2026-07-17 오가닉 여정 분석). 구글/카카오와 동일하게 ch 로 판정.
+    v = props.get("ch")
+    if v is not None and str(v).strip().lower() == "naver":
+        return True
     for key in ["utm_source", "$initial_utm_source", "UTM_Source", "utm_Source", "UTM Source"]:
         v = props.get(key)
         if v and str(v).strip().lower() in NAVER_UTM_VALUES:
@@ -365,7 +377,7 @@ def parse_events(lines):
 
         out.append({
             "distinct_id": props.get("distinct_id"),
-            "date": ds, "hour": hour, "bucket": (hour // 4) * 4,
+            "date": ds, "hour": hour, "bucket": (hour // 4) * 4, "ts": ts,
             "utm_term": ut, "utm_source": us,
             "revenue": revenue,
             "서비스": props.get("서비스", ""),
@@ -450,7 +462,46 @@ def classify(e, kr_adsets, vn_adsets, vn_tw_adsets):
         if cur != "KRW":
             rev = rev * get_krw_rates().get(cur, 1.0)
         return CH_KAKAO, rev
+    # ⑥ 메타(기타) — Meta 광고 흔적은 명확하나 세트 귀속이 불가한 KRW 결제 (2026-07-17)
+    #   (a) Meta계열 utm + 세트ID(utm_term) 보유했으나 목록 미매칭(만료/120일 밖/미등록 세트)
+    #   (b) utm 소실됐지만 자사 Meta 광고 랜딩 태그(ch=meta/ins)가 남은 결제
+    #       (광고 귀속 결제의 93%가 ch=meta 동반 · ct 소재태그 대부분 광고와 일치 — 여정 분석 근거)
+    #   ※ KRW 한정: 글로벌 세트는 이 스크립트의 세트 목록에 없어 해외 결제가 유입되는 것 방지.
+    #   ※ utm_source 빈값 + 직전24h 메타결제 보유(=세트별 크로스셀 백필로 이미 국내메타 귀속)는
+    #     apply_crosssell_meta_etc() 에서 제외. 후행24h 인접 크로스셀 부여도 거기서 처리.
+    if event_currency(props) == "KRW":
+        if meta and ut:
+            return CH_META_ETC, e["revenue"]
+        if not e["utm_source"] and str(props.get("ch") or "").strip().lower() in META_CH_TAGS:
+            return CH_META_ETC, e["revenue"]
     return None
+
+BACKFILL_WINDOW_SEC = 86400   # 국내_세트별_supabase.py 크로스셀 백필과 동일 창(라스트터치·24h)
+
+def apply_crosssell_meta_etc(events, meta_ts_by_user):
+    """utm 소실(utm_source 빈값) 결제의 메타(기타) 보정 — classify() 1차 결과(_res)를 조정.
+
+    · 선행 24h 내 동일유저 메타 귀속 결제 존재 → 세트별 크로스셀 백필(라스트터치·24h)이
+      이미 국내메타(ad_performance_daily)로 회수한 결제 → 메타(기타) 부여 시 매출탭
+      이중계상(국내메타行+메타(기타)行) → 제외(None 유지/강등).
+    · 후행 24h 내에만 존재 → 백필 밖 인접 크로스셀 → 메타(기타) 부여.
+    """
+    demoted = promoted = 0
+    for e in events:
+        if e["utm_source"]:
+            continue
+        ts = e.get("ts") or 0
+        xs = meta_ts_by_user.get(e["distinct_id"]) or []
+        if not (ts and xs):
+            continue
+        prior = any(0 <= ts - t2 <= BACKFILL_WINDOW_SEC for t2 in xs if t2 != ts)
+        res = e.get("_res")
+        if res and res[0] == CH_META_ETC and prior:
+            e["_res"] = None; demoted += 1
+        elif res is None and not prior and event_currency(e["props"]) == "KRW":
+            if any(0 < t2 - ts <= BACKFILL_WINDOW_SEC for t2 in xs):
+                e["_res"] = (CH_META_ETC, e["revenue"]); promoted += 1
+    log.info(f"  🔗 메타(기타) 크로스셀 보정: 백필중복 제외 {demoted}건 · 후행24h 부여 {promoted}건")
 
 # =========================================================
 # Meta 시간대 지출
@@ -566,6 +617,14 @@ def main():
     events = parse_events(lines)
     events = dedup_events(events)
 
+    # 1차 분류 + 메타 귀속 결제 시각 수집(버퍼 포함 전체 — 메타(기타) 크로스셀/백필중복 판정용)
+    meta_ts_by_user = defaultdict(list)
+    for e in events:
+        e["_res"] = classify(e, kr_adsets, vn_adsets, vn_tw_adsets)
+        if e["_res"] and e["_res"][0] in (CH_META, CH_VANCED) and e.get("ts"):
+            meta_ts_by_user[e["distinct_id"]].append(e["ts"])
+    apply_crosssell_meta_etc(events, meta_ts_by_user)
+
     # (date, bucket, channel) 집계 — 업로드 대상은 date ∈ [START, END] 만
     start_s, end_s = START.isoformat(), END.isoformat()
     agg = defaultdict(lambda: [0.0, 0])   # key -> [revenue, count]
@@ -573,7 +632,7 @@ def main():
     for e in events:
         if not (start_s <= e["date"] <= end_s):
             continue
-        res = classify(e, kr_adsets, vn_adsets, vn_tw_adsets)
+        res = e["_res"]
         if not res:
             continue
         ch, rev = res

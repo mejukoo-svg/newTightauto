@@ -3303,7 +3303,7 @@ function renderChannelRevenue(){
 
 // ===== 시간별(4시간 버킷) 국내 채널 매출 — kr_channel_revenue_4h (Mixpanel 귀속, 매출만) =====
 // 일별/주별/월별과 달리 지출·ROAS 없음(4시간 단위 채널 지출 원천이 없음). 셀=매출(₩)만.
-// 시트기반 채널(구글검색·네이버파워링크)은 일단위라 제외 — 여기 '네이버'는 Mixpanel utm_source=naver 귀속분.
+// 시트기반 채널(구글검색·네이버파워링크)은 일단위라 제외 — 여기 '네이버'는 Mixpanel 귀속분(utm/referrer/ch=naver).
 let KR_REV4H=[],_KR_REV4H_LOADED=false;
 function ensureKrRev4h(cb){
   if(_KR_REV4H_LOADED){cb&&cb();return}
@@ -3316,7 +3316,7 @@ function _chrevHourly(){
   const scope=document.getElementById('chrScope')?.value||'all';
   const BK=[0,4,8,12,16,20];
   const bkLabel=b=>String(b).padStart(2,'0')+'-'+String(b+4).padStart(2,'0');
-  const DOM=['국내 메타','밴스드 국내','네이버','디멘드젠(타이트)'];
+  const DOM=['국내 메타','밴스드 국내','네이버','디멘드젠(타이트)','메타(기타)'];
   const GL=['대만 밴스드','글로벌(밴스드 제외)'];
   // lut[date][bucket][channel] = {r:매출, c:건수, s:지출}
   const lut={};
@@ -3377,7 +3377,13 @@ function _chrevChannels(){
   const byDateCRM={};
   ALIMTALK.forEach(r=>{if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].s+=(+r.cost||0);byDateCRM[r.date].r+=(+r.rev||0)});
   // MP ch=kakao 매출도 CRM 에 포함 — kr_channel_revenue_4h 채널='카카오' 를 일자별 합산(매출만, 지출 0).
-  (KR_REV4H||[]).forEach(r=>{if(r.channel==='카카오'){if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].r+=(+r.revenue||0)}});
+  // + 네이버(MP 귀속, ch=naver 포함)·메타(기타) 일자합 — 네이버/메타 광고 추정분을 오가닉에서 분리(2026-07-17).
+  const byDateNvMP={},byDateMetaEtc={};
+  (KR_REV4H||[]).forEach(r=>{
+    if(r.channel==='카카오'){if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].r+=(+r.revenue||0)}
+    else if(r.channel==='네이버'){byDateNvMP[r.date]=(byDateNvMP[r.date]||0)+(+r.revenue||0)}
+    else if(r.channel==='메타(기타)'){byDateMetaEtc[r.date]=(byDateMetaEtc[r.date]||0)+(+r.revenue||0)}
+  });
   TOSS_DAILY.forEach(r=>{byDateTOSS[r.date]=(r.net_amount||r.total_amount||0)});
   // 권역별 종합 — 매출은 실 결제액(국내=시트/Toss, 글로벌=Stripe), 지출은 해당 권역 채널 합산
   const domRev=d=>(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0));
@@ -3392,10 +3398,16 @@ function _chrevChannels(){
   const domChannels=[
     {name:'국내 메타',  get:d=>byDateKR[d]||{s:0,r:0}},
     {name:'밴스드 국내',get:d=>byDateVN[d]||{s:0,r:0}},
-    {name:'네이버',get:d=>byDatePL[d]||{s:0,r:0}},
+    // 네이버 매출 = max(시트 전환값, MP 귀속(ch=naver 포함)) — 검증(2026-07-17): 30일 전일 MP≥시트(시트는
+    //   네이버 전환추적分만 커버). max 라 이중계상 없이 시트 밖 네이버 광고발 결제가 오가닉으로 새지 않음. 지출=시트.
+    {name:'네이버',get:d=>{const pl=byDatePL[d]||{s:0,r:0};return {s:pl.s,r:Math.max(pl.r,byDateNvMP[d]||0)}}},
     {name:'밴스드 구글',  get:d=>byDateGG[d]||{s:0,r:0}},
     {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}},
     {name:'CRM',get:d=>byDateCRM[d]||{s:0,r:0}},  // 알림톡: 매출=귀속, 지출=발송비용
+    // 메타(기타): 세트 귀속 불가한 Meta 광고 흔적 결제(만료세트 utm/ch=meta·ins utm소실/후행24h 크로스셀).
+    //   kr_channel_revenue_4h 채널='메타(기타)' 일자합(매출만). 세트별 크로스셀 백필로 이미 국내메타에
+    //   귀속된 결제는 파이프라인에서 제외되어 국내메타 행과 이중계상 없음(2026-07-17).
+    {name:'메타(기타)',revOnly:true,get:d=>({s:0,r:byDateMetaEtc[d]||0})},
   ];
   const glChannels=[
     {name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0}},  // VN_TW_ACC 단독 (KRW)
@@ -3410,6 +3422,8 @@ function _chrevChannels(){
   else if(scope==='gl'){head=[sumAll,sumGl];detail=glChannels;totalRev=glRev;}
   else{head=[sumAll];detail=domChannels.concat(glChannels);totalRev=d=>domRev(d)+glRev(d);}
   // 오가닉 = 종합 실결제 매출(국내=Toss/시트, 글로벌=Stripe) − 채널 귀속 매출 합 = 미귀속·직접유입.
+  //   (2026-07-17: 네이버 행 max(시트,MP)·메타(기타) 신설로 네이버/메타 광고 추정분은 오가닉에서 제외 —
+  //    잔여 오가닉의 대부분은 무컨텍스트 서버이벤트(PDF/이용권 등)와 MP 미계측 Toss 결제)
   // 지출 없음(s:0). 채널 맨 아래에 표시. (글로벌은 글로벌(밴스드제외)가 잔여라 오가닉≈0)
   // 글로벌 단독은 '글로벌(밴스드 제외)'가 이미 잔여라 오가닉≈0 → 생략. 국내/전체만 오가닉 추가.
   if(scope==='gl')return [...head,...detail];
@@ -3517,7 +3531,7 @@ function _chrevChart(channels,periods){
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
   const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','오가닉':'#94a3b8'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -3555,7 +3569,7 @@ function renderChannelDonut(){
   const channels=_chrevChannels().filter(c=>!c.sum);   // 실제 채널만(종합 제외)
   const today=new Date();const dates=[];
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','오가닉':'#94a3b8'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)
