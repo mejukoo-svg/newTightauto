@@ -206,6 +206,21 @@ def fetch_all_charges(start_date, end_date):
     print(f"✅ 총 {len(all_charges)}건")
     return all_charges
 
+# ==================== net 매출 계산 ====================
+def _net_charge_units(charge):
+    """순매출(net) 청구 단위 = 캡처액(amount_captured) − 환불액(amount_refunded).
+    - 언캡쳐드(승인만 된 건): amount_captured=0 → 0 으로 제외
+    - 환불 건: amount_refunded 만큼 차감 (부분환불·부분캡처도 자연 처리)
+    - fetch 가 status='succeeded' 라 failed/blocked 는 애초에 포함 안 됨
+    주의: 환불은 원결제일(charge.created) 기준으로 차감됨(환불 발생일 아님).
+          과거 결제의 사후 환불을 반영하려면 해당 날짜 재적재 필요."""
+    captured = getattr(charge, "amount_captured", None)
+    if captured is None:  # 구버전 응답 객체 호환
+        captured = charge.amount if getattr(charge, "captured", True) else 0
+    refunded = getattr(charge, "amount_refunded", 0) or 0
+    return captured - refunded
+
+
 # ==================== [모드 1] 일별 매출 (매출 탭) ====================
 
 def _process_charge_daily(charge):
@@ -239,7 +254,7 @@ def _process_charge_daily(charge):
 
     country_name = TARGET_COUNTRIES[country_code]
     divisor = CURRENCY_DIVISOR.get(currency, 100)
-    amount = charge.amount / divisor
+    amount = _net_charge_units(charge) / divisor  # 캡처액−환불액 (언캡쳐드·환불 제외)
     rates = get_rate(date_str)
     amount_krw = convert_to_krw(amount, currency, rates)
     return country_name, date_str, amount_krw
@@ -688,7 +703,7 @@ def aggregate_daily_for_weekly(charges):
         date_str = charge_dt.strftime("%Y-%m-%d")
 
         divisor = CURRENCY_DIVISOR.get(currency, 100)
-        amount = ch.amount / divisor
+        amount = _net_charge_units(ch) / divisor  # 캡처액−환불액 (언캡쳐드·환불 제외)
 
         rates = get_rate(date_str)
         usd_to_local = rates.get(currency, 1)

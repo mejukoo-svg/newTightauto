@@ -36,7 +36,7 @@ import requests
 SB_URL = os.environ.get("SUPABASE_URL", "https://qkvqiorazdrhtuicnpec.supabase.co").rstrip("/")
 # 읽기 전용: index.html 에 이미 공개된 anon publishable 키 기본값 (override 가능)
 SB_KEY = os.environ.get("SUPABASE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") \
-    or "sb_publishable_43NkUJjcYzcBUiJhnKVHXw_eWTuZU2g"
+    or os.environ.get("SUPABASE_SERVICE_KEY", "")
 SBH = {"apikey": SB_KEY, "Authorization": f"Bearer {SB_KEY}"}
 
 MP_PID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")

@@ -685,14 +685,24 @@ def main():
     if mp_raw:
         df = pd.DataFrame(mp_raw)
 
-        # ▼ Meta 채널 결제만 귀속 (google 등 타채널 stale utm_term 오염 차단)
-        _bn = len(df); df = df[df['utm_source'].apply(is_meta_source)]
-        log.info(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn-len(df)}건 제외)")
-
         def _norm(x):
             s = str(x).strip() if x is not None else ''
             return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
         df['utm_term'] = df['utm_term'].apply(_norm)
+
+        # ▼ 채널 분류 (meta / organic / other) — 크로스셀 백필 재도입(2026-07-07) 전처리.
+        #   - other(google/tiktok 등): 직전 Meta 방문의 stale utm_term 오귀속 차단 → 통째로 제외.
+        #   - organic(utm_source 빈값): 크로스셀로 utm 소실된 결제. 자기 utm 불신 → 비운 뒤
+        #     같은 유저의 직전 Meta 결제(라스트터치·24h)에서만 상속.
+        #   - meta: 자기 utm_term(=adset_id) 사용.
+        def _src_class(us):
+            if is_meta_source(us): return 'meta'
+            return 'organic' if str(us).strip() == '' else 'other'
+        df['_src'] = df['utm_source'].apply(_src_class)
+        _bn = len(df); _no = int((df['_src'] == 'other').sum())
+        df = df[df['_src'] != 'other'].copy()
+        df.loc[df['_src'] == 'organic', 'utm_term'] = ''  # organic 자기 utm 불신 → Meta 라스트터치에서만 상속
+        log.info(f"  🔵 채널 분류: 전체 {_bn} → meta+organic {len(df)}건 (other 타채널 {_no}건 제외)")
 
         # 1) 중복 결제 dedup — 주문번호(order_no) 우선 (2026-06-08)
         #    같은 주문번호 = 같은 주문 = 1건. Mixpanel 은 같은 결제를 다른 $insert_id 로
@@ -736,13 +746,37 @@ def main():
         except Exception as e:
             log.warning(f"  서비스 진단 skip: {e}")
 
-        # 2) utm_term backfill 비활성화 (2026-05-06)
-        # 이유: backfill이 같은 user의 organic 결제까지 광고에 귀속시켜
-        #       추이차트 매출이 Stripe 실결제를 초과하는 over-attribution 유발.
+        # 2) utm_term 백필 — 크로스셀 회수 (라스트터치 · 1일창 · 세트 그레인) [재도입 2026-07-07]
+        #   과거 무제한 backfill 은 organic 결제까지 광고 귀속시켜 Stripe 초과(over-attribution)로
+        #   2026-05-06 비활성화됐다. 여기선 '직전 24h 내 마지막 Meta 결제'로만 상속을 좁혀 재도입한다.
+        #   · 라스트터치: 가장 최근 Meta 접점의 세트(utm_term=adset_id). · 24h(86400s) 초과 상속 금지.
+        #   · 백필된 행은 다음 결제의 접점으로 쓰지 않음(체이닝 방지). · 세트 전용 → 소재별 무영향.
+        #   ⚠️ 국내(국내_세트별_supabase.py)는 실데이터 검증 통과(+1.1%, 회수 80%가 재구매). 글로벌은
+        #      배포 전 Stripe 대조 필수(추이 매출 ≤ Stripe 실결제).
+        BACKFILL_WINDOW_SEC = 86400
+        if 'ts' not in df_d.columns: df_d['ts'] = 0
+        df_d = df_d.reset_index(drop=True)
+        df_d['_ismeta'] = (df_d['_src'] == 'meta') & (df_d['utm_term'].astype(str).str.len() > 0)
+        _s = df_d.sort_values(['distinct_id', 'ts'], kind='mergesort').reset_index(drop=False)
+        _T = _s['utm_term'].astype(str).tolist(); _TS = _s['ts'].fillna(0).astype('int64').tolist()
+        _D = _s['distinct_id'].astype(str).tolist(); _M = _s['_ismeta'].tolist(); _IX = _s['index'].tolist()
+        _ld = None; _lt = None; _lts = None; _rec = {}
+        for _i in range(len(_s)):
+            _d = _D[_i]
+            if _d != _ld: _ld = _d; _lt = None; _lts = None
+            if _d in ('', 'None', 'nan', 'null'): continue
+            if _T[_i]:
+                if _M[_i] and _TS[_i] > 0: _lt = _T[_i]; _lts = _TS[_i]  # 라스트터치 갱신
+            else:
+                if _lt and _TS[_i] > 0 and _lts and 0 <= _TS[_i] - _lts <= BACKFILL_WINDOW_SEC: _rec[_IX[_i]] = _lt
+        _rec_rev = float(df_d.loc[list(_rec.keys()), 'revenue'].sum()) if _rec else 0.0
+        for _oi, _t in _rec.items(): df_d.at[_oi, 'utm_term'] = _t
+        log.info(f"  🔗 크로스셀 백필(라스트터치·24h): {len(_rec)}건 회수 · 매출 {_rec_rev:,.0f} local")
+
         before_n = len(df_d); before_rev = float(df_d['revenue'].sum())
         df_d = df_d[df_d['utm_term'].astype(str).str.len() > 0]
         after_rev = float(df_d['revenue'].sum())
-        log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외 · 매출 {before_rev:,.0f} -> {after_rev:,.0f} local, organic drop {before_rev - after_rev:,.0f})")
+        log.info(f"  utm_term filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 미회수 organic 제외 · 매출 {before_rev:,.0f} -> {after_rev:,.0f} local)")
 
         # 3) (구) Logical payment dedup — 주문번호 dedup(1단계)으로 대체됨 (2026-06-08).
         #    주문번호 기반이 더 정확(같은 날 같은 금액 별개 주문을 잘못 합치지 않음).

@@ -584,6 +584,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     data.append({
                         "distinct_id": props.get("distinct_id"),
                         "date": ds,
+                        "ts": int(ts) if ts else 0,
                         "utm_term": ut or "",
                         "utm_source": us or "",
                         "amount": amount_val,
@@ -913,16 +914,28 @@ def main():
     if mp_raw:
         df = pd.DataFrame(mp_raw)
 
-        # ▼ Meta 채널 결제만 귀속 (google 등 타채널의 stale utm_term 오염 차단)
-        _before_n = len(df)
-        df = df[df["utm_source"].apply(is_meta_source)]
-        log.info(f"  🔵 Meta 소스 필터: {_before_n} → {len(df)}건 (비-Meta {_before_n - len(df)}건 제외)")
-
         # utm_term 정규화: undefined/None 등을 빈 문자열로
         def _norm_utm(x):
             s = str(x).strip() if x is not None else ""
             return "" if s.lower() in ("", "none", "undefined", "null") else s
         df["utm_term"] = df["utm_term"].apply(_norm_utm)
+
+        # ▼ 채널 분류 (meta / organic / other)
+        #   - other(google 등 명시된 타채널): 결제가 직전 Meta 방문의 stale utm_term(세트 id)을
+        #     달고 들어와 Meta 세트로 오귀속되는 것 차단 → 통째로 제외(기존 Meta 소스필터 취지 유지).
+        #   - organic(utm_source 빈값): 크로스셀로 utm 소실돼 오가닉처럼 찍힌 결제. 자기 utm_term은
+        #     신뢰 안 함(스테일 가능) → 비운 뒤 같은 유저의 직전 Meta 결제(라스트터치·24h)에서만 상속.
+        #   - meta: 자기 utm_term(=adset_id) 그대로 사용.
+        def _src_class(us):
+            if is_meta_source(us):
+                return "meta"
+            return "organic" if str(us).strip() == "" else "other"
+        df["_src"] = df["utm_source"].apply(_src_class)
+        _n_all = len(df)
+        _n_other = int((df["_src"] == "other").sum())
+        df = df[df["_src"] != "other"].copy()
+        df.loc[df["_src"] == "organic", "utm_term"] = ""  # organic 자기 utm 불신 → Meta 라스트터치에서만 상속
+        log.info(f"  🔵 채널 분류: 전체 {_n_all} → meta+organic {len(df)}건 (other 타채널 {_n_other}건 제외)")
 
         # 1) Mixpanel canonical dedup: $insert_id 기준 (true duplicates만 제거)
         #    insert_id 가 없는 이벤트는 청크 2일 겹침 fetch 시 중복될 수 있어
@@ -956,21 +969,56 @@ def main():
             df_d = pd.concat([_with, _without], ignore_index=True).drop(columns=["_oid"])
             log.info(f"  🧹 order_id 주문단위 dedup 후: {len(df_d)}건")
 
-        # 2) utm_term backfill: 같은 (date, distinct_id) 그룹의 비어있는 utm_term을
-        #    그룹 내 utm_term-set 이벤트 값으로 채움 → 패키지 2번째 이벤트도 attribution
-        has_utm_mask = df_d["utm_term"].astype(str).str.len() > 0
-        bf_map = (df_d[has_utm_mask].groupby(["date", "distinct_id"])["utm_term"].first().to_dict())
-        def _fill(row):
-            if row["utm_term"]:
-                return row["utm_term"]
-            return bf_map.get((row["date"], row["distinct_id"]), "")
-        df_d["utm_term"] = df_d.apply(_fill, axis=1)
+        # 2) utm_term 백필 — 크로스셀 회수 (라스트터치 · 1일창 · 세트 그레인)
+        #   같은 유저(distinct_id)가 Meta 광고로 산 뒤(utm_term 보유) 인앱/추천 등 UTM 없는
+        #   경로로 연달아 산 결제(organic)는 utm_term 이 비어 오가닉처럼 찍힌다. 이 빈 결제에
+        #   '직전 24h 내 마지막 Meta 결제'의 utm_term(=adset_id)을 상속시켜 세트 매출로 회수한다.
+        #   · 라스트터치: 시간상 가장 최근 Meta 접점의 세트.
+        #   · 1일창(86400s): 접점~결제 간격 24h 이내만(과거 광고 과귀속 방지).
+        #   · 백필된 행은 다음 결제의 접점으로 쓰지 않음(체이닝 24h 초과 확장 방지).
+        #   과거 글로벌은 무제한 백필로 Stripe 초과(over-attribution)해 비활성화됨(2026-05-06) →
+        #   여기선 라스트터치+24h 로 좁혀 재도입. 세트 전용(utm_term=adset_id)이라 소재별엔 무영향.
+        BACKFILL_WINDOW_SEC = 86400
+        if "ts" not in df_d.columns:
+            df_d["ts"] = 0
+        df_d = df_d.reset_index(drop=True)
+        df_d["_ismeta"] = (df_d["_src"] == "meta") & (df_d["utm_term"].astype(str).str.len() > 0)
+        _s = df_d.sort_values(["distinct_id", "ts"], kind="mergesort").reset_index(drop=False)
+        _terms = _s["utm_term"].astype(str).tolist()
+        _tsl = _s["ts"].fillna(0).astype("int64").tolist()
+        _didl = _s["distinct_id"].astype(str).tolist()
+        _metal = _s["_ismeta"].tolist()
+        _idxl = _s["index"].tolist()
+        _last_did = None; _last_term = None; _last_ts = None
+        _recovered = {}
+        for _i in range(len(_s)):
+            _d = _didl[_i]
+            if _d != _last_did:
+                _last_did = _d; _last_term = None; _last_ts = None
+            if _d in ("", "None", "nan", "null"):
+                continue  # 식별 불가 유저는 상속/접점 대상 제외
+            if _terms[_i]:
+                if _metal[_i] and _tsl[_i] > 0:
+                    _last_term = _terms[_i]; _last_ts = _tsl[_i]  # 라스트터치 갱신
+            else:
+                if _last_term and _tsl[_i] > 0 and _last_ts and 0 <= _tsl[_i] - _last_ts <= BACKFILL_WINDOW_SEC:
+                    _recovered[_idxl[_i]] = _last_term
+        if _recovered:
+            _rev_rec = float(df_d.loc[list(_recovered.keys()), "revenue"].sum())
+            for _oi, _t in _recovered.items():
+                df_d.at[_oi, "utm_term"] = _t
+            log.info(f"  🔗 크로스셀 백필(라스트터치·24h): {len(_recovered)}건 회수 · 매출 ₩{int(_rev_rec):,}")
+        else:
+            log.info("  🔗 크로스셀 백필: 회수 대상 없음")
 
-        # 3) utm_term이 채워진 이벤트만 attribution 집계
+        # 3) utm_term 채워진 결제만 귀속 (미회수 organic 은 오가닉으로 남겨 제외)
+        _pre_n = len(df_d); _pre_rev = float(df_d["revenue"].sum())
         df_d = df_d[df_d["utm_term"].astype(str).str.len() > 0]
+        _drop_rev = _pre_rev - float(df_d["revenue"].sum())
+        log.info(f"  📊 귀속 {len(df_d)}건 · 미회수 organic 제외 {_pre_n - len(df_d)}건(매출 ₩{int(_drop_rev):,})")
 
         total_revenue = df_d["revenue"].sum()
-        log.info(f"  📊 매출 합계 (utm_term backfill 적용): ₩{int(total_revenue):,}")
+        log.info(f"  📊 매출 합계 (크로스셀 백필 적용): ₩{int(total_revenue):,}")
 
         for (d, ut), v in df_d.groupby(["date", "utm_term"])["revenue"].sum().items():
             if d and ut:
