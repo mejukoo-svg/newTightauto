@@ -3287,8 +3287,9 @@ const HIST_REVENUE={"2025-09-01":7483000,"2025-09-02":6441600,"2025-09-03":58520
 function renderChannelRevenue(){
   const view=document.getElementById('chrView')?.value||'daily';
   if(view==='hourly'){ensureKrRev4h(_chrevHourly);return}   // 시간별: 4시간 버킷(별도 데이터·매출만)
-  // 디멘드젠(타이트) 행 = GGDG_TIGHT(lazy) → 미로드면 로딩 트리거 후 완료 시 재렌더(표+도넛)
-  if(!GGDG_TIGHT.length&&!(window._BIG_LOADED&&window._BIG_LOADED.ggdgkr)){
+  // 디멘드젠(타이트) 행 = GGDG_TIGHT(lazy) → 신선 로드 전이면 트리거 후 완료 시 재렌더(표+도넛).
+  //   캐시(GGDG_TIGHT.length>0)가 있어도 세션 첫 진입엔 재검증(stale-while-revalidate, 국내탭과 동일).
+  if(!(window._BIG_LOADED&&window._BIG_LOADED.ggdgkr)){
     ensureBigTable('ggdgkr').then(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='chrev'){renderChannelRevenue();renderChannelDonut();}});
   }
   // CRM 채널에 MP ch=kakao 매출을 합치려면 kr_channel_revenue_4h(채널='카카오')가 필요 → 먼저 로드.
