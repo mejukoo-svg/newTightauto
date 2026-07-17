@@ -3565,6 +3565,9 @@ let _chrDonutInst=null;
 function renderChannelDonut(){
   if(typeof Chart==='undefined')return;
   const cv=document.getElementById('chrDonut');if(!cv)return;
+  // 메타(기타)·카카오(CRM)·네이버MP 매출은 kr_channel_revenue_4h 기반 → 로드 완료 후 그려야
+  // 첫 진입에도 반영됨 (미로드 시 매출 0 → rev>0 필터에 걸려 도넛에서 누락되던 버그 수정)
+  if(!_KR_REV4H_LOADED){ensureKrRev4h(()=>renderChannelDonut());return}
   const days=parseInt(document.getElementById('chrDonutDays')?.value)||30;
   const channels=_chrevChannels().filter(c=>!c.sum);   // 실제 채널만(종합 제외)
   const today=new Date();const dates=[];
