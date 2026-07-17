@@ -3329,15 +3329,18 @@ function _chrevHourly(){
   // scope 별 행 구성 (일별 _chrevChannels 와 동일 규칙): 전체종합 상단 고정 + 권역종합/채널
   const mk=ch=>({name:ch,get:(d,b)=>cell(d,b,ch)});
   const sumAll={name:'전체 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM.concat(GL))};
-  let rows;
-  if(scope==='dom')rows=[sumAll,{name:'국내 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM)},...DOM.map(mk)];
-  else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...GL.map(mk)];
-  else rows=[sumAll,...DOM.map(mk),...GL.map(mk)];
   // 날짜(최근→과거), 각 날짜 내 버킷도 최근(20)→과거(0) → 최신이 왼쪽(일별과 동일 방향)
   const today=new Date();const dates=[];
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}
   const cols=[];
   dates.forEach(d=>{[...BK].reverse().forEach(b=>{cols.push({date:d,bucket:b,key:d+'#'+b,label:DK(d).slice(3)+' '+bkLabel(b),dayStart:b===20})})});
+  // 채널 나열 = 표시기간 매출 내림차순 (일별 뷰 _chrevSortByRev 와 동일 규칙, 종합행 상단 고정)
+  const revOfCh=ch=>{let r=0;cols.forEach(col=>{r+=cell(col.date,col.bucket,ch).r});return r};
+  const byRev=list=>[...list].sort((a,b)=>revOfCh(b)-revOfCh(a));
+  let rows;
+  if(scope==='dom')rows=[sumAll,{name:'국내 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM)},...byRev(DOM).map(mk)];
+  else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...byRev(GL).map(mk)];
+  else rows=[sumAll,...byRev(DOM.concat(GL)).map(mk)];
   // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
   const ths=cols.map(col=>'<th style="min-width:92px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
@@ -3349,7 +3352,7 @@ function _chrevHourly(){
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
   // 하단 누적 막대차트 (채널별 매출) — 종합행 제외, scope 반영
-  const chList=(scope==='dom'?DOM:scope==='gl'?GL:DOM.concat(GL));
+  const chList=(scope==='dom'?byRev(DOM):scope==='gl'?byRev(GL):byRev(DOM.concat(GL)));
   const channels=chList.map(c=>({name:c,get:k=>{const p=k.split('#');return {s:0,r:cell(p[0],+p[1],c).r}}}));
   const periods=cols.map(col=>({label:col.label,dates:[col.key]}));
   _chrevChart(channels,periods);
@@ -3422,6 +3425,16 @@ function _chrCell(v,revOnly,avg){
   return '<td class="mc '+RC(roas)+'"'+(avg?' style="font-weight:700"':'')+'>'+MC_CH(roas,p,v.s,v.r)+'</td>';
 }
 
+// 채널 행 나열 순서: 종합(sum) 상단 고정 → 상세채널은 표시기간 매출 합 내림차순 → 오가닉 맨 아래
+function _chrevSortByRev(channels,dates){
+  const head=channels.filter(c=>c.sum);
+  const tail=channels.filter(c=>!c.sum&&c.name==='오가닉');
+  const mid=channels.filter(c=>!c.sum&&c.name!=='오가닉')
+    .map(c=>{let r=0;dates.forEach(d=>{r+=(c.get(d).r||0)});return{c,r}})
+    .sort((a,b)=>b.r-a.r).map(x=>x.c);
+  return [...head,...mid,...tail];
+}
+
 function _chrevDaily(channels,days){
   const today=new Date();
   const dates=[];
@@ -3429,6 +3442,7 @@ function _chrevDaily(channels,days){
     const d=new Date(today);d.setDate(today.getDate()-i);
     dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
+  channels=_chrevSortByRev(channels,dates);
   const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
   const r7=dates.slice(0,7);
@@ -3474,6 +3488,7 @@ function _chrevPeriod(channels,view,count){
     }
   }
   // 일별 뷰(_chrevDaily)와 동일한 행=채널 / 열=기간 매트릭스. 각 셀은 MC_CH(ROAS/순이익/매출/지출).
+  channels=_chrevSortByRev(channels,periods.flatMap(p=>p.dates));
   const ths=periods.map(per=>'<th style="min-width:100px">'+per.label+'</th>').join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
   channels.forEach(ch=>{
