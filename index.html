@@ -3442,7 +3442,7 @@ function _chrevDaily(channels,days){
     const d=new Date(today);d.setDate(today.getDate()-i);
     dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
-  channels=_chrevSortByRev(channels,dates);
+  channels=_chrevSortByRev(channels,dates.slice(0,7));  // 정렬 기준 = '7일 평균' 컬럼과 동일한 최근 7일 매출
   const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 평균</th>'+ths+'</tr></thead><tbody>';
   const r7=dates.slice(0,7);
