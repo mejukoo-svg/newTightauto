@@ -237,7 +237,8 @@ mark.sh.active{background:#ff6d01;color:#fff}
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
     <select id="chrChartMode" style="font-size:11px"><option value="abs" selected>절대값(₩)</option><option value="pct">비율(100%)</option></select>
-    <span style="color:#888;font-size:10px">막대 전체=채널 매출 합, 누적 조각=채널별 매출 → 비율 확인 · 국내 채널은 귀속 매출 기준</span>
+    <select id="chrChartStyle" style="font-size:11px"><option value="stack" selected>누적 막대</option><option value="group">개별 막대(채널 나란히)</option></select>
+    <span style="color:#888;font-size:10px">누적=막대 전체가 채널 매출 합 · 개별=하루 안에 채널별 막대가 나란히 펼쳐짐 · 국내 채널은 귀속 매출 기준</span>
   </div>
   <div style="height:360px"><canvas id="chrChart"></canvas></div>
 </div>
@@ -1284,6 +1285,7 @@ document.getElementById('krSort').addEventListener('change',renderAdsetRanking);
 document.getElementById('chrDays').addEventListener('change',renderChannelRevenue);
 document.getElementById('chrScope').addEventListener('change',renderChannelRevenue);
 document.getElementById('chrChartMode').addEventListener('change',renderChannelRevenue);
+document.getElementById('chrChartStyle').addEventListener('change',renderChannelRevenue);
 document.getElementById('chrDonutDays').addEventListener('change',renderChannelDonut);
 document.getElementById('chrScope').addEventListener('change',renderChannelDonut);
 document.getElementById('chrView').addEventListener('change',function(){
@@ -3739,6 +3741,7 @@ function _chrevChart(channels,periods){
   if(typeof Chart==='undefined')return;
   const cv=document.getElementById('chrChart');if(!cv)return;
   const mode=document.getElementById('chrChartMode')?.value||'abs';
+  const style=document.getElementById('chrChartStyle')?.value||'stack';  // stack=누적, group=채널별 개별 막대 나란히
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
   const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
@@ -3748,7 +3751,8 @@ function _chrevChart(channels,periods){
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
   const totals=pers.map((p,idx)=>raw.reduce((s,ds)=>s+ds.data[idx],0));  // 기간별 채널 매출 합
   const datasets=raw.map(ds=>({
-    label:ds.name,backgroundColor:ds.color,borderWidth:0,stack:'rev',
+    label:ds.name,backgroundColor:ds.color,borderWidth:0,
+    ...(style==='stack'?{stack:'rev'}:{}),
     data:mode==='pct'?ds.data.map((v,idx)=>totals[idx]>0?v/totals[idx]*100:0):ds.data,
     _abs:ds.data,_tot:totals,
   }));
@@ -3764,8 +3768,8 @@ function _chrevChart(channels,periods){
             return d.label+': '+won(abs)+' ('+pct.toFixed(1)+'%)'},
           footer:items=>items.length?'채널 합: '+won(items[0].dataset._tot[items[0].dataIndex]):''}}},
       scales:{
-        x:{stacked:true,ticks:{font:{size:10},maxRotation:60,minRotation:0}},
-        y:{stacked:true,beginAtZero:true,max:mode==='pct'?100:undefined,
+        x:{stacked:style==='stack',ticks:{font:{size:10},maxRotation:60,minRotation:0}},
+        y:{stacked:style==='stack',beginAtZero:true,max:mode==='pct'?100:undefined,
           ticks:{font:{size:10},callback:v=>mode==='pct'?v+'%':axMoney(v)}}}}});
 }
 
