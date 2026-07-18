@@ -4,7 +4,7 @@ kpi_slack_alert.py — Supabase 데이터 조건 검사 → Slack 알람 (중복
 ======================================================================
 조건:
   [고예산 적자 세트] 오늘(실시간) 국내 광고세트 중
-        일예산(budget) >= 800,000  AND  적자(지출-매출) >= 50,000
+        일예산(budget) >= 500,000  AND  적자(지출-매출) >= 100,000
         + 오전 오알람 방지: 오늘 지출이 일예산의 SPEND_MATURITY(기본 15%) 이상인 세트만
         → 적자 큰 순 목록(세트ID 포함). 조건 지속 시 매시간 재알림  · ad_performance_daily
   [일ROAS 경고] 어제 국내 광고 일ROAS < 100% (KR 지출 > 매출)   · ad_performance_daily
@@ -25,8 +25,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ── 임계값 (필요시 여기만 수정) ──
-ADSET_BUDGET_MIN = 800_000   # 일예산 하한 (KRW)
-ADSET_LOSS_MIN   = 50_000    # 적자(지출-매출) 하한 (KRW) — 이 이상이면 알람
+ADSET_BUDGET_MIN = 500_000   # 일예산 하한 (KRW)
+ADSET_LOSS_MIN   = 100_000   # 적자(지출-매출) 하한 (KRW) — 이 이상이면 알람
 ADSET_ROAS_MAX   = 110       # ROAS 상한 (표시·심각도용. 트리거는 ADSET_LOSS_MIN)
 SPEND_MATURITY   = 0.15      # 오늘 지출이 일예산의 이 비율 이상인 세트만 판정(새벽 빈데이터 오알람 방지). 0=끔
 ADSET_MAX_LINES  = 30        # 한 메시지 최대 세트 수
@@ -129,7 +129,7 @@ def sev_emoji(roas):
 
 # ───────────────────── 조건 ─────────────────────
 def check_adset_low_roas():
-    """오늘(실시간) 일예산 800k↑ & 적자(지출-매출) 5만↑ 광고세트 (지출 성숙도 가드)."""
+    """오늘(실시간) 일예산 500k↑ & 적자(지출-매출) 10만↑ 광고세트 (지출 성숙도 가드)."""
     d = TODAY.isoformat()
     rows = sb_get("ad_performance_daily",
                   f"date=eq.{d}&select=adset_id,adset_name,product,campaign_name,budget,spend,revenue")
