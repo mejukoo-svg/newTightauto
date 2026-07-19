@@ -2190,7 +2190,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     tr.innerHTML='<td class="fx fx0" style="background:#fff3cd;font-size:10px"><b>'+subLabel+'</b></td>'
       +'<td class="fx fx1" style="background:#fff3cd"></td>'
       +'<td style="background:#fff3cd"></td>'
-      +(showChg?'<td style="background:#fff3cd"></td><td style="background:#fff3cd"></td>':'')
+      +(showChg?'<td style="background:#fff3cd"></td>':'')
       +'<td class="mc '+RC(tRoas)+'" style="background:#fff3cd">'+MC(tRoas,tP,tS,tR,tCvr,null,tCtr)+'</td>'
       +subCells;
     trs.push(tr);
@@ -2209,7 +2209,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     tr.innerHTML='<td class="fx fx0" style="background:#fff8e1"></td>'
       +'<td class="fx fx1" style="background:#fff8e1;padding-left:24px" title="'+anEsc+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
       +'<td style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
-      +(showChg?'<td style="background:#fff8e1"></td><td style="background:#fff8e1"></td>':'')
+      +(showChg?'<td style="background:#fff8e1"></td>':'')
       +'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr,null,c._ctr)+'</td>'
       +cells;
     trs.push(tr);
