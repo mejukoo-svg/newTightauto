@@ -435,15 +435,29 @@ def parse_insights(rows, date_str, date_obj, ad_account_id=""):
     return parsed
 
 
-def fetch_adset_budgets(ad_account_id):
+def fetch_adset_budgets(ad_account_id, relevant_ids=None):
     """광고 세트별 일 예산 조회 (ASC 캠페인 예산 폴백 포함).
-       부수효과: ADSET_CAMPAIGN(세트→캠페인) 맵을 채운다 → activities CBO 이벤트 적용용."""
+       부수효과: ADSET_CAMPAIGN(세트→캠페인) 맵을 채운다 → activities CBO 이벤트 적용용.
+
+       ※ effective_status 필터는 ACTIVE 뿐 아니라 PAUSED 계열까지 포함한다.
+         (ARCHIVED/DELETED만 제외) — ACTIVE만 조회하면 최근 지출은 있었으나 지금은
+         꺼진 세트가 budget_map 에서 빠져 예산 0/과거값으로 고착됐다(날짜탭 예산 컬럼
+         불일치의 주원인). 꺼진 세트도 현재 메타 예산을 받아야 대시보드와 일치한다.
+
+       relevant_ids: 최근 insights 가 있어 실제로 예산이 기록될 세트 id 집합.
+         주면 CBO 캠페인 예산 폴백(세트당 순차 호출)을 이 집합으로 한정해 API 부하를
+         줄인다(넓힌 필터로 세트가 ~10배 늘어도 폴백은 대시보드에 뜨는 세트만). None이면
+         전체 폴백(하위호환)."""
     url = f"{META_BASE_URL}/{ad_account_id}/adsets"
     params = {
         "fields": "id,daily_budget,campaign_id",
         "limit": 500,
         "filtering": json.dumps(
-            [{"field": "effective_status", "operator": "IN", "value": ["ACTIVE"]}]
+            [{"field": "effective_status", "operator": "IN", "value": [
+                "ACTIVE", "PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED",
+                "IN_PROCESS", "WITH_ISSUES", "PENDING_REVIEW",
+                "PENDING_BILLING_INFO", "DISAPPROVED", "PREAPPROVED",
+            ]}]
         ),
     }
 
@@ -481,7 +495,10 @@ def fetch_adset_budgets(ad_account_id):
         else:
             break
 
-    # ASC 캠페인 예산 폴백
+    # ASC 캠페인 예산 폴백 — 실제 기록에 쓰일 세트만(최근 insights 있는 세트)로 한정.
+    #   넓힌 상태 필터로 세트가 수백~천 개로 늘어도 폴백은 대시보드 대상만 순차 호출.
+    if relevant_ids is not None:
+        needs_campaign = {k: v for k, v in needs_campaign.items() if k in relevant_ids}
     if needs_campaign:
         unique_campaigns = set(needs_campaign.values())
         campaign_budgets = {}
@@ -813,10 +830,12 @@ def main():
     # =======================================================
     log.info(f"\n3단계: 예산 조회")
     budget_map = {}
+    # 예산이 실제로 기록될(최근 insights 있는) 세트 → 캠페인 폴백을 이걸로 한정.
+    _relevant_ids = set(adset_to_account.keys())
 
     with ThreadPoolExecutor(max_workers=BUDGET_WORKERS) as pool:
         futs = {
-            pool.submit(fetch_adset_budgets, acc): acc for acc in ALL_AD_ACCOUNTS
+            pool.submit(fetch_adset_budgets, acc, _relevant_ids): acc for acc in ALL_AD_ACCOUNTS
         }
         for f in as_completed(futs):
             try:
