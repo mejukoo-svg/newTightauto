@@ -327,9 +327,14 @@ def _extract_action_window(al, types, window_key):
     return 0
 
 def fetch_adset_budgets(ad_account_id):
+    # effective_status 는 ACTIVE 뿐 아니라 PAUSED 계열까지 포함(ARCHIVED/DELETED만 제외).
+    #   ACTIVE만 조회하면 최근 지출은 있었으나 꺼진 세트가 budget_map 에서 빠져 날짜탭
+    #   예산 컬럼이 0/과거값으로 고착됐다(국내와 동일 이슈). 폴백 없어 세트 증가분은 페이지네이션뿐.
     url = f"{META_BASE_URL}/{ad_account_id}/adsets"
     params = {'fields':'id,daily_budget,campaign_id','limit':500,
-        'filtering':json.dumps([{'field':'effective_status','operator':'IN','value':['ACTIVE']}])}
+        'filtering':json.dumps([{'field':'effective_status','operator':'IN','value':[
+            'ACTIVE','PAUSED','CAMPAIGN_PAUSED','ADSET_PAUSED','IN_PROCESS',
+            'WITH_ISSUES','PENDING_REVIEW','PENDING_BILLING_INFO','DISAPPROVED','PREAPPROVED']}])}
     results = {}
     data = meta_api_get(url, params, token=get_token(ad_account_id))
     while data:
