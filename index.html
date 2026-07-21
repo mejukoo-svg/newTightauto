@@ -226,10 +226,11 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
 <div id="grevPeriodBox" style="margin-top:16px;padding:12px 14px;border:1px solid #cfe2f3;border-radius:6px;background:#f7fbff;max-width:820px">
-  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 = 순수익 (USD · 상단 밴스드 포함/미포함 토글 반영)</span></div>
+  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 − 인플루언서 비용 = 순수익 (USD · 상단 밴스드 포함/미포함 토글 반영)</span></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <label style="font-size:11px">시작</label><select id="grevPStart" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
     <label style="font-size:11px;margin-left:6px">종료</label><select id="grevPEnd" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
+    <label style="font-size:11px;margin-left:6px">인플루언서 비용 $</label><input id="grevPInfl" type="number" min="0" step="1" placeholder="0" oninput="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px;width:90px;border:1px solid #ccc;border-radius:3px">
     <div id="grevPResult" style="margin-left:12px;font-size:12px;line-height:1.6"></div>
   </div>
 </div></div>
@@ -2965,11 +2966,13 @@ function renderGlobalRevenuePeriod(){
     if(!incVan)rev-=(vanRev[dt]||0);
     let sp=glSpend[dt]||0;if(incVan)sp+=(vanSpend[dt]||0);
     revSum+=rev;spendSum+=sp});
-  const net=revSum-spendSum;const roas=spendSum>0?revSum/spendSum*100:0;
+  const infl=Math.max(0,parseFloat(document.getElementById('grevPInfl')?.value)||0);  // 인플루언서 비용(수동 입력 $)
+  const net=revSum-spendSum-infl;const roas=spendSum>0?revSum/spendSum*100:0;
   resEl.innerHTML=
     '<span style="color:#888">'+dayN+'일</span> &nbsp; '
     +'매출합 <b style="color:#00d">$'+F(revSum)+'</b> &nbsp;−&nbsp; '
-    +'지출합 <b style="color:#d00">$'+F(spendSum)+'</b> &nbsp;=&nbsp; '
+    +'지출합 <b style="color:#d00">$'+F(spendSum)+'</b> &nbsp;−&nbsp; '
+    +'인플 <b style="color:#d00">$'+F(infl)+'</b> &nbsp;=&nbsp; '
     +'순수익 <b style="color:'+(net>=0?'green':'red')+'">'+(net<0?'-$':'$')+F(Math.abs(net))+'</b>'
     +' &nbsp;<span style="color:#888">(ROAS '+(spendSum>0?roas.toFixed(0)+'%':'-')+')</span>';
 }
