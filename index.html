@@ -224,7 +224,15 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>기간</label><select id="dpPeriod"><option value="day" selected>하루</option><option value="week">주간</option><option value="month">월간</option></select><label style="margin-left:10px">날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table><div id="dpCPWrap" style="display:none;margin-top:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏×📦 나라별 · 상품별 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">국가 × 상품 교차 — 지출순 정렬</span></div><table id="dpCPTbl"></table></div></div></div>
 <div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
-<div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div></div>
+<div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
+<div id="grevPeriodBox" style="margin-top:16px;padding:12px 14px;border:1px solid #cfe2f3;border-radius:6px;background:#f7fbff;max-width:820px">
+  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 = 순수익 (USD · 상단 밴스드 포함/미포함 토글 반영)</span></div>
+  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+    <label style="font-size:11px">시작</label><select id="grevPStart" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
+    <label style="font-size:11px;margin-left:6px">종료</label><select id="grevPEnd" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
+    <div id="grevPResult" style="margin-left:12px;font-size:12px;line-height:1.6"></div>
+  </div>
+</div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
@@ -2921,6 +2929,49 @@ function renderGlobalRevenue(){
     h+='<td></td></tr>';
   }
   h+='</tbody>';document.getElementById('grevTbl').innerHTML=h;
+  renderGlobalRevenuePeriod();
+}
+
+// 글로벌 매출탭 하단 — 시작~종료 기간의 매출합 − 지출합 = 순수익 (테이블 순이익 행과 동일 정의).
+//   매출합=Stripe 국가별 실결제 USD 합(밴스드 미포함 시 대만밴스드 귀속매출 차감),
+//   지출합=GL_AD 지출(+밴스드 포함 시 대만밴스드 지출). 상단 밴스드 토글을 그대로 반영.
+function renderGlobalRevenuePeriod(){
+  const startSel=document.getElementById('grevPStart');
+  const endSel=document.getElementById('grevPEnd');
+  const resEl=document.getElementById('grevPResult');
+  if(!startSel||!endSel||!resEl)return;
+  if(!STRIPE_DATA.length){resEl.innerHTML='<span style="color:#999">Stripe 데이터 없음</span>';return}
+  const countries=['대만','홍콩','일본','태국'];
+  const allDates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort();  // 오름차순
+  // 드롭다운 최초 1회 채움 (최신이 위). 기본: 시작=최신-29일, 종료=최신.
+  if(!startSel.options.length){
+    const opts=allDates.slice().reverse().map(d=>'<option value="'+d+'">'+DK(d)+'</option>').join('');
+    startSel.innerHTML=opts;endSel.innerHTML=opts;
+    const last=allDates[allDates.length-1];endSel.value=last;
+    const d=new Date(last);d.setDate(d.getDate()-29);const lo=d.toISOString().slice(0,10);
+    startSel.value=allDates.includes(lo)?lo:allDates[0];
+  }
+  let sd=startSel.value||allDates[0],ed=endSel.value||allDates[allDates.length-1];
+  if(sd>ed){[sd,ed]=[ed,sd];startSel.value=sd;endSel.value=ed}  // 뒤집혀 있으면 자동 swap
+  const incVan=(document.getElementById('grevVanced')?.value||'inc')==='inc';
+  // 날짜별 성분 맵 (renderGlobalRevenue 와 동일 소스)
+  const byDate={};STRIPE_DATA.forEach(r=>{if(!byDate[r.date])byDate[r.date]={};byDate[r.date][r.country]=r});
+  const glSpend={},vanSpend={},vanRev={};
+  GL_AD.forEach(r=>{glSpend[r.date]=(glSpend[r.date]||0)+(+r.spend_usd||0)});
+  vnTwUsdRows().forEach(r=>{vanSpend[r.date]=(vanSpend[r.date]||0)+(+r.spend||0);vanRev[r.date]=(vanRev[r.date]||0)+(+r.revenue||0)});
+  let revSum=0,spendSum=0,dayN=0;
+  allDates.forEach(dt=>{if(dt<sd||dt>ed)return;dayN++;
+    const bd=byDate[dt]||{};let rev=0;countries.forEach(c=>{rev+=bd[c]?.revenue_usd||0});
+    if(!incVan)rev-=(vanRev[dt]||0);
+    let sp=glSpend[dt]||0;if(incVan)sp+=(vanSpend[dt]||0);
+    revSum+=rev;spendSum+=sp});
+  const net=revSum-spendSum;const roas=spendSum>0?revSum/spendSum*100:0;
+  resEl.innerHTML=
+    '<span style="color:#888">'+dayN+'일</span> &nbsp; '
+    +'매출합 <b style="color:#00d">$'+F(revSum)+'</b> &nbsp;−&nbsp; '
+    +'지출합 <b style="color:#d00">$'+F(spendSum)+'</b> &nbsp;=&nbsp; '
+    +'순수익 <b style="color:'+(net>=0?'green':'red')+'">'+(net<0?'-$':'$')+F(Math.abs(net))+'</b>'
+    +' &nbsp;<span style="color:#888">(ROAS '+(spendSum>0?roas.toFixed(0)+'%':'-')+')</span>';
 }
 
 // ===== 글로벌_주간매출 (월별+주별 USD) =====
