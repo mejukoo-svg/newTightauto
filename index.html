@@ -713,6 +713,7 @@ function switchMode(m){
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
     if(t.dataset.t==='ggdgkr'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // [Tight] 디멘드젠은 국내(kr) 전용 (vn 의 ggdgct 와 라벨 중복 방지)
+    if(t.dataset.t==='krank'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 세트랭킹: 국내·밴스드·글로벌 공통(kr-only 클래스보다 먼저 처리)
     if(t.classList.contains('kr-only')){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
     if(t.classList.contains('vn-only')){t.style.display=(!isSpecial&&m==='vn')?'inline-block':'none';return}
     if(t.classList.contains('creative-only')){t.style.display=(!isSpecial&&m==='cr')?'inline-block':'none';return}
@@ -3125,12 +3126,12 @@ document.addEventListener('click',e=>{
   }
 });
 
-// ===== ADSET RANKING (세트랭킹 — 국내용) =====
+// ===== ADSET RANKING (세트랭킹 — 국내·밴스드·글로벌 공통) =====
 let krankFilters={};
 function clearKrankFilters(){krankFilters={};renderAdsetRanking()}
 
 function renderAdsetRanking(){
-  if(MODE!=='kr'&&MODE!=='vn'){document.getElementById('krTbl').innerHTML='<tr><td>세트 모드에서만 사용</td></tr>';return}
+  if(MODE!=='kr'&&MODE!=='vn'&&MODE!=='gl'){document.getElementById('krTbl').innerHTML='<tr><td>세트 모드에서만 사용</td></tr>';return}
   const days=parseInt(document.getElementById('krDays').value);
   const sortKey=document.getElementById('krSort').value;
   const dd=DATES.slice(0,days);
