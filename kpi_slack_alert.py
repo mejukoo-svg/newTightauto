@@ -35,10 +35,13 @@ ADSET_MAX_LINES  = 30        # 한 메시지 최대 세트 수
 # 경고로 강등해 한 계정 오염이 전체 알람을 점령하지 못하게 한다.
 DAILY_SPEND_SANITY_MAX = 300_000_000   # ₩3억
 
-# ── 일회성 스누즈: 이 시각(KST) 전에는 어떤 알람도 보내지 않음 ──
-#   운영 요청으로 2026-07-23 밤 9시부터 재개(그 전엔 무음). 지난 뒤엔 재개되며,
-#   상시 무음 해제하려면 None 으로 되돌린다. (매일 반복 조용시간이 필요하면 시각 비교로 교체)
-SNOOZE_UNTIL = datetime(2026, 7, 23, 21, 0)   # KST(naive) · None 이면 스누즈 없음
+# ── 수동 무음 스위치: True 인 동안 어떤 알람도 보내지 않는다 ──
+#   운영 요청으로 2026-07-23 무기한 OFF. 다시 켜려면 False 로 되돌린다.
+ALERTS_MUTED = True
+
+# ── 일회성 스누즈(선택): 이 시각(KST) 전에는 무음. None 이면 미사용 ──
+#   (특정 시각까지만 무음이 필요할 때 사용. 위 ALERTS_MUTED 가 우선.)
+SNOOZE_UNTIL = None   # KST(naive) 또는 None
 
 
 def _load_env():
@@ -224,6 +227,9 @@ ALERT_CHECKS = [check_adset_low_roas, check_daily_roas]
 def main():
     log.info("=" * 56)
     log.info("🔔 광고 알람 검사" + ("  [DRY]" if DRY else ""))
+    if ALERTS_MUTED:
+        log.info("🔇 알람 무음(수동 OFF) — ALERTS_MUTED=False 로 되돌리면 재개")
+        return
     if SNOOZE_UNTIL and NOW < SNOOZE_UNTIL:
         log.info(f"⏸ 스누즈 중 — {SNOOZE_UNTIL:%Y-%m-%d %H:%M} KST 이후 재개 "
                  f"(현재 {NOW:%Y-%m-%d %H:%M})")
