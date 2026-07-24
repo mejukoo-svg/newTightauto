@@ -625,9 +625,18 @@ function MCAUX(spend,revenue,uc,mp,imp){
 const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
 // 밴스드 대만 광고계정 — 추이차트를 별도 탭(🇹🇼 대만 추이차트)으로 분리. 기존 밴스드 추이차트에선 제외.
 const VN_TW_ACC='act_1286632473622244';
-// 글로벌 상품명 한↔영 통합: 한국어명을 영어 canonical 로 합쳐서 같은 상품으로 집계 (예: 솔로→solo, 무당→shaman)
-const GL_PRODUCT_CANON={'솔로':'solo','무당':'shaman'};
-const canonGLRows=rows=>(rows||[]).map(r=>(r&&GL_PRODUCT_CANON[r.product])?{...r,product:GL_PRODUCT_CANON[r.product]}:r);
+// 글로벌 상품명 통합: 한국어명·영문 변형을 하나의 canonical 로 합쳐서 같은 상품으로 집계.
+// (예: 솔로→solo, 무당·mudang→shaman, 무녀→mzpian) 키는 소문자, 조회 시 trim+소문자화하여 대소문자·표기변형 무시.
+const GL_PRODUCT_CANON={'솔로':'solo','solo':'solo',
+  '무당':'shaman','mudang':'shaman','shaman':'shaman',
+  '무녀':'mzpian','mzpian':'mzpian',
+  '집착':'possessive','possessive':'possessive',
+  '커리어':'job','job':'job'};
+const canonGLRows=rows=>(rows||[]).map(r=>{
+  if(!r||r.product==null)return r;
+  const c=GL_PRODUCT_CANON[String(r.product).trim().toLowerCase()];
+  return c?{...r,product:c}:r;
+});
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
   if(MODE==='vn'){
