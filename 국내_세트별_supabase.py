@@ -105,6 +105,10 @@ TODAY = datetime.now(KST).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2025, 1, 1)
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
+# 예산 변경이력(activities) 조회 창 + 날짜탭 예산 자가교정 범위(일).
+#   REFRESH_DAYS(10)로만 조회하면 마지막 예산변경이 창 밖으로 밀려난 세트가
+#   has_events_for=False → 현재값 평탄화로 고착됐다. 표시범위만큼 넓혀 재구성이 항상 옳게 한다.
+BUDGET_HIST_DAYS = int(os.environ.get("BUDGET_HIST_DAYS", "180"))
 
 if FULL_REFRESH:
     REFRESH_DAYS = (TODAY - FULL_REFRESH_START).days + 1
@@ -853,7 +857,8 @@ def main():
     log.info(f"\n3.5단계: 예산 변경이력(activities) 수집")
     bud_hist = BudgetHistory(KST)
     bud_hist.set_adset_campaign(ADSET_CAMPAIGN)
-    _act_since = (DATA_REFRESH_START - timedelta(days=2)).replace(tzinfo=KST).timestamp()
+    # ★ 창을 표시범위(BUDGET_HIST_DAYS)로 확대 — 마지막 변경이 오래돼도 재구성/has_events 가 옳게.
+    _act_since = (TODAY - timedelta(days=BUDGET_HIST_DAYS)).replace(tzinfo=KST).timestamp()
     _act_until = (TODAY + timedelta(days=1)).replace(tzinfo=KST).timestamp()
     _act_total = 0
     for acc in ALL_AD_ACCOUNTS:
@@ -1185,6 +1190,22 @@ def main():
         log.info(f"✅ Supabase 완료: {success}/{len(records)}행")
     else:
         log.warning("⚠️ upsert할 레코드 없음")
+
+    # =======================================================
+    # 6.5) 예산 자가교정 — 표시범위(BUDGET_HIST_DAYS) 전체의 저장 예산을 activities
+    #   재구성값으로 맞춘다. REFRESH_DAYS(10일)만 재기록하는 탓에 과거에 평탄화·고착된
+    #   예산이 스스로 교정되지 않던 문제 해결. 부분 업서트(예산 컬럼만, 타 컬럼 불변).
+    # =======================================================
+    try:
+        from budget_backfill import reconcile_budget
+        _bs = (TODAY - timedelta(days=BUDGET_HIST_DAYS)).strftime("%Y-%m-%d")
+        _be2 = TODAY.strftime("%Y-%m-%d")
+        log.info(f"\n6.5단계: 예산 자가교정 ({_bs}~{_be2})")
+        reconcile_budget(sb.base_url, sb.headers, "ad_performance_daily", "budget",
+                         bud_hist, budget_map, lambda raw: int(round(raw)),
+                         _bs, _be2, req_lib, log, tol=0.5)
+    except Exception as _e:
+        log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 
     # =======================================================
     # 7) 일별 집계 테이블

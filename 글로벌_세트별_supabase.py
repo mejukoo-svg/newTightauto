@@ -99,6 +99,8 @@ TODAY = datetime.now(KST).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2025, 12, 1)
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
+# 예산 변경이력(activities) 조회 창 + 날짜탭 예산 자가교정 범위(일). 국내와 동일 취지.
+BUDGET_HIST_DAYS = int(os.environ.get("BUDGET_HIST_DAYS", "180"))
 
 if FULL_REFRESH:
     REFRESH_DAYS = (TODAY - FULL_REFRESH_START).days + 1
@@ -630,7 +632,8 @@ def main():
     log.info("\n2.6단계: 예산 변경이력(activities) 수집")
     bud_hist = BudgetHistory(KST)
     bud_hist.set_adset_campaign(ADSET_CAMPAIGN)
-    _act_since = (DATA_REFRESH_START - timedelta(days=2)).replace(tzinfo=KST).timestamp()
+    # ★ 창을 표시범위(BUDGET_HIST_DAYS)로 확대 — 국내와 동일.
+    _act_since = (TODAY - timedelta(days=BUDGET_HIST_DAYS)).replace(tzinfo=KST).timestamp()
     _act_until = (TODAY + timedelta(days=1)).replace(tzinfo=KST).timestamp()
     _act_total = 0
     for acc_id in ALL_AD_ACCOUNTS:
@@ -982,6 +985,19 @@ def main():
             _deleted_dates += 1
         log.info(f"  🧹 구 country 분할 행 정리: {_deleted_dates}일 × 세트")
         sb.upsert("global_ad_performance_daily", records)
+
+    # 6.5) 예산 자가교정 — 표시범위(BUDGET_HIST_DAYS) 전체 저장 예산을 activities 재구성값으로
+    #   맞춘다(국내와 동일 취지). 부분 업서트(budget_usd 컬럼만, 타 컬럼 불변).
+    try:
+        from budget_backfill import reconcile_budget
+        _bs = (TODAY - timedelta(days=BUDGET_HIST_DAYS)).strftime("%Y-%m-%d")
+        _be2 = TODAY.strftime("%Y-%m-%d")
+        log.info(f"\n6.5단계: 예산 자가교정 ({_bs}~{_be2})")
+        reconcile_budget(sb.base_url, sb.headers, "global_ad_performance_daily", "budget_usd",
+                         bud_hist, budget_map, lambda raw: round(raw / 100, 2),
+                         _bs, _be2, req_lib, log, tol=0.01, extra_cols=("country",))
+    except Exception as _e:
+        log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 
     # 7) Stripe → Supabase
     log.info(f"\n7단계: Stripe 매출 → Supabase")

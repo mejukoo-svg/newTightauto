@@ -44,7 +44,7 @@ def fetch_budget_events(base_url, acc_id, token, since_epoch, until_epoch,
     params = {
         "access_token": token,
         "since": int(since_epoch), "until": int(until_epoch),
-        "limit": 200,
+        "limit": 500,   # 페이지 수 축소(창 확대 비용 완화). 데이터 동일.
         "fields": "event_type,event_time,object_id,extra_data,actor_name",
     }
     out = []
