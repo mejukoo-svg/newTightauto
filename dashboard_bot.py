@@ -330,6 +330,72 @@ ADV_SRC = {
 
 HIST_DAYS = 14  # 증감액 액션 이력 조회 창 (7일 성과요약보다 길게 봐야 '그 조치가 먹혔는지' 판단 가능)
 
+# =====================================================================
+# Meta effective_status (현재 활성/중단) — 하이라이트는 '활성' 세트만 대상.
+#   중단(PAUSED 계열)된 세트에 증감액·OFF 하이라이트를 달지 않도록, 조언 프롬프트에
+#   상태를 실어주고 마크 적용 단계에서 '중단 확정' 세트를 하드 필터한다.
+#   계정→토큰 맵은 세트별 파이프라인(국내_세트별_supabase.py / 글로벌_세트별_supabase.py)과
+#   동일 — 그쪽이 정본이므로 계정이 바뀌면 양쪽을 함께 맞춘다.
+# =====================================================================
+META_API_VERSION = "v21.0"
+META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
+def _mtok(k):
+    # .env(로컬, ENV엔 .env 전체 키가 담김) → os.environ(GitHub Actions secrets) 순으로 읽는다.
+    return (ENV.get(k) or os.environ.get(k, "")).strip()
+_MT1 = _mtok("META_TOKEN_1")
+_MT2 = _mtok("META_TOKEN_2")
+_MT_GL = _mtok("META_TOKEN_GlobalTT") or _mtok("META_TOKEN_4") or _mtok("META_TOKEN_3")
+_MT_9937 = _mtok("META_TOKEN_ACT_9937")
+META_TOKENS = {
+    # 국내 3계정 (국내_세트별_supabase.py)
+    "act_1270614404675034": _MT1,
+    "act_707835224206178": _MT1,
+    "act_1808141386564262": _MT2,
+    # 글로벌 (글로벌_세트별_supabase.py)
+    "act_1054081590008088": _MT1,
+    "act_2677707262628563": _MT_GL,
+    "act_1335040608536838": _MT_GL,
+    "act_993712016404855": _MT_9937,
+    "act_1021437716898605": _MT1,
+}
+META_ACCOUNTS = {
+    "kr": ["act_1270614404675034", "act_707835224206178", "act_1808141386564262"],
+    "gl": ["act_1054081590008088", "act_2677707262628563", "act_1335040608536838",
+           "act_993712016404855", "act_1021437716898605"],
+}
+# '활성화중'으로 볼 상태 — 이것만 하이라이트 대상. 나머지(PAUSED·CAMPAIGN_PAUSED·ADSET_PAUSED·
+# DISAPPROVED·PENDING_* 등)는 '중단'으로 보고 하이라이트에서 제외한다.
+ACTIVE_STATUSES = {"ACTIVE"}
+# effective_status 조회 시 넓게 요청(ARCHIVED/DELETED만 자동 제외) → 여기 없는 세트는 보관/삭제 = 비활성.
+_STATUS_FILTER = json.dumps([{"field": "effective_status", "operator": "IN", "value": [
+    "ACTIVE", "PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "IN_PROCESS",
+    "WITH_ISSUES", "PENDING_REVIEW", "PENDING_BILLING_INFO", "DISAPPROVED", "PREAPPROVED"]}])
+
+def fetch_active_status(region):
+    """region 계정들의 adset effective_status를 조회해 {adset_id: status} 반환.
+    토큰이 하나도 없거나 전부 실패하면 {} → 상태 미상으로 두어 하이라이트 필터를 적용하지 않는다
+    (기존 동작으로 안전 폴백; '중단 확정'일 때만 제외)."""
+    out = {}
+    for acc in META_ACCOUNTS.get(region, []):
+        tok = META_TOKENS.get(acc, "")
+        if not tok:
+            continue
+        url = f"{META_BASE_URL}/{acc}/adsets"
+        params = {"fields": "id,effective_status", "limit": 500,
+                  "filtering": _STATUS_FILTER, "access_token": tok}
+        try:
+            nxt = f"{url}?{urllib.parse.urlencode(params)}"
+            while nxt:
+                data = json.loads(urllib.request.urlopen(nxt, timeout=60).read().decode("utf-8"))
+                for row in data.get("data", []):
+                    aid = row.get("id")
+                    if aid:
+                        out[aid] = row.get("effective_status") or "UNKNOWN"
+                nxt = data.get("paging", {}).get("next")
+        except Exception as e:
+            print(f"  [active_status] {acc} 조회 실패(무시): {e}")
+    return out
+
 def _load_human_marks(region, since, dc):
     """durable 사람 마킹 로드 {adset_id: {date: tag}}. 글로벌은 perfTbl.highlight 유실이 잦아
     (daily 늦은 적재) 이 테이블이 사람 조치의 신뢰 소스. 국내도 보강(마킹 유실 방지)."""
@@ -389,6 +455,9 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
                 ai_marks.setdefault(aid, {})[r["date"]] = r["tag"]
     except Exception:
         ai_marks = {}   # 테이블 미생성 등 → 비교 생략(무해)
+    # 현재 활성/중단 상태(Meta effective_status) — 하이라이트를 활성 세트로 한정하기 위함.
+    # 실패 시 {} → 아래에서 active=None(미상)로 두어 필터를 걸지 않는다(안전 폴백).
+    status_map = fetch_active_status(region)
     # 요약 라인 생성 (지출 큰 순, 최대 40세트) — 성과는 최근 7일, 이력은 최근 14일
     items = []
     for aid, a in agg.items():
@@ -414,10 +483,14 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         for d in sorted(aim):
             hs = a["acts"].get(d)
             airec.append(f"{d[5:]}AI{HL_SHORT.get(aim[d], aim[d])}(사람:{HL_SHORT.get(hs, hs) if hs else '—'})")
+        # active: True=현재 활성(하이라이트 대상) / False=중단 확정(제외) / None=상태 미상(필터 안 함)
+        st = status_map.get(aid)
+        active = (st in ACTIVE_STATUSES) if status_map else None
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
                       "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist),
-                      "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp})
+                      "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp,
+                      "active": active, "status": st or ""})
     items.sort(key=lambda x: -x["_sp"])
     return items[:40], cur
 
@@ -433,7 +506,8 @@ HL_TAGS_OK = {"up10", "up20", "down10", "down20", "off"}
 ADV_MARKS_HINT = (
     "\n\n[하이라이트 출력 — 본문 맨 끝에 반드시 추가]\n"
     "위에서 실제로 증액/감액/OFF를 권한 세트만 골라, 대시보드 추이차트가 읽을 수 있게 아래 코드블록으로 정확히 출력하라. "
-    "관찰·보류·특이없음은 넣지 마라. id는 [세트 데이터]에 주어진 세트ID 숫자를 그대로 쓴다. "
+    "관찰·보류·특이없음은 넣지 마라. **'⏸ …상태:중단'으로 표시된 비활성 세트는 절대 넣지 마라(현재 활성 세트만 하이라이트한다).** "
+    "id는 [세트 데이터]에 주어진 세트ID 숫자를 그대로 쓴다. "
     "tag는 다음 중 하나: 증액10%→up10, 증액20%→up20, 감액10%→down10, 감액20%→down20, OFF→off, 복제증액(복증)→up20.\n"
     "```marks\n[{\"id\":\"120xxxxxxxxxxxxxxx\",\"tag\":\"up10\"}]\n```")
 
@@ -490,6 +564,8 @@ def sets_to_text(items, cur):
     lines = []
     for s in items:
         tag = []
+        if s.get("active") is False:  # 현재 중단(비활성) — 하이라이트 대상 아님
+            tag.append("상태:중단(" + (s.get("status") or "PAUSED") + ")")
         if s["hl"]:
             tag.append("조치:" + HL_KO.get(s["hl"], s["hl"]))
         if s["memo"]:
@@ -499,7 +575,8 @@ def sets_to_text(items, cur):
         if s.get("airec"):
             tag.append("AI권고이력:" + s["airec"])  # 과거 AI권고 vs 그날 사람선택 (조언 자체 보정용)
         tagstr = (" | " + " · ".join(tag)) if tag else ""
-        lines.append(f"- {s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
+        mark = "⏸ " if s.get("active") is False else ""  # 중단 세트는 눈에 띄게(하이라이트 금지 신호)
+        lines.append(f"- {mark}{s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
                      f"{ADVICE_DAYS}일ROAS {s['roas7']}%(지출{cur}{s['sp']:,}) · "
                      f"최근3일 {s['trend']}% · {s['ndays']}일{tagstr}")
     return "\n".join(lines)
@@ -520,6 +597,7 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 🔻 감액·OFF 후보: 세트명 + 근거. 여기는 빠뜨리지 말고 망라한다 — 7일ROAS 100~130% + 최근 3일 하락추세 = 10% 감액 후보, 7일ROAS<100% + 3일 연속 적자(OFF 3기준 C1·C2·C3 중 2개↑) = OFF 또는 20% 감액. 특히 '조치' 태그가 없는(미조치) 하락 세트를 놓치지 마라.
   · 👀 지켜볼 것: 데이터 얇음(런칭 3일내)·이미 조치한 세트의 효과 관찰·조치와 데이터가 모순되는 세트 등
 - 끄기/증액/감액 대상 세트를 언급할 때는 **반드시 세트명과 세트ID를 함께** 표기한다. 예: `무당_260507_aiUGC정확도 (ID 120243753711540177)`. ID는 [세트 데이터]에 주어진 값을 그대로 쓴다.
+- **하이라이트(증액·감액·OFF)는 '현재 활성'인 세트만 대상이다.** [세트 데이터]에서 앞에 `⏸`가 붙고 `상태:중단(…)`으로 표시된 세트는 지금 꺼져 있으므로, 증액·감액·OFF·복증 어느 것도 권하거나 하이라이트하지 마라(이미 꺼진 세트에 OFF·증감액은 무의미). 중단 세트를 다뤄야 하면 본문에서 '이미 중단됨'으로만 사실 언급하고, 재개 여부는 👀 지켜볼 것으로만 돌려라. (상태 표시가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
 - 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
 - 각 세트의 '이력:'은 최근 14일 증감액 액션과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액, 그날 ROAS 172%·110%). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
   · 증액 후 며칠 뒤 ROAS가 하락했으면 '증액 안 먹힘 → 되돌림/관망', 감액 후 회복했으면 '유효'.
@@ -848,6 +926,15 @@ def main():
                 items, _ = gather_sets(region, dc)
                 thread_ctx = fetch_thread_context(ch, region)
                 advice, adv_marks = compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx)
+                # 하드 가드: 프롬프트 지시와 무관하게 '중단 확정' 세트는 하이라이트/기록에서 제외.
+                # (active is False인 세트만 제거 — 상태 미상(None)은 종전대로 통과)
+                inactive_ids = {str(it["id"]) for it in items if it.get("active") is False}
+                if inactive_ids and adv_marks:
+                    kept = [m for m in adv_marks if str(m.get("id")) not in inactive_ids]
+                    dropped = len(adv_marks) - len(kept)
+                    if dropped:
+                        print(f"  [하이라이트] 중단 세트 {dropped}건 제외 (활성 세트만 마킹)")
+                    adv_marks = kept
             except Exception as e:
                 print(f"  [조언] 생성 실패: {e}")
 
