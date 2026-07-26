@@ -30,4 +30,11 @@ jobs:
           SLACK_CH_KR_MARKETING: ${{ secrets.SLACK_CH_KR_MARKETING }}
           SLACK_CH_GL_MARKETING: ${{ secrets.SLACK_CH_GL_MARKETING }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Meta effective_status 조회용 — 하이라이트를 '현재 활성' 세트로 한정하기 위함
+          META_TOKEN_1: ${{ secrets.META_TOKEN_1 }}
+          META_TOKEN_2: ${{ secrets.META_TOKEN_2 }}
+          META_TOKEN_3: ${{ secrets.META_TOKEN_3 }}
+          META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
+          META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GlobalTT }}
+          META_TOKEN_ACT_9937: ${{ secrets.META_TOKEN_ACT_9937 }}
         run: python dashboard_bot.py
