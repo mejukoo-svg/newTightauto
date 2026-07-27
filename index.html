@@ -225,9 +225,9 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>기간</label><select id="dpPeriod"><option value="day" selected>하루</option><option value="week">주간</option><option value="month">월간</option></select><label style="margin-left:10px">날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table><div id="dpCPWrap" style="display:none;margin-top:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏×📦 나라별 · 상품별 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">국가 × 상품 교차 — 지출순 정렬</span></div><table id="dpCPTbl"></table></div></div></div>
 <div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
-<div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
+<div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><label style="margin-left:10px">국가</label><select id="grevCountry" onchange="renderGlobalRevenue()"><option value="ALL" selected>🌐 전체</option><option value="TW">대만</option><option value="HK">홍콩</option><option value="JP">일본</option><option value="TH">태국</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중<br>🌐 국가 선택 시 매출·지출·순이익·ROAS·오가닉이 그 나라만으로 계산 — ⚠ 매출=Stripe(빌링주소 우선), 지출·귀속매출=세트 country(캠페인명 tw/hk 태그)로 분류 기준이 달라 국가별 ROAS·순이익은 근사치이고, country 태그 없는 세트 지출은 제외됩니다(전체 합과 불일치 가능).</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
 <div id="grevPeriodBox" style="margin-top:16px;padding:12px 14px;border:1px solid #cfe2f3;border-radius:6px;background:#f7fbff;max-width:820px">
-  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 − 인플루언서 비용 = 순수익 (USD · 상단 밴스드 포함/미포함 토글 반영)</span></div>
+  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 − 인플루언서 비용 = 순수익 (USD · 상단 밴스드 포함/미포함 · 국가 선택 반영)</span></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <label style="font-size:11px">시작</label><select id="grevPStart" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
     <label style="font-size:11px;margin-left:6px">종료</label><select id="grevPEnd" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
@@ -2860,7 +2860,13 @@ function renderStripeMonthly(){
   h+='</tbody>';document.getElementById('sTbl').innerHTML=h;
 }
 
-// ===== 글로벌_매출 (국가별 USD · 일별/주간/월간 토글) =====
+// ===== 글로벌_매출 (국가별 USD · 일별/주간/월간 토글 · 국가 드롭다운) =====
+// 국가 필터(grevCountry): ALL|TW|HK|JP|TH.
+//   매출=Stripe(global_stripe_daily, 빌링주소 우선 분류) / 지출·귀속매출=GL_AD.country(캠페인명 tw·hk 태그 기준)
+//   → 분류 기준이 서로 달라 국가별 ROAS·순이익은 근사. country 태그 없는 세트 지출은 국가 선택 시 빠진다.
+//   대만밴스드(vnTwUsdRows)는 TW(또는 전체)일 때만 합산.
+const GREV_CC={'대만':'TW','홍콩':'HK','일본':'JP','태국':'TH'};
+function _grevCountry(){return document.getElementById('grevCountry')?.value||'ALL'}
 function renderGlobalRevenue(){
   if(!STRIPE_DATA.length){document.getElementById('grevTbl').innerHTML='<tr><td>Stripe 데이터 없음</td></tr>';return}
   const mode=document.getElementById('grevMode')?.value||'daily';
@@ -2872,8 +2878,11 @@ function renderGlobalRevenue(){
   // 광고 지출·귀속매출 집계 (USD) — 성분별로 분리: 글로벌(타이트 GL_AD) / 대만밴스드(KRW→USD 환산)
   //   glSpend=GL_AD 지출, vanSpend=대만밴스드 지출, metaRev=GL_AD 귀속매출, vanRev=대만밴스드 귀속매출(Mixpanel)
   const glSpendByDate={},vanSpendByDate={},metaRevByDate={},vanRevByDate={};
-  GL_AD.forEach(r=>{glSpendByDate[r.date]=(glSpendByDate[r.date]||0)+(+r.spend_usd||0);metaRevByDate[r.date]=(metaRevByDate[r.date]||0)+(+r.revenue_usd||0)});
-  vnTwUsdRows().forEach(r=>{vanSpendByDate[r.date]=(vanSpendByDate[r.date]||0)+(+r.spend||0);vanRevByDate[r.date]=(vanRevByDate[r.date]||0)+(+r.revenue||0)});
+  const cSel=_grevCountry();                       // 국가 필터
+  const twOK=(cSel==='ALL'||cSel==='TW');          // 대만밴스드는 전체·대만에서만 합산
+  GL_AD.forEach(r=>{if(cSel!=='ALL'&&canonCountry(r.country)!==cSel)return;
+    glSpendByDate[r.date]=(glSpendByDate[r.date]||0)+(+r.spend_usd||0);metaRevByDate[r.date]=(metaRevByDate[r.date]||0)+(+r.revenue_usd||0)});
+  if(twOK)vnTwUsdRows().forEach(r=>{vanSpendByDate[r.date]=(vanSpendByDate[r.date]||0)+(+r.spend||0);vanRevByDate[r.date]=(vanRevByDate[r.date]||0)+(+r.revenue||0)});
   const allDates=[...new Set(STRIPE_DATA.map(r=>r.date))].sort();
   // 주(월요일 시작) 키
   const monKey=d=>{const dt=new Date(d);const wd=dt.getDay();const diff=dt.getDate()-wd+(wd===0?-6:1);const m=new Date(dt);m.setDate(diff);return m.toISOString().split('T')[0]};
@@ -2886,7 +2895,7 @@ function renderGlobalRevenue(){
   const agg={};
   keys.forEach(k=>{const o={rev:{대만:0,홍콩:0,일본:0,태국:0},total:0,glSpend:0,vanSpend:0,metaRev:0,vanRev:0,rateSum:0,rateN:0};
     groups[k].forEach(d=>{const bd=byDate[d]||{};
-      countries.forEach(c=>{const v=bd[c]?.revenue_usd||0;o.rev[c]+=v;o.total+=v});
+      countries.forEach(c=>{const v=bd[c]?.revenue_usd||0;o.rev[c]+=v;if(cSel==='ALL'||GREV_CC[c]===cSel)o.total+=v});
       o.glSpend+=glSpendByDate[d]||0;o.vanSpend+=vanSpendByDate[d]||0;
       o.metaRev+=metaRevByDate[d]||0;o.vanRev+=vanRevByDate[d]||0;
       const rate=bd['대만']?.usd_krw_rate||bd['홍콩']?.usd_krw_rate||bd['일본']?.usd_krw_rate||bd['태국']?.usd_krw_rate||0;
@@ -2909,7 +2918,8 @@ function renderGlobalRevenue(){
   keys.forEach(k=>{h+='<th style="min-width:85px;'+(isSunCol(k)?'background:#ffe0e0;color:#c00':'background:#4476b8;color:#fff')+'">'+colLabel(k)+'</th>'});
   h+='<th style="background:#4476b8;color:#fff">합계</th></tr></thead><tbody>';
   // 국가별 행 (미포함 시 대만은 대만밴스드 귀속매출 차감 반영)
-  countries.forEach(c=>{
+  //   국가를 하나 고르면 아래 '종합' 행이 곧 그 나라 매출이라 중복 행은 생략
+  (cSel==='ALL'?countries:[]).forEach(c=>{
     let total=0;
     h+='<tr><td style="text-align:left;font-weight:600">'+c+'</td>';
     keys.forEach(k=>{const v=dispCountryRev(agg[k],c);total+=v;h+='<td style="text-align:right">$'+F(v)+'</td>'});
@@ -2921,7 +2931,8 @@ function renderGlobalRevenue(){
     h+='<td style="text-align:right">'+(rate?rate.toFixed(2):'')+'</td>'});
   h+='<td></td></tr>';
   // 종합 행 (밴스드 미포함 시 대만밴스드 귀속매출 차감)
-  h+='<tr style="border-top:2px solid #000;font-weight:700"><td style="text-align:left">종합</td>';
+  const cName=cSel==='ALL'?'':(Object.keys(GREV_CC).find(k=>GREV_CC[k]===cSel)||cSel);
+  h+='<tr style="border-top:2px solid #000;font-weight:700"><td style="text-align:left">종합'+(cName?' · '+cName:'')+'</td>';
   let grandTotal=0;
   keys.forEach(k=>{const t=dispTotal(agg[k]);grandTotal+=t;
     h+='<td style="text-align:right">$'+F(t)+'</td>'});
@@ -2971,13 +2982,18 @@ function renderGlobalRevenue(){
       else h+='<td></td>'});
     h+='<td></td></tr>';
   }
+  // 국가를 골랐는데 그 국가로 태그된 세트 지출이 0이면 경고 — 캠페인명 국가태그(tw/hk)가 없는 세트는 국가별 집계에서 빠진다.
+  if(cSel!=='ALL'&&mtTotal===0){
+    h+='<tr><td colspan="'+(keys.length+2)+'" style="text-align:left;background:#fff4e5;color:#a15c00;font-size:10px;padding:6px;font-weight:400">'
+      +'⚠ '+(cName||cSel)+'(으)로 태그된 세트 지출이 없습니다 — 캠페인명에 국가 태그가 없는 세트는 국가별 지출·귀속매출에서 빠집니다. 매출만 참고하세요(순이익·ROAS는 지출 0 기준).</td></tr>';
+  }
   h+='</tbody>';document.getElementById('grevTbl').innerHTML=h;
   renderGlobalRevenuePeriod();
 }
 
 // 글로벌 매출탭 하단 — 시작~종료 기간의 매출합 − 지출합 = 순수익 (테이블 순이익 행과 동일 정의).
 //   매출합=Stripe 국가별 실결제 USD 합(밴스드 미포함 시 대만밴스드 귀속매출 차감),
-//   지출합=GL_AD 지출(+밴스드 포함 시 대만밴스드 지출). 상단 밴스드 토글을 그대로 반영.
+//   지출합=GL_AD 지출(+밴스드 포함 시 대만밴스드 지출). 상단 밴스드 토글·국가 드롭다운을 그대로 반영.
 function renderGlobalRevenuePeriod(){
   const startSel=document.getElementById('grevPStart');
   const endSel=document.getElementById('grevPEnd');
@@ -3000,18 +3016,22 @@ function renderGlobalRevenuePeriod(){
   // 날짜별 성분 맵 (renderGlobalRevenue 와 동일 소스)
   const byDate={};STRIPE_DATA.forEach(r=>{if(!byDate[r.date])byDate[r.date]={};byDate[r.date][r.country]=r});
   const glSpend={},vanSpend={},vanRev={};
-  GL_AD.forEach(r=>{glSpend[r.date]=(glSpend[r.date]||0)+(+r.spend_usd||0)});
-  vnTwUsdRows().forEach(r=>{vanSpend[r.date]=(vanSpend[r.date]||0)+(+r.spend||0);vanRev[r.date]=(vanRev[r.date]||0)+(+r.revenue||0)});
+  const cSel=_grevCountry();                       // 상단 국가 드롭다운 반영
+  const twOK=(cSel==='ALL'||cSel==='TW');
+  const shownC=countries.filter(c=>cSel==='ALL'||GREV_CC[c]===cSel);
+  GL_AD.forEach(r=>{if(cSel!=='ALL'&&canonCountry(r.country)!==cSel)return;glSpend[r.date]=(glSpend[r.date]||0)+(+r.spend_usd||0)});
+  if(twOK)vnTwUsdRows().forEach(r=>{vanSpend[r.date]=(vanSpend[r.date]||0)+(+r.spend||0);vanRev[r.date]=(vanRev[r.date]||0)+(+r.revenue||0)});
   let revSum=0,spendSum=0,dayN=0;
   allDates.forEach(dt=>{if(dt<sd||dt>ed)return;dayN++;
-    const bd=byDate[dt]||{};let rev=0;countries.forEach(c=>{rev+=bd[c]?.revenue_usd||0});
+    const bd=byDate[dt]||{};let rev=0;shownC.forEach(c=>{rev+=bd[c]?.revenue_usd||0});
     if(!incVan)rev-=(vanRev[dt]||0);
     let sp=glSpend[dt]||0;if(incVan)sp+=(vanSpend[dt]||0);
     revSum+=rev;spendSum+=sp});
   const infl=Math.max(0,parseFloat(document.getElementById('grevPInfl')?.value)||0);  // 인플루언서 비용(수동 입력 $)
   const net=revSum-spendSum-infl;const roas=spendSum>0?revSum/spendSum*100:0;
+  const cNm=cSel==='ALL'?'':(Object.keys(GREV_CC).find(k=>GREV_CC[k]===cSel)||cSel);
   resEl.innerHTML=
-    '<span style="color:#888">'+dayN+'일</span> &nbsp; '
+    '<span style="color:#888">'+dayN+'일'+(cNm?' · '+cNm:'')+'</span> &nbsp; '
     +'매출합 <b style="color:#00d">$'+F(revSum)+'</b> &nbsp;−&nbsp; '
     +'지출합 <b style="color:#d00">$'+F(spendSum)+'</b> &nbsp;−&nbsp; '
     +'인플 <b style="color:#d00">$'+F(infl)+'</b> &nbsp;=&nbsp; '
