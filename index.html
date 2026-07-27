@@ -271,18 +271,18 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-allmedia"><iframe id="allmediaFrame" data-src="allmedia.html" style="width:100%;height:calc(100vh - 150px);min-height:600px;border:0;display:block"></iframe></div>
 <div class="panel" id="p-exp"><div class="filter" style="flex-wrap:wrap;gap:10px;align-items:center">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#1a73e8;font-size:13px">A</b>
-    <span id="expIdsA" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID" onchange="expLookup('A')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
+    <span id="expIdsA" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID (메타·구글)" title="메타 세트 ID(국내·밴스드·글로벌) / 구글 디멘드젠 세트=광고그룹 ID / 메타 소재 ID" onchange="expLookup('A')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
     <button onclick="expAddId('A')" title="세트 ID 추가(여러 세트 합산)" style="padding:1px 8px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
     <button onclick="expDelId('A')" title="마지막 세트 ID 제거" style="padding:1px 8px;border:1px solid #999;border-radius:4px;background:#fff;color:#666;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">−</button>
     <span id="expNameA" style="font-size:11px;color:#1a73e8;font-weight:600;min-width:70px"></span>
     <input type="date" id="expStartA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndA" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#d81b60;font-size:13px">B</b>
-    <span id="expIdsB" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID" onchange="expLookup('B')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
+    <span id="expIdsB" style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center"><input class="exp-id" placeholder="세트 ID (메타·구글)" title="메타 세트 ID(국내·밴스드·글로벌) / 구글 디멘드젠 세트=광고그룹 ID / 메타 소재 ID" onchange="expLookup('B')" style="width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"></span>
     <button onclick="expAddId('B')" title="세트 ID 추가(여러 세트 합산)" style="padding:1px 8px;border:1px solid #d81b60;border-radius:4px;background:#fff;color:#d81b60;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">+</button>
     <button onclick="expDelId('B')" title="마지막 세트 ID 제거" style="padding:1px 8px;border:1px solid #999;border-radius:4px;background:#fff;color:#666;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">−</button>
     <span id="expNameB" style="font-size:11px;color:#d81b60;font-weight:600;min-width:70px"></span>
     <input type="date" id="expStartB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"><span style="color:#888">~</span><input type="date" id="expEndB" onchange="renderExperiment()" style="font-size:11px;padding:2px 4px"></div>
-  <span style="color:#888;font-size:10px">💡 A/B에 세트 ID 여러 개(+로 추가) 넣으면 합산 비교 · 각자 기간 지정 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계</span>
+  <span style="color:#888;font-size:10px">💡 A/B에 세트 ID 여러 개(+로 추가) 넣으면 합산 비교 · 각자 기간 지정 · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM · 맨 왼쪽=전체(선택기간) 집계<br>🟢 구글 디멘드젠 세트(광고그룹 ID)도 입력 가능 — 이름 앞 🟢 표시. 도달·빈도 없음(공란), 클릭=구글 총클릭(메타는 순클릭)이라 CVR·CTR 소스 간 직접 비교는 주의.</span>
 </div><div class="sheet-wrap"><table id="expTbl"></table></div>
 <div style="font-weight:700;font-size:12px;margin:16px 4px 6px">📊 지정 기간 평균 <span style="color:#888;font-weight:400;font-size:10px">· 지출·매출·순이익=하루 평균(설정한 기간 일수로 나눔) / ROAS·CVR·CTR·빈도·구매당비용·CPM=기간 비율</span></div>
 <div class="sheet-wrap"><table id="expAvgTbl"></table></div>
@@ -467,7 +467,8 @@ function _expCell(o,cur){        // o={s,r,uc,mp,imp}
   if(cpm)h+='<div class="cm">'+_expMoney(cpm,cur)+'</div>';
   return h;
 }
-// 입력 ID 를 KR/밴스드/글로벌(세트) → 소재(ad) 순으로 검색해 정규화. 반환 {name,cur,byDate:{date:{s,r,uc,mp,imp}}}
+// 입력 ID 를 KR/밴스드/글로벌(세트) → 구글 디멘드젠(광고그룹) → 소재(ad) 순으로 검색해 정규화.
+//   반환 {name,cur,byDate:{date:{s,r,uc,mp,imp,rch}}}
 function _expFindSet(id){
   id=String(id||'').trim();if(!id)return null;
   const scan=(rows,idf,namef,cur,usd)=>{
@@ -480,7 +481,33 @@ function _expFindSet(id){
     return {name,cur,byDate};
   };
   return scan(KR_AD,'adset_id','adset_name','₩',false)||scan(VN_AD,'adset_id','adset_name','₩',false)
-       ||scan(GL_AD,'adset_id','adset_name','$',true)||scan(CR_AD,'ad_id','ad_name','₩',false);
+       ||scan(GL_AD,'adset_id','adset_name','$',true)||_expFindGgdg(id)||scan(CR_AD,'ad_id','ad_name','₩',false);
+}
+// 구글 디멘드젠 [Tight] 세트(=광고그룹 ad_group_id) — google_demandgen_campaign_daily(GGDG_TIGHT).
+//   필드명이 메타와 다름: spend/revenue/clicks/purchase_count/impressions. reach 컬럼 없음 → 도달·빈도는 공란.
+//   ⚠ 클릭은 구글 총클릭(메타는 unique_clicks) → 소스 간 CVR·CTR 직접 비교는 주의. 통화=₩.
+function _expFindGgdg(id){
+  if(!GGDG_TIGHT||!GGDG_TIGHT.length)return null;
+  const rr=GGDG_TIGHT.filter(r=>String(r.ad_group_id||'')===id);if(!rr.length)return null;
+  const byDate={};let name='';
+  rr.forEach(r=>{if(!byDate[r.date])byDate[r.date]={s:0,r:0,uc:0,mp:0,imp:0,rch:0};const o=byDate[r.date];
+    o.s+=(+r.spend||0);o.r+=(+r.revenue||0);o.uc+=(+r.clicks||0);o.mp+=(+r.purchase_count||0);o.imp+=(+r.impressions||0);
+    name=r.ad_group_name||name});
+  return {name:'🟢 '+(name||id),cur:'₩',byDate};
+}
+// 실험탭이 쓰는 지연로드 테이블(CR_AD=소재, GGDG_TIGHT=구글 디멘드젠 세트) 1회 요청 후 콜백.
+//   ensureBigTable 은 실패해도 재시도하지 않으므로 재귀 루프 방지를 위해 one-shot 플래그 사용.
+let _expSrcRequested=false;
+function _expEnsureSrc(cb){
+  if(_expSrcRequested)return false;
+  const L=window._BIG_LOADED||{};
+  const need=[];
+  if(!L.cr&&!CR_AD.length)need.push('cr');
+  if(!L.ggdgkr)need.push('ggdgkr');   // IndexedDB 캐시본만 있으면 최신 날짜가 비므로 세션당 1회는 fresh fetch
+  if(!need.length)return false;
+  _expSrcRequested=true;
+  Promise.all(need.map(n=>ensureBigTable(n))).then(()=>{try{cb&&cb()}catch(e){}}).catch(()=>{});
+  return true;
 }
 // 사이드 k 의 모든 ID(여러 개) 를 합산 — 날짜 필터 전. {ids,names,cur,byDate}
 function _expAgg(k){
@@ -508,7 +535,8 @@ function _expSide(k){
 function expAddId(k){
   const c=document.getElementById('expIds'+k);
   const inp=document.createElement('input');
-  inp.className='exp-id';inp.placeholder='세트 ID';
+  inp.className='exp-id';inp.placeholder='세트 ID (메타·구글)';
+  inp.title='메타 세트 ID(국내·밴스드·글로벌) / 구글 디멘드젠 세트=광고그룹 ID / 메타 소재 ID';
   inp.style.cssText='width:150px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px';
   inp.addEventListener('change',()=>expLookup(k));
   c.appendChild(inp);inp.focus();
@@ -521,6 +549,7 @@ function expDelId(k){
   expLookup(k);
 }
 function expLookup(k){
+  _expEnsureSrc(()=>expLookup(k));   // 소재·구글 디멘드젠 테이블 로드 전에 ID 입력한 경우 로드 후 재조회
   const agg=_expAgg(k);
   const anyInput=[...document.querySelectorAll('#expIds'+k+' input.exp-id')].some(el=>(el.value||'').trim());
   document.getElementById('expName'+k).textContent=agg.names.length?(agg.names.length===1?agg.names[0]:agg.names.length+'개 세트'):(anyInput?'(세트 없음)':'');
@@ -562,9 +591,11 @@ function renderExperiment(){
 }
 // 퍼널: 노출→도달→클릭→구매. 전환=바로 윗단계 대비. A vs B 나란히. 값은 선택 기간 합.
 function _expRenderFunnel(A,B){
+  // 구글 디멘드젠 세트는 reach 컬럼이 없음(rch=0) → 도달 단계 공란, 클릭 전환은 노출 대비(=CTR)로 계산
   const stages=S=>{const t=S.tot||{imp:0,rch:0,uc:0,mp:0};const imp=t.imp||0,rch=t.rch||0,clk=t.uc||0,buy=t.mp||0;
-    return [{n:'노출',v:imp,rate:null},{n:'도달',v:rch,rate:imp>0?rch/imp*100:null},
-            {n:'클릭',v:clk,rate:rch>0?clk/rch*100:null},{n:'구매',v:buy,rate:clk>0?buy/clk*100:null}];};
+    const base=rch>0?rch:imp;
+    return [{n:'노출',v:imp,rate:null},{n:'도달',v:rch>0?rch:null,rate:(rch>0&&imp>0)?rch/imp*100:null},
+            {n:'클릭',v:clk,rate:base>0?clk/base*100:null},{n:'구매',v:buy,rate:clk>0?buy/clk*100:null}];};
   const aOK=A.tot&&A.tot.imp,bOK=B.tot&&B.tot.imp;
   const aS=stages(A),bS=stages(B);
   let h='<thead><tr><th style="min-width:70px;text-align:left">단계</th>'+
@@ -573,9 +604,9 @@ function _expRenderFunnel(A,B){
   for(let i=0;i<4;i++){
     const a=aS[i],b=bS[i];
     h+='<tr><td style="text-align:left;font-weight:600">'+a.n+'</td>'+
-       '<td style="text-align:right">'+(aOK?F(a.v):'')+'</td>'+
+       '<td style="text-align:right">'+(aOK&&a.v!=null?F(a.v):'')+'</td>'+
        '<td style="text-align:right;color:#888">'+(aOK&&a.rate!=null?a.rate.toFixed(1)+'%':(i===0&&aOK?'-':''))+'</td>'+
-       '<td style="text-align:right">'+(bOK?F(b.v):'')+'</td>'+
+       '<td style="text-align:right">'+(bOK&&b.v!=null?F(b.v):'')+'</td>'+
        '<td style="text-align:right;color:#888">'+(bOK&&b.rate!=null?b.rate.toFixed(1)+'%':(i===0&&bOK?'-':''))+'</td></tr>';
   }
   h+='</tbody>';document.getElementById('expFunnelTbl').innerHTML=h;
@@ -759,7 +790,7 @@ function switchMode(m){
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
     document.getElementById('p-exp').classList.add('active');
-    if(!CR_AD.length)ensureBigTable('cr').then(()=>renderExperiment());  // 소재(ad_id) 조회용 lazy 로드
+    _expEnsureSrc(()=>renderExperiment());  // 소재(ad_id) · 구글 디멘드젠 세트(ad_group_id) 조회용 lazy 로드
     renderExperiment();
     return;
   }
