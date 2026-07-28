@@ -57,6 +57,8 @@ td.mc .cpa{color:#e67e22;font-size:9px;font-weight:600}
 .bg-r300{background:#00ffff!important}.bg-r200{background:#b3ffb3!important}.bg-r100{background:#ffff99!important}.bg-r50{background:#ffcccc!important}.bg-r0{background:#ff9999!important}
 td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;font-size:10px;cursor:pointer}
 td.fx0{left:0}td.fx1{left:200px}
+/* 광고 계정 컬럼(추이차트 최좌측 sticky). 있을 때 fx0/fx1 의 left 는 JS(_fixSticky)가 계산해 덮어씀 */
+td.fxa{left:0;max-width:120px;color:#555}
 #p-trend td.fx0,#p-trend td.fx1{max-width:none}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
@@ -656,6 +658,21 @@ function MCAUX(spend,revenue,uc,mp,imp){
 const VANCED_PRODUCT_MAP={'MZMUDANG':'Shaman'};
 // 밴스드 대만 광고계정 — 추이차트를 별도 탭(🇹🇼 대만 추이차트)으로 분리. 기존 밴스드 추이차트에선 제외.
 const VN_TW_ACC='act_1286632473622244';
+// 광고 계정 ID → 계정 이름 (Meta Graph API `name` 그대로). 추이차트(국내·글로벌) 좌측 '광고 계정' 컬럼용.
+// 새 계정 추가 시 여기에 한 줄만 추가하면 됨. 미등록 ID 는 계정번호(act_ 제거)로 폴백 표시.
+const ACC_NAMES={
+  'act_1270614404675034':'1분꿀잼썰',
+  'act_707835224206178':'2비즈니스계정 일6-7만 hksong',
+  'act_1808141386564262':'타이트사주3rd원화새계정',
+  'act_1054081590008088':'Sajutight_tw',
+  'act_1021437716898605':'글로벌계정',
+  'act_1335040608536838':'GlobalSaju',
+  'act_2677707262628563':'TTsaju',
+  'act_993712016404855':'Saju Taiwan',
+  'act_25183853061243175':'타이트사주 (밴스드)',
+  'act_1560037899174007':'타이트사주 2 (밴스드)',
+  'act_1286632473622244':'타이트사주(밴스드_대만)'};
+const accName=id=>{const k=String(id||'');if(!k)return'';return ACC_NAMES[k]||k.replace(/^act_/,'')};
 // 글로벌 상품명 통합: 한국어명·영문 변형을 하나의 canonical 로 합쳐서 같은 상품으로 집계.
 // (예: 솔로→solo, 무당·mudang→shaman, 무녀→mzpian) 키는 소문자, 조회 시 trim+소문자화하여 대소문자·표기변형 무시.
 const GL_PRODUCT_CANON={'솔로':'solo','solo':'solo',
@@ -1953,6 +1970,8 @@ function renderTrend(opts){
   const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
   const chgD2={};ROWS.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
+  // 광고 계정 컬럼: 국내·글로벌 추이차트에서만 캠페인 왼쪽에 계정 '이름' 표시 (ID는 미표시)
+  const showAcc=MODE==='kr'||MODE==='gl';
   // 증감액(증액/감액) 테두리: 실제 메타 예산(budget)의 전일 대비 변화로 자동 판정.
   //   예산은 수동 설정값이라 값이 바뀌면 = 사람이 증액/감액한 것. 과거 보유한 모든 날짜 셀에 퍼센트별 색 링 표시.
   //   색: +20%↑=up20, +변화=up10, -변화=down10, -20%↓=down20. |변화율|<BUD_MIN_PCT% 는 노이즈로 무시.
@@ -1979,7 +1998,7 @@ function renderTrend(opts){
   // 하이라이트가 걸려 있는 세트는 색 유지 위해 항상 표시.
   const isHidden=a=>!tKw&&(MODE==='kr'||MODE==='gl')&&!(a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
-  const colSpan=dd.length+4+(showChg?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 메모 1칸(증감 컬럼 제거)
+  const colSpan=dd.length+4+(showChg?1:0)+(showAcc?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 메모 1칸(증감 컬럼 제거), showAcc시 광고계정 1칸
   // Summary
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks;imp+=(a.d[d].impressions||0)}});totD[d]={s,r,p,mp,uc,imp}});
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
@@ -1987,9 +2006,11 @@ function renderTrend(opts){
   const timp=d7.reduce((a,d)=>a+(totD[d]?.imp||0),0),tcpm=timp>0?ts/timp*1000:0,tctr=timp>0?tuc/timp*100:0;
   const chgTh='';  // 증감 컬럼 제거(국내·글로벌 추이차트)
   const memoTh=showChg?'<th class="h-memo" style="min-width:130px">메모</th>':'';
-  let h='<thead><tr><th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th>'+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
+  const accTh=showAcc?'<th style="text-align:left;white-space:nowrap">광고 계정</th>':'';
+  const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';  // 종합·소계 행의 빈 계정칸
+  let h='<thead><tr>'+accTh+'<th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th>'+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
   const legend=AUX?'<div class="r">CTR</div><div class="cv">CVR</div><div class="cm">CPM</div><div class="s">구매당비용</div>':'<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+(showChg?'<td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+(AUX?MCAUX(ts,tr,tuc,tmp,timp):MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0))+'</td>';
+  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+(showChg?'<td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+(AUX?MCAUX(ts,tr,tuc,tmp,timp):MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0))+'</td>';
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+(AUX?MCAUX(x.s,x.r,x.uc,x.mp,x.imp):MC(roas,x.p,x.s,x.r,cvr,cpm,ctr,x.mp>0?x.s/x.mp:0))+'</td>'});
   h+='</tr>';
   // Group by product
@@ -2004,7 +2025,7 @@ function renderTrend(opts){
     const pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0);
     const pCpm=pImp>0?pS/pImp*1000:0;
     const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+(AUX?MCAUX(t.s,t.r,t.uc,t.mp,t.imp):MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm,t.ctr,t.mp>0?t.s/t.mp:0))+'</td>':'<td class="'+yd+'"></td>'}).join('');
-    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm,null,pMp>0?pS/pMp:0))+'</td>'+pCells+'</tr>';
+    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm,null,pMp>0?pS/pMp:0))+'</td>'+pCells+'</tr>';
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     g.adsets.forEach(a=>{
       if(isHidden(a))return;
@@ -2024,17 +2045,31 @@ function renderTrend(opts){
       if(MODE==='kr'||MODE==='gl'||MODE==='vn'){
         caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
       }
-      h+='<tr data-adset-row="'+a.id+'"><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
+      h+='<tr data-adset-row="'+a.id+'">'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
   h+='</tbody>';tblEl.innerHTML=h;
   tblEl.dataset.daysEl=daysElId; // 소재펼침(caret)이 올바른 기간 컨트롤을 읽도록
-  requestAnimationFrame(()=>{
-    const fx0=tblEl.querySelector('tbody td.fx0');
-    if(!fx0)return;
-    const w=fx0.offsetWidth;
-    tblEl.querySelectorAll('td.fx1').forEach(td=>td.style.left=w+'px');
+  requestAnimationFrame(()=>_fixSticky(tblEl));
+}
+// sticky 좌측 컬럼 left 오프셋 재계산.
+//   컬럼 순서: [광고 계정(fxa)] · 캠페인(fx0) · 세트(fx1) — 계정 컬럼 유무에 따라 fx0/fx1 시작점이 달라진다.
+//   scope: 특정 <tr> 들만 보정하고 싶을 때(소재 펼침 행) 전달, 없으면 테이블 전체.
+function _fixSticky(tblEl,scope){
+  if(!tblEl)return;
+  const fx0=tblEl.querySelector('tbody td.fx0');
+  if(!fx0)return;
+  const fxa=tblEl.querySelector('tbody td.fxa');
+  const aw=fxa?fxa.offsetWidth:0;
+  const w0=fx0.offsetWidth;
+  const targets=scope&&scope.length?scope:[tblEl];
+  targets.forEach(el=>{
+    el.querySelectorAll('td.fxa').forEach(td=>td.style.left='0px');
+    el.querySelectorAll('td.fx0').forEach(td=>td.style.left=aw+'px');
+    el.querySelectorAll('td.fx1').forEach(td=>td.style.left=(aw+w0)+'px');
   });
 }
 
@@ -2083,7 +2118,7 @@ function renderTrendAgg(gran){
   // rowId 별 · 컬럼별 합산
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const ck=colKey(r.date);const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,b:{}};
+    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',b:{}};
     const b=byA[rid].b;if(!b[ck])b[ck]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
     b[ck].s+=r.spend;b[ck].r+=r.revenue;b[ck].p+=r.profit;b[ck].mp+=r.results_mp;b[ck].uc+=r.unique_clicks;b[ck].imp+=(r.impressions||0)});
   let list=Object.values(byA).map(a=>{let s=0,r=0,p=0,uc=0,mp=0,imp=0;cols.forEach(ck=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;uc+=b.uc;mp+=b.mp;imp+=b.imp}});
@@ -2093,7 +2128,11 @@ function renderTrendAgg(gran){
   const tKw=(document.getElementById('tFilter').value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
   const ths=cols.map(ck=>'<th style="min-width:90px">'+colLabel(ck)+'</th>').join('');
-  const colSpan=cols.length+4;
+  // 광고 계정 컬럼(캠페인 왼쪽) — 일별 뷰(renderTrend)와 동일하게 국내·글로벌만
+  const showAcc=MODE==='kr'||MODE==='gl';
+  const accTh=showAcc?'<th style="text-align:left;white-space:nowrap">광고 계정</th>':'';
+  const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';
+  const colSpan=cols.length+4+(showAcc?1:0);
   const cell=t=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm,ctr,t.mp>0?t.s/t.mp:0)+'</td>'};
   // 컬럼별 종합
   const totC={};cols.forEach(ck=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;mp+=b.mp;uc+=b.uc;imp+=b.imp}});totC[ck]={s,r,p,mp,uc,imp}});
@@ -2101,8 +2140,8 @@ function renderTrendAgg(gran){
   const timp=cols.reduce((a,ck)=>a+totC[ck].imp,0),tcpm=timp>0?ts/timp*1000:0;
   const tmp=cols.reduce((a,ck)=>a+totC[ck].mp,0),tuc=cols.reduce((a,ck)=>a+totC[ck].uc,0),tcvr=tuc>0&&tmp>0?tmp/tuc*100:0,tctr=timp>0?tuc/timp*100:0;
   const legend='<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
-  let h='<thead><tr><th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
-  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
+  let h='<thead><tr>'+accTh+'<th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
+  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
   cols.forEach(ck=>{h+=cell(totC[ck])});
   h+='</tr>';
   // 상품별 그룹
@@ -2115,16 +2154,18 @@ function renderTrendAgg(gran){
     const pImp=cols.reduce((a,ck)=>a+pByCol[ck].imp,0),pCpm=pImp>0?pS/pImp*1000:0;
     const pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0),pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pCvr=pUc>0&&pMp>0?pMp/pUc*100:0,pCtr=pImp>0?pUc/pImp*100:0;
     const pCells=cols.map(ck=>cell(pByCol[ck])).join('');
-    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
+    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
     g.adsets.forEach(a=>{
       const cells=cols.map(ck=>cell(a.b[ck])).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
-      h+='<tr><td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
+      h+='<tr>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
   h+='</tbody>';tblEl.innerHTML=h;
-  requestAnimationFrame(()=>{const fx0=tblEl.querySelector('tbody td.fx0');if(!fx0)return;const w=fx0.offsetWidth;tblEl.querySelectorAll('td.fx1').forEach(td=>td.style.left=w+'px')});
+  requestAnimationFrame(()=>_fixSticky(tblEl));
 }
 // 보조지표 — 추이차트와 동일 구조(국내탭), 셀만 CTR/CVR/CPM/CPP/구매당단가로 렌더
 function renderAux(){
@@ -2205,6 +2246,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   const showChg=(MODE==='kr'||MODE==='gl');
+  const showAcc=(MODE==='kr'||MODE==='gl');   // 세트 행과 컬럼 수를 맞추기 위한 빈 '광고 계정' 칸
   const ddSet=new Set(dd);
   const byC={};
   for(let i=0;i<records.length;i++){
@@ -2255,7 +2297,8 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     tr.setAttribute('data-parent',adsetId);
     const subLabel='↳ 소재 소계 ('+fullCount+'개)';
     const subCells=dd.map(d=>{const t=subDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'" style="background:#fff3cd">'+MC(t.roas,t.p,t.s,t.r,t.cvr,null,t.ctr,t.mp>0?t.s/t.mp:0)+'</td>':'<td class="'+yd+'" style="background:#fff3cd"></td>'}).join('');
-    tr.innerHTML='<td class="fx fx0" style="background:#fff3cd;font-size:10px"><b>'+subLabel+'</b></td>'
+    tr.innerHTML=(showAcc?'<td class="fx fxa" style="background:#fff3cd"></td>':'')
+      +'<td class="fx fx0" style="background:#fff3cd;font-size:10px"><b>'+subLabel+'</b></td>'
       +'<td class="fx fx1" style="background:#fff3cd"></td>'
       +'<td style="background:#fff3cd"></td>'
       +(showChg?'<td style="background:#fff3cd"></td>':'')
@@ -2274,7 +2317,8 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       ? '<a href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_ad_ids='+c.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 (Meta Ads Manager) — 좌측 상단 검토 탭 클릭" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
     const cells=dd.map(d=>{const r=c.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'" style="background:#fff8e1">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,null,ctr,r.results_mp>0?r.spend/r.results_mp:0)+'</td>'}).join('');
-    tr.innerHTML='<td class="fx fx0" style="background:#fff8e1"></td>'
+    tr.innerHTML=(showAcc?'<td class="fx fxa" style="background:#fff8e1"></td>':'')
+      +'<td class="fx fx0" style="background:#fff8e1"></td>'
       +'<td class="fx fx1" style="background:#fff8e1;padding-left:24px" title="'+anEsc+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
       +'<td style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
       +(showChg?'<td style="background:#fff8e1"></td>':'')
@@ -2287,11 +2331,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
   // sticky fx1 의 left 오프셋을 세트 row 와 동일하게 맞춤 — 앵커 테이블 기준(대만 탭 등 분리 뷰 대응)
   const _tbl=anchorRow.closest('table');
-  const fx0Ref=_tbl?_tbl.querySelector('tbody td.fx0'):document.querySelector('#tTbl tbody td.fx0');
-  if(fx0Ref){
-    const w=fx0Ref.offsetWidth;
-    trs.forEach(tr=>tr.querySelectorAll('td.fx1').forEach(td=>td.style.left=w+'px'));
-  }
+  _fixSticky(_tbl||document.getElementById('tTbl'),trs);
   if(caret)caret.textContent='▼';
 }
 
