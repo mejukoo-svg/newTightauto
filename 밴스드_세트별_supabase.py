@@ -154,6 +154,19 @@ def _extract_outbound(dl):
 PURCHASE_TYPES = ['offsite_conversion.fb_pixel_purchase','purchase','omni_purchase']
 
 # Meta API
+# 요청한도(rate limit) 에러 코드 — 403 으로 오지만 일시적이라 재시도해야 한다.
+#   code 4/17/32/613 = App/User/Page/Custom rate limit, 80000~80004 = Ads Insights 한도.
+_META_RATE_LIMIT_CODES = {4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004}
+
+
+def _is_rate_limit(resp):
+    try:
+        e = resp.json().get("error", {}) or {}
+        return bool(e.get("is_transient")) or int(e.get("code", 0)) in _META_RATE_LIMIT_CODES
+    except Exception:
+        return False
+
+
 def meta_api_get(url, params=None):
     if params is None: params = {}
     params['access_token'] = META_TOKEN
@@ -161,26 +174,44 @@ def meta_api_get(url, params=None):
         try:
             resp = req_lib.get(url, params=params, timeout=120)
             if resp.status_code == 200: return resp.json()
-            if resp.status_code in [429,500,502,503]:
+            # ★ 403 "Application request limit reached"(code 4) 를 즉시 포기하면 그 (계정,날짜)
+            #   Meta 데이터가 통째로 비고, 병합에서 Mixpanel 매출만으로 spend=0 레코드가 만들어져
+            #   이미 저장된 지출이 0 으로 덮인다(2026-07-26 대만 사고). → 백오프 후 재시도.
+            if resp.status_code in [429,500,502,503] or (resp.status_code == 403 and _is_rate_limit(resp)):
+                log.warning(f"  ⏳ Meta {resp.status_code} 재시도 {attempt+1}/5")
                 time.sleep(30 + attempt*30); continue
             log.error(f"  ❌ Meta {resp.status_code}: {resp.text[:200]}"); return None
         except: time.sleep(15)
     return None
 
-def fetch_meta_insights(single_date, account):
+
+def fetch_meta_insights_range(since, until, account):
+    """계정 1개의 [since~until] 일별 인사이트를 '한 번의 호출'로 가져온다.
+
+    이전에는 날짜마다 1콜(10일×3계정=30콜/실행, 매시)이라 요청한도에 자주 걸렸다.
+    time_increment=1 이면 범위 호출도 날짜별 행(date_start)으로 쪼개져 온다 → 결과 동일, 호출 1/10.
+    반환: 성공 시 행 리스트(빈 리스트 = 지출 0), 실패 시 None(← '데이터 없음'과 반드시 구분).
+    """
     url = f"{META_BASE_URL}/{account}/insights"
     params = {'fields':'campaign_name,adset_name,adset_id,spend,cpm,reach,impressions,frequency,actions,cost_per_action_type,purchase_roas,unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click',
-        'level':'adset','breakdowns':'country','time_increment':1,'time_range':json.dumps({'since':single_date,'until':single_date}),'limit':500,
+        'level':'adset','breakdowns':'country','time_increment':1,'time_range':json.dumps({'since':since,'until':until}),'limit':500,
         'filtering':json.dumps([{'field':'spend','operator':'GREATER_THAN','value':'0'}])}
     all_results = []
     data = meta_api_get(url, params)
+    if data is None:
+        return None
     while data:
         all_results.extend(data.get('data',[]));
         nxt = data.get('paging',{}).get('next')
         if nxt:
             time.sleep(1)
-            try: resp=req_lib.get(nxt,timeout=120); data=resp.json() if resp.status_code==200 else None
-            except: data=None
+            try:
+                resp = req_lib.get(nxt, timeout=120)
+                data = resp.json() if resp.status_code == 200 else None
+            except Exception:
+                data = None
+            if data is None:      # 페이지 도중 실패 = 부분 데이터 → 지출 과소계상 위험, 실패로 처리
+                return None
         else: break
     return all_results
 
@@ -301,34 +332,46 @@ def main():
     # 1) Meta (계정별 — adset_id 는 계정 간 고유하므로 한 dict 에 합산)
     log.info(f"\n1단계: Meta Insights adset level")
     meta_data = {}
+    # Meta 조회가 실패한 (계정, 날짜) — 이 조합은 '지출 0'이 아니라 '모름'이므로
+    #   아래 병합에서 레코드를 만들지 않아 이미 저장된 지출을 보존한다.
+    failed_days = set()
+    _all_dks = [ (TODAY-timedelta(days=d)) for d in range(REFRESH_DAYS) ]
+    _all_dks = [ f"{t.year%100:02d}/{t.month:02d}/{t.day:02d}" for t in _all_dks ]
     for account in META_AD_ACCOUNTS:
         log.info(f"  🔑 {account}")
-        for d in range(REFRESH_DAYS):
-            td=TODAY-timedelta(days=d); ts=td.strftime('%Y-%m-%d')
-            dk=f"{td.year%100:02d}/{td.month:02d}/{td.day:02d}"
-            rows=fetch_meta_insights(ts, account)
-            if rows:
-                for r in rows:
-                    if float(r.get('spend',0))<=0: continue  # breakdown=country 하위행 0지출 제외
-                    cc=str(r.get('country','') or 'XX').strip().upper()  # Meta country breakdown (ISO)
-                    pr_list=r.get('purchase_roas',[])
-                    # (dk, adset_id, country) 그레인 — 같은 adset 도 국가별로 별도 행
-                    meta_data[(dk,r.get('adset_id',''),cc)]={
-                        'campaign_name':r.get('campaign_name',''),'adset_name':r.get('adset_name',''),'adset_id':r.get('adset_id',''),
-                        'country':cc,
-                        'spend':float(r.get('spend',0)),'cpm':float(r.get('cpm',0)),'reach':int(float(r.get('reach',0))),
-                        'impressions':int(float(r.get('impressions',0))),'frequency':float(r.get('frequency',0)),
-                        'results_meta':_extract_action(r.get('actions',[]),PURCHASE_TYPES),
-                        'cost_per_result':_extract_action(r.get('cost_per_action_type',[]),PURCHASE_TYPES),
-                        'unique_clicks':_extract_outbound(r.get('unique_outbound_clicks')),
-                        'unique_ctr':_extract_outbound(r.get('unique_outbound_clicks_ctr')),
-                        'cost_per_click':_extract_outbound(r.get('cost_per_unique_outbound_click')),
-                        'meta_roas':float(pr_list[0]['value'])*100 if pr_list else 0,
-                        'account':account,
-                    }
-                log.info(f"    📊 {dk}: {len(rows)}건")
-            time.sleep(1)
-    log.info(f"✅ Meta: {len(meta_data)}건")
+        rows = fetch_meta_insights_range(DATA_REFRESH_START.strftime('%Y-%m-%d'),
+                                         TODAY.strftime('%Y-%m-%d'), account)
+        if rows is None:
+            for dk in _all_dks: failed_days.add((account, dk))
+            log.warning(f"    ⚠️ Meta 조회 실패 → {account} 의 {REFRESH_DAYS}일 지출 보존(레코드 생성 스킵)")
+            time.sleep(5)
+            continue
+        by_day = defaultdict(int)
+        for r in rows:
+            ds = str(r.get('date_start') or '')
+            if len(ds) != 10: continue                       # 날짜 없는 행은 그레인 불명 → 스킵
+            dk = f"{ds[2:4]}/{ds[5:7]}/{ds[8:10]}"
+            by_day[dk] += 1
+            if float(r.get('spend',0))<=0: continue  # breakdown=country 하위행 0지출 제외
+            cc=str(r.get('country','') or 'XX').strip().upper()  # Meta country breakdown (ISO)
+            pr_list=r.get('purchase_roas',[])
+            # (dk, adset_id, country) 그레인 — 같은 adset 도 국가별로 별도 행
+            meta_data[(dk,r.get('adset_id',''),cc)]={
+                'campaign_name':r.get('campaign_name',''),'adset_name':r.get('adset_name',''),'adset_id':r.get('adset_id',''),
+                'country':cc,
+                'spend':float(r.get('spend',0)),'cpm':float(r.get('cpm',0)),'reach':int(float(r.get('reach',0))),
+                'impressions':int(float(r.get('impressions',0))),'frequency':float(r.get('frequency',0)),
+                'results_meta':_extract_action(r.get('actions',[]),PURCHASE_TYPES),
+                'cost_per_result':_extract_action(r.get('cost_per_action_type',[]),PURCHASE_TYPES),
+                'unique_clicks':_extract_outbound(r.get('unique_outbound_clicks')),
+                'unique_ctr':_extract_outbound(r.get('unique_outbound_clicks_ctr')),
+                'cost_per_click':_extract_outbound(r.get('cost_per_unique_outbound_click')),
+                'meta_roas':float(pr_list[0]['value'])*100 if pr_list else 0,
+                'account':account,
+            }
+        log.info(f"    📊 {len(rows)}건 / {len(by_day)}일 " + ' '.join(f"{k}:{v}" for k,v in sorted(by_day.items(), reverse=True)))
+        time.sleep(1)
+    log.info(f"✅ Meta: {len(meta_data)}건 (조회실패 {len(failed_days)} 계정·일)")
 
     # 2) Budget (계정별 — adset_id 고유하므로 budget_map 합산)
     log.info("\n2단계: 예산")
@@ -402,11 +445,18 @@ def main():
 
     all_keys=set(meta_data.keys())|set(mp_value_map.keys())
     records=[]
+    _preserved=0
     for (dk,asid,cc) in all_keys:
         parts=dk.split('/'); iso=f"20{parts[0]}-{parts[1]}-{parts[2]}"
         mr=meta_data.get((dk,asid,cc))
         info=mr or adset_info.get(asid)
         if not info:  # 지출·메타정보 전무한 매출행(드묾) — 라벨 불가, 스킵 (집계 누락 방지 위해 로그)
+            continue
+        # ★ Meta 조회가 실패한 (계정, 날짜) 는 지출이 '0'이 아니라 '모름'이다.
+        #   여기서 레코드를 만들면 Mixpanel 매출만 있는 spend=0 행이 기존 지출을 덮어쓴다
+        #   (2026-07-26 대만 계정 사고: 403 rate limit → 매 실행마다 지출 0 고착).
+        if mr is None and (info['account'], dk) in failed_days:
+            _preserved+=1
             continue
         mpc=mp_count_map.get((dk,asid,cc),0); mpv=mp_value_map.get((dk,asid,cc),0.0)
         spend=mr['spend'] if mr else 0.0
@@ -432,7 +482,8 @@ def main():
             'revenue':round(revenue,2),'profit':round(profit,2),'roas':round(roas,2),'cvr':round(cvr,4),
             'budget':budget,
         })
-    log.info(f"✅ 레코드: {len(records)}개 (country 분할)")
+    log.info(f"✅ 레코드: {len(records)}개 (country 분할)" +
+             (f" · Meta 실패로 보존(스킵) {_preserved}행" if _preserved else ""))
 
     # 5) Upsert
     log.info(f"\n5단계: Supabase upsert")

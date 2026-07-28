@@ -121,6 +121,20 @@ def get_token(acc_id):
 # =========================================================
 # Meta API (ad 레벨)
 # =========================================================
+# 요청한도(rate limit) 에러 — 403 으로 오지만 일시적이라 재시도해야 한다.
+#   즉시 포기하면 그 (계정,날짜) Meta 데이터가 통째로 비고, 병합에서 매출만 있는
+#   spend=0 레코드가 만들어져 이미 저장된 지출을 0 으로 덮는다(2026-07-26 대만 사고).
+_META_RATE_LIMIT_CODES = {4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004}
+
+
+def _is_rate_limit(resp):
+    try:
+        e = resp.json().get("error", {}) or {}
+        return bool(e.get("is_transient")) or int(e.get("code", 0)) in _META_RATE_LIMIT_CODES
+    except Exception:
+        return False
+
+
 def meta_api_get(url, params=None, token=None):
     if params is None: params = {}
     params['access_token'] = token or META_TOKEN_DEFAULT
@@ -131,7 +145,7 @@ def meta_api_get(url, params=None, token=None):
             if resp.status_code == 400:
                 log.error(f"  ❌ Meta 400: {resp.json().get('error',{}).get('message','')[:200]}")
                 return None
-            if resp.status_code in [429,500,502,503]:
+            if resp.status_code in [429,500,502,503] or (resp.status_code == 403 and _is_rate_limit(resp)):
                 time.sleep(30 + attempt * 30); continue
             return None
         except Exception as e:
