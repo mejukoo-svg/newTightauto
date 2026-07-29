@@ -34,6 +34,11 @@ create index if not exists budget_apply_log_adset_idx
 
 alter table "new-tightauto".budget_apply_log enable row level security;
 
+-- 이 스키마는 신규 테이블에 authenticated 전권을 주는 기본권한이 걸려 있다.
+-- RLS 정책이 SELECT 뿐이라 실제 쓰기는 막히지만, 테이블 권한도 의도대로 좁힌다.
+revoke insert, update, delete, truncate, references, trigger
+  on "new-tightauto".budget_apply_log from authenticated;
+
 grant select on "new-tightauto".budget_apply_log to authenticated;
 grant usage, select on sequence "new-tightauto".budget_apply_log_id_seq to service_role;
 grant select, insert on "new-tightauto".budget_apply_log to service_role;
