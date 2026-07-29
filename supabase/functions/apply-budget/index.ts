@@ -173,6 +173,7 @@ type Plan = {
   note: string;
   error: string;
   applied?: boolean;
+  conflict?: boolean; // 같은 CBO 캠페인에 다른 증감률 — 선택을 하나로 줄이면 해소된다
   shared_with?: string[]; // 같은 CBO 캠페인을 공유하는 다른 세트
 };
 
@@ -287,8 +288,10 @@ function resolveCampaignConflicts(plans: Plan[]) {
     if (arr.length < 2) continue;
     const tags = new Set(arr.map((p) => p.tag));
     if (tags.size > 1) {
+      // 선택에서 한쪽을 빼고 다시 요청하면 충돌이 사라진다 → conflict 로 표시해 UI 가 체크는 허용하게 한다
       for (const p of arr) {
-        p.error = `같은 CBO 캠페인(${cid})에 서로 다른 증감률이 마킹됨 (${[...tags].join(", ")}) — 하나만 남기고 적용`;
+        p.conflict = true;
+        p.error = `같은 CBO 캠페인(${cid})에 서로 다른 증감률 (${[...tags].join(", ")}) — 한쪽만 선택하면 적용됩니다`;
       }
     } else {
       // 동일 비율: 첫 항목만 실제로 쓰고 나머지는 그 결과를 공유

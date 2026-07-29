@@ -104,7 +104,11 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .ab-body td{border:1px solid #eee;padding:4px 6px;white-space:nowrap}
 .ab-body td.ab-name{white-space:normal;max-width:260px;text-align:left}
 .ab-body tr.ab-err td{background:#fff2f2;color:#a00}
+.ab-body tr.ab-conf td{background:#fff8ec;color:#a60}
 .ab-body tr.ab-skip td{background:#fafafa;color:#999}
+.ab-body td.ab-ckc,.ab-body th.ab-ckc{width:26px;text-align:center;padding:2px}
+.ab-body input[type=checkbox]{cursor:pointer;margin:0}
+.ab-body input[type=checkbox]:disabled{cursor:not-allowed;opacity:.35}
 .ab-warn{color:#c60;font-size:9px}
 .ab-foot{padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;align-items:center;gap:8px;font-size:11px}
 .ab-foot .ab-msg{color:#666;margin-right:auto}
@@ -2881,8 +2885,12 @@ async function abAuthHeaders(){
   if(!tk)throw new Error('로그인이 필요합니다. 새로고침 후 다시 로그인해 주세요.');
   return {'Authorization':'Bearer '+tk,'Content-Type':'application/json','apikey':SB_KEY};
 }
-async function abCall(dryRun){
-  const items=abTargets().map(t=>({adset_id:t.adset_id,ad_account_id:t.ad_account_id,tag:t.tag}));
+// ids 를 주면 그 세트만 보낸다 → 서버가 그 부분집합만으로 다시 계획을 세운다.
+// (CBO 충돌도 한쪽만 보내면 자연히 풀린다)
+async function abCall(dryRun,ids){
+  const pick=ids?new Set(ids):null;
+  const items=abTargets().filter(t=>!pick||pick.has(t.adset_id))
+    .map(t=>({adset_id:t.adset_id,ad_account_id:t.ad_account_id,tag:t.tag}));
   const r=await fetch(AB_FN,{method:'POST',headers:await abAuthHeaders(),
     body:JSON.stringify({mode:MODE,dryRun:dryRun,items:items})});
   const j=await r.json().catch(()=>({}));
@@ -2899,14 +2907,20 @@ function abAmt(v,off,ccy){
 }
 function abEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 
+// 적용 대상으로 고를 수 있는 행인가. 실제로 바뀌는 게 있거나, 선택을 줄이면 풀리는 CBO 충돌.
+function abSelectable(p){
+  if(p.conflict)return true;
+  return !p.error&&!!p.field&&p.after!==p.before;
+}
 function abRender(plan,applied){
   const meta={};abTargets().forEach(t=>meta[t.adset_id]=t);
-  let h='<table><thead><tr><th>세트</th><th>계정</th><th>마킹</th><th>대상</th><th>항목</th>'
+  const ckTh=applied?'':'<th class="ab-ckc"><input type="checkbox" id="abAll" onclick="abToggleAll(this)" title="전체 선택"></th>';
+  let h='<table><thead><tr>'+ckTh+'<th>세트</th><th>계정</th><th>마킹</th><th>대상</th><th>항목</th>'
        +'<th>현재</th><th>→</th><th>변경 후</th><th>'+(applied?'결과':'비고')+'</th></tr></thead><tbody>';
   plan.forEach(p=>{
     const m=meta[p.adset_id]||{};
     const noChange=!p.error&&(!p.field||p.after===p.before);
-    const cls=p.error?'ab-err':((applied?!p.applied:noChange)?'ab-skip':'');
+    const cls=p.conflict?'ab-conf':(p.error?'ab-err':((applied?!p.applied:noChange)?'ab-skip':''));
     const lbl=(HL_CONFIG[p.tag]||{}).label||p.tag;
     let last;
     if(p.error)last='⚠ '+abEsc(p.error);
@@ -2915,7 +2929,12 @@ function abRender(plan,applied){
     if(!p.error&&p.scope==='campaign')last='<span class="ab-warn">⚠ CBO</span> '+last;
     const cur=p.field==='status'?abEsc(p.before):abAmt(p.before,p.offset,p.currency);
     const nxt=p.field==='status'?abEsc(p.after):abAmt(p.after,p.offset,p.currency);
-    h+='<tr class="'+cls+'">'
+    // CBO 충돌은 기본 해제 — 어느 쪽을 살릴지 사람이 정해야 한다
+    const sel=abSelectable(p);
+    const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="ab-ck" data-id="'+abEsc(p.adset_id)+'"'
+      +(p.conflict?' data-conf="1"':'')+(sel?'':' disabled')+(sel&&!p.conflict?' checked':'')
+      +' onclick="abSelChanged()"></td>';
+    h+='<tr class="'+cls+'">'+ckTd
       +'<td class="ab-name">'+abEsc((p.adset_name||m.name||p.adset_id))+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
       +'<td>'+abEsc(accName(p.ad_account_id))+'</td>'
       +'<td style="text-align:center">'+abEsc(lbl)+'</td>'
@@ -2927,6 +2946,34 @@ function abRender(plan,applied){
   });
   h+='</tbody></table>';
   document.getElementById('abBody').innerHTML=h;
+  if(!applied)abSelChanged();
+}
+
+// ── 선택 ──
+function abSelBoxes(){return[...document.querySelectorAll('#abBody .ab-ck:not(:disabled)')]}
+// 전체선택 대상에서 CBO 충돌 행은 뺀다 — 둘 다 켜면 서버가 양쪽을 막으므로 사람이 직접 골라야 한다
+function abBulkBoxes(){return abSelBoxes().filter(b=>!b.dataset.conf)}
+function abSelIds(){return abSelBoxes().filter(b=>b.checked).map(b=>b.dataset.id)}
+function abToggleAll(el){
+  abBulkBoxes().forEach(b=>b.checked=el.checked);
+  if(!el.checked)abSelBoxes().forEach(b=>b.checked=false);
+  abSelChanged();
+}
+function abSelChanged(){
+  if(!AB_PLAN)return;
+  const boxes=abSelBoxes(),n=abSelIds().length;
+  const bulk=abBulkBoxes(),bn=bulk.filter(b=>b.checked).length;
+  const all=document.getElementById('abAll');
+  if(all){all.checked=bulk.length>0&&bn===bulk.length;all.indeterminate=n>0&&bn<bulk.length}
+  const errN=AB_PLAN.filter(p=>p.error&&!p.conflict).length;
+  const go=document.getElementById('abGo');
+  go.disabled=!n;
+  go.textContent=n?('확인 — '+n+'건 메타에 적용'):'적용할 세트를 선택하세요';
+  document.getElementById('abMsg').innerHTML=boxes.length
+    ? '선택 <b>'+n+'</b> / 적용 가능 '+boxes.length+'건'
+      +(errN?' · <span style="color:#a00">'+errN+'건 오류(제외)</span>':'')
+      +' — 되돌리려면 Ads Manager 에서 직접 수정해야 합니다'
+    : '반영할 변경이 없습니다'+(errN?' · <span style="color:#a00">'+errN+'건 오류</span>':'');
 }
 
 async function abOpen(){
@@ -2942,34 +2989,33 @@ async function abOpen(){
   try{
     const j=await abCall(true);
     AB_PLAN=j.plan||[];
-    abRender(AB_PLAN,false);
-    const n=AB_PLAN.filter(p=>!p.error&&p.field&&p.after!==p.before).length;
-    const e=AB_PLAN.filter(p=>p.error).length;
-    document.getElementById('abMsg').innerHTML=n
-      ? '<b>'+n+'건</b>이 메타에 반영됩니다'+(e?' · <span style="color:#a00">'+e+'건 오류(제외)</span>':'')+' — 되돌리려면 Ads Manager 에서 직접 수정해야 합니다'
-      : '반영할 변경이 없습니다'+(e?' · <span style="color:#a00">'+e+'건 오류</span>':'');
-    go.disabled=!n;
+    abRender(AB_PLAN,false);   // 체크박스 상태에 따라 abSelChanged 가 푸터·버튼을 채운다
   }catch(err){
     document.getElementById('abBody').innerHTML='<div style="padding:24px;color:#a00">⚠ '+abEsc(err.message||err)+'</div>';
   }
 }
 async function abApply(){
   if(AB_BUSY||!AB_PLAN)return;
-  const n=AB_PLAN.filter(p=>!p.error&&p.field&&p.after!==p.before).length;
-  if(!confirm('메타 광고 '+n+'건의 예산·상태를 실제로 변경합니다.\n실행 후에는 Ads Manager 에서 직접 되돌려야 합니다.\n\n진행할까요?'))return;
+  const ids=abSelIds();
+  if(!ids.length)return;
+  const lines=AB_PLAN.filter(p=>ids.includes(p.adset_id))
+    .map(p=>' · '+((p.adset_name||p.adset_id).slice(0,34))+'  '+((HL_CONFIG[p.tag]||{}).label||p.tag)).join('\n');
+  if(!confirm('선택한 '+ids.length+'개 세트의 메타 예산·상태를 실제로 변경합니다.\n\n'+lines
+    +'\n\n실행 후에는 Ads Manager 에서 직접 되돌려야 합니다. 진행할까요?'))return;
   AB_BUSY=true;
   const go=document.getElementById('abGo');go.disabled=true;go.textContent='적용 중…';
   try{
-    const j=await abCall(false);
+    const j=await abCall(false,ids);
     abRender(j.plan||[],true);
     document.getElementById('abMsg').innerHTML='✅ <b>'+(j.applied||0)+'건</b> 적용'
       +((j.failed||0)?' · <span style="color:#a00">'+j.failed+'건 실패</span>':'')
-      +' — 기록은 budget_apply_log 에 남습니다. 대시보드 예산 컬럼은 다음 파이프라인 실행 후 갱신됩니다.';
+      +' — 선택한 세트만 표시됩니다. 기록은 budget_apply_log 에 남고, 대시보드 예산 컬럼은 다음 파이프라인 실행 후 갱신됩니다.';
     document.getElementById('abCancel').textContent='닫기';
     go.style.display='none';
+    AB_PLAN=null;   // 같은 계획을 두 번 적용하지 못하게 (복리 적용 방지)
   }catch(err){
     document.getElementById('abMsg').innerHTML='<span style="color:#a00">⚠ '+abEsc(err.message||err)+'</span>';
-    go.disabled=false;go.textContent='확인 — 메타에 적용';
+    abSelChanged();
   }
   AB_BUSY=false;
 }
