@@ -65,7 +65,10 @@ const CCY_OFFSET: Record<string, number> = {
 const MAX_ITEMS = 200;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// SUPABASE_SERVICE_ROLE_KEY 는 런타임이 자동 주입하는 레거시 JWT 키다.
+// 프로젝트가 새 키 형식(sb_secret_…)으로 넘어가 레거시가 비활성화되면 이게 무효해지고,
+// 증상이 '로그인이 필요합니다'(401) 로만 보여 원인을 찾기 어렵다 → SB_SECRET_KEY 로 덮어쓸 수 있게 둔다.
+const SERVICE_KEY = Deno.env.get("SB_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const DB_SCHEMA = "new-tightauto";
 
 const CORS = {
