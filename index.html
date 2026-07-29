@@ -91,6 +91,26 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .color-picker .cp-btn{width:28px;height:28px;border-radius:4px;cursor:pointer;border:2px solid transparent;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600}
 .color-picker .cp-btn:hover{border-color:#333}
 .cp-off{background:#000;color:#fff}.cp-d20{background:#ff7777;color:#fff}.cp-d10{background:#ffcccc}.cp-u10{background:#88dd88}.cp-u20{background:#66eecc}.cp-watch{background:#ff9900;color:#fff}.cp-clear{background:#fff;border:1px solid #ccc}
+/* 메타 예산 적용 모달 — 실제 광고비를 움직이는 쓰기라 '현재→변경'을 전부 보여주고 승인받는다 */
+.ab-mask{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;display:none;align-items:center;justify-content:center}
+.ab-mask.show{display:flex}
+.ab-box{background:#fff;border-radius:8px;width:min(1020px,94vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+.ab-head{padding:12px 16px;border-bottom:1px solid #e0e0e0;font-size:13px;font-weight:700;display:flex;align-items:center;gap:8px}
+.ab-head .ab-sub{font-weight:400;font-size:10px;color:#888}
+.ab-head button{margin-left:auto;border:none;background:none;font-size:15px;cursor:pointer;color:#888;font-family:inherit}
+.ab-body{padding:10px 16px;overflow:auto;flex:1}
+.ab-body table{border-collapse:collapse;width:100%;font-size:10px}
+.ab-body th{background:#f5f5f5;border:1px solid #e0e0e0;padding:4px 6px;white-space:nowrap;font-weight:600}
+.ab-body td{border:1px solid #eee;padding:4px 6px;white-space:nowrap}
+.ab-body td.ab-name{white-space:normal;max-width:260px;text-align:left}
+.ab-body tr.ab-err td{background:#fff2f2;color:#a00}
+.ab-body tr.ab-skip td{background:#fafafa;color:#999}
+.ab-warn{color:#c60;font-size:9px}
+.ab-foot{padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;align-items:center;gap:8px;font-size:11px}
+.ab-foot .ab-msg{color:#666;margin-right:auto}
+.ab-foot button{padding:6px 14px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid #ccc;background:#fff}
+.ab-foot button.ab-go{border-color:#d00;background:#d00;color:#fff}
+.ab-foot button:disabled{opacity:.45;cursor:not-allowed}
 .memo-input{display:block;box-sizing:border-box;width:100%;min-width:130px;height:60px;padding:4px 5px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:inherit;line-height:1.4;resize:vertical;vertical-align:top;white-space:pre-wrap;overflow:auto}
 .memo-input:focus{border-color:#4285f4;outline:none;background:#f0f7ff}
 td.memo-cell{min-width:140px;padding:3px 4px;vertical-align:top}
@@ -224,7 +244,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-change"><div class="filter"><label>보기</label><select id="cView" onchange="renderChange()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="cFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('cFilter').value='';renderChange()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select><label style="margin-left:10px">소스</label><select id="wSource"><option value="kr" selected>국내 메타</option><option value="dg">디멘드젠(타이트)</option><option value="both">국내 종합(메타+디멘드젠)</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 디멘드젠=google_demandgen_campaign_daily(지출=Google Ads·매출=MP귀속). 디멘드젠은 클릭·노출 없어 CVR/CTR 공백</span></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
-<div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
+<div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button><button id="abBtn" onclick="abOpen()" title="증감액이 마킹된 세트의 메타 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:auto;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 메타에 예산 적용</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>기간</label><select id="dpPeriod"><option value="day" selected>하루</option><option value="week">주간</option><option value="month">월간</option></select><label style="margin-left:10px">날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table><div id="dpCPWrap" style="display:none;margin-top:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏×📦 나라별 · 상품별 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">국가 × 상품 교차 — 지출순 정렬</span></div><table id="dpCPTbl"></table></div></div></div>
 <div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><label style="margin-left:10px">국가</label><select id="grevCountry" onchange="renderGlobalRevenue()"><option value="ALL" selected>🌐 전체</option><option value="TW">대만</option><option value="HK">홍콩</option><option value="JP">일본</option><option value="TH">태국</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중<br>🌐 국가 선택 시 매출·지출·순이익·ROAS·오가닉이 그 나라만으로 계산 — ⚠ 매출=Stripe(빌링주소 우선), 지출·귀속매출=세트 country(캠페인명 tw/hk 태그)로 분류 기준이 달라 국가별 ROAS·순이익은 근사치이고, country 태그 없는 세트 지출은 제외됩니다(전체 합과 불일치 가능).</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
@@ -298,6 +318,15 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="cp-btn cp-d10" data-c="down10">-10</div><div class="cp-btn cp-d20" data-c="down20">-20</div>
 <div class="cp-btn cp-off" data-c="off">OFF</div><div class="cp-btn cp-watch" data-c="watch">복증</div>
 <div class="cp-btn cp-clear" data-c="">✕</div>
+</div>
+
+<!-- 메타 예산 적용 확인 모달 (날짜탭) -->
+<div class="ab-mask" id="abMask">
+<div class="ab-box">
+  <div class="ab-head">⚡ 메타 예산 적용<span class="ab-sub" id="abSub"></span><button onclick="abClose()">✕</button></div>
+  <div class="ab-body" id="abBody"></div>
+  <div class="ab-foot"><span class="ab-msg" id="abMsg"></span><button onclick="abClose()" id="abCancel">취소</button><button class="ab-go" id="abGo" onclick="abApply()" disabled>확인 — 메타에 적용</button></div>
+</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -1408,6 +1437,7 @@ async function saveHL(id,c){
   // 메모리 동기화 — AD + 원본배열(GL_AD/VN_AD 등) 모두 갱신 → 탭 전환/모드 전환 후에도 유지
   _syncRowField(id, tDate, 'highlight', c||null);
   rerenderTrendView();
+  abSyncBtn();  // 날짜탭 '메타에 예산 적용' 버튼의 대상 개수 갱신
 }
 // 구글 디멘드젠(국내탭) 세트 하이라이트 — 추이차트와 같은 adset_highlights 테이블·같은 색·0시 자동삭제·전체삭제 공유.
 //   키는 구글 ad_group_id(11자리 내외)라 메타 adset_id(17자리)와 겹치지 않는다.
@@ -2807,7 +2837,150 @@ function renderDateTab(){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
+  DT_ROWS=rows;  // '메타에 예산 적용' 버튼이 화면에 실제로 보이는 세트만 대상으로 삼기 위해 보관
+  abSyncBtn();
 }
+
+// ===== 메타 예산 적용 (날짜탭 → Edge Function) =====
+// 날짜탭의 '변동예산'을 실제 메타 예산에 반영한다. 브라우저는 '어떤 세트를 어떤 마킹으로'만
+// 보내고, 현재 예산 조회·계산·쓰기는 전부 Edge Function 이 한다 —
+//   ① Meta 쓰기 토큰을 공개 HTML 에 둘 수 없고,
+//   ② 날짜탭 '예산'은 파이프라인 스냅샷+통화환산을 거친 표시용 값이라 계산 근거로 못 쓴다
+//      (서버가 적용 시점에 메타에서 현재값을 다시 읽는다).
+var DT_ROWS=[];        // var — renderDateTab 이 이 선언보다 먼저 실행돼도 TDZ 에 걸리지 않게
+let AB_PLAN=null;      // dry-run 결과 (확인 버튼이 이걸 그대로 적용)
+let AB_BUSY=false;
+const AB_FN=SB_URL+'/functions/v1/apply-budget';
+const AB_MODES={kr:'국내',gl:'글로벌',vn:'밴스드'};
+
+// 날짜탭에 보이는 행 중 증감액이 마킹된 세트 (중복 제거)
+function abTargets(){
+  if(!AB_MODES[MODE])return[];
+  const seen=new Set(),out=[];
+  (DT_ROWS||[]).forEach(r=>{
+    const id=rowId(r);if(!id||seen.has(id))return;
+    const tag=HIGHLIGHTS[id];if(!tag||!HL_CONFIG[tag])return;
+    seen.add(id);
+    out.push({adset_id:id,ad_account_id:String(r.ad_account_id||''),tag:tag,
+              name:(r.adset_name||''),campaign:(r.campaign_name||'')});
+  });
+  return out;
+}
+// 소재별(cr)은 세트가 아니라 광고 단위라 예산 개념이 없다 → 버튼 자체를 숨긴다
+function abSyncBtn(){
+  const b=document.getElementById('abBtn');if(!b)return;
+  if(!AB_MODES[MODE]){b.style.display='none';return}
+  const n=abTargets().length;
+  b.style.display='';b.disabled=!n;b.style.opacity=n?'1':'.45';
+  b.textContent='⚡ 메타에 예산 적용'+(n?' ('+n+')':'');
+}
+
+async function abAuthHeaders(){
+  const {data}=await SBC.auth.getSession();
+  const tk=data&&data.session?data.session.access_token:'';
+  if(!tk)throw new Error('로그인이 필요합니다. 새로고침 후 다시 로그인해 주세요.');
+  return {'Authorization':'Bearer '+tk,'Content-Type':'application/json','apikey':SB_KEY};
+}
+async function abCall(dryRun){
+  const items=abTargets().map(t=>({adset_id:t.adset_id,ad_account_id:t.ad_account_id,tag:t.tag}));
+  const r=await fetch(AB_FN,{method:'POST',headers:await abAuthHeaders(),
+    body:JSON.stringify({mode:MODE,dryRun:dryRun,items:items})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok||j.ok===false)throw new Error(j.error||('서버 오류 ('+r.status+')'));
+  return j;
+}
+
+// 최소통화단위(cents 등) → 사람이 읽는 금액. offset 은 서버가 통화별로 실어 보낸다.
+function abAmt(v,off,ccy){
+  if(v===''||v==null)return'';
+  const n=Number(v);if(!isFinite(n))return String(v);
+  const a=n/(off||1);
+  return a.toLocaleString('ko-KR',{maximumFractionDigits:(off||1)>1?2:0})+(ccy?' '+ccy:'');
+}
+function abEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+function abRender(plan,applied){
+  const meta={};abTargets().forEach(t=>meta[t.adset_id]=t);
+  let h='<table><thead><tr><th>세트</th><th>계정</th><th>마킹</th><th>대상</th><th>항목</th>'
+       +'<th>현재</th><th>→</th><th>변경 후</th><th>'+(applied?'결과':'비고')+'</th></tr></thead><tbody>';
+  plan.forEach(p=>{
+    const m=meta[p.adset_id]||{};
+    const noChange=!p.error&&(!p.field||p.after===p.before);
+    const cls=p.error?'ab-err':((applied?!p.applied:noChange)?'ab-skip':'');
+    const lbl=(HL_CONFIG[p.tag]||{}).label||p.tag;
+    let last;
+    if(p.error)last='⚠ '+abEsc(p.error);
+    else if(applied)last=p.applied?'✅ 적용됨':'— 변경 없음';
+    else last=abEsc(p.note||'');
+    if(!p.error&&p.scope==='campaign')last='<span class="ab-warn">⚠ CBO</span> '+last;
+    const cur=p.field==='status'?abEsc(p.before):abAmt(p.before,p.offset,p.currency);
+    const nxt=p.field==='status'?abEsc(p.after):abAmt(p.after,p.offset,p.currency);
+    h+='<tr class="'+cls+'">'
+      +'<td class="ab-name">'+abEsc((p.adset_name||m.name||p.adset_id))+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
+      +'<td>'+abEsc(accName(p.ad_account_id))+'</td>'
+      +'<td style="text-align:center">'+abEsc(lbl)+'</td>'
+      +'<td>'+(p.scope==='campaign'?'캠페인':(p.scope==='adset'?'세트':''))+'</td>'
+      +'<td>'+abEsc(p.field==='status'?'상태':(p.field==='lifetime_budget'?'총예산':(p.field?'일예산':'')))+'</td>'
+      +'<td style="text-align:right">'+cur+'</td><td style="text-align:center;color:#aaa">→</td>'
+      +'<td style="text-align:right;font-weight:600">'+nxt+'</td>'
+      +'<td>'+last+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  document.getElementById('abBody').innerHTML=h;
+}
+
+async function abOpen(){
+  if(!AB_MODES[MODE]){alert('예산 적용은 국내·글로벌·밴스드 세트 탭에서만 가능합니다.');return}
+  const t=abTargets();
+  if(!t.length){alert('증감액이 마킹된 세트가 없습니다.\n추이차트나 날짜탭에서 먼저 +20/+10/-10/-20/OFF 를 마킹해 주세요.');return}
+  AB_PLAN=null;
+  document.getElementById('abMask').classList.add('show');
+  document.getElementById('abSub').textContent=AB_MODES[MODE]+' · '+t.length+'개 세트';
+  document.getElementById('abBody').innerHTML='<div style="padding:24px;text-align:center;color:#888">메타에서 현재 예산 확인 중…</div>';
+  document.getElementById('abMsg').textContent='';
+  const go=document.getElementById('abGo');go.disabled=true;go.textContent='확인 — 메타에 적용';
+  try{
+    const j=await abCall(true);
+    AB_PLAN=j.plan||[];
+    abRender(AB_PLAN,false);
+    const n=AB_PLAN.filter(p=>!p.error&&p.field&&p.after!==p.before).length;
+    const e=AB_PLAN.filter(p=>p.error).length;
+    document.getElementById('abMsg').innerHTML=n
+      ? '<b>'+n+'건</b>이 메타에 반영됩니다'+(e?' · <span style="color:#a00">'+e+'건 오류(제외)</span>':'')+' — 되돌리려면 Ads Manager 에서 직접 수정해야 합니다'
+      : '반영할 변경이 없습니다'+(e?' · <span style="color:#a00">'+e+'건 오류</span>':'');
+    go.disabled=!n;
+  }catch(err){
+    document.getElementById('abBody').innerHTML='<div style="padding:24px;color:#a00">⚠ '+abEsc(err.message||err)+'</div>';
+  }
+}
+async function abApply(){
+  if(AB_BUSY||!AB_PLAN)return;
+  const n=AB_PLAN.filter(p=>!p.error&&p.field&&p.after!==p.before).length;
+  if(!confirm('메타 광고 '+n+'건의 예산·상태를 실제로 변경합니다.\n실행 후에는 Ads Manager 에서 직접 되돌려야 합니다.\n\n진행할까요?'))return;
+  AB_BUSY=true;
+  const go=document.getElementById('abGo');go.disabled=true;go.textContent='적용 중…';
+  try{
+    const j=await abCall(false);
+    abRender(j.plan||[],true);
+    document.getElementById('abMsg').innerHTML='✅ <b>'+(j.applied||0)+'건</b> 적용'
+      +((j.failed||0)?' · <span style="color:#a00">'+j.failed+'건 실패</span>':'')
+      +' — 기록은 budget_apply_log 에 남습니다. 대시보드 예산 컬럼은 다음 파이프라인 실행 후 갱신됩니다.';
+    document.getElementById('abCancel').textContent='닫기';
+    go.style.display='none';
+  }catch(err){
+    document.getElementById('abMsg').innerHTML='<span style="color:#a00">⚠ '+abEsc(err.message||err)+'</span>';
+    go.disabled=false;go.textContent='확인 — 메타에 적용';
+  }
+  AB_BUSY=false;
+}
+function abClose(){
+  if(AB_BUSY)return;
+  document.getElementById('abMask').classList.remove('show');
+  document.getElementById('abGo').style.display='';
+  document.getElementById('abCancel').textContent='취소';
+  AB_PLAN=null;
+}
+document.getElementById('abMask').addEventListener('click',e=>{if(e.target.id==='abMask')abClose()});
 
 // ===== DATE PRODUCT =====
 const COUNTRY_LIST=['대만','홍콩','일본','싱가폴','싱가포르','멕시코','미국','한국','중국','베트남','태국','인도네시아','필리핀','말레이시아','인도'];
