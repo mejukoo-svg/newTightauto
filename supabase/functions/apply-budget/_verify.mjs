@@ -10,6 +10,7 @@ const T1_TOK = "TOK-1";
 
 let handler = null;
 let calls = [];
+let LOG_ROWS = []; // budget_apply_log 조회 응답 (기본: 오늘 적용 이력 없음)
 
 globalThis.Deno = {
   env: { get: (k) => globalThis.__ENV[k] },
@@ -44,7 +45,7 @@ globalThis.fetch = async (url, init = {}) => {
   const method = init.method || "GET";
   const tok = new URL(u).searchParams.get("access_token") ||
     new URLSearchParams(init.body || "").get("access_token") || "";
-  calls.push({ method, u: u.split("?")[0], tok });
+  calls.push({ method, u: u.split("?")[0], tok, full: u });
 
   const ok = (j) => new Response(JSON.stringify(j), { status: 200, headers: { "Content-Type": "application/json" } });
 
@@ -52,7 +53,10 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.includes("/rest/v1/adset_highlights")) {
     return ok(Object.entries(HL).map(([adset_id, highlight]) => ({ adset_id, highlight })));
   }
-  if (u.includes("/rest/v1/budget_apply_log")) return new Response("", { status: 201 });
+  if (u.includes("/rest/v1/budget_apply_log")) {
+    if (method === "POST") return new Response("", { status: 201 });
+    return ok(LOG_ROWS); // 오늘 이미 적용된 세트 조회 (테스트마다 LOG_ROWS 를 바꾼다)
+  }
 
   if (u.includes("graph.facebook.com")) {
     const path = u.split("graph.facebook.com/")[1].split("?")[0].split("/").pop();
@@ -82,8 +86,9 @@ function baseEnv() {
   };
 }
 
-async function run(env, body) {
+async function run(env, body, logRows = []) {
   globalThis.__ENV = env;
+  LOG_ROWS = logRows;
   calls = [];
   const res = await handler(new Request("https://stub/apply-budget", {
     method: "POST",
@@ -178,6 +183,28 @@ console.log("\n[7] 계정 소유가 다른 세트를 보내면 막힌다 (accoun
   const p = r.json?.plan?.[0];
   check("소유 계정 불일치 오류", (p?.error || "").includes("소속인데"), JSON.stringify(p?.error));
   check("쓰기 0건", r.calls.filter((c) => c.method === "POST" && c.u.includes("graph")).length === 0);
+}
+
+console.log("\n[8] 오늘 이미 적용된 세트는 redo 로 표시된다 (막지는 않는다)");
+{
+  const nowIso = new Date(Date.now() - 3600 * 1000).toISOString(); // 1시간 전
+  const r = await run({ ...baseEnv(), META_TOKEN_2_1: NEW_TOK }, { mode: "kr", dryRun: true, items },
+    [{ adset_id: SET_13, tag: "up10", before_value: "500000", after_value: "550000", applied_at: nowIso }]);
+  const p = r.json?.plan?.[0];
+  check("redo=true", p?.redo === true, JSON.stringify(p?.note));
+  check("비고에 이력 문구", (p?.note || "").includes("이미 적용됨") && (p.note || "").includes("+10%"), p?.note);
+  check("계획은 그대로 살아있다(차단 아님)", !p?.error && p?.after === "220000", JSON.stringify(p?.error));
+  const q = r.calls.find((c) => c.u.includes("budget_apply_log") && c.method === "GET");
+  check("로그 조회에 region·ok·KST일자 필터", !!q && q.full.includes("region=eq.kr") &&
+    q.full.includes("ok=is.true") && q.full.includes("applied_at=gte."), q?.full?.slice(-120));
+}
+
+console.log("\n[9] 오늘 이력이 없으면 redo 없음 · 다른 세트 이력은 옮겨붙지 않는다");
+{
+  const r = await run({ ...baseEnv(), META_TOKEN_2_1: NEW_TOK }, { mode: "kr", dryRun: true, items },
+    [{ adset_id: SET_18, tag: "up20", before_value: "1", after_value: "2", applied_at: new Date().toISOString() }]);
+  const p = r.json?.plan?.[0];
+  check("다른 세트 이력에 반응하지 않음", !p?.redo, JSON.stringify(p?.note));
 }
 
 console.log(fail ? `\n실패 ${fail}건` : "\n전부 통과");

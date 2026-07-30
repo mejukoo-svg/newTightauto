@@ -2935,7 +2935,7 @@ function abRender(plan,applied){
   plan.forEach(p=>{
     const m=meta[p.adset_id]||{};
     const noChange=!p.error&&(!p.field||p.after===p.before);
-    const cls=p.conflict?'ab-conf':(p.error?'ab-err':((applied?!p.applied:noChange)?'ab-skip':''));
+    const cls=(p.conflict||p.redo)?'ab-conf':(p.error?'ab-err':((applied?!p.applied:noChange)?'ab-skip':''));
     const lbl=(HL_CONFIG[p.tag]||{}).label||p.tag;
     const hlc=(HL_CONFIG[p.tag]||{}).cls||'';   // 날짜탭과 같은 색을 마킹·변경후 칸에 입힌다
     let last;
@@ -2943,12 +2943,13 @@ function abRender(plan,applied){
     else if(applied)last=p.applied?'✅ 적용됨':'— 변경 없음';
     else last=abEsc(p.note||'');
     if(!p.error&&p.scope==='campaign')last='<span class="ab-warn">⚠ CBO</span> '+last;
+    if(!p.error&&p.redo)last='<span class="ab-warn">⚠ 재적용</span> '+last;   // 오늘 이미 적용 — 또 하면 ±% 가 복리
     const cur=p.field==='status'?abEsc(p.before):abAmt(p.before,p.offset,p.currency);
     const nxt=p.field==='status'?abEsc(p.after):abAmt(p.after,p.offset,p.currency);
-    // CBO 충돌은 기본 해제 — 어느 쪽을 살릴지 사람이 정해야 한다
-    const sel=abSelectable(p);
+    // CBO 충돌·오늘 재적용은 기본 해제 — 어느 쪽을 살릴지, 두 번 올릴지는 사람이 정해야 한다
+    const sel=abSelectable(p),nobulk=!!(p.conflict||p.redo);
     const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="ab-ck" data-id="'+abEsc(p.adset_id)+'"'
-      +(p.conflict?' data-conf="1"':'')+(sel?'':' disabled')+(sel&&!p.conflict?' checked':'')
+      +(nobulk?' data-nobulk="1"':'')+(sel?'':' disabled')+(sel&&!nobulk?' checked':'')
       +' onclick="abSelChanged()"></td>';
     h+='<tr class="'+cls+'">'+ckTd
       +'<td class="ab-name">'+abEsc((p.adset_name||m.name||p.adset_id))+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
@@ -2967,8 +2968,9 @@ function abRender(plan,applied){
 
 // ── 선택 ──
 function abSelBoxes(){return[...document.querySelectorAll('#abBody .ab-ck:not(:disabled)')]}
-// 전체선택 대상에서 CBO 충돌 행은 뺀다 — 둘 다 켜면 서버가 양쪽을 막으므로 사람이 직접 골라야 한다
-function abBulkBoxes(){return abSelBoxes().filter(b=>!b.dataset.conf)}
+// 전체선택 대상에서 CBO 충돌·오늘 재적용 행은 뺀다 — 둘 다 켜면 서버가 양쪽을 막고,
+// 재적용은 예산이 복리로 오르므로 사람이 직접 골라야 한다
+function abBulkBoxes(){return abSelBoxes().filter(b=>!b.dataset.nobulk)}
 function abSelIds(){return abSelBoxes().filter(b=>b.checked).map(b=>b.dataset.id)}
 function abToggleAll(el){
   abBulkBoxes().forEach(b=>b.checked=el.checked);
@@ -3042,9 +3044,13 @@ async function abApply(){
   if(AB_BUSY||!AB_PLAN)return;
   const ids=abSelIds();
   if(!ids.length)return;
-  const lines=AB_PLAN.filter(p=>ids.includes(p.adset_id))
-    .map(p=>' · '+((p.adset_name||p.adset_id).slice(0,34))+'  '+((HL_CONFIG[p.tag]||{}).label||p.tag)).join('\n');
+  const picked=AB_PLAN.filter(p=>ids.includes(p.adset_id));
+  const lines=picked
+    .map(p=>' · '+((p.adset_name||p.adset_id).slice(0,34))+'  '+((HL_CONFIG[p.tag]||{}).label||p.tag)
+      +(p.redo?'   ⚠ 오늘 이미 적용됨':'')).join('\n');
+  const redoN=picked.filter(p=>p.redo).length;
   if(!confirm('선택한 '+ids.length+'개 세트의 메타 예산·상태를 실제로 변경합니다.\n\n'+lines
+    +(redoN?'\n\n⚠ 이 중 '+redoN+'개는 오늘 이미 적용된 세트입니다. 지금 올라간 예산 기준으로 또 계산되어 증감이 복리로 걸립니다.':'')
     +'\n\n실행 후에는 Ads Manager 에서 직접 되돌려야 합니다. 진행할까요?'))return;
   AB_BUSY=true;
   const go=document.getElementById('abGo');go.disabled=true;go.textContent='적용 중…';

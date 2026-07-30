@@ -64,6 +64,11 @@ const TAG_PCT: Record<string, number | null> = {
   watch: null, // '복증' — 지켜보기, 아무것도 하지 않음
 };
 
+// index.html HL_CONFIG 의 label 과 같은 값 (재적용 안내 문구용)
+const TAG_LABEL: Record<string, string> = {
+  up20: "+20%", up10: "+10%", down10: "-10%", down20: "-20%", off: "OFF", watch: "복증",
+};
+
 // 마킹이 저장된 하이라이트 테이블 (index.html hlTbl() 과 동일)
 const HL_TBL: Record<string, { tbl: string; col: string }> = {
   kr: { tbl: "adset_highlights", col: "adset_id" },
@@ -193,7 +198,41 @@ type Plan = {
   applied?: boolean;
   conflict?: boolean; // 같은 CBO 캠페인에 다른 증감률 — 선택을 하나로 줄이면 해소된다
   shared_with?: string[]; // 같은 CBO 캠페인을 공유하는 다른 세트
+  redo?: boolean; // 오늘 이미 적용된 세트 — 또 적용하면 ±% 가 복리로 걸린다
 };
+
+// 오늘(KST) 이미 성공적으로 적용된 세트. 하이라이트는 남아 있고 서버는 메타의 '현재' 예산으로
+// ±% 를 다시 계산하므로, 두 번 누르면 50만→55만→60.5만처럼 복리가 된다. 그래서 계획 단계에서
+// 로그를 읽어 표시하고, 클라이언트가 기본 해제·전체선택 제외로 다룬다(체크하면 재적용 가능).
+// 기준일을 KST 로 잡는 이유: 하이라이트를 지우는 cron 도 KST 자정이다.
+async function fetchDoneToday(mode: string): Promise<Record<string, any>> {
+  const kst = new Date(Date.now() + 9 * 3600 * 1000);
+  const from = new Date(
+    Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()) - 9 * 3600 * 1000,
+  ).toISOString();
+  const rows: any[] = await sbSelect(
+    "budget_apply_log",
+    `select=adset_id,tag,before_value,after_value,applied_at&region=eq.${encodeURIComponent(mode)}` +
+      `&ok=is.true&applied_at=gte.${encodeURIComponent(from)}&order=applied_at.desc`,
+  );
+  const m: Record<string, any> = {};
+  for (const r of rows) {
+    const k = String(r?.adset_id ?? "");
+    if (k && !m[k]) m[k] = r; // 같은 세트가 여러 건이면 가장 최근 것
+  }
+  return m;
+}
+
+// 적용 이력을 사람이 읽는 한 줄로. 시각은 KST.
+function redoNote(r: any): string {
+  const t = new Date(r.applied_at);
+  const hhmm = isNaN(t.getTime())
+    ? ""
+    : new Date(t.getTime() + 9 * 3600 * 1000).toISOString().slice(11, 16);
+  const label = TAG_LABEL[String(r.tag)] || String(r.tag || "");
+  const move = r.before_value && r.after_value ? ` ${r.before_value}→${r.after_value}` : "";
+  return `오늘 ${hhmm} 이미 적용됨 (${label}${move})`;
+}
 
 function blank(item: any, err: string): Plan {
   return {
@@ -207,7 +246,11 @@ function blank(item: any, err: string): Plan {
   };
 }
 
-async function planOne(item: any, hlMap: Record<string, string>): Promise<Plan> {
+async function planOne(
+  item: any,
+  hlMap: Record<string, string>,
+  doneMap: Record<string, any>,
+): Promise<Plan> {
   const id = String(item?.adset_id ?? "").trim();
   const acc = String(item?.ad_account_id ?? "").trim();
   const tag = String(item?.tag ?? "").trim();
@@ -297,6 +340,13 @@ async function planOne(item: any, hlMap: Record<string, string>): Promise<Plan> 
   } catch (e) {
     p.error = String((e as Error).message || e).slice(0, 400);
   }
+
+  // 오늘 이미 적용된 세트는 계획은 그대로 내주고 표시만 남긴다 — 막지 않고 사람이 고르게 한다.
+  const done = doneMap[id];
+  if (done && !p.error) {
+    p.redo = true;
+    p.note = (p.note ? p.note + " / " : "") + redoNote(done);
+  }
   return p;
 }
 
@@ -372,8 +422,10 @@ Deno.serve(async (req) => {
     return true;
   });
 
+  const doneMap = await fetchDoneToday(mode);
+
   const plans: Plan[] = [];
-  for (const it of uniq) plans.push(await planOne(it, hlMap));
+  for (const it of uniq) plans.push(await planOne(it, hlMap, doneMap));
   resolveCampaignConflicts(plans);
 
   if (dryRun) return json({ ok: true, dryRun: true, actor: user.email || "", plan: plans });
