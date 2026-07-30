@@ -20,24 +20,39 @@
 const META_API_VERSION = "v21.0";
 const GRAPH = `https://graph.facebook.com/${META_API_VERSION}`;
 
-// 광고계정 → 토큰 환경변수명. 파이프라인(국내_세트별_supabase.py / 글로벌_세트별_supabase.py /
-// 밴스드_세트별_supabase.py)의 META_TOKENS 매핑과 동일하게 유지할 것.
-const ACC_TOKEN_ENV: Record<string, string> = {
+// 광고계정 → 토큰 환경변수명(후보를 앞에서부터 훑어 먼저 설정된 것을 쓴다). 파이프라인
+// (국내_세트별_supabase.py / 글로벌_세트별_supabase.py / 밴스드_세트별_supabase.py)의
+// META_TOKENS 매핑과 계정 목록을 동일하게 유지할 것.
+const ACC_TOKEN_ENV: Record<string, string[]> = {
   // 국내
-  "act_1270614404675034": "META_TOKEN_1",
-  "act_707835224206178": "META_TOKEN_1",
-  "act_1808141386564262": "META_TOKEN_2",
+  "act_1270614404675034": ["META_TOKEN_1"],
+  "act_707835224206178": ["META_TOKEN_1"],
+  // 파이프라인이 쓰는 META_TOKEN_2 는 스코프가 ads_read 뿐이라 예산 수정이 불가하다.
+  // ads_management 를 가진 META_TOKEN_2_1 을 우선 쓰고, 미설정일 때만 구 토큰으로 폴백한다
+  // (폴백 시 읽기·계획은 되고 적용 단계에서 메타가 권한 오류를 돌려준다).
+  "act_1808141386564262": ["META_TOKEN_2_1", "META_TOKEN_2"],
   // 글로벌
-  "act_1054081590008088": "META_TOKEN_1",
-  "act_2677707262628563": "META_TOKEN_GlobalTT",
-  "act_1335040608536838": "META_TOKEN_GlobalTT",
-  "act_993712016404855": "META_TOKEN_ACT_9937",
-  "act_1021437716898605": "META_TOKEN_1",
+  "act_1054081590008088": ["META_TOKEN_1"],
+  "act_2677707262628563": ["META_TOKEN_GlobalTT"],
+  "act_1335040608536838": ["META_TOKEN_GlobalTT"],
+  "act_993712016404855": ["META_TOKEN_ACT_9937"],
+  "act_1021437716898605": ["META_TOKEN_1"],
   // 밴스드
-  "act_25183853061243175": "META_TOKEN_VANCED",
-  "act_1560037899174007": "META_TOKEN_VANCED",
-  "act_1286632473622244": "META_TOKEN_VANCED",
+  "act_25183853061243175": ["META_TOKEN_VANCED"],
+  "act_1560037899174007": ["META_TOKEN_VANCED"],
+  "act_1286632473622244": ["META_TOKEN_VANCED"],
 };
+
+// 계정에 쓸 토큰을 고른다. envName 은 오류 메시지에 쓰이므로 미설정일 때는 후보 전체를 보여준다.
+function tokenFor(acc: string): { envName: string; token: string } | null {
+  const names = ACC_TOKEN_ENV[acc];
+  if (!names) return null;
+  for (const n of names) {
+    const v = Deno.env.get(n) || "";
+    if (v) return { envName: n, token: v };
+  }
+  return { envName: names.join(" / "), token: "" };
+}
 
 // index.html 의 HL_CONFIG 와 같은 값. null = 예산 변경 없음.
 const TAG_PCT: Record<string, number | null> = {
@@ -197,13 +212,15 @@ async function planOne(item: any, hlMap: Record<string, string>): Promise<Plan> 
   const acc = String(item?.ad_account_id ?? "").trim();
   const tag = String(item?.tag ?? "").trim();
 
-  // 구글 디멘드젠 ad_group_id(11자리 내외)가 같은 adset_highlights 테이블을 쓰므로 길이로 걸러낸다.
-  if (!/^\d{15,}$/.test(id)) return blank(item, "메타 광고세트 ID 형식이 아님");
+  // 숫자 ID 여부만 본다. 길이로는 구글 디멘드젠 ad_group_id 를 걸러낼 수 없다 —
+  // 실측(2026-07-30) 메타 세트 13·14·18자리 / 구글 ad_group 12·16자리로 구간이 섞인다.
+  // 실제 방어는 아래 metaGet 의 account_id 대조(요청한 계정의 세트인지)가 한다.
+  if (!/^\d{9,}$/.test(id)) return blank(item, "메타 광고세트 ID 형식이 아님");
   if (!(tag in TAG_PCT)) return blank(item, `알 수 없는 마킹: ${tag}`);
-  const envName = ACC_TOKEN_ENV[acc];
-  if (!envName) return blank(item, `등록되지 않은 광고계정: ${acc || "(없음)"}`);
-  const token = Deno.env.get(envName) || "";
-  if (!token) return blank(item, `토큰 미설정: ${envName}`);
+  const sel = tokenFor(acc);
+  if (!sel) return blank(item, `등록되지 않은 광고계정: ${acc || "(없음)"}`);
+  const token = sel.token;
+  if (!token) return blank(item, `토큰 미설정: ${sel.envName}`);
 
   // 대시보드 표시와 DB 마킹이 어긋난 채로(새로고침 전 낡은 화면) 적용되는 것을 막는다.
   if ((hlMap[id] || "") !== tag) {
@@ -217,10 +234,16 @@ async function planOne(item: any, hlMap: Record<string, string>): Promise<Plan> 
   try {
     const a = await metaGet(
       id,
-      "id,name,status,effective_status,daily_budget,lifetime_budget,campaign_id," +
+      "id,name,status,effective_status,account_id,daily_budget,lifetime_budget,campaign_id," +
         "campaign{id,name,status,daily_budget,lifetime_budget}",
       token,
     );
+    // 브라우저가 보낸 계정과 실제 소유 계정이 다르면 중단한다. 엉뚱한 객체(구글 ad_group_id,
+    // 다른 계정 세트)를 이 계정 토큰으로 수정하는 경로를 여기서 끊는다.
+    const owner = a.account_id ? `act_${a.account_id}` : "";
+    if (owner && owner !== acc) {
+      return blank(item, `세트가 ${owner} 소속인데 ${acc} 로 요청됨 — 새로고침 후 재시도`);
+    }
     p.adset_name = String(a.name || "");
     p.currency = await accCurrency(acc, token);
     p.offset = CCY_OFFSET[p.currency] ?? 1;
@@ -362,7 +385,7 @@ Deno.serve(async (req) => {
       p.applied = false; // 공유 세트(shared_with)의 결과는 루프가 끝난 뒤 덮어쓴다
       continue;
     }
-    const token = Deno.env.get(ACC_TOKEN_ENV[p.ad_account_id] || "") || "";
+    const token = tokenFor(p.ad_account_id)?.token || "";
     try {
       await metaPost(p.target_id, { [p.field]: p.after }, token);
       p.applied = true;

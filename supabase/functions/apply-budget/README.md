@@ -43,15 +43,19 @@ HTML 본문 자체는 누구나 받을 수 있다). Meta 쓰기 토큰을 브라
 
 `sql/budget_apply_log.sql`을 Supabase SQL Editor에서 1회 실행.
 
-### 2. ⚠️ META_TOKEN_2 권한
+### 2. 토큰 권한 — `act_1808141386564262`은 `META_TOKEN_2_1`을 쓴다
 
-현재 `META_TOKEN_2`의 스코프는 `ads_read` 뿐이라 **쓰기가 안 된다**.
-이 토큰이 담당하는 `act_1808141386564262`(타이트사주3rd원화새계정) 세트는
-`ads_management`가 붙은 토큰으로 교체하기 전까지 적용이 실패한다.
+파이프라인이 쓰는 `META_TOKEN_2`는 스코프가 `ads_read` 뿐이어서 **쓰기가 안 된다**.
+그 토큰이 담당하는 `act_1808141386564262`(타이트사주3rd원화새계정)용으로
+`ads_management`가 붙은 시스템 사용자 토큰을 따로 발급해 **`META_TOKEN_2_1`**로 등록했고,
+`ACC_TOKEN_ENV`가 이 이름을 먼저 찾는다(미설정 시에만 구 `META_TOKEN_2`로 폴백).
 
-확인 완료된 토큰: `META_TOKEN_1`, `META_TOKEN_ACT_9937`, `META_TOKEN_SAJU_TW`,
-`META_TOKEN_VANCED` → `ads_management` 보유.
-`META_TOKEN_GlobalTT`(act_2677·act_1335)는 미확인 — 첫 적용 시 에러 메시지로 드러난다.
+환경변수명에 하이픈(`META_TOKEN_2-1`)은 쓰지 말 것 — GitHub Actions·Supabase 시크릿 이름이
+영숫자와 밑줄만 허용한다.
+
+`ads_management` 확인 완료(2026-07-30): `META_TOKEN_1`, `META_TOKEN_2_1`,
+`META_TOKEN_ACT_9937`, `META_TOKEN_GlobalTT`, `META_TOKEN_GLOBAL1`,
+`META_TOKEN_SAJU_TW`, `META_TOKEN_VANCED`.
 
 스코프 확인:
 
@@ -67,7 +71,7 @@ curl -s "https://graph.facebook.com/v21.0/debug_token?input_token=$TOKEN&access_
 supabase link --project-ref grtglwavqhvlqcocahao
 supabase secrets set \
   META_TOKEN_1="..." \
-  META_TOKEN_2="..." \
+  META_TOKEN_2_1="..." \
   META_TOKEN_GlobalTT="..." \
   META_TOKEN_ACT_9937="..." \
   META_TOKEN_VANCED="..."
@@ -82,6 +86,18 @@ supabase functions deploy apply-budget
 ```
 
 JWT 검증은 기본값(켜짐) 그대로 둔다 — `--no-verify-jwt`를 쓰지 말 것.
+
+## 로컬 검증
+
+`Deno.serve` 핸들러를 직접 호출한다. 메타·Supabase 호출은 스텁이라 **실제 예산은 건드리지 않는다**.
+
+```bash
+node --experimental-strip-types _verify.mjs   # Node 22+
+```
+
+토큰 선택(신·구 폴백), dry-run 쓰기 0건, CBO 캠페인 경유, OFF, 구글 `ad_group_id` 차단,
+계정 소유 불일치 차단을 확인한다. 세트 ID 길이는 **실측값**(메타 13·14·18자리 /
+구글 12·16자리)을 쓴다 — 길이 기반 필터가 왜 불가능한지가 여기 박혀 있다.
 
 ## 계정 → 토큰 매핑
 
