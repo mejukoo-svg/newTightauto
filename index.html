@@ -333,6 +333,21 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 </div>
 
+<!-- 예산 적용 비밀번호 게이트 -->
+<div class="ab-mask" id="abPwMask">
+<div class="ab-box" style="width:min(340px,90vw)">
+  <div class="ab-head">🔒 예산 적용 확인<button onclick="abPwCancel()">✕</button></div>
+  <div class="ab-body" style="padding:16px 16px 4px">
+    <div style="font-size:11px;color:#666;margin-bottom:8px">비밀번호를 입력하세요.</div>
+    <input type="password" id="abPwInput" inputmode="numeric" autocomplete="off" maxlength="20"
+      style="width:100%;padding:7px 9px;border:1px solid #ccc;border-radius:4px;font-size:14px;font-family:inherit;letter-spacing:4px;text-align:center;box-sizing:border-box"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();abPwOk()}">
+    <div id="abPwErr" style="font-size:10px;color:#a00;margin-top:6px;min-height:14px"></div>
+  </div>
+  <div class="ab-foot"><span class="ab-msg"></span><button onclick="abPwCancel()">취소</button><button class="ab-go" onclick="abPwOk()">확인</button></div>
+</div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ===== CONFIG =====
@@ -2922,6 +2937,7 @@ function abRender(plan,applied){
     const noChange=!p.error&&(!p.field||p.after===p.before);
     const cls=p.conflict?'ab-conf':(p.error?'ab-err':((applied?!p.applied:noChange)?'ab-skip':''));
     const lbl=(HL_CONFIG[p.tag]||{}).label||p.tag;
+    const hlc=(HL_CONFIG[p.tag]||{}).cls||'';   // 날짜탭과 같은 색을 마킹·변경후 칸에 입힌다
     let last;
     if(p.error)last='⚠ '+abEsc(p.error);
     else if(applied)last=p.applied?'✅ 적용됨':'— 변경 없음';
@@ -2937,11 +2953,11 @@ function abRender(plan,applied){
     h+='<tr class="'+cls+'">'+ckTd
       +'<td class="ab-name">'+abEsc((p.adset_name||m.name||p.adset_id))+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
       +'<td>'+abEsc(accName(p.ad_account_id))+'</td>'
-      +'<td style="text-align:center">'+abEsc(lbl)+'</td>'
+      +'<td class="'+hlc+'" style="text-align:center;font-weight:600">'+abEsc(lbl)+'</td>'
       +'<td>'+(p.scope==='campaign'?'캠페인':(p.scope==='adset'?'세트':''))+'</td>'
       +'<td>'+abEsc(p.field==='status'?'상태':(p.field==='lifetime_budget'?'총예산':(p.field?'일예산':'')))+'</td>'
       +'<td style="text-align:right">'+cur+'</td><td style="text-align:center;color:#aaa">→</td>'
-      +'<td style="text-align:right;font-weight:600">'+nxt+'</td>'
+      +'<td class="'+hlc+'" style="text-align:right;font-weight:600">'+nxt+'</td>'
       +'<td>'+last+'</td></tr>';
   });
   h+='</tbody></table>';
@@ -2976,10 +2992,38 @@ function abSelChanged(){
     : '반영할 변경이 없습니다'+(errN?' · <span style="color:#a00">'+errN+'건 오류</span>':'');
 }
 
+// 예산 적용 전 비밀번호 확인. index.html 은 공개 소스라 이 값 자체는 비밀이 될 수 없다 —
+// 실수로 눌러 광고비가 바뀌는 것을 막는 절차이고, 실제 권한은 Supabase Auth 로그인 +
+// Edge Function 의 JWT 검증이 본다.
+const AB_PW='0000';
+let AB_PW_RESOLVE=null;
+function abPwAsk(){
+  return new Promise(res=>{
+    AB_PW_RESOLVE=res;
+    const el=document.getElementById('abPwInput');
+    el.value='';document.getElementById('abPwErr').textContent='';
+    document.getElementById('abPwMask').classList.add('show');
+    setTimeout(()=>el.focus(),30);
+  });
+}
+function abPwDone(ok){
+  document.getElementById('abPwMask').classList.remove('show');
+  const r=AB_PW_RESOLVE;AB_PW_RESOLVE=null;if(r)r(ok);
+}
+function abPwOk(){
+  const el=document.getElementById('abPwInput');
+  if(el.value===AB_PW){abPwDone(true);return}
+  document.getElementById('abPwErr').textContent='비밀번호가 맞지 않습니다.';
+  el.value='';el.focus();
+}
+function abPwCancel(){abPwDone(false)}
+document.getElementById('abPwMask').addEventListener('click',e=>{if(e.target.id==='abPwMask')abPwCancel()});   // abMask 와 동일한 배경 클릭 닫기
+
 async function abOpen(){
   if(!AB_MODES[MODE]){alert('예산 적용은 국내·글로벌·밴스드 세트 탭에서만 가능합니다.');return}
   const t=abTargets();
   if(!t.length){alert('증감액이 마킹된 세트가 없습니다.\n추이차트나 날짜탭에서 먼저 +20/+10/-10/-20/OFF 를 마킹해 주세요.');return}
+  if(!await abPwAsk())return;   // 취소하면 dry-run 조회조차 하지 않는다
   AB_PLAN=null;
   document.getElementById('abMask').classList.add('show');
   document.getElementById('abSub').textContent=AB_MODES[MODE]+' · '+t.length+'개 세트';
