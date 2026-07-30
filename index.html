@@ -110,6 +110,7 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .ab-body input[type=checkbox]{cursor:pointer;margin:0}
 .ab-body input[type=checkbox]:disabled{cursor:not-allowed;opacity:.35}
 .ab-warn{color:#c60;font-size:9px}
+.ab-body .ab-id{color:#999;font-size:9px;font-weight:400;white-space:nowrap;user-select:all}
 .ab-foot{padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;align-items:center;gap:8px;font-size:11px}
 .ab-foot .ab-msg{color:#666;margin-right:auto}
 .ab-foot button{padding:6px 14px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid #ccc;background:#fff}
@@ -2951,8 +2952,11 @@ function abRender(plan,applied){
     const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="ab-ck" data-id="'+abEsc(p.adset_id)+'"'
       +(nobulk?' data-nobulk="1"':'')+(sel?'':' disabled')+(sel&&!nobulk?' checked':'')
       +' onclick="abSelChanged()"></td>';
+    // 이름 옆에 세트 ID — Ads Manager·날짜탭과 대조할 때 쓰므로 그대로 복사 가능하게 둔다
+    const nm=p.adset_name||m.name||'';
+    const nameCell=nm?abEsc(nm)+' <span class="ab-id">'+abEsc(p.adset_id)+'</span>':'<span class="ab-id">'+abEsc(p.adset_id)+'</span>';
     h+='<tr class="'+cls+'">'+ckTd
-      +'<td class="ab-name">'+abEsc((p.adset_name||m.name||p.adset_id))+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
+      +'<td class="ab-name">'+nameCell+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
       +'<td>'+abEsc(accName(p.ad_account_id))+'</td>'
       +'<td class="'+hlc+'" style="text-align:center;font-weight:600">'+abEsc(lbl)+'</td>'
       +'<td>'+(p.scope==='campaign'?'캠페인':(p.scope==='adset'?'세트':''))+'</td>'
