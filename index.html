@@ -110,6 +110,7 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .ab-body input[type=checkbox]{cursor:pointer;margin:0}
 .ab-body input[type=checkbox]:disabled{cursor:not-allowed;opacity:.35}
 .ab-warn{color:#c60;font-size:9px}
+td.clickable{cursor:pointer}
 .ab-body .ab-id{color:#999;font-size:9px;font-weight:400;white-space:nowrap;user-select:all}
 .ab-foot{padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;align-items:center;gap:8px;font-size:11px}
 .ab-foot .ab-msg{color:#666;margin-right:auto}
@@ -1457,6 +1458,10 @@ async function saveHL(id,c){
   // 메모리 동기화 — AD + 원본배열(GL_AD/VN_AD 등) 모두 갱신 → 탭 전환/모드 전환 후에도 유지
   _syncRowField(id, tDate, 'highlight', c||null);
   rerenderTrendView();
+  // 날짜탭이 열려 있으면 같이 그린다 — 날짜탭 하이라이트는 HIGHLIGHTS 를 그대로 읽으므로
+  // 저장 한 번으로 추이차트·날짜탭·'메타에 예산 적용' 대상이 같은 값을 보게 된다.
+  const _at=document.querySelector('.tab.active');
+  if(_at&&_at.dataset.t==='datetab')renderDateTab();
   abSyncBtn();  // 날짜탭 '메타에 예산 적용' 버튼의 대상 개수 갱신
 }
 // 구글 디멘드젠(국내탭) 세트 하이라이트 — 추이차트와 같은 adset_highlights 테이블·같은 색·0시 자동삭제·전체삭제 공유.
@@ -2830,7 +2835,7 @@ function renderDateTab(){
     const name2=(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
     h+='<tr>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td>';
-    h+='<td style="text-align:left" class="'+hlCls+'">'+name2+'</td>';
+    h+='<td style="text-align:left" class="'+hlCls+' clickable" data-id="'+rid+'" onclick="showCP(\''+rid+'\',this)" title="클릭해 증감액 마킹 — 추이차트와 연동됩니다"'+'>'+name2+'</td>';
     h+='<td class="'+hlCls+'" style="font-size:9px">'+rid+'</td>';
     h+='<td style="text-align:right;color:#d00">'+money(r.spend)+'</td>';
     h+='<td style="text-align:right">'+money(r.cost_per_result)+'</td>';
@@ -2850,7 +2855,7 @@ function renderDateTab(){
     h+='<td class="'+(r.roas?RC(r.roas):'')+'">'+P(r.roas)+'</td>';
     h+='<td>'+P(r.cvr,2)+'</td>';
     h+='<td style="text-align:right" title="현재 메타 예산(최신 스냅샷)">'+money(cbud)+'</td>';
-    h+='<td class="'+hlCls+'" style="text-align:center;font-weight:600">'+hlLabel+'</td>';
+    h+='<td class="'+hlCls+' clickable" data-id="'+rid+'" onclick="showCP(\''+rid+'\',this)" title="클릭해 증감액 마킹 — 추이차트와 연동됩니다"'+' style="text-align:center;font-weight:600">'+(hlLabel||'<span style="color:#ccc;font-weight:400">+</span>')+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td>';
     // 메모는 가장 최근 날짜(r.date)에 저장됨
     h+='<td class="memo-cell"><textarea class="memo-input" placeholder="메모" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mv+'</textarea><span class="memo-saved">✓</span></td>';
