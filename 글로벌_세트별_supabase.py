@@ -467,14 +467,27 @@ def fetch_stripe_revenue(start_date, end_date):
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-        # 국가 분류: 결제 통화(스토어) 기준 — twd=대만 / hkd=홍콩 / jpy=일본 / thb=태국.
-        #   2026-07-31 변경: 이전엔 빌링주소 우선(42f620c, 홍콩 과소계상 보정)이었으나,
-        #   매출탭 값은 Stripe 화면과 바로 대조되어야 한다는 요구로 통화 단독 기준으로 되돌림.
-        #   ⚠️ 트레이드오프: 홍콩 고객이 -tw 스토어에서 TWD 결제하면 대만으로 잡힌다
-        #      (42f620c 가 고쳤던 홍콩 과소계상이 재발). 국가=스토어 정의로 합의된 사항.
-        country_code = STRIPE_CURRENCY_MAP.get(currency)
-        if country_code not in STRIPE_COUNTRY_NAMES: continue
-        country_name = STRIPE_COUNTRY_NAMES[country_code]
+        # 국가 분류: ① 빌링주소(TW/HK/JP/TH) 우선 → ② 통화 폴백.
+        #   홍콩 고객이 -tw 스토어에서 TWD로 결제하는 케이스(2026-07 이후 급증)를
+        #   통화-only 분류가 대만으로 오분류해 홍콩이 과소계상되던 문제 보정(42f620c).
+        #   금액 환산은 아래에서 결제 통화(currency) 기준 그대로 → 정확.
+        #   ⚠️ 2026-07-31: 통화 단독 기준으로 바꿨다가 되돌림. 홍콩 매출의 91%가
+        #      HK 빌링 고객의 TWD 결제라, 통화 기준으로 가면 7월 홍콩이 $136k→$13k 로
+        #      붕괴하고 지출은 세트 country(hk 태그) 기준이라 그대로 남아 홍콩
+        #      ROAS·순이익이 무의미해진다. 통화 기준으로 재검토할 땐 이 수치를 먼저 볼 것.
+        addr_country = None
+        bd = getattr(ch, 'billing_details', None)
+        if bd:
+            addr = getattr(bd, 'address', None)
+            if addr:
+                ac = getattr(addr, 'country', None)
+                if ac: addr_country = str(ac).strip().upper()
+        if addr_country in STRIPE_BILLING_COUNTRY:
+            country_name = STRIPE_BILLING_COUNTRY[addr_country]
+        else:
+            country_code = STRIPE_CURRENCY_MAP.get(currency)
+            if country_code not in STRIPE_COUNTRY_NAMES: continue
+            country_name = STRIPE_COUNTRY_NAMES[country_code]
         divisor = STRIPE_DIVISOR.get(currency, 100)
         # ★ 순매출(net) = 캡처액(amount_captured) − 환불액(amount_refunded) — 2026-07-31
         #   Stripe 의 status='succeeded' 는 '승인 성공'이지 '청구 완료'가 아니다.
