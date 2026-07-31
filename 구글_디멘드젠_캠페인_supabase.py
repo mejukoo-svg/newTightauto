@@ -89,6 +89,13 @@ START = date(2025, 1, 1) if FULL_REFRESH else TODAY - timedelta(days=REFRESH_DAY
 END = TODAY
 START_ISO, END_ISO = START.isoformat(), END.isoformat()
 
+# ★ Mixpanel export 는 to_date 가 프로젝트(UTC) 기준 미래면 400 을 던진다.
+#   END 는 KST 오늘이라 KST 00:00~09:00(=UTC 전날 15:00~24:00) 구간에는 항상
+#   UTC 기준 '내일'이 되어 매일 9시간씩 스크립트가 죽었다. MP 요청 상한만
+#   UTC 오늘로 클램프한다. KST 오늘 새벽분 이벤트는 UTC 어제까지 안에 들어
+#   있으므로 데이터 손실은 없다. (국내_세트별_supabase.py 와 동일한 가드)
+MP_END_ISO = min(END, datetime.now(timezone.utc).date()).isoformat()
+
 digits = lambda s: re.sub(r"\D", "", str(s or ""))
 
 
@@ -208,7 +215,7 @@ def fetch_mp(tight_camp_ids, ad_to_group, group_meta):
         log.warning("  ⏭  Mixpanel 자격증명 없음 — 매출측 스킵")
         return defaultdict(float), defaultdict(int)
     r = req_lib.get("https://data.mixpanel.com/api/2.0/export",
-                    params={"from_date": START_ISO, "to_date": END_ISO,
+                    params={"from_date": START_ISO, "to_date": MP_END_ISO,
                             "event": json.dumps(MP_EVENTS), "project_id": MP_PID},
                     auth=(MP_USER, MP_SECRET), timeout=600)
     r.raise_for_status()

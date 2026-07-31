@@ -49,7 +49,13 @@ FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
 START = date(2025, 1, 1) if FULL_REFRESH else TODAY - timedelta(days=REFRESH_DAYS - 1)
 END = TODAY
-log.info(f"📅 Mixpanel(구글 디멘드젠/ch=google) 수집: {START} ~ {END}")
+
+# ★ Mixpanel export 는 to_date 가 프로젝트(UTC) 기준 미래면 400 을 던진다.
+#   KST 00:00~09:00 구간에는 END(=KST 오늘)가 UTC 기준 '내일'이라 매번 400 →
+#   빈 결과로 조용히 스킵돼 그 시간대 갱신이 통째로 누락됐다. MP 요청 상한만
+#   UTC 오늘로 클램프 (KST 오늘 새벽분은 UTC 어제까지에 포함돼 손실 없음).
+MP_END = min(END, datetime.now(timezone.utc).date())
+log.info(f"📅 Mixpanel(구글 디멘드젠/ch=google) 수집: {START} ~ {END} (MP 요청 상한 {MP_END})")
 
 GOOGLE_CH_VALUES = {"google"}   # lowercase 비교용 (필요시 'youtube','yt' 등 추가 가능)
 
@@ -300,7 +306,7 @@ def main():
     log.info("=" * 60)
     log.info("🚀 Mixpanel(ch=google) → Supabase (google_demandgen_content_mp_daily)")
     log.info("=" * 60)
-    lines = fetch_mixpanel(START, END)
+    lines = fetch_mixpanel(START, MP_END)
     if not lines:
         log.warning("  ⚠️ 빈 결과"); return
     agg = aggregate(lines)
