@@ -555,11 +555,17 @@ def main():
         d = s
         while d <= e:
             uncovered.add(d.strftime('%Y-%m-%d')); d += timedelta(days=1)
+    # ★ KST 경계 보정 버퍼 (2026-07-31): MP export 는 from_date 를 UTC 날짜로 필터하지만
+    #   parse 는 KST(UTC+9)로 재버킷팅 → 윈도우 첫 KST 날짜의 00:00~09:00 이 통째로 누락(~28~35%).
+    #   REFRESH_DAYS=10 상 각 날짜의 마지막 기록(D+9)이 항상 첫날이라 영구 고착됐다.
+    #   상세: 글로벌_세트별_supabase.py 의 동일 주석 참조.
+    MP_FETCH_BUFFER_DAYS = 2
     # 과거 구간: 7일 청크로 분할 (대용량 응답 timeout 위험 완화 · 실패한 청크만 보존모드)
     chunk_start = DATA_REFRESH_START
     while chunk_start <= YESTERDAY:
         chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
-        res = fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'))
+        fetch_from = (chunk_start - timedelta(days=MP_FETCH_BUFFER_DAYS)).strftime('%Y-%m-%d')
+        res = fetch_mixpanel_data(fetch_from, chunk_end.strftime('%Y-%m-%d'))
         if res is None:
             log.error(f"  ❌ Mixpanel 수집 실패: {chunk_start:%Y-%m-%d}~{chunk_end:%Y-%m-%d} → 해당 날짜 기존 매출 보존")
             _mark_uncovered(chunk_start, chunk_end)

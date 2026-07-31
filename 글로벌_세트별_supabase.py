@@ -672,11 +672,22 @@ def main():
         d = s
         while d <= e:
             uncovered.add(d.strftime('%Y-%m-%d')); d += timedelta(days=1)
+    # ★ KST 경계 보정 버퍼 (2026-07-31):
+    #   Mixpanel raw export 는 from_date 를 프로젝트(UTC) 날짜로 필터하는데, parse 단계에선
+    #   이벤트 time 을 KST(UTC+9)로 재버킷팅한다(fetch_mixpanel_data). 그래서 fetch 윈도우의
+    #   '첫 KST 날짜'는 새벽분(KST 00:00~09:00 = 전날 UTC)이 from_date 미만으로 빠져 ~28~35%
+    #   과소집계된다. REFRESH_DAYS=10 이면 각 날짜의 마지막 기록이 D+9 일에 일어나는데 그때
+    #   그 날짜는 항상 윈도우의 첫날 → 모든 날짜가 절단된 값으로 영구 고착됐다(7/6~7/22 사고).
+    #   from_date 만 버퍼만큼 앞당겨 실제 시작일을 '내부 날짜'로 만든다. records 는 meta_data
+    #   날짜(>= DATA_REFRESH_START)에만 생성되고, 겹침 중복은 order_no dedup 이 제거하므로 안전.
+    #   국내_세트별_supabase.py 의 동일 수정(MP_FETCH_BUFFER_DAYS)을 이식한 것.
+    MP_FETCH_BUFFER_DAYS = 2
     # 과거 구간: 7일 청크로 분할 (대용량 응답 timeout 위험 완화 · 실패한 청크만 보존모드)
     chunk_start = DATA_REFRESH_START
     while chunk_start <= YESTERDAY:
         chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
-        res = fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d'))
+        fetch_from = (chunk_start - timedelta(days=MP_FETCH_BUFFER_DAYS)).strftime('%Y-%m-%d')
+        res = fetch_mixpanel_data(fetch_from, chunk_end.strftime('%Y-%m-%d'))
         if res is None:
             log.error(f"  ❌ Mixpanel 수집 실패: {chunk_start:%Y-%m-%d}~{chunk_end:%Y-%m-%d} → 해당 날짜 기존 매출 보존")
             _mark_uncovered(chunk_start, chunk_end)

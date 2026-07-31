@@ -371,15 +371,23 @@ def main():
     log.info(f"\n3단계: Mixpanel ({REFRESH_DAYS}일, utm_content 매칭)")
     YESTERDAY = TODAY - timedelta(days=1)
     mp_raw = []
+    # ★ KST 경계 보정 버퍼 (2026-07-31): MP export 는 from_date 를 UTC 날짜로 필터하지만
+    #   parse 는 KST(UTC+9)로 재버킷팅 → 윈도우 첫 KST 날짜의 00:00~09:00 이 통째로 누락(~28~35%).
+    #   REFRESH_DAYS=10 상 각 날짜의 마지막 기록(D+9)이 항상 첫날이라 영구 고착됐다(7/4~7/22 사고).
+    #   records 는 meta_data 날짜에만 생성되고 겹침은 insert_id/order_id dedup 이 제거하므로 안전.
+    #   국내_세트별_supabase.py 의 동일 수정(MP_FETCH_BUFFER_DAYS)을 이식한 것.
+    MP_FETCH_BUFFER_DAYS = 2
     if REFRESH_DAYS > 14:
         chunk_start = DATA_REFRESH_START
         while chunk_start <= YESTERDAY:
             chunk_end = min(chunk_start + timedelta(days=6), YESTERDAY)
-            mp_raw.extend(fetch_mixpanel_data(chunk_start.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')))
+            fetch_from = (chunk_start - timedelta(days=MP_FETCH_BUFFER_DAYS)).strftime('%Y-%m-%d')
+            mp_raw.extend(fetch_mixpanel_data(fetch_from, chunk_end.strftime('%Y-%m-%d')))
             chunk_start = chunk_end + timedelta(days=1)
     else:
         if DATA_REFRESH_START <= YESTERDAY:
-            mp_raw.extend(fetch_mixpanel_data(DATA_REFRESH_START.strftime('%Y-%m-%d'), YESTERDAY.strftime('%Y-%m-%d')))
+            mp_from = (DATA_REFRESH_START - timedelta(days=MP_FETCH_BUFFER_DAYS)).strftime('%Y-%m-%d')
+            mp_raw.extend(fetch_mixpanel_data(mp_from, YESTERDAY.strftime('%Y-%m-%d')))
     today_data = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
     if today_data: mp_raw.extend(today_data)
     log.info(f"✅ Mixpanel: {len(mp_raw)}건")
