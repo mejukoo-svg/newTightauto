@@ -580,7 +580,15 @@ def fetch_stripe_hourly(start_d, end_d):
             cur = (getattr(ch, "currency", "") or "").lower()
             if cur not in STRIPE_DIVISOR:
                 continue
-            amt_local = (getattr(ch, "amount", 0) or 0) / STRIPE_DIVISOR[cur]
+            # ★ 순매출(net) = 캡처액 − 환불액 — 2026-07-31
+            #   status='succeeded' 는 '승인 성공'이지 '청구 완료'가 아니다. 승인만 되고
+            #   캡처 안 된 건(amount_captured=0)을 ch.amount 로 더하면 매출이 부풀려진다
+            #   (2026-07 글로벌 기준 12.7% 과대). 글로벌_매출.py _net_charge_units() 와 동일 규약.
+            _cap = getattr(ch, "amount_captured", None)
+            if _cap is None:  # 구버전 응답 객체 호환
+                _cap = (getattr(ch, "amount", 0) or 0) if getattr(ch, "captured", True) else 0
+            _net_units = _cap - (getattr(ch, "amount_refunded", 0) or 0)
+            amt_local = _net_units / STRIPE_DIVISOR[cur]
             if amt_local <= 0:
                 continue
             krw = amt_local * (1.0 if cur == "krw" else rates.get(cur.upper(), 0))
