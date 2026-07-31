@@ -112,6 +112,15 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .ab-warn{color:#c60;font-size:9px}
 td.clickable{cursor:pointer}
 .ab-body .ab-id{color:#999;font-size:9px;font-weight:400;white-space:nowrap;user-select:all}
+/* 증감 합계 — 표 아래. '얼마 올리고 얼마 내려서 결국 얼마가 바뀌는가'를 승인 직전에 한 줄로 확인시킨다 */
+.ab-sum{margin-top:10px;border:1px solid #d8d8d8;border-radius:5px;background:#fafafa;font-size:11px}
+.ab-sum .ab-sum-r{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid #ececec;flex-wrap:wrap}
+.ab-sum .ab-sum-r:last-child{border-bottom:none}
+.ab-sum .ab-ccy{font-weight:700;min-width:38px;color:#555}
+.ab-sum .ab-up{color:#0a7d32;font-weight:600}
+.ab-sum .ab-dn{color:#c00;font-weight:600}
+.ab-sum .ab-net{margin-left:auto;font-weight:700;font-size:12px}
+.ab-sum .ab-note{color:#888;font-size:10px}
 .ab-foot{padding:10px 16px;border-top:1px solid #e0e0e0;display:flex;align-items:center;gap:8px;font-size:11px}
 .ab-foot .ab-msg{color:#666;margin-right:auto}
 .ab-foot button{padding:6px 14px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;border:1px solid #ccc;background:#fff}
@@ -2995,9 +3004,68 @@ function abRender(plan,applied){
       +'<td class="'+hlc+'" style="text-align:right;font-weight:600">'+nxt+'</td>'
       +'<td>'+last+'</td></tr>';
   });
-  h+='</tbody></table>';
+  h+='</tbody></table><div class="ab-sum" id="abSum"></div>';
   document.getElementById('abBody').innerHTML=h;
-  if(!applied)abSelChanged();
+  if(applied)abRenderSum(plan.filter(p=>p.applied),true);
+  else abSelChanged();
+}
+
+// ── 증감 합계 (표 하단) ──
+// '얼마를 내리고 얼마를 올려서 결국 총예산이 얼마 움직이는가'를 승인 직전에 보여준다.
+// 규칙:
+//  · 통화가 섞일 수 있어(국내=KRW·글로벌=USD) 통화별로 나눠 더한다. 환산은 하지 않는다.
+//  · CBO(캠페인 예산)는 한 캠페인이 여러 세트 행으로 나올 수 있어 대상 단위로 한 번만 센다
+//    — 안 그러면 같은 예산 변경이 중복으로 더해진다.
+//  · OFF(상태 변경)는 plan 에 예산 숫자가 없어 금액에 넣을 수 없다 → 건수만 따로 표기.
+//  · 집계 대상은 '선택된 행'(적용 후에는 '실제 적용된 행') — 실제로 일어날 일만 더한다.
+function abSumKey(p){
+  return p.scope==='campaign'
+    ? 'c|'+(p.ad_account_id||'')+'|'+(p.campaign_name||p.adset_id)
+    : 'a|'+p.adset_id;
+}
+function abSumCalc(rows){
+  const by={},seen=new Set();let offN=0,dup=0;
+  rows.forEach(p=>{
+    const k=abSumKey(p);
+    if(seen.has(k)){dup++;return}
+    seen.add(k);
+    if(p.field==='status'){offN++;return}
+    if(!p.field)return;
+    const b=Number(p.before),a=Number(p.after);
+    if(!isFinite(a)||!isFinite(b))return;
+    const off=p.offset||1,d=(a-b)/off;
+    if(!d)return;
+    const c=p.currency||'';
+    const o=by[c]||(by[c]={inc:0,dec:0,ni:0,nd:0,base:0});
+    o.base+=b/off;                       // 변경 대상들의 '현재' 예산 합 — 변동폭의 체감 기준
+    if(d>0){o.inc+=d;o.ni++}else{o.dec+=d;o.nd++}
+  });
+  return{by:by,offN:offN,dup:dup};
+}
+function abSumFmt(v){return Math.abs(v).toLocaleString('ko-KR',{maximumFractionDigits:2})}
+function abRenderSum(rows,applied){
+  const el=document.getElementById('abSum');if(!el)return;
+  const r=abSumCalc(rows),ccys=Object.keys(r.by);
+  if(!ccys.length&&!r.offN){el.innerHTML='';return}
+  let h='';
+  ccys.forEach(c=>{
+    const o=r.by[c],net=o.inc+o.dec;
+    const pct=o.base>0?(net/o.base*100):null;
+    h+='<div class="ab-sum-r"><span class="ab-ccy">'+abEsc(c||'—')+'</span>'
+      +'<span class="ab-up">▲ 증액 '+(o.inc?'+'+abSumFmt(o.inc):'0')+'</span><span class="ab-note">'+o.ni+'건</span>'
+      +'<span class="ab-dn">▼ 감액 '+(o.dec?'−'+abSumFmt(o.dec):'0')+'</span><span class="ab-note">'+o.nd+'건</span>'
+      +'<span class="ab-note">· 현재 합 '+abSumFmt(o.base)+'</span>'
+      +'<span class="ab-net" style="color:'+(net>0?'#0a7d32':(net<0?'#c00':'#555'))+'">'
+      +(net===0?'변동 없음(증액·감액 상쇄)'
+        :((applied?'실제 변동':'최종 변동')+' '+(net>0?'+':'−')+abSumFmt(net)+' '+abEsc(c)
+          +(pct===null?'':' <span class="ab-note">('+(pct>0?'+':'−')+Math.abs(pct).toFixed(1)+'%)</span>')))
+      +'</span></div>';
+  });
+  const notes=[];
+  if(r.offN)notes.push('OFF '+r.offN+'건은 예산 금액이 없어 합계에서 제외(중단되면 그만큼 소진도 멈춤)');
+  if(r.dup)notes.push('같은 캠페인 예산(CBO) 중복 '+r.dup+'건은 1회만 반영');
+  if(notes.length)h+='<div class="ab-sum-r"><span class="ab-note">※ '+notes.join(' · ')+'</span></div>';
+  el.innerHTML=h;
 }
 
 // ── 선택 ──
@@ -3021,6 +3089,9 @@ function abSelChanged(){
   const go=document.getElementById('abGo');
   go.disabled=!n;
   go.textContent=n?('확인 — '+n+'건 메타에 적용'):'적용할 세트를 선택하세요';
+  // 표 하단 증감 합계 — 체크를 바꿀 때마다 '선택된 것만' 다시 더한다
+  const selSet=new Set(abSelIds().map(String));
+  abRenderSum(AB_PLAN.filter(p=>selSet.has(String(p.adset_id))),false);
   document.getElementById('abMsg').innerHTML=boxes.length
     ? '선택 <b>'+n+'</b> / 적용 가능 '+boxes.length+'건'
       +(errN?' · <span style="color:#a00">'+errN+'건 오류(제외)</span>':'')
