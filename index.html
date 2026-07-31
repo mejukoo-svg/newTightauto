@@ -290,7 +290,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
-<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">보기</label><select id="ggdgkrView" onchange="renderGgdgTight()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">검색</label><input type="text" id="ggdgkrFilter" oninput="renderGgdgTight()" placeholder="캠페인/세트/ID 키워드" style="width:170px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('ggdgkrFilter').value='';renderGgdgTight()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 지출=Google Ads API / 매출=Mixpanel · 최신 왼쪽 · 추이차트처럼 📦 상품별로 나눠 소계 표시 · 🎨 캠페인·세트·세트ID 칸을 클릭하면 추이차트처럼 하이라이트(0시 자동 삭제 · 전체삭제 공유)</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
+<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">보기</label><select id="ggdgkrView" onchange="renderGgdgTight()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">검색</label><input type="text" id="ggdgkrFilter" oninput="renderGgdgTight()" placeholder="캠페인/세트/ID 키워드" style="width:170px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('ggdgkrFilter').value='';renderGgdgTight()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><button id="abBtnG" onclick="abOpenGoogle()" title="증감액이 마킹된 광고그룹의 구글 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 구글에 예산 적용</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 지출=Google Ads API / 매출=Mixpanel · 최신 왼쪽 · 추이차트처럼 📦 상품별로 나눠 소계 표시 · 🎨 캠페인·세트·세트ID 칸을 클릭하면 추이차트처럼 하이라이트(0시 자동 삭제 · 전체삭제 공유)</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
 <div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 디멘드젠(dg_) 콘텐츠만 · ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=Google Ads API)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
@@ -329,7 +329,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <!-- 메타 예산 적용 확인 모달 (날짜탭) -->
 <div class="ab-mask" id="abMask">
 <div class="ab-box">
-  <div class="ab-head">⚡ 메타 예산 적용<span class="ab-sub" id="abSub"></span><button onclick="abClose()">✕</button></div>
+  <div class="ab-head"><span id="abTitle">⚡ 메타 예산 적용</span><span class="ab-sub" id="abSub"></span><button onclick="abClose()">✕</button></div>
   <div class="ab-body" id="abBody"></div>
   <div class="ab-foot"><span class="ab-msg" id="abMsg"></span><button onclick="abClose()" id="abCancel">취소</button><button class="ab-go" id="abGo" onclick="abApply()" disabled>확인 — 메타에 적용</button></div>
 </div>
@@ -1472,7 +1472,7 @@ async function saveHLGgdg(id,c){
   const body={adset_id:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/adset_highlights',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
   KR_HL[id]=c||null;HIGHLIGHTS[id]=c||null;
-  renderGgdgTight();
+  renderGgdgTight();   // 안에서 GGDG_ROWS·abSyncBtnG 까지 갱신된다
 }
 function showCPGgdg(id,el){showCP(id,el);currentHlGgdg=true}
 function showCP(id,el){currentHlId=id;currentHlGgdg=false;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
@@ -2873,15 +2873,30 @@ function renderDateTab(){
 //   ② 날짜탭 '예산'은 파이프라인 스냅샷+통화환산을 거친 표시용 값이라 계산 근거로 못 쓴다
 //      (서버가 적용 시점에 메타에서 현재값을 다시 읽는다).
 var DT_ROWS=[];        // var — renderDateTab 이 이 선언보다 먼저 실행돼도 TDZ 에 걸리지 않게
+var GGDG_ROWS=[];      // 구글 디멘드젠 탭에 실제로 보이는 광고그룹 (버튼·모달 대상)
+let AB_SRC='meta';     // 'meta'(날짜탭) | 'google'(구글 디멘드젠 탭) — 대상·호출 함수가 갈린다
 let AB_PLAN=null;      // dry-run 결과 (확인 버튼이 이걸 그대로 적용)
 let AB_BUSY=false;
 const AB_FN=SB_URL+'/functions/v1/apply-budget';
+// 구글은 광고그룹 예산이 없어 ±% 가 캠페인 예산을 바꾼다 → 서버를 따로 둔다
+const AB_FN_G=SB_URL+'/functions/v1/apply-budget-google';
 const AB_MODES={kr:'국내',gl:'글로벌',vn:'밴스드'};
 
 // 날짜탭에 보이는 행 중 증감액이 마킹된 세트 (중복 제거)
-function abTargets(){
-  if(!AB_MODES[MODE])return[];
+// src 를 명시하면 그 소스로 센다 — 버튼 개수 갱신(abSyncBtn/abSyncBtnG)이 서로를 침범하지 않게.
+function abTargets(src){
+  const S=src||AB_SRC;
   const seen=new Set(),out=[];
+  if(S==='google'){
+    (GGDG_ROWS||[]).forEach(o=>{
+      const id=String(o.id||'');if(!id||seen.has(id))return;
+      const tag=HIGHLIGHTS[id];if(!tag||!HL_CONFIG[tag])return;
+      seen.add(id);
+      out.push({adset_id:id,ad_account_id:'',tag:tag,name:(o.name||''),campaign:(o.camp||'')});
+    });
+    return out;
+  }
+  if(!AB_MODES[MODE])return[];
   (DT_ROWS||[]).forEach(r=>{
     const id=rowId(r);if(!id||seen.has(id))return;
     const tag=HIGHLIGHTS[id];if(!tag||!HL_CONFIG[tag])return;
@@ -2892,10 +2907,17 @@ function abTargets(){
   return out;
 }
 // 소재별(cr)은 세트가 아니라 광고 단위라 예산 개념이 없다 → 버튼 자체를 숨긴다
+// 구글 디멘드젠 탭 버튼
+function abSyncBtnG(){
+  const b=document.getElementById('abBtnG');if(!b)return;
+  const n=abTargets('google').length;
+  b.disabled=!n;b.style.opacity=n?'1':'.45';
+  b.textContent='⚡ 구글에 예산 적용'+(n?' ('+n+')':'');
+}
 function abSyncBtn(){
   const b=document.getElementById('abBtn');if(!b)return;
   if(!AB_MODES[MODE]){b.style.display='none';return}
-  const n=abTargets().length;
+  const n=abTargets('meta').length;
   b.style.display='';b.disabled=!n;b.style.opacity=n?'1':'.45';
   b.textContent='⚡ 메타에 예산 적용'+(n?' ('+n+')':'');
 }
@@ -2912,8 +2934,9 @@ async function abCall(dryRun,ids){
   const pick=ids?new Set(ids):null;
   const items=abTargets().filter(t=>!pick||pick.has(t.adset_id))
     .map(t=>({adset_id:t.adset_id,ad_account_id:t.ad_account_id,tag:t.tag}));
-  const r=await fetch(AB_FN,{method:'POST',headers:await abAuthHeaders(),
-    body:JSON.stringify({mode:MODE,dryRun:dryRun,items:items})});
+  const g=AB_SRC==='google';
+  const r=await fetch(g?AB_FN_G:AB_FN,{method:'POST',headers:await abAuthHeaders(),
+    body:JSON.stringify({mode:g?'gd':MODE,dryRun:dryRun,items:items})});
   const j=await r.json().catch(()=>({}));
   if(!r.ok||j.ok===false)throw new Error(j.error||('서버 오류 ('+r.status+')'));
   return j;
@@ -2936,7 +2959,9 @@ function abSelectable(p){
 function abRender(plan,applied){
   const meta={};abTargets().forEach(t=>meta[t.adset_id]=t);
   const ckTh=applied?'':'<th class="ab-ckc"><input type="checkbox" id="abAll" onclick="abToggleAll(this)" title="전체 선택"></th>';
-  let h='<table><thead><tr>'+ckTh+'<th>세트</th><th>계정</th><th>마킹</th><th>대상</th><th>항목</th>'
+  const g=AB_SRC==='google';
+  let h='<table><thead><tr>'+ckTh+'<th>'+(g?'광고그룹':'세트')+'</th><th>'+(g?'캠페인':'계정')+'</th>'
+       +'<th>마킹</th><th>대상</th><th>항목</th>'
        +'<th>현재</th><th>→</th><th>변경 후</th><th>'+(applied?'결과':'비고')+'</th></tr></thead><tbody>';
   plan.forEach(p=>{
     const m=meta[p.adset_id]||{};
@@ -2948,7 +2973,7 @@ function abRender(plan,applied){
     if(p.error)last='⚠ '+abEsc(p.error);
     else if(applied)last=p.applied?'✅ 적용됨':'— 변경 없음';
     else last=abEsc(p.note||'');
-    if(!p.error&&p.scope==='campaign')last='<span class="ab-warn">⚠ CBO</span> '+last;
+    if(!p.error&&p.scope==='campaign')last='<span class="ab-warn">⚠ '+(g?'캠페인 예산':'CBO')+'</span> '+last;
     if(!p.error&&p.redo)last='<span class="ab-warn">⚠ 재적용</span> '+last;   // 오늘 이미 적용 — 또 하면 ±% 가 복리
     const cur=p.field==='status'?abEsc(p.before):abAmt(p.before,p.offset,p.currency);
     const nxt=p.field==='status'?abEsc(p.after):abAmt(p.after,p.offset,p.currency);
@@ -2957,14 +2982,14 @@ function abRender(plan,applied){
     const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="ab-ck" data-id="'+abEsc(p.adset_id)+'"'
       +(nobulk?' data-nobulk="1"':'')+(sel?'':' disabled')+(sel&&!nobulk?' checked':'')
       +' onclick="abSelChanged()"></td>';
-    // 이름 옆에 세트 ID — Ads Manager·날짜탭과 대조할 때 쓰므로 그대로 복사 가능하게 둔다
+    // 이름 옆에 ID — Ads Manager·날짜탭과 대조할 때 쓰므로 그대로 복사 가능하게 둔다
     const nm=p.adset_name||m.name||'';
     const nameCell=nm?abEsc(nm)+' <span class="ab-id">'+abEsc(p.adset_id)+'</span>':'<span class="ab-id">'+abEsc(p.adset_id)+'</span>';
     h+='<tr class="'+cls+'">'+ckTd
       +'<td class="ab-name">'+nameCell+'<div style="color:#aaa;font-size:9px">'+abEsc(m.campaign||'')+'</div></td>'
-      +'<td>'+abEsc(accName(p.ad_account_id))+'</td>'
+      +'<td>'+abEsc(g?(p.campaign_name||m.campaign||''):accName(p.ad_account_id))+'</td>'
       +'<td class="'+hlc+'" style="text-align:center;font-weight:600">'+abEsc(lbl)+'</td>'
-      +'<td>'+(p.scope==='campaign'?'캠페인':(p.scope==='adset'?'세트':''))+'</td>'
+      +'<td>'+(p.scope==='campaign'?'캠페인':(p.scope==='adset'?'세트':(p.scope==='adgroup'?'광고그룹':'')))+'</td>'
       +'<td>'+abEsc(p.field==='status'?'상태':(p.field==='lifetime_budget'?'총예산':(p.field?'일예산':'')))+'</td>'
       +'<td style="text-align:right">'+cur+'</td><td style="text-align:center;color:#aaa">→</td>'
       +'<td class="'+hlc+'" style="text-align:right;font-weight:600">'+nxt+'</td>'
@@ -3030,17 +3055,23 @@ function abPwOk(){
 function abPwCancel(){abPwDone(false)}
 document.getElementById('abPwMask').addEventListener('click',e=>{if(e.target.id==='abPwMask')abPwCancel()});   // abMask 와 동일한 배경 클릭 닫기
 
-async function abOpen(){
-  if(!AB_MODES[MODE]){alert('예산 적용은 국내·글로벌·밴스드 세트 탭에서만 가능합니다.');return}
+function abOpenGoogle(){return abOpen('google')}
+async function abOpen(src){
+  AB_SRC=(src==='google')?'google':'meta';
+  const g=AB_SRC==='google';
+  if(!g&&!AB_MODES[MODE]){alert('예산 적용은 국내·글로벌·밴스드 세트 탭에서만 가능합니다.');return}
   const t=abTargets();
-  if(!t.length){alert('증감액이 마킹된 세트가 없습니다.\n추이차트나 날짜탭에서 먼저 +20/+10/-10/-20/OFF 를 마킹해 주세요.');return}
+  if(!t.length){alert('증감액이 마킹된 '+(g?'광고그룹':'세트')+'이 없습니다.\n'
+    +(g?'구글 디멘드젠 표에서 캠페인·세트 칸을 클릭해':'추이차트나 날짜탭에서')+' 먼저 +20/+10/-10/-20/OFF 를 마킹해 주세요.');return}
   if(!await abPwAsk())return;   // 취소하면 dry-run 조회조차 하지 않는다
   AB_PLAN=null;
   document.getElementById('abMask').classList.add('show');
-  document.getElementById('abSub').textContent=AB_MODES[MODE]+' · '+t.length+'개 세트';
+  document.getElementById('abTitle').textContent=g?'⚡ 구글 예산 적용':'⚡ 메타 예산 적용';
+  document.getElementById('abSub').textContent=(g?'구글 디멘드젠':AB_MODES[MODE])+' · '+t.length+'개 '+(g?'광고그룹':'세트');
   document.getElementById('abBody').innerHTML='<div style="padding:24px;text-align:center;color:#888">메타에서 현재 예산 확인 중…</div>';
   document.getElementById('abMsg').textContent='';
-  const go=document.getElementById('abGo');go.disabled=true;go.textContent='확인 — 메타에 적용';
+  const go=document.getElementById('abGo');go.disabled=true;
+  go.textContent='확인 — '+(g?'구글':'메타')+'에 적용';
   try{
     const j=await abCall(true);
     AB_PLAN=j.plan||[];
@@ -3058,7 +3089,8 @@ async function abApply(){
     .map(p=>' · '+((p.adset_name||p.adset_id).slice(0,34))+'  '+((HL_CONFIG[p.tag]||{}).label||p.tag)
       +(p.redo?'   ⚠ 오늘 이미 적용됨':'')).join('\n');
   const redoN=picked.filter(p=>p.redo).length;
-  if(!confirm('선택한 '+ids.length+'개 세트의 메타 예산·상태를 실제로 변경합니다.\n\n'+lines
+  const gg=AB_SRC==='google';
+  if(!confirm('선택한 '+ids.length+'개 '+(gg?'광고그룹':'세트')+'의 '+(gg?'구글':'메타')+' 예산·상태를 실제로 변경합니다.\n\n'+lines
     +(redoN?'\n\n⚠ 이 중 '+redoN+'개는 오늘 이미 적용된 세트입니다. 지금 올라간 예산 기준으로 또 계산되어 증감이 복리로 걸립니다.':'')
     +'\n\n실행 후에는 Ads Manager 에서 직접 되돌려야 합니다. 진행할까요?'))return;
   AB_BUSY=true;
@@ -4415,6 +4447,8 @@ function renderGgdgTight(){
   list=list.filter(o=>o._s>0||o._r>0);
   if(kw)list=list.filter(o=>((o.camp||'')+' '+(o.name||'')+' '+(o.id||'')).toLowerCase().includes(kw));
   list.sort((a,b)=>(b._sy-a._sy)||(b._s-a._s));
+  GGDG_ROWS=list;   // '구글에 예산 적용' 대상 = 화면에 실제로 보이는 광고그룹
+  abSyncBtnG();
   // 셀: 지출 있으면 ROAS/순이익/-지출/매출/건수, 없으면 매출/건수만
   const cell=(s,r,c)=>{
     if(!s&&!r&&!c)return'';
