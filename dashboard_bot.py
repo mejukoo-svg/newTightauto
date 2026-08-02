@@ -486,12 +486,19 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         # active: True=현재 활성(하이라이트 대상) / False=중단 확정(제외) / None=상태 미상(필터 안 함)
         st = status_map.get(aid)
         active = (st in ACTIVE_STATUSES) if status_map else None
+        # 이틀 연속 증감액 금지: 마지막 조치가 기준일(dc=어제)의 증액·감액이면 오늘은 조정 대상에서 뺀다
+        act_dates = sorted(a["acts"])
+        last_act = a["acts"][act_dates[-1]] if act_dates else ""
+        just_adj = bool(act_dates) and act_dates[-1] == dc and last_act in ADJ_TAGS
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
                       "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist),
                       "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp,
-                      "active": active, "status": st or ""})
-    items.sort(key=lambda x: -x["_sp"])
+                      "active": active, "status": st or "",
+                      "just_adj": just_adj, "last_act": last_act})
+    # 활성(및 상태미상) 먼저, 그 안에서 지출 큰 순 → 40칸을 조언 대상 세트가 우선 차지한다.
+    # (중단 세트는 sets_to_text에서 목록 제외되지만, 하이라이트 하드 가드용으로 뒤에 남겨둔다)
+    items.sort(key=lambda x: (x.get("active") is False, -x["_sp"]))
     return items[:40], cur
 
 HL_KO = {"up10": "증액10%", "up20": "증액20%", "up": "증액", "down10": "감액10%",
@@ -502,6 +509,8 @@ HL_SHORT = {"up10": "증10", "up20": "증20", "up": "증", "down10": "감10",
 
 # 조언→추이차트 하이라이트로 자동 표기할 태그 (관찰=watch은 제외, 사용자 결정 2026-07-03)
 HL_TAGS_OK = {"up10", "up20", "down10", "down20", "off"}
+# 예산 '조정' 액션 (증액·감액) — 이틀 연속 금지 대상. OFF는 조정이 아니므로 제외(적자 방어는 언제든 가능)
+ADJ_TAGS = {"up10", "up20", "up", "down10", "down20", "down"}
 # 봇 응답 끝에 붙일 기계용 하이라이트 블록 지시 (ADV_SYSTEM이 아닌 봇 user 프롬프트에만 → perf-advice 스킬과 무관)
 ADV_MARKS_HINT = (
     "\n\n[하이라이트 출력 — 본문 맨 끝에 반드시 추가]\n"
@@ -561,11 +570,15 @@ def record_ai_marks(region, marks, mark_date):
     return len(rows)
 
 def sets_to_text(items, cur):
-    lines = []
+    """조언용 세트 목록. 중단(비활성) 세트는 아예 빼고 건수만 알린다 — 조언 대상은 활성 세트뿐."""
+    lines, skipped = [], 0
     for s in items:
+        if s.get("active") is False:  # 이미 정지됨 → 조언에서 다루지 않음(목록에서 제외)
+            skipped += 1
+            continue
         tag = []
-        if s.get("active") is False:  # 현재 중단(비활성) — 하이라이트 대상 아님
-            tag.append("상태:중단(" + (s.get("status") or "PAUSED") + ")")
+        if s.get("just_adj"):  # 어제 증감액함 → 오늘 또 조정하면 이틀 연속(효과 측정 불가)
+            tag.append("어제조정:" + HL_KO.get(s.get("last_act"), s.get("last_act")) + "(오늘 증감액 금지)")
         if s["hl"]:
             tag.append("조치:" + HL_KO.get(s["hl"], s["hl"]))
         if s["memo"]:
@@ -575,10 +588,11 @@ def sets_to_text(items, cur):
         if s.get("airec"):
             tag.append("AI권고이력:" + s["airec"])  # 과거 AI권고 vs 그날 사람선택 (조언 자체 보정용)
         tagstr = (" | " + " · ".join(tag)) if tag else ""
-        mark = "⏸ " if s.get("active") is False else ""  # 중단 세트는 눈에 띄게(하이라이트 금지 신호)
-        lines.append(f"- {mark}{s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
+        lines.append(f"- {s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
                      f"{ADVICE_DAYS}일ROAS {s['roas7']}%(지출{cur}{s['sp']:,}) · "
                      f"최근3일 {s['trend']}% · {s['ndays']}일{tagstr}")
+    if skipped:  # 조언 대상에서 빠졌음을 명시 (세트 수가 적어 보이는 이유 + 되살리지 말라는 신호)
+        lines.append(f"(이미 정지된 세트 {skipped}개는 조언 대상이 아니므로 목록에서 제외 — 언급하지 말 것)")
     return "\n".join(lines)
 
 ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 [플레이북]의 기준을 그대로 적용해,
@@ -597,12 +611,13 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 🔻 감액·OFF 후보: 세트명 + 근거. 여기는 빠뜨리지 말고 망라한다 — 7일ROAS 100~130% + 최근 3일 하락추세 = 10% 감액 후보, 7일ROAS<100% + 3일 연속 적자(OFF 3기준 C1·C2·C3 중 2개↑) = OFF 또는 20% 감액. 특히 '조치' 태그가 없는(미조치) 하락 세트를 놓치지 마라.
   · 👀 지켜볼 것: 데이터 얇음(런칭 3일내)·이미 조치한 세트의 효과 관찰·조치와 데이터가 모순되는 세트 등
 - 끄기/증액/감액 대상 세트를 언급할 때는 **반드시 세트명과 세트ID를 함께** 표기한다. 예: `무당_260507_aiUGC정확도 (ID 120243753711540177)`. ID는 [세트 데이터]에 주어진 값을 그대로 쓴다.
-- **하이라이트(증액·감액·OFF)는 '현재 활성'인 세트만 대상이다.** [세트 데이터]에서 앞에 `⏸`가 붙고 `상태:중단(…)`으로 표시된 세트는 지금 꺼져 있으므로, 증액·감액·OFF·복증 어느 것도 권하거나 하이라이트하지 마라(이미 꺼진 세트에 OFF·증감액은 무의미). 중단 세트를 다뤄야 하면 본문에서 '이미 중단됨'으로만 사실 언급하고, 재개 여부는 👀 지켜볼 것으로만 돌려라. (상태 표시가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
+- **이미 정지(중단)된 광고세트는 조언에서 아예 다루지 않는다.** 조언 대상은 '지금 돈이 나가고 있는 활성 세트'뿐이다. 중단 세트는 [세트 데이터] 목록에서 이미 제외돼 있고 하단에 제외 건수만 표기된다 → 증액·감액·OFF·복증 권고는 물론, 본문 언급도, 👀 지켜볼 것(재개·재활성 검토 포함)에 올리는 것도 금지다. [이전 스레드 토론]·'이력:'·'AI권고이력:'에 중단된 세트가 등장하더라도 이번 조언에서 되살리지 마라. (제외 안내가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
 - 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
 - 각 세트의 '이력:'은 최근 14일 증감액 액션과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액, 그날 ROAS 172%·110%). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
   · 증액 후 며칠 뒤 ROAS가 하락했으면 '증액 안 먹힘 → 되돌림/관망', 감액 후 회복했으면 '유효'.
   · **같은 액션(예: 증액20%)을 반복했는데도 계속 하락하면** 그 패턴을 명시적으로 지적하고, 증감액 손장난 대신 다른 처방(소재 수혈·타겟 제외·OFF 등 플레이북 5·9장)을 권하라.
   · 과거에 실패한 액션을 그대로 반복 권고하지 마라. 근거로 이력의 날짜·ROAS를 인용하라.
+- **이틀 연속 증감액 금지(원칙)**: 예산을 조정한 다음 날은 결과를 최소 하루 지켜본다. 이력의 날짜는 '조치를 실행한 날'이고 [세트 데이터]의 기준일은 어제이므로, **이력의 가장 최근 조치가 어제이고 그것이 증액 또는 감액이면 그 세트는 오늘 증액·감액 후보에서 제외**한다. 그런 세트에는 `어제조정:…(오늘 증감액 금지)` 태그가 붙어 있으니 그대로 따르라. 같은 방향 재조정(증액→증액)도, 방향을 뒤집는 조정(증액→감액)도 안 된다 — 이틀 연속 손대면 어느 조치가 먹혔는지 측정이 불가능해진다. 대신 👀 지켜볼 것으로 돌려 '어제 OO 조정 → 효과 관찰 중'으로만 적어라. 예외: OFF(끄기)는 증감액이 아니므로 이 제한을 받지 않는다(OFF 3기준을 명백히 충족하는 적자 세트는 어제 조정했더라도 OFF 권고 가능).
 - 각 세트의 'AI권고이력:'은 **과거에 내가(AI) 그날 권한 증감액과, 그날 사람이 실제 선택한 하이라이트를 나란히** 보여준다(예: `07-01AI OFF(사람:—) → 07-02AI증20(사람:증10)`). `(사람:—)`=사람이 내 권고를 안 따랐거나 미표기, `(사람:증10)`=내가 증20을 권했으나 사람이 증10으로 하향 조정. **이 AI↔사람 차이를 이후 ROAS 추세와 대조해 내 조언 기준 자체를 채점·보정하라(핵심 학습 루프)**:
   · 사람이 내 권고를 반복적으로 하향/무시했고 그게 옳았으면(이후 ROAS가 사람 선택을 지지), 내 기준이 과했음을 인정하고 이번 권고의 강도·폭을 그 방향으로 조정하라.
   · 반대로 사람이 안 따랐는데 이후 ROAS가 나빠졌으면, 근거(그날 AI권고·이후 ROAS)를 들어 이번에 다시 설득하라.
@@ -934,6 +949,16 @@ def main():
                     dropped = len(adv_marks) - len(kept)
                     if dropped:
                         print(f"  [하이라이트] 중단 세트 {dropped}건 제외 (활성 세트만 마킹)")
+                    adv_marks = kept
+                # 하드 가드2: 어제 증감액한 세트는 오늘 또 증감액 금지(이틀 연속 조정 → 효과 측정 불가).
+                # OFF는 조정이 아니므로 통과시킨다.
+                adj_ids = {str(it["id"]) for it in items if it.get("just_adj")}
+                if adj_ids and adv_marks:
+                    kept = [m for m in adv_marks
+                            if not (str(m.get("id")) in adj_ids and m.get("tag") in ADJ_TAGS)]
+                    dropped = len(adv_marks) - len(kept)
+                    if dropped:
+                        print(f"  [하이라이트] 어제 증감액한 세트 {dropped}건 제외 (이틀 연속 조정 금지)")
                     adv_marks = kept
             except Exception as e:
                 print(f"  [조언] 생성 실패: {e}")
