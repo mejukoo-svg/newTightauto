@@ -4513,6 +4513,8 @@ function renderGgdgTight(){
     if(view==='week'){const s=new Date(k),e=new Date(k);e.setDate(e.getDate()+6);return(s.getMonth()+1)+'/'+s.getDate()+'~'+(e.getMonth()+1)+'/'+e.getDate()}
     return DK(k)+'('+WD(k)+')'};
   const setCol=(o,k)=>{let s=0,r=0,c=0;colOf[k].forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});return{s,r,c}};
+  // 소재 펼침(toggleGgdgCreatives)이 세트 행과 똑같은 컬럼을 그리도록 현재 컬럼 구성을 보관
+  _GGDG_COLCFG={cols,colOf,view,yDay,allDates};
   // 기간합계 + 검색필터 + 정렬(어제 지출↓, 동률이면 기간합계 지출↓)
   let list=Object.values(byC).map(o=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});o._s=s;o._r=r;o._c=c;o._roas=s>0?r/s*100:0;o._sy=o.d[yDay]?.s||0;return o});
   list=list.filter(o=>o._s>0||o._r>0);
@@ -4543,8 +4545,11 @@ function renderGgdgTight(){
     // 하이라이트 — 추이차트와 동일한 색상 피커·저장소(키=세트 id)
     const hl=hlClass(o.id);
     const ck=' clickable" data-id="'+o.id+'" onclick="showCPGgdg(\''+o.id+'\',this)"';
-    const head='<td class="fx fx0 '+hl+ck+' style="text-align:left;font-size:11px">'+(o.camp||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:11px">'+(o.name||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:9px;color:#888">'+o.id+'</td>';
-    return'<tr>'+head+'<td class="mc '+(o._s>0?RC(o._roas):'')+'" style="font-weight:700">'+cell(o._s,o._r,o._c)+'</td>'+cells+'</tr>';
+    // 캠페인 칸의 ▶ 캐럿 = 그 캠페인(=세트) 하위 소재 목록 펼치기/접기.
+    //   '(세트미상)' 합성 행(camp_<id>)은 실제 광고가 없으므로 캐럿 없음.
+    const caret=/^camp_/.test(o.id)?'':'<span class="ex-caret" onclick="event.stopPropagation();toggleGgdgCreatives(\''+o.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
+    const head='<td class="fx fx0 '+hl+ck+' style="text-align:left;font-size:11px">'+caret+(o.camp||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:11px">'+(o.name||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:9px;color:#888">'+o.id+'</td>';
+    return'<tr data-ggdg-row="'+o.id+'">'+head+'<td class="mc '+(o._s>0?RC(o._roas):'')+'" style="font-weight:700">'+cell(o._s,o._r,o._c)+'</td>'+cells+'</tr>';
   };
   // 추이차트와 동일하게 상품별로 나눠서 표시 (📦 상품 헤더 + 상품 소계 + 세트 행).
   //   상품 판정=_dgProduct(세트명||캠페인명), 주간종합 탭의 디멘드젠 상품분해와 동일 기준.
@@ -4564,6 +4569,98 @@ function renderGgdgTight(){
     });
   }
   h+='</tbody>';tbl.innerHTML=h;
+}
+
+// ===== 구글 디멘드젠 [Tight] — 캠페인(세트) 행 ▶ → 하위 소재(광고) 펼침 =====
+// 소스: google_demandgen_ad_daily (구글_디멘드젠_캠페인_supabase.py 가 세트별 테이블과
+//   같은 실행에서 함께 적재 — Ads API ad_group_ad 지출 + MP utm_content(=광고 id) 매출).
+//   클릭한 세트의 소재만 Supabase에서 직접 fetch(세션 캐시) → 세트 행과 완전히 같은
+//   컬럼 구성(_GGDG_COLCFG: 일/주/월 보기·기간)으로 소계 + 소재 행을 그린다.
+//   ⚠ 매출은 utm_content 가 붙은 결제만 소재로 귀속되므로 소재 합계 ≤ 세트 매출(소계 행에 표시).
+let _GGDG_COLCFG=null;
+async function toggleGgdgCreatives(adGroupId,anchorRow){
+  const tbody=anchorRow.parentNode;
+  const sel='tr.creative-expanded[data-parent="'+CSS.escape(adGroupId)+'"]';
+  const existing=tbody.querySelectorAll(sel);
+  const caret=anchorRow.querySelector('.ex-caret');
+  if(existing.length){existing.forEach(r=>r.remove());if(caret)caret.textContent='▶';return}
+  if(caret)caret.textContent='⌛';
+  await new Promise(r=>requestAnimationFrame(r));
+  // 세트별 1회 fetch (in-flight 중복 방지)
+  if(!window._GGDG_AD_CACHE)window._GGDG_AD_CACHE={};
+  let recs=window._GGDG_AD_CACHE[adGroupId];
+  if(recs===undefined){
+    const url=SB_URL+'/rest/v1/google_demandgen_ad_daily?select=*&order=date.desc&ad_group_id=eq.'
+      +encodeURIComponent(adGroupId)+'&date=gte.'+_dateCutoff(215)+'&limit=100000';
+    const p=fetch(url,{headers:SBH}).then(r=>r.json()).catch(()=>[]);
+    window._GGDG_AD_CACHE[adGroupId]=p;
+    const got=await p;
+    recs=window._GGDG_AD_CACHE[adGroupId]=Array.isArray(got)?got:[];
+  }else if(recs&&typeof recs.then==='function'){
+    const got=await recs;recs=Array.isArray(got)?got:[];
+  }
+  const cfg=_GGDG_COLCFG||{};
+  const cols=cfg.cols||[],colOf=cfg.colOf||{},view=cfg.view||'day',yDay=cfg.yDay||'',allDates=cfg.allDates||[];
+  const dateSet=new Set(allDates);
+  const totalCols=anchorRow.cells.length;
+  const cell=(s,r,c)=>{
+    if(!s&&!r&&!c)return'';
+    let h='';
+    if(s>0){const roas=r/s*100,p=r-s;h+='<div class="r">'+roas.toFixed(0)+'</div><div class="'+(p>=0?'p':'p neg')+'">'+moneyKRW(p)+'</div><div class="s">-'+moneyKRW(s)+'</div>'}
+    h+='<div class="rv">'+moneyKRW(r)+'</div><div class="cv" style="color:#888">'+(c||0)+'건</div>';
+    return h;
+  };
+  // 소재(ad_id)별 × 일자 집계
+  const byA={};
+  recs.forEach(r=>{if(!dateSet.has(r.date))return;
+    const id=String(r.ad_id||'');if(!id)return;
+    const a=byA[id]||(byA[id]={id,name:r.ad_name||r.ct||id,ct:r.ct||'',d:{}});
+    if(r.ad_name)a.name=r.ad_name;
+    const x=a.d[r.date]||(a.d[r.date]={s:0,r:0,c:0});
+    x.s+=(+r.spend||0);x.r+=(+r.revenue||0);x.c+=(+r.purchase_count||0)});
+  let list=Object.values(byA).map(a=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=a.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});
+    a._s=s;a._r=r;a._c=c;a._roas=s>0?r/s*100:0;return a}).filter(a=>a._s>0||a._r>0||a._c>0);
+  list.sort((a,b)=>(b._s-a._s)||(b._r-a._r));
+  if(!list.length){
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded';tr.setAttribute('data-parent',adGroupId);
+    tr.innerHTML='<td colspan="'+totalCols+'" style="padding:8px 24px;background:#fff7e6;color:#999;font-size:11px;font-style:italic">↳ 소재 데이터 없음 (google_demandgen_ad_daily 미수집 또는 해당 기간 미운영)</td>';
+    anchorRow.after(tr);if(caret)caret.textContent='▼';return;
+  }
+  const colOfSum=(a,k)=>{let s=0,r=0,c=0;(colOf[k]||[]).forEach(d=>{const x=a.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});return{s,r,c}};
+  const trs=[];
+  // 1) 소재 소계 — 세트 행과 비교용(매출 커버리지 확인)
+  {
+    const tS=list.reduce((x,a)=>x+a._s,0),tR=list.reduce((x,a)=>x+a._r,0),tC=list.reduce((x,a)=>x+a._c,0);
+    const tRoas=tS>0?tR/tS*100:0;
+    const cells=cols.map(k=>{let s=0,r=0,c=0;list.forEach(a=>{const x=colOfSum(a,k);s+=x.s;r+=x.r;c+=x.c});
+      const yd=(view==='day'&&k===yDay)?' col-yday':'';
+      if(!s&&!r&&!c)return'<td class="'+yd+'"></td>';
+      const roas=s>0?r/s*100:0;return'<td class="mc '+(s>0?RC(roas):'')+yd+'">'+cell(s,r,c)+'</td>'}).join('');
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded cr-subtotal';tr.setAttribute('data-parent',adGroupId);
+    tr.innerHTML='<td class="fx fx0 cr-name">↳ 소재 소계 ('+list.length+'개)</td><td class="cr-name2"></td><td class="cr-id"></td>'
+      +'<td class="mc '+(tS>0?RC(tRoas):'')+'" style="font-weight:700">'+cell(tS,tR,tC)+'</td>'+cells;
+    trs.push(tr);
+  }
+  // 2) 개별 소재 행
+  list.forEach(a=>{
+    const cells=cols.map(k=>{const x=colOfSum(a,k);const yd=(view==='day'&&k===yDay)?' col-yday':'';
+      if(!x.s&&!x.r&&!x.c)return'<td class="'+yd+'"></td>';
+      const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
+    const nm=(a.name||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const ttl=(a.ct?('ct='+a.ct+' · '):'')+(a.name||'');
+    const tr=document.createElement('tr');
+    tr.className='creative-expanded';tr.setAttribute('data-parent',adGroupId);
+    tr.innerHTML='<td class="fx fx0 cr-name"></td><td class="cr-name2" title="'+ttl.replace(/"/g,'&quot;')+'"><span style="color:#888">┗</span> '+nm+'</td>'
+      +'<td class="cr-id" style="color:#888">'+a.id+'</td>'
+      +'<td class="mc '+(a._s>0?RC(a._roas):'')+'" style="font-weight:700">'+cell(a._s,a._r,a._c)+'</td>'+cells;
+    trs.push(tr);
+  });
+  const frag=document.createDocumentFragment();
+  trs.forEach(t=>frag.appendChild(t));
+  anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
+  if(caret)caret.textContent='▼';
 }
 
 // ===== ZOOM =====
