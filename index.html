@@ -3016,7 +3016,11 @@ function abRender(plan,applied){
 //  · 통화가 섞일 수 있어(국내=KRW·글로벌=USD) 통화별로 나눠 더한다. 환산은 하지 않는다.
 //  · CBO(캠페인 예산)는 한 캠페인이 여러 세트 행으로 나올 수 있어 대상 단위로 한 번만 센다
 //    — 안 그러면 같은 예산 변경이 중복으로 더해진다.
-//  · OFF(상태 변경)는 plan 에 예산 숫자가 없어 금액에 넣을 수 없다 → 건수만 따로 표기.
+//  · OFF(상태 변경)도 감액으로 센다 — 세트를 끄면 그 세트 예산만큼 하루 지출이 사라지므로
+//    '결국 예산이 얼마 움직이는가'에는 포함돼야 한다. 서버(apply-budget)가 내려주는
+//    off_budget(세트 자체 예산, ABO)을 −금액으로 더한다.
+//    단 CBO(off_scope='campaign')는 세트를 꺼도 캠페인 예산이 남아 다른 세트로 재분배되므로
+//    금액에 넣지 않고 건수만 따로 적는다. 구글(디멘드젠)도 광고그룹 예산이 없어 같은 처리.
 //  · 집계 대상은 '선택된 행'(적용 후에는 '실제 적용된 행') — 실제로 일어날 일만 더한다.
 function abSumKey(p){
   return p.scope==='campaign'
@@ -3024,23 +3028,31 @@ function abSumKey(p){
     : 'a|'+p.adset_id;
 }
 function abSumCalc(rows){
-  const by={},seen=new Set();let offN=0,dup=0;
+  const by={},seen=new Set();let offN=0,offCut=0,dup=0;
+  const bucket=c=>by[c]||(by[c]={inc:0,dec:0,ni:0,nd:0,base:0});
   rows.forEach(p=>{
     const k=abSumKey(p);
     if(seen.has(k)){dup++;return}
     seen.add(k);
-    if(p.field==='status'){offN++;return}
+    if(p.field==='status'){
+      if(p.after===p.before)return;             // '이미 중단됨' — 실제로 바뀌는 게 없다
+      const b=Number(p.off_budget||0)/(p.offset||1);
+      if(b>0){                                   // ABO: 세트 예산이 통째로 빠진다 → 감액
+        const o=bucket(p.currency||'');
+        o.base+=b;o.dec-=b;o.nd++;offCut++;
+      }else offN++;                              // CBO·구글: 끄는 건 맞지만 예산은 남는다
+      return;
+    }
     if(!p.field)return;
     const b=Number(p.before),a=Number(p.after);
     if(!isFinite(a)||!isFinite(b))return;
     const off=p.offset||1,d=(a-b)/off;
     if(!d)return;
-    const c=p.currency||'';
-    const o=by[c]||(by[c]={inc:0,dec:0,ni:0,nd:0,base:0});
+    const o=bucket(p.currency||'');
     o.base+=b/off;                       // 변경 대상들의 '현재' 예산 합 — 변동폭의 체감 기준
     if(d>0){o.inc+=d;o.ni++}else{o.dec+=d;o.nd++}
   });
-  return{by:by,offN:offN,dup:dup};
+  return{by:by,offN:offN,offCut:offCut,dup:dup};
 }
 function abSumFmt(v){return Math.abs(v).toLocaleString('ko-KR',{maximumFractionDigits:2})}
 function abRenderSum(rows,applied){
@@ -3062,7 +3074,8 @@ function abRenderSum(rows,applied){
       +'</span></div>';
   });
   const notes=[];
-  if(r.offN)notes.push('OFF '+r.offN+'건은 예산 금액이 없어 합계에서 제외(중단되면 그만큼 소진도 멈춤)');
+  if(r.offCut)notes.push('OFF '+r.offCut+'건은 세트 예산 전액을 감액으로 반영');
+  if(r.offN)notes.push('OFF '+r.offN+'건은 캠페인 예산(CBO·구글)이 남아 금액 미반영 — 중단되면 소진은 멈춤');
   if(r.dup)notes.push('같은 캠페인 예산(CBO) 중복 '+r.dup+'건은 1회만 반영');
   if(notes.length)h+='<div class="ab-sum-r"><span class="ab-note">※ '+notes.join(' · ')+'</span></div>';
   el.innerHTML=h;

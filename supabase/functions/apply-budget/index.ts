@@ -195,6 +195,14 @@ type Plan = {
   after: string;
   note: string;
   error: string;
+  // OFF(상태 변경) 행은 예산 필드를 바꾸지 않지만, 중단되면 그 세트가 쓰던 예산만큼 지출이 멈춘다.
+  // 대시보드 하단 '증감 합계'가 이를 감액으로 셀 수 있도록 현재 예산을 함께 내려준다.
+  //   off_scope='adset'  → 세트 자체 예산(ABO). 그 금액이 그대로 빠진다 → 합계에 −로 반영.
+  //   off_scope='campaign' → CBO. 세트를 꺼도 캠페인 예산은 남아 다른 세트로 재분배되므로
+  //                          off_budget=0 으로 두고 UI 가 '금액 미반영'으로 안내한다.
+  off_budget?: number;
+  off_scope?: "adset" | "campaign";
+  off_field?: string;
   applied?: boolean;
   conflict?: boolean; // 같은 CBO 캠페인에 다른 증감률 — 선택을 하나로 줄이면 해소된다
   shared_with?: string[]; // 같은 CBO 캠페인을 공유하는 다른 세트
@@ -301,6 +309,23 @@ async function planOne(
       if (String(a.status) === "PAUSED") {
         p.note = "이미 중단됨 — 변경 없음";
         p.after = p.before;
+      }
+      // 중단으로 빠지는 예산 — 세트 자체 예산(ABO)만 확정적으로 사라지는 금액이다.
+      // CBO 는 캠페인 예산이 그대로 남으므로 금액 0 + scope 만 알려 UI 가 구분해 안내한다.
+      {
+        const campOff = a.campaign || {};
+        const ownDaily = Number(a.daily_budget || 0);
+        const ownLife = Number(a.lifetime_budget || 0);
+        if (ownDaily > 0 || ownLife > 0) {
+          p.off_scope = "adset";
+          p.off_field = ownDaily > 0 ? "daily_budget" : "lifetime_budget";
+          p.off_budget = ownDaily > 0 ? ownDaily : ownLife;
+        } else if (Number(campOff.daily_budget || 0) > 0 || Number(campOff.lifetime_budget || 0) > 0) {
+          p.off_scope = "campaign";
+          p.off_field = Number(campOff.daily_budget || 0) > 0 ? "daily_budget" : "lifetime_budget";
+          p.off_budget = 0;
+          p.note = (p.note ? p.note + " / " : "") + "CBO — 캠페인 예산은 남음(합계 금액 미반영)";
+        }
       }
       return p;
     }
