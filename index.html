@@ -767,8 +767,19 @@ const GL_META_DAYS=new Set(['2026-07-31','2026-08-01','2026-08-02','2026-08-03']
 function glMetaRow(r){
   if(!GL_META_DAYS.has(r.date))return r;
   const sp=+r.spend||0;
-  const rev=sp*(+r.purchase_roas_meta||0);   // 메타 ROAS 는 배수(1.6 = 160%)
-  return {...r,revenue:rev,profit:rev-sp,results_mp:Math.round(+r.results_meta||0),_glMeta:1};
+  const cnt=Math.round(+r.results_meta||0);
+  // 메타 ROAS(배수)가 있으면 그걸로 매출을 만들고, 없으면(값 추적이 없는 세트) 구매수만 살린다.
+  //   메타는 구매수는 잡아도 purchase_roas 를 0 으로 주는 경우가 흔하다 → 매출 0 은 그대로 두되
+  //   구매수·CVR·구매당비용은 메타 기준으로 보이게 한다.
+  const rev=sp*(+r.purchase_roas_meta||0);
+  const uc=+r.unique_clicks||0;
+  // ★ 셀은 저장된 r.roas / r.cvr 을 그대로 쓴다(재계산하지 않는다) → 여기서 같이 갈아끼워야
+  //   ROAS·CVR 만 Mixpanel 기준으로 남아 0 으로 찍히는 일이 없다.
+  return {...r,revenue:rev,profit:rev-sp,results_mp:cnt,
+          roas:sp>0?rev/sp*100:0,
+          cvr:(uc>0&&cnt>0)?cnt/uc*100:0,
+          cost_per_result:cnt>0?sp/cnt:0,
+          _glMeta:1};
 }
 
 // Row ID: adset_id for kr/gl, ad_id for creative
