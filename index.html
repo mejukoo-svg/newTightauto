@@ -373,7 +373,11 @@ const SBC=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRef
 // onAuthStateChange는 로그인/토큰자동갱신/로그아웃 시 SBH 헤더를 항상 최신으로 유지.
 SBC.auth.onAuthStateChange((_e,session)=>{SBH.Authorization='Bearer '+(session?session.access_token:SB_KEY);});
 
-// ===== 매월 매출 목표 (KRW, 대시보드 배너용) — 매달 새로 추가/수정 =====
+// ===== 매월 매출 목표 (대시보드 배너용) — 매달 새로 추가/수정 =====
+//   국내(kr) = KRW,  글로벌(gl) = USD. 글로벌 탭은 지표가 전부 달러라 목표도 달러로 둔다.
+//   기존 KRW 목표는 그 달 실효환율(실적KRW÷실적USD)로 환산해 달성률이 바뀌지 않게 옮겼다:
+//     4.5억÷1479.6=$304,128 → $304,000 · 6억÷1530.6=$392,007 → $392,000
+//     16억÷1495.7=$1,069,733 → $1,070,000  (반올림 오차 0.05%p 미만)
 const MONTHLY_REVENUE_GOAL={
   kr:{
     '2026-05': 1500000000,  // 국내: 15억
@@ -381,9 +385,9 @@ const MONTHLY_REVENUE_GOAL={
     '2026-07': 1700000000,  // 국내: 17억
   },
   gl:{
-    '2026-05': 450000000,   // 글로벌: 4.5억 (KRW 환산 기준, USD→KRW per-day rate)
-    '2026-06': 600000000,   // 글로벌: 6억 (KRW 환산 기준, USD→KRW per-day rate)
-    '2026-07': 1600000000,  // 글로벌: 16억 (KRW 환산 기준, USD→KRW per-day rate)
+    '2026-05': 304000,      // 글로벌: $304K (구 4.5억)
+    '2026-06': 392000,      // 글로벌: $392K (구 6억)
+    '2026-07': 1070000,     // 글로벌: $1.07M (구 16억)
   },
 };
 
@@ -1636,29 +1640,30 @@ function renderDashboard(){
         mtd+=(HIST_REVENUE[k]!=null?HIST_REVENUE[k]:(tossMap[k]||0));
       }
     }else{
-      // 글로벌: STRIPE_DATA(revenue_usd) × usd_krw_rate(per-day) 합산
+      // 글로벌: STRIPE_DATA(revenue_usd) 를 USD 그대로 누적한다(환율 곱하지 않음).
+      //   글로벌 탭 지표가 전부 달러라 목표·실적도 달러로 맞춘다. 원화 환산액은 참고로만 괄호에.
       let fbRate=0;
       for(const r of STRIPE_DATA){if(r.usd_krw_rate>0){fbRate=r.usd_krw_rate;break}}
-      let totUsd=0;
       STRIPE_DATA.forEach(r=>{
-        if(r.date>=monthStart&&r.date<=endYmd){
-          const rate=r.usd_krw_rate||fbRate;
-          mtd+=(r.revenue_usd||0)*rate;
-          totUsd+=(r.revenue_usd||0);
-        }
+        if(r.date>=monthStart&&r.date<=endYmd)mtd+=(r.revenue_usd||0);
       });
-      extra=' <span style="color:#888;font-size:11px">($'+Math.round(totUsd).toLocaleString('en-US')+' · 환율 '+(fbRate?fbRate.toFixed(0):'-')+')</span>';
+      // 환율은 밴스드 대만 기여(KRW 원본)를 USD 로 환산할 때 쓰는 값이라 근거로만 남긴다.
+      extra=' <span style="color:#888;font-size:11px">(환율 '+(fbRate?fbRate.toFixed(0):'-')+')</span>';
     }
     // 경과일/남은일: 당월이면 어제까지 경과, 과거 월이면 완료(남은 0)
     const hasData=(endYmd>=monthStart);
     const elapsed=isCurMonth?((yest.getFullYear()===now.getFullYear()&&yest.getMonth()===now.getMonth())?yest.getDate():0):totalDaysInMonth;
     const daysLeft=isCurMonth?Math.max(1,totalDaysInMonth-elapsed):0;
-    const fmt=n=>'₩'+Math.round(n).toLocaleString('ko-KR');
+    // 국내=원, 글로벌=달러 (글로벌 탭에서 원화 표기를 남기지 않는다)
+    const fmt=n=>MODE==='gl'?('$'+Math.round(n).toLocaleString('en-US')):('₩'+Math.round(n).toLocaleString('ko-KR'));
     // 글로벌: 실적(Stripe KRW)을 '순수 글로벌'과 '밴스드 대만 기여'로 분리.
     // 밴스드 대만 = vanced_ad_performance_daily(VN_TW_ACC, KRW) 대상 월 누적. '글로벌 채널=Stripe−대만밴스드귀속' 정의와 동일.
     let vncTw=0,pureRev=mtd,vncShare=0,pureShare=0;const vncColor='#9333ea';
     if(MODE==='gl'){
-      (VN_AD||[]).forEach(r=>{if(String(r.ad_account_id||'')===VN_TW_ACC&&r.date>=monthStart&&r.date<=endYmd)vncTw+=(+r.revenue||0);});
+      // VN_AD.revenue 는 KRW → 일별 환율로 USD 환산(mtd 가 USD 라 단위를 맞춘다)
+      (VN_AD||[]).forEach(r=>{if(String(r.ad_account_id||'')===VN_TW_ACC&&r.date>=monthStart&&r.date<=endYmd){
+        const _rt=usdKrwRateAt(r.date)||1450; vncTw+=(+r.revenue||0)/_rt;
+      }});
       vncTw=Math.max(0,Math.min(vncTw,mtd));
       pureRev=Math.max(0,mtd-vncTw);
       if(mtd>0){vncShare=vncTw/mtd*100;pureShare=pureRev/mtd*100;}
