@@ -757,6 +757,20 @@ function norm(r){
   }
   return r;
 }
+// ===== 글로벌 추이차트: 특정 날짜만 Meta 자체 보고값으로 =====
+// Mixpanel 귀속 매출은 UTM 이 붙은 실주문만 세므로 Meta 보고값보다 늘 낮다(최근 실측 58~79%).
+// 아래 날짜는 사용자 요청으로 추이차트에서만 Meta 기준으로 본다 — 매출 = 지출 × ROAS(메타),
+// 구매수 = results_meta, 순이익·ROAS·CVR 은 그 값으로 재계산된다.
+//   · 적용 범위: 글로벌(gl) 모드의 추이차트뿐. 날짜탭·매출탭 등 나머지는 Mixpanel 그대로.
+//   · 되돌리려면 이 Set 을 비우면 된다(코드 수정 불필요).
+const GL_META_DAYS=new Set(['2026-07-31','2026-08-01','2026-08-02','2026-08-03']);
+function glMetaRow(r){
+  if(!GL_META_DAYS.has(r.date))return r;
+  const sp=+r.spend||0;
+  const rev=sp*(+r.purchase_roas_meta||0);   // 메타 ROAS 는 배수(1.6 = 160%)
+  return {...r,revenue:rev,profit:rev-sp,results_mp:Math.round(+r.results_meta||0),_glMeta:1};
+}
+
 // Row ID: adset_id for kr/gl, ad_id for creative
 function rowId(r){return MODE==='cr'?(r.ad_id||''):(r.adset_id||'')}
 function rowName1(r){return MODE==='cr'?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
@@ -2022,7 +2036,9 @@ function renderTrend(opts){
   // accFilter: 국가 구분은 상단 countrySel(국가 필터)로 처리 → 구 ad_account(대만계정) 분리 제거.
   const accFilter=opts.accFilter||null;
   // opts.rows: 명시 시 전역 AD 대신 이 데이터셋으로 렌더(글로벌 추이차트 타이트/밴스드/모두 등)
-  const ROWS=opts.rows||AD;
+  //   글로벌은 GL_META_DAYS 날짜만 Meta 보고값으로 치환해서 그린다(다른 탭은 영향 없음).
+  const _ROWS0=opts.rows||AD;
+  const ROWS=(MODE==='gl')?_ROWS0.map(glMetaRow):_ROWS0;
   console.log('[DBG] renderTrend called, MODE=',MODE,'TBL=',TBL);
   const days=parseInt(document.getElementById(daysElId).value);
   const dd=DATES.slice(0,days);const d7=dd.slice(0,7);
@@ -2061,7 +2077,10 @@ function renderTrend(opts){
   //   (예전엔 list 자체를 필터해 합계가 과거 구간에서 누락됐음)
   // 하이라이트가 걸려 있는 세트는 색 유지 위해 항상 표시.
   const isHidden=a=>!tKw&&(MODE==='kr'||MODE==='gl')&&!(a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
-  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';
+    // 메타 기준으로 그린 날짜는 헤더에 표시 — 날짜탭(Mixpanel)과 숫자가 다른 이유를 바로 알 수 있게
+    const mm=(MODE==='gl'&&GL_META_DAYS.has(d))?'<span title="이 날짜는 Mixpanel 대신 Meta 보고값(매출=지출×메타ROAS, 구매수=results_meta) 기준입니다" style="color:#1a73e8;font-size:9px">ᴹ</span>':'';
+    return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')'+mm+'</th>'}).join('');
   const colSpan=dd.length+4+(showChg?1:0)+(showAcc?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 메모 1칸(증감 컬럼 제거), showAcc시 광고계정 1칸
   // Summary
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks;imp+=(a.d[d].impressions||0)}});totD[d]={s,r,p,mp,uc,imp}});
