@@ -204,6 +204,8 @@ def meta_api_get(url, params=None):
     return None
 
 
+_META_RANGE_CHUNK_DAYS = int(os.environ.get("META_RANGE_CHUNK_DAYS", "30"))
+
 def fetch_meta_insights_range(since, until, account):
     """계정 1개의 [since~until] 일별 인사이트를 '한 번의 호출'로 가져온다.
 
@@ -211,6 +213,24 @@ def fetch_meta_insights_range(since, until, account):
     time_increment=1 이면 범위 호출도 날짜별 행(date_start)으로 쪼개져 온다 → 결과 동일, 호출 1/10.
     반환: 성공 시 행 리스트(빈 리스트 = 지출 0), 실패 시 None(← '데이터 없음'과 반드시 구분).
     """
+    # 긴 구간은 조각내서 호출한다. adset×country×일자 그레인이라 범위가 길면 Meta 가
+    #   집계 도중 500 을 뱉고 재시도해도 계속 실패한다(FULL_REFRESH 269일 = 5회 전부 500 실측,
+    #   2026-08-04). 30일 조각이면 안정적. 평상시 10일 창은 조각 1개 = 기존과 동일한 1콜.
+    if (datetime.strptime(until,'%Y-%m-%d') - datetime.strptime(since,'%Y-%m-%d')).days + 1 > _META_RANGE_CHUNK_DAYS:
+        merged = []
+        cur = datetime.strptime(since,'%Y-%m-%d'); last = datetime.strptime(until,'%Y-%m-%d')
+        while cur <= last:
+            ce = min(cur + timedelta(days=_META_RANGE_CHUNK_DAYS-1), last)
+            part = fetch_meta_insights_range(cur.strftime('%Y-%m-%d'), ce.strftime('%Y-%m-%d'), account)
+            if part is None:
+                log.warning(f"    ⚠️ {account} {cur:%Y-%m-%d}~{ce:%Y-%m-%d} 조각 실패")
+                return None      # 부분 데이터로 덮으면 지출 과소계상 → 구간 전체를 실패 처리
+            log.info(f"    📦 {cur:%Y-%m-%d}~{ce:%Y-%m-%d}: {len(part)}행")
+            merged.extend(part)
+            cur = ce + timedelta(days=1)
+            time.sleep(3)
+        return merged
+
     url = f"{META_BASE_URL}/{account}/insights"
     params = {'fields':'campaign_name,adset_name,adset_id,spend,cpm,reach,impressions,frequency,actions,cost_per_action_type,purchase_roas,unique_outbound_clicks,unique_outbound_clicks_ctr,cost_per_unique_outbound_click',
         'level':'adset','breakdowns':'country','time_increment':1,'time_range':json.dumps({'since':since,'until':until}),'limit':500,
@@ -267,8 +287,11 @@ def fetch_mixpanel(from_date, to_date):
             resp = req_lib.get(url, params=params, auth=(MIXPANEL_USERNAME,MIXPANEL_SECRET), timeout=300)
             if resp.status_code in (429,500,502,503):
                 if attempt<3: time.sleep(30+attempt*30); continue
-                return []
-            if resp.status_code != 200: return []
+                log.error(f"  ❌ Mixpanel {resp.status_code} 소진 → {from_date}~{to_date} 실패")
+                return None      # ← [] (매출 0) 과 반드시 구분. None = '모름' → 해당 날짜 보존
+            if resp.status_code != 200:
+                log.error(f"  ❌ Mixpanel {resp.status_code}: {resp.text[:200]}")
+                return None
             lines = [l for l in resp.text.split('\n') if l.strip()]
             log.info(f"  📊 이벤트: {len(lines)}건")
             data = []
@@ -307,8 +330,8 @@ def fetch_mixpanel(from_date, to_date):
             # 타임아웃/연결오류 → 백오프 후 재시도 (대용량 export 간헐 타임아웃 대응)
             log.warning(f"  ⚠️ Mixpanel 오류(시도 {attempt+1}/4): {e}")
             if attempt<3: time.sleep(30+attempt*30); continue
-            return []
-    return []
+            return None
+    return None
 
 # Supabase
 class SB:
@@ -419,18 +442,30 @@ def main():
     log.info(f"\n3단계: Mixpanel")
     import pandas as pd
     YESTERDAY=TODAY-timedelta(days=1); mp_raw=[]
+    # ★ MP fetch 실패(429 rate limit 등)를 '매출 0' 으로 쓰면 안 된다 — 실패 구간의 날짜를
+    #   모아두고 병합에서 통째로 스킵해 기존 행을 보존한다. (2026-08-04 사고: 전기간 백필 중
+    #   export 시간당 쿼리한도 초과로 7/12~8/04 4청크가 429 → 그 구간 매출이 0 으로 덮였다.)
+    mp_failed_days=set()
+    def _mark_failed(s_dt, e_dt):
+        d=s_dt
+        while d<=e_dt:
+            mp_failed_days.add(f"{d.year%100:02d}/{d.month:02d}/{d.day:02d}"); d+=timedelta(days=1)
+    def _pull(s_dt, e_dt):
+        got=fetch_mixpanel(s_dt.strftime('%Y-%m-%d'), e_dt.strftime('%Y-%m-%d'))
+        if got is None: _mark_failed(s_dt, e_dt)
+        else: mp_raw.extend(got)
     if REFRESH_DAYS>14:
         cs=DATA_REFRESH_START
         while cs<=YESTERDAY:
             ce=min(cs+timedelta(days=6),YESTERDAY)
-            mp_raw.extend(fetch_mixpanel(cs.strftime('%Y-%m-%d'),ce.strftime('%Y-%m-%d')))
+            _pull(cs, ce)
             cs=ce+timedelta(days=1)
     else:
         if DATA_REFRESH_START<=YESTERDAY:
-            mp_raw.extend(fetch_mixpanel(DATA_REFRESH_START.strftime('%Y-%m-%d'),YESTERDAY.strftime('%Y-%m-%d')))
-    td=fetch_mixpanel(TODAY.strftime('%Y-%m-%d'),TODAY.strftime('%Y-%m-%d'))
-    if td: mp_raw.extend(td)
-    log.info(f"✅ Mixpanel: {len(mp_raw)}건")
+            _pull(DATA_REFRESH_START, YESTERDAY)
+    _pull(TODAY, TODAY)
+    log.info(f"✅ Mixpanel: {len(mp_raw)}건" +
+             (f" · ⚠️ fetch 실패 {len(mp_failed_days)}일 → 해당 날짜 매출 보존(스킵)" if mp_failed_days else ""))
 
     mp_value_map,mp_count_map={},{}
     if mp_raw:
@@ -502,8 +537,13 @@ def main():
 
     all_keys=set(by_set.keys())|set(mp_rev.keys())
     records=[]
-    _preserved=0
+    _preserved=0; _mp_preserved=0
     for (dk,asid) in all_keys:
+        # ★ MP fetch 실패한 날짜는 매출이 '0'이 아니라 '모름' → 행을 만들지 않고 기존 값을 보존.
+        #   (레코드를 만들면 revenue=0 으로 덮여 "지출은 있는데 매출 0" 이 고착된다.)
+        if dk in mp_failed_days:
+            _mp_preserved+=1
+            continue
         parts=dk.split('/'); iso=f"20{parts[0]}-{parts[1]}-{parts[2]}"
         rows=by_set.get((dk,asid)) or []
         info=rows[0] if rows else adset_info.get(asid)
@@ -549,7 +589,8 @@ def main():
             'budget':int(budget_map.get(asid,0)),
         })
     log.info(f"✅ 레코드: {len(records)}개 (세트당 1행, 캠페인명 country)" +
-             (f" · Meta 실패로 보존(스킵) {_preserved}행" if _preserved else ""))
+             (f" · Meta 실패로 보존(스킵) {_preserved}행" if _preserved else "") +
+             (f" · MP 실패로 보존(스킵) {_mp_preserved}행" if _mp_preserved else ""))
 
     # 5) Upsert — 구 country 분할 행이 stale 로 남아 이중계상되므로 (date, adset_id) 를 먼저 지운다.
     log.info(f"\n5단계: Supabase upsert ({len(records)}행)")
