@@ -297,7 +297,9 @@ def fetch_mixpanel(from_date, to_date):
                         mp_cur = str(props.get('통화') or '').strip().upper()
                         cur = mp_cur if mp_cur in CURRENCY_KRW else payment_currency(svc, _cc)
                         revenue = revenue * CURRENCY_KRW.get(cur, 1.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':svc,'country':_cc,'insert_id':props.get('$insert_id') or props.get('insert_id') or ''})
+                    # 주문번호: 같은 주문의 중복발화($insert_id 제각각)를 주문단위로 dedup 하기 위한 1차 키.
+                    order_no=props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'utm_term':ut or '','utm_source':us or '','revenue':revenue,'서비스':svc,'country':_cc,'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip()})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -438,13 +440,29 @@ def main():
             s=str(x).strip() if x is not None else ''
             return '' if s.lower() in ('','none','undefined','null') else s
         df['utm_term']=df['utm_term'].apply(_norm)
-        if 'insert_id' in df.columns:
-            df_iid=df[df['insert_id'].astype(str).str.len()>0]
-            df_no=df[df['insert_id'].astype(str).str.len()==0]
-            df_iid=df_iid.drop_duplicates(subset=['insert_id'],keep='first')
-            df_d=pd.concat([df_iid,df_no],ignore_index=True)
-        else:
-            df_d=df.drop_duplicates(subset=['date','distinct_id','서비스'],keep='first')
+        # 중복 결제 dedup — 주문번호(order_no) 우선 (소재 파이프라인과 동일). Mixpanel 은 같은 결제를
+        # 다른 $insert_id 로 여러 번 재기록하므로 insert_id dedup 만으론 과대계상(주문 1건이 여러 건으로 집계).
+        #   ★ 2026-08-04 실측: insert_id dedup 만 쓰던 구버전은 7/20~8/3 매출을 KR +9.3% / TW +48.1%
+        #     / HK +62.4% (전체 +34.9%) 과대계상했다. 소재별은 order_no dedup 이 들어가 정상이었고,
+        #     세트별에만 이식이 빠져 있어 밴스드 탭 세트 합계가 소재 합계보다 30~45% 크게 나왔다.
+        if 'order_no' not in df.columns: df['order_no']=''
+        df['order_no']=df['order_no'].fillna('').astype(str).str.strip()
+        _has_ord=df['order_no'].str.len()>0
+        df_ord=df[_has_ord].copy(); df_no=df[~_has_ord].copy()
+        # (A) 주문번호 있는 행: 주문단위 1건 — utm_term 보존 우선, 그다음 revenue 큰 행 유지
+        if len(df_ord):
+            df_ord['_hasutm']=(df_ord['utm_term'].astype(str).str.len()>0).astype(int)
+            df_ord=(df_ord.sort_values(['order_no','_hasutm','revenue'],ascending=[True,False,False])
+                          .drop_duplicates(subset=['order_no'],keep='first').drop(columns=['_hasutm']))
+        # (B) 주문번호 없는 행(드묾): insert_id → (date,distinct_id,revenue,서비스,utm_term) 복합키 fallback
+        if len(df_no):
+            if 'insert_id' in df_no.columns:
+                _a=df_no[df_no['insert_id'].astype(str).str.len()>0].drop_duplicates(subset=['insert_id'],keep='first')
+                _b=df_no[df_no['insert_id'].astype(str).str.len()==0]
+                df_no=pd.concat([_a,_b],ignore_index=True)
+            df_no=df_no.drop_duplicates(subset=['date','distinct_id','revenue','서비스','utm_term'],keep='first')
+        df_d=pd.concat([df_ord,df_no],ignore_index=True)
+        log.info(f"  🧾 주문번호 dedup: 주문있음 {int(_has_ord.sum())}→{len(df_ord)} · 주문없음 {int((~_has_ord).sum())}→{len(df_no)} · 합계 {len(df_d)}")
         # utm_term backfill (패키지 2번째 이벤트 attribution)
         has_mask=df_d['utm_term'].astype(str).str.len()>0
         bf_map=df_d[has_mask].groupby(['date','distinct_id'])['utm_term'].first().to_dict()
