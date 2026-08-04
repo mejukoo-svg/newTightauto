@@ -1079,7 +1079,13 @@ async function initData(){
   // 큰 보조 테이블: 모드 진입 시 lazy 로드 (ensureBigTable)
   // 단, CR_AD 는 추이차트의 ▶ 펼침에 자주 쓰이므로 브라우저 idle 시 prefetch
   const idle=window.requestIdleCallback||((cb)=>setTimeout(cb,3000));
-  idle(()=>{ensureBigTable('cr');},{timeout:30000});
+  //   prefetch 가 끝나면 국내소재 모드를 보고 있는 경우 다시 그린다 —
+  //   안 그러면 IndexedDB 의 옛 CR_AD 로 그려진 화면이 탭을 옮길 때까지 그대로 남는다(백필 직후 특히).
+  idle(()=>{ensureBigTable('cr').then(()=>{
+    if(MODE!=='cr')return;
+    AD=buildAD('cr');rebuildLookups();
+    const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
+  });},{timeout:30000});
 }
 // 큰 테이블은 모드 진입 시 lazy 로드
 async function ensureBigTable(name){
