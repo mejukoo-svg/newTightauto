@@ -454,9 +454,37 @@ def main():
         for (d, ut), c in df_d.groupby(['date','utm_content']).size().items():
             if d and ut: mp_count_map[(d, str(ut))] = c
 
+    # ── only-raise 가드용: 현재 저장된 귀속(results_mp/revenue) 미리 읽기 ──
+    #   국내_세트별_supabase.py 의 동일 가드를 이식(2026-08-04).
+    #   부실/부분 실패한 Mixpanel fetch 가 이미 정상인 과거 귀속을 '낮추지' 못하게 한다.
+    #   (spend 등 Meta-side 지표는 항상 최신값으로 갱신 — 가드 대상은 매출/구매수뿐)
+    #   ※ 이 가드가 없어 7/4~7/21 구간이 KST 경계 누락값(~70%)으로 덮여 고착됐다.
+    prev_attr = {}
+    _ps = DATA_REFRESH_START.strftime("%Y-%m-%d")
+    _pe = TODAY.strftime("%Y-%m-%d")
+    _off = 0
+    while True:
+        _u = (f"{sb.base_url}/rest/v1/ad_creative_daily?select=date,ad_id,results_mp,revenue"
+              f"&date=gte.{_ps}&date=lte.{_pe}&order=date.asc,ad_id.asc&limit=1000&offset={_off}")
+        try:
+            _chunk = req_lib.get(_u, headers={**sb.headers, "Prefer": ""}, timeout=60).json()
+        except Exception as _e:
+            log.warning(f"  ⚠️ 기존 귀속 읽기 실패(가드 비활성화): {_e}")
+            _chunk = []
+        if not isinstance(_chunk, list) or not _chunk:
+            break
+        for _row in _chunk:
+            prev_attr[(_row.get("date"), str(_row.get("ad_id")))] = (
+                int(_row.get("results_mp") or 0), float(_row.get("revenue") or 0.0))
+        if len(_chunk) < 1000:
+            break
+        _off += 1000
+    log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 로드")
+
     # 4) 병합
     log.info(f"\n4단계: 병합")
     records = []
+    _guarded = 0
     for dk, rows in meta_data.items():
         parts = dk.split('/'); iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
         for mr in rows:
@@ -466,6 +494,12 @@ def main():
             # ★ Mixpanel 매칭: (date_key, ad_id)
             mpc = mp_count_map.get((dk, ad_id), 0)
             mpv = mp_value_map.get((dk, ad_id), 0.0)
+            # ★ only-raise 가드: 새 귀속이 기존 저장값보다 낮으면(부실 fetch 등) 기존 보존
+            _prev = prev_attr.get((iso_date, str(ad_id)))
+            if _prev and mpc < _prev[0]:
+                mpc = _prev[0]
+                mpv = _prev[1]
+                _guarded += 1
             revenue = float(mpv)
             profit = revenue - spend
             roas = (revenue / spend * 100) if spend > 0 else 0
@@ -488,7 +522,7 @@ def main():
                 'revenue': round(revenue, 2), 'profit': round(profit, 2),
                 'roas': round(roas, 2), 'cvr': round(cvr, 4), 'budget': budget_val,
             })
-    log.info(f"✅ 레코드: {len(records)}개")
+    log.info(f"✅ 레코드: {len(records)}개" + (f" · 🛡️ 기존 귀속 보존 {_guarded}행" if _guarded else ""))
 
     # 5) Supabase upsert
     log.info(f"\n5단계: Supabase upsert ({len(records)}행)")
