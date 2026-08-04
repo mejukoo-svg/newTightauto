@@ -769,9 +769,13 @@ function norm(r){
 // 구매수 = results_meta, 순이익·ROAS·CVR 은 그 값으로 재계산된다.
 //   · 적용 범위: 글로벌(gl) 모드의 추이차트뿐. 날짜탭·매출탭 등 나머지는 Mixpanel 그대로.
 //   · 되돌리려면 이 Set 을 비우면 된다(코드 수정 불필요).
+// ★ 2026-08-04 부터는 글로벌 매출을 Mixpanel 기준으로 확정한다(사용자 결정).
+//   GL_MP_FROM 이후 날짜는 Set 에 뭐가 들어있든 Meta 치환을 하지 않는다 → 규칙이 뒤로 밀릴 일 없음.
+const GL_MP_FROM='2026-08-04';
 const GL_META_DAYS=new Set(['2026-07-31','2026-08-01','2026-08-02','2026-08-03']);
+function isGlMetaDay(d){return !!d&&d<GL_MP_FROM&&GL_META_DAYS.has(d)}
 function glMetaRow(r){
-  if(!GL_META_DAYS.has(r.date))return r;
+  if(!isGlMetaDay(r.date))return r;
   const sp=+r.spend||0;
   const cnt=Math.round(+r.results_meta||0);
   // 메타 ROAS(배수)가 있으면 그걸로 매출을 만들고, 없으면(값 추적이 없는 세트) 구매수만 살린다.
@@ -2097,7 +2101,7 @@ function renderTrend(opts){
   const isHidden=a=>!tKw&&(MODE==='kr'||MODE==='gl')&&!(a._s>0||a._yS>0||HIGHLIGHTS[a.id]);
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';
     // 메타 기준으로 그린 날짜는 헤더에 표시 — 날짜탭(Mixpanel)과 숫자가 다른 이유를 바로 알 수 있게
-    const mm=(MODE==='gl'&&GL_META_DAYS.has(d))?'<span title="이 날짜는 Mixpanel 대신 Meta 보고값(매출=지출×메타ROAS, 구매수=results_meta) 기준입니다" style="color:#1a73e8;font-size:9px">ᴹ</span>':'';
+    const mm=(MODE==='gl'&&isGlMetaDay(d))?'<span title="이 날짜는 Mixpanel 대신 Meta 보고값(매출=지출×메타ROAS, 구매수=results_meta) 기준입니다" style="color:#1a73e8;font-size:9px">ᴹ</span>':'';
     return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')'+mm+'</th>'}).join('');
   const colSpan=dd.length+4+(showChg?1:0)+(showAcc?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 메모 1칸(증감 컬럼 제거), showAcc시 광고계정 1칸
   // Summary
