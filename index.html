@@ -299,7 +299,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
-<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">보기</label><select id="ggdgkrView" onchange="renderGgdgTight()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">검색</label><input type="text" id="ggdgkrFilter" oninput="renderGgdgTight()" placeholder="캠페인/세트/ID 키워드" style="width:170px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('ggdgkrFilter').value='';renderGgdgTight()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><button id="abBtnG" onclick="abOpenGoogle()" title="증감액이 마킹된 광고그룹의 구글 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 구글에 예산 적용</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 지출=Google Ads API / 매출=Mixpanel · 최신 왼쪽 · 추이차트처럼 📦 상품별로 나눠 소계 표시 · 🎨 캠페인·세트·세트ID 칸을 클릭하면 추이차트처럼 하이라이트(0시 자동 삭제 · 전체삭제 공유)</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
+<div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">보기</label><select id="ggdgkrView" onchange="renderGgdgTight()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">검색</label><input type="text" id="ggdgkrFilter" oninput="renderGgdgTight()" placeholder="캠페인/세트/ID 키워드" style="width:170px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('ggdgkrFilter').value='';renderGgdgTight()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><button id="abBtnG" onclick="abOpenGoogle()" title="증감액이 마킹된 광고그룹의 구글 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 구글에 예산 적용</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 지출=Google Ads API / 매출=Mixpanel · 최신 왼쪽 · 추이차트처럼 📦 상품별로 나눠 소계 표시 · 🎨 캠페인·세트·세트ID 칸을 클릭하면 추이차트처럼 하이라이트(0시 자동 삭제 · 전체삭제 공유) · 🟩 <b>증감액 테두리</b>=⚡로 구글에 실제 반영된 날짜 셀에 색 링(+20%·+10%·-10%·-20%·OFF 검정 / 셀에 마우스를 올리면 변경 전→후 금액). 실패한 적용은 표시하지 않음</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
 <div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 디멘드젠(dg_) 콘텐츠만 · ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=Google Ads API)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
@@ -406,6 +406,10 @@ let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let COUNTRY='ALL';  // 국가 필터 (vn/gl 전용). ALL=전체(국가행을 adset당 합산)
 let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[],GGDG_TIGHT=[];
 let ALIMTALK=[];  // CRM(알림톡) 채널 — alimtalk_daily_campaign (일자×캠페인, rev=귀속매출·cost=발송비용)
+// 구글 디멘드젠 증감액 테두리용 — budget_apply_log(region='gd') = '⚡ 구글에 예산 적용'으로 실제 반영된 기록.
+//   메타 추이차트는 ad_performance_daily.budget 의 전일 대비 변화로 테두리를 그리는데,
+//   google_demandgen_campaign_daily 엔 budget 컬럼이 없어 같은 방식이 불가 → 실제 적용 로그를 쓴다.
+let GGDG_CHG=[],_GGDG_CHG_LOADED=false;
 let KR_HL={},GL_HL={},CR_HL={},VN_HL={};
 // 하이라이트 출처: 'ai'(오늘의퍼포먼스봇 조언 자동표기)면 네모에 테두리(.hl-ai), 'user'(사람 클릭)면 테두리 없음
 let KR_SRC={},GL_SRC={},CR_SRC={},VN_SRC={};
@@ -4576,9 +4580,38 @@ function renderGgdgContent(){
 // 캠페인 id × 일자. 지출=Google Ads API, 매출/구매=Mixpanel utm_campaign 매칭.
 //   단일 테이블 google_demandgen_campaign_daily (구글_디멘드젠_캠페인_supabase.py).
 //   추이차트와 동일 셀(ROAS/순이익/-지출/매출/구매건) + ROAS 색상밴드. 최신 날짜 왼쪽.
+// budget_apply_log(region='gd') 지연 로드. 실패는 캐시하지 않아 다음 렌더에서 재시도한다.
+//   ok=true 만 — 실패한 적용은 예산이 실제로 안 바뀌었으므로 테두리를 그리면 거짓말이 된다.
+function ensureGgdgChg(cb){
+  if(_GGDG_CHG_LOADED){cb&&cb();return}
+  sbQ('budget_apply_log','select=adset_id,applied_at,tag,field,before_value,after_value&region=eq.gd&ok=is.true&order=applied_at.desc&limit=3000')
+    .then(d=>{GGDG_CHG=Array.isArray(d)?d:[];_GGDG_CHG_LOADED=true;cb&&cb();})
+    .catch(()=>{GGDG_CHG=[];cb&&cb();});
+}
+// (ad_group_id, KST날짜) → {tag, 툴팁문구}. 같은 날 여러 번 적용했으면 마지막(최신) 것을 쓴다.
+function _ggdgChgMap(){
+  const m={};
+  (GGDG_CHG||[]).forEach(r=>{
+    const id=String(r.adset_id||'');if(!id||!r.applied_at)return;
+    const t=new Date(r.applied_at);if(isNaN(t))return;
+    const k=new Date(t.getTime()+9*3600*1000);   // UTC → KST
+    const d=k.getUTCFullYear()+'-'+String(k.getUTCMonth()+1).padStart(2,'0')+'-'+String(k.getUTCDate()).padStart(2,'0');
+    const tag=String(r.tag||'');if(!HL_CONFIG[tag])return;
+    const lbl=r.field==='status'
+      ? (String(r.after_value||'')==='PAUSED'?'OFF':String(r.after_value||''))
+      : HL_CONFIG[tag].label+' '+(+r.before_value||0).toLocaleString('ko-KR')+'→'+(+r.after_value||0).toLocaleString('ko-KR');
+    (m[id]||(m[id]={}));
+    // applied_at desc 로 받아오므로 먼저 들어온 것이 최신 → 이미 있으면 덮지 않는다
+    if(!m[id][d])m[id][d]={tag,txt:d+' '+lbl};
+  });
+  return m;
+}
+
 function renderGgdgTight(){
   const tbl=document.getElementById('ggdgkrTbl');
   if(!tbl)return;
+  // 증감액 테두리 데이터가 아직 없으면 로드 후 재렌더 (표는 먼저 그려서 체감 지연 없음)
+  if(!_GGDG_CHG_LOADED)ensureGgdgChg(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='ggdgkr')renderGgdgTight()});
   const loaded=window._BIG_LOADED&&window._BIG_LOADED.ggdgkr;
   if(!loaded){
     ensureBigTable('ggdgkr').then(()=>{
@@ -4640,9 +4673,21 @@ function renderGgdgTight(){
   h+='<tr class="sr"><td colspan="3" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'세트'+(kw?' · 검색결과':'')+')</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700">'+cell(gS,gR,gC)+'</td>';
   cols.forEach(k=>{const x=totCol[k];const yd=(view==='day'&&k===yDay)?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
   h+='</tr>';
+  // 증감액 테두리 — '⚡ 구글에 예산 적용'으로 실제 반영된 날짜 셀에 색 링(메타 추이차트와 동일한 표현).
+  //   주/월 보기에선 그 기간에 적용이 하나라도 있으면 링을 그리고, 여러 건이면 최신 건의 색을 쓴다.
+  const CHGMAP=_ggdgChgMap();
+  const chgOfCol=(id,k)=>{const per=CHGMAP[id];if(!per)return null;
+    const ds=colOf[k].filter(d=>per[d]).sort();      // 기간 내 적용일
+    if(!ds.length)return null;
+    const last=per[ds[ds.length-1]];
+    return {bg:HL_CONFIG[last.tag].bg, txt:ds.map(d=>per[d].txt).join(' / ')};
+  };
   // 세트(광고그룹) 행 1개 생성
   const rowHtml=o=>{
-    const cells=cols.map(k=>{const x=setCol(o,k);const yd=(view==='day'&&k===yDay)?' col-yday':'';if(!x.s&&!x.r&&!x.c)return'<td class="'+yd+'"></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'}).join('');
+    const cells=cols.map(k=>{const x=setCol(o,k);const yd=(view==='day'&&k===yDay)?' col-yday':'';
+      const cg=chgOfCol(o.id,k);
+      const cb=cg?' style="box-shadow:inset 0 0 0 3px '+cg.bg+'" title="증감액 적용: '+cg.txt.replace(/"/g,'&quot;')+'"':'';
+      if(!x.s&&!x.r&&!x.c)return'<td class="'+yd+'"'+cb+'></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'"'+cb+'>'+cell(x.s,x.r,x.c)+'</td>'}).join('');
     // 하이라이트 — 추이차트와 동일한 색상 피커·저장소(키=세트 id)
     const hl=hlClass(o.id);
     const ck=' clickable" data-id="'+o.id+'" onclick="showCPGgdg(\''+o.id+'\',this)"';
