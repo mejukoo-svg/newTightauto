@@ -109,18 +109,21 @@ if FULL_REFRESH:
 DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 
 # 환율 폴백
-FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5}
-CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국"}
+FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5, "SGD": 1.28}
+CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국", "SGD": "싱가포르"}
 # 통화 → country ISO 코드 (캠페인명 기반 country 분류에 사용). 캠페인 시장이 곧 country.
-CURRENCY_TO_ISO = {"TWD": "TW", "HKD": "HK", "JPY": "JP", "THB": "TH", "USD": "GLOBAL", "KRW": "KR"}
+CURRENCY_TO_ISO = {"TWD": "TW", "HKD": "HK", "JPY": "JP", "THB": "TH", "SGD": "SG", "USD": "GLOBAL", "KRW": "KR"}
 # 세트(adset_id) → 캠페인명 (2단계 meta_data 로 채움). MP 결제의 시장/통화를 캠페인명으로 판별할 때 사용.
 ADSET_CAMPAIGN_NAME = {}
-STRIPE_CURRENCY_MAP = {"twd": "TW", "hkd": "HK", "jpy": "JP", "usd": "GLOBAL", "krw": "KR", "thb": "TH"}
-STRIPE_COUNTRY_NAMES = {"TW": "대만", "HK": "홍콩", "JP": "일본", "GLOBAL": "글로벌(USD)", "KR": "한국(KRW)", "TH": "태국"}
-STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100}
+STRIPE_CURRENCY_MAP = {"twd": "TW", "hkd": "HK", "jpy": "JP", "usd": "GLOBAL", "krw": "KR", "thb": "TH", "sgd": "SG"}
+STRIPE_COUNTRY_NAMES = {"TW": "대만", "HK": "홍콩", "JP": "일본", "GLOBAL": "글로벌(USD)", "KR": "한국(KRW)", "TH": "태국", "SG": "싱가포르"}
+STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100, "sgd": 100}
 # 빌링주소(ISO) → country_name. 통화-only 분류의 누락 보정용(홍콩 고객이 -tw 스토어에서 TWD로 결제해도
 #   빌링주소=HK 이면 홍콩 매출로 잡는다). 금액 환산은 결제 통화 기준 유지.
 #   ★ JP 는 의도적으로 뺐다 — 일본만 결제통화(JPY) 단독 기준(2026-07-31, 아래 분류부 주석 참조).
+#   ★ SG 도 뺐다 — 싱가포르는 결제통화(SGD) 단독 기준(2026-08-07). SG 빌링 고객의 -tw 스토어
+#     TWD 결제(최근 30일 $15.5k·전체 1.98%)까지 옮기면 기존 대만 매출이 그만큼 줄고, 재적재 창
+#     밖 과거는 대만으로 남아 히스토리가 끊긴다 → 싱가포르 컬럼은 SGD 실결제만 잡는다.
 STRIPE_BILLING_COUNTRY = {"TW": "대만", "HK": "홍콩", "TH": "태국"}
 
 
@@ -162,7 +165,12 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
     #   · 모든 글로벌 계정은 해외 계정(국내 KRW 계정과 분리)이고, 한국 결제는
     #     mp_country_code=KR 필터로 이미 제외됨.
     #   · 세트명에 '한국연예인' 같은 소구 문구가 섞여도 KRW로 오판하지 않도록
-    #     KRW 분기를 제거. 시장은 jp/hk/th/tw 키워드로만 판별, 없으면 계정 기본통화.
+    #     KRW 분기를 제거. 시장은 jp/hk/th/tw/sg 키워드로만 판별, 없으면 계정 기본통화.
+    #   · ★ SG(싱가포르)는 tw 뒤에서 본다 — 캠페인명은 '시장_상품_..._타겟' 규칙이라 뒤쪽 토큰이
+    #     타겟(오디언스)인 경우가 있다. 예: '대만_무당_ASC_싱가포르' = 대만 스토어(-tw, TWD 결제)로
+    #     싱가포르 오디언스를 타게팅한 캠페인 → SGD로 잡으면 매출이 ~25배(32/1.28) 부풀려진다.
+    #     ('대만_무당_ASC_전세계중국어'와 같은 계열). 순수 싱가포르 캠페인(시장 태그 sg/싱가포르만
+    #     있고 tw/hk/jp/th 없음)만 SGD로 판별한다.
     for name in [adset_name, campaign_name]:
         if not name: continue
         n = str(name); nl = n.lower()
@@ -171,12 +179,13 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
         if "hk" in parts or "hongkong" in parts or "홍콩" in n: return "HKD"
         if "th" in parts or "thailand" in parts or "태국" in n: return "THB"
         if "tw" in parts or "taiwan" in parts or "대만" in n or "台灣" in n: return "TWD"
+        if "sg" in parts or "singapore" in parts or "싱가포르" in n or "싱가폴" in n: return "SGD"
     return ACCOUNT_CURRENCY.get(account_id, "TWD")
 
 
 # 서비스 접미사 → 통화 (스토어프론트 기준, 캠페인명 detect_currency 보다 신뢰도 높음).
-#   접미사 -tw → TWD, -th → THB. (HK/JP/US 등 해외 고객도 -tw 스토어프론트는 TWD 결제)
-SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD"}
+#   접미사 -tw → TWD, -th → THB, -sg → SGD. (HK/JP/US 등 해외 고객도 -tw 스토어프론트는 TWD 결제)
+SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD", "sg": "SGD"}
 
 # country(mp_country_code) 행 단위 통화 보정: 해당 국가 고객은 -tw 스토어프론트에서 결제해도
 #   Stripe가 현지통화로 청구하므로 country 기준으로 통화를 강제한다.
@@ -193,7 +202,7 @@ def currency_from_suffix(svc):
 
 
 # 건별 실제 통화 판별에 쓰는 알려진 통화 집합 (usd_rates 로 환산 가능한 것만).
-KNOWN_CURRENCIES = {"TWD", "HKD", "JPY", "THB", "USD", "KRW"}
+KNOWN_CURRENCIES = {"TWD", "HKD", "JPY", "THB", "SGD", "USD", "KRW"}
 
 # Stripe charge 통화 인덱스: {amount_major: [(created_ts, currency_upper), ...]}.
 #   같은 결제는 Stripe·Mixpanel 에 동일 (현지)금액·동일 시각으로 찍히므로
@@ -468,10 +477,11 @@ def fetch_stripe_revenue(start_date, end_date):
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-        # 국가 분류 (2026-07-31 확정): 일본만 결제통화 기준, 나머지는 빌링주소 우선.
-        #   ① currency=JPY  → 무조건 일본
-        #   ② 빌링주소(TW/HK/TH) → 해당 국가   ※ JP 는 STRIPE_BILLING_COUNTRY 에서 제외됨
-        #   ③ 통화 폴백(twd=대만/hkd=홍콩/thb=태국)
+        # 국가 분류 (2026-07-31 확정 · 2026-08-07 SG 추가): 일본·싱가포르만 결제통화 기준,
+        #   나머지는 빌링주소 우선.
+        #   ① currency=JPY → 무조건 일본, currency=SGD → 무조건 싱가포르
+        #   ② 빌링주소(TW/HK/TH) → 해당 국가   ※ JP·SG 는 STRIPE_BILLING_COUNTRY 에서 제외됨
+        #   ③ 통화 폴백(twd=대만/hkd=홍콩/thb=태국/sgd=싱가포르)
         #   금액 환산은 아래에서 결제 통화(currency) 기준 그대로 → 정확.
         #
         #   왜 일본만 다른가: 일본 빌링 고객이 -tw 스토어에서 TWD로 결제한 건이 일본
@@ -482,8 +492,12 @@ def fetch_stripe_revenue(start_date, end_date):
         #      -tw 스토어 TWD 결제라 7월 홍콩이 $136k→$13k 로 붕괴한다. 게다가 매출탭
         #      지출은 세트 country(캠페인명 hk 태그) 기준이라 홍콩 광고비는 그대로 남아
         #      홍콩 ROAS·순이익이 무의미해진다(9781ba1 에서 시도했다가 dca67bf 로 되돌림).
+        #   싱가포르(SGD)도 통화 단독 기준 — SG 빌링 고객의 -tw 스토어 TWD 결제(최근 30일 $15.5k)
+        #   까지 옮기면 기존 대만 매출이 줄고 재적재 창 밖 과거와 어긋난다(2026-08-07 결정).
         if currency == 'jpy':
             country_name = STRIPE_COUNTRY_NAMES['JP']
+        elif currency == 'sgd':
+            country_name = STRIPE_COUNTRY_NAMES['SG']
         else:
             addr_country = None
             bd = getattr(ch, 'billing_details', None)
@@ -610,7 +624,7 @@ def main():
     # 1) 환율 조회
     log.info("\n1단계: 환율 조회")
     rate_start = DATA_REFRESH_START - timedelta(days=7)
-    for curr in ["TWD", "JPY", "HKD", "KRW", "THB"]:
+    for curr in ["TWD", "JPY", "HKD", "KRW", "THB", "SGD"]:
         usd_rates[curr] = fetch_usd_rates(rate_start, TODAY, curr)
 
     # 2) Meta Insights
@@ -857,7 +871,7 @@ def main():
 
         # ★ 통화 확정 (2026-07-02 변경) — 캠페인명(hk/tw) 기준으로 통일.
         #   우선순위: ① MP '통화' 프라퍼티(있으면 최우선, 정확) → ② 캠페인명 키워드(hk→HKD, tw→TWD,
-        #            jp→JPY, th→THB; 키워드 없으면 계정 기본 TWD).
+        #            jp→JPY, th→THB, sg→SGD; 키워드 없으면 계정 기본 TWD).
         #   결제의 세트(utm_term=adset_id)에 연결된 캠페인명으로 시장/통화를 판별한다.
         #   ★ 7월 이전 결제는 '통화' 프라퍼티가 없어 자동으로 ② 캠페인명 폴백으로 판별됨(소재별과 동일).
         _src_stat = {'explicit': 0, 'campaign': 0}
@@ -923,7 +937,7 @@ def main():
         _boff += 1000
     log.info(f"  🛡️ 예산 스냅샷맵: {len(prev_budget)}행 로드")
 
-    # 5) 병합 — (date, adset_id) 그레인, country = 캠페인명 기반 시장(TW/HK/JP/TH).
+    # 5) 병합 — (date, adset_id) 그레인, country = 캠페인명 기반 시장(TW/HK/JP/TH/SG).
     #    ★ 2026-07-02 변경: country 분류를 '결제국가(mp_country_code)'가 아닌 '캠페인명 hk/tw 키워드'로 통일.
     #      세트는 캠페인 시장 1개에 귀속되므로 country 분할 없이 세트당 1레코드로 집계한다.
     #      · 매출: mp_value_map(건별 통화→USD 환산)을 세트 단위로 합산(mp country 무시).
@@ -951,7 +965,7 @@ def main():
             r0 = rep[asid]
             # ★ 통화·country 모두 캠페인명 기준: 캠페인/세트명 hk/tw 키워드 → 통화·시장 판별.
             currency = detect_currency(r0['adset_name'], r0['campaign_name'], r0.get('ad_account_id'))
-            cc = CURRENCY_TO_ISO.get(currency, "TW")  # 캠페인 시장 = country (TW/HK/JP/TH)
+            cc = CURRENCY_TO_ISO.get(currency, "TW")  # 캠페인 시장 = country (TW/HK/JP/TH/SG)
             # 지출/지표: 비한국(KR viewer 제외) breakdown 행 합산 → 세트 단위 집계
             valid = [m for m in cc_rows if str(m['country']).upper() not in KOREA_CC]
             spend = sum(m['spend'] for m in valid)  # Already USD
@@ -1074,7 +1088,7 @@ def main():
     if stripe_total_usd > 0:
         log.info("  ── 매출 비교 (기간 합, USD) ──")
         log.info(f"  메타 귀속 ${attributed_usd:,.0f}  vs  Stripe 실매출 ${stripe_total_usd:,.0f}  → 귀속률 {attributed_usd / stripe_total_usd * 100:.1f}%")
-        log.info(f"  (주의: 이 Stripe 합은 본 스크립트 수집분=TW/HK/JP/TH, USD통화·일본 별도수집분 제외될 수 있음)")
+        log.info(f"  (주의: 이 Stripe 합은 본 스크립트 수집분=TW/HK/JP/TH/SG, USD통화·일본 별도수집분 제외될 수 있음)")
 
     log.info("\n" + "=" * 60)
     log.info("✅ 글로벌 파이프라인 완료!")

@@ -98,8 +98,8 @@ if FULL_REFRESH:
 DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 
 # 환율 폴백
-FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5}
-CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국"}
+FALLBACK_RATES = {"TWD": 32.0, "JPY": 155.0, "HKD": 7.8, "KRW": 1450.0, "USD": 1.0, "THB": 35.5, "SGD": 1.28}
+CURRENCY_TO_COUNTRY = {"TWD": "대만", "JPY": "일본", "HKD": "홍콩", "KRW": "한국", "USD": "글로벌", "THB": "태국", "SGD": "싱가포르"}
 # 소재(ad_id) → 캠페인명 (2단계 meta_data 로 채움). MP 결제의 통화를 캠페인명으로 판별할 때 사용.
 AD_CAMPAIGN_NAME = {}
 
@@ -147,7 +147,9 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
     #   · 모든 글로벌 계정은 해외 계정(국내 KRW 계정과 분리)이고, 한국 결제는
     #     mp_country_code=KR 필터로 이미 제외됨.
     #   · 세트명에 '한국연예인' 같은 소구 문구가 섞여도 KRW로 오판하지 않도록
-    #     KRW 분기를 제거. 시장은 jp/hk/th/tw 키워드로만 판별, 없으면 계정 기본통화.
+    #     KRW 분기를 제거. 시장은 jp/hk/th/tw/sg 키워드로만 판별, 없으면 계정 기본통화.
+    #   · ★ SG(싱가포르)는 tw 뒤에서 본다 — '대만_무당_ASC_싱가포르'처럼 뒤쪽 토큰이 타겟(오디언스)인
+    #     캠페인은 대만 스토어(-tw, TWD 결제)라 SGD로 잡으면 매출이 ~25배 부풀려진다(세트별과 동일).
     for name in [adset_name, campaign_name]:
         if not name: continue
         n = str(name); nl = n.lower()
@@ -156,6 +158,7 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
         if "hk" in parts or "hongkong" in parts or "홍콩" in n: return "HKD"
         if "th" in parts or "thailand" in parts or "태국" in n: return "THB"
         if "tw" in parts or "taiwan" in parts or "대만" in n or "台灣" in n: return "TWD"
+        if "sg" in parts or "singapore" in parts or "싱가포르" in n or "싱가폴" in n: return "SGD"
     return ACCOUNT_CURRENCY.get(account_id, "TWD")
 
 
@@ -165,9 +168,9 @@ def detect_currency(adset_name, campaign_name=None, account_id=None):
 #   country=HK 일괄 HKD(÷7.8) 강제가 -tw TWD 결제(~25%)를 ~4배 과대계상하던 문제 해결.
 # =========================================================
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
-STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100}
-KNOWN_CURRENCIES = {"TWD", "HKD", "JPY", "THB", "USD", "KRW"}
-SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD"}
+STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb": 100, "sgd": 100}
+KNOWN_CURRENCIES = {"TWD", "HKD", "JPY", "THB", "SGD", "USD", "KRW"}
+SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD", "sg": "SGD"}
 
 def market_suffix(svc):
     m = re.search(r'-([a-z]{2,3})$', str(svc or "").strip().lower())
@@ -484,7 +487,7 @@ def main():
     # 1) 환율 조회
     log.info("\n1단계: 환율 조회")
     rate_start = DATA_REFRESH_START - timedelta(days=7)
-    for curr in ["TWD", "JPY", "HKD", "KRW", "THB"]:
+    for curr in ["TWD", "JPY", "HKD", "KRW", "THB", "SGD"]:
         usd_rates[curr] = fetch_usd_rates(rate_start, TODAY, curr)
 
     # 2) Meta Insights (ad level)
@@ -649,7 +652,7 @@ def main():
 
         # ★ 통화 확정 (2026-07-02 변경) — 세트별 로더와 동일: 캠페인명(hk/tw) 기준으로 통일.
         #   우선순위: ① MP '통화' 프라퍼티(있으면 최우선) → ② 캠페인명 키워드(hk→HKD, tw→TWD, jp→JPY,
-        #            th→THB; 키워드 없으면 계정 기본 TWD). 결제의 소재(utm_content=ad_id)에 연결된 캠페인명 사용.
+        #            th→THB, sg→SGD; 키워드 없으면 계정 기본 TWD). 결제의 소재(utm_content=ad_id)에 연결된 캠페인명 사용.
         #   ★ 7월 이전 결제는 '통화' 프라퍼티가 없어 자동으로 ② 캠페인명 폴백으로 판별됨.
         _src_stat = {'explicit': 0, 'campaign': 0}
         def _resolve_cur(row):
