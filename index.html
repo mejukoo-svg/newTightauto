@@ -232,6 +232,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab global-only" data-t="gweek">📅 글로벌_주간매출</div>
 <div class="tab creative-only" data-t="crank">🏆 소재랭킹</div>
 <div class="tab kr-only" data-t="krank">🏆 세트랭킹</div>
+<div class="tab kr-only" data-t="dupvar">🧬 복제·변형</div>
 <div class="tab kr-only" data-t="chrev">📊 매출</div>
 <div class="tab kr-only" data-t="nsadaily">🔍 네이버SA_추이차트</div>
 <div class="tab kr-only" data-t="nsaweekly">📅 네이버SA_주간추이</div>
@@ -274,6 +275,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
+<div class="panel" id="p-dupvar"><div class="filter"><label>기간</label><select id="dvDays" onchange="renderDupVar()"><option value="30">30일</option><option value="60">60일</option><option value="90" selected>90일</option><option value="180">180일</option></select><label style="margin-left:10px">정렬</label><select id="dvSort" onchange="renderDupVar()"><option value="spend" selected>가족 지출↓</option><option value="dup">복제 수↓</option><option value="var">변형 수↓</option><option value="total">파생 수↓</option></select><label style="margin-left:10px">검색</label><input type="text" id="dvFilter" placeholder="원본/복제/변형 이름 키워드" oninput="renderDupVar()" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dvFilter').value='';renderDupVar()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><label style="margin-left:10px;font-size:10px;color:#555;cursor:pointer" title="복제·변형만 남고 원본 세트가 조회 기간 안에 없는 가족도 표시합니다(원본이 기간 밖이거나 이름이 크게 바뀐 경우)."><input type="checkbox" id="dvOrphan" checked onchange="renderDupVar()" style="vertical-align:-1px;margin-right:3px">원본 미확인 포함</label><span id="dvInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div><div class="sheet-wrap"><table id="dvTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
 <div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">밴스드</label><select id="chrVanced"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 제외</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>밴스드 제외</b>=밴스드 국내·밴스드 구글·대만 밴스드 행을 빼고 종합에서도 그만큼 매출(귀속)·지출을 차감(글로벌 매출탭 밴스드 토글과 동일 규칙) ·디멘드젠(타이트)=국내탭 🟢구글 디멘드젠 종합과 동일(지출=Ads API·매출=MP귀속) · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
@@ -880,6 +882,7 @@ function switchMode(m){
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
     if(t.dataset.t==='ggdgkr'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // [Tight] 디멘드젠은 국내(kr) 전용 (vn 의 ggdgct 와 라벨 중복 방지)
     if(t.dataset.t==='krank'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 세트랭킹: 국내·밴스드·글로벌 공통(kr-only 클래스보다 먼저 처리)
+    if(t.dataset.t==='dupvar'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 복제·변형 계보: 국내·밴스드·글로벌 공통
     if(t.classList.contains('kr-only')){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
     if(t.classList.contains('vn-only')){t.style.display=(!isSpecial&&m==='vn')?'inline-block':'none';return}
     if(t.classList.contains('creative-only')){t.style.display=(!isSpecial&&m==='cr')?'inline-block':'none';return}
@@ -1420,6 +1423,7 @@ function renderTab(id){
   if(id==='gweek')renderGlobalWeekly();
   if(id==='crank')renderCreativeRanking();
   if(id==='krank')renderAdsetRanking();
+  if(id==='dupvar')renderDupVar();
   if(id==='chrev'){renderChannelRevenue();renderChannelDonut();}
   if(id==='nsadaily')renderNsaDaily();
   if(id==='nsaweekly')renderNsaWeekly();
@@ -3841,6 +3845,177 @@ function renderAdsetRanking(){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('krTbl').innerHTML=h;
+}
+
+// ===== 🧬 복제·변형 계보 (국내·밴스드·글로벌 공통) =====
+// 세트 '이름'에 남는 마커로 원본 / 복제(증액용 복사) / 변형(tROAS·결과당비용 등 최적화 변경)을
+// 분류하고, 마커·날짜토큰을 걷어낸 '계보 키'로 한 가족(원본+파생)을 묶는다.
+//
+// ★ 판정은 adset_name 만 본다. campaign_name 의 '- 사본'은 캠페인을 복제한 흔적이라
+//   세트 복제가 아니다(예: '바람기_260703_신혼 | 바람기_0613_전환캠페인 - 사본').
+// ★ 날짜 토큰(260418 / 0421 / 250311)은 키에서 제거한다. 복제·변형은 원본과 날짜가
+//   다른 경우가 많아(원본 260420 → 복제 260422) 날짜를 남기면 가족이 갈라진다.
+// 마커를 새로 쓰기 시작하면 아래 두 배열에만 추가하면 된다.
+const DV_DUP=[
+  {rx:/\[\s*복제\s*\]/,tag:'복제'},
+  {rx:/\s*-\s*(사본|복사본|copy)\s*$/i,tag:'사본'},
+  {rx:/\s*-\s*복제증액\s*$/,tag:'복제증액'},
+];
+// 변형 마커는 이름 '꼬리'에 구분자와 함께 붙은 것만 인정한다.
+//   (원본 소재명에 우연히 섞인 단어의 오분류 방지 — 예 '자체UGC파트너십실험'의 '실험')
+const DV_VAR=[
+  {rx:/[_\-\s]+troas(실험)?$/i,tag:'tROAS'},
+  {rx:/[_\-\s]+구매당(비용)?(변경|전환)?$/,tag:'구매당비용'},
+  {rx:/[_\-\s]+결과당비용(전환|변경)?$/,tag:'결과당비용'},
+  {rx:/[_\-\s]+(기존)?구매자\s*제외(실험)?$/,tag:'구매자제외'},
+  {rx:/[_\-\s]+(테스트|test)$/i,tag:'테스트'},
+  {rx:/[_\-\s]+전세계중국어$/,tag:'전세계중국어'},
+];
+const DV_EMOJI=/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu;
+const DV_DATE=/^\d{4}(\d{2})?(\d{2})?$/;   // 0421 · 260418 · 19930920
+
+function dvStripAll(s,rx){let p;do{p=s;s=s.replace(rx,'')}while(s!==p);return s}
+
+// 세트 이름 → {kind:'orig'|'dup'|'var', tags:[], key, label}
+function dvClassify(name){
+  const s=String(name||'').trim();
+  const tags=[];let kind='orig';
+  const stripVar=w=>{
+    for(let i=0;i<4;i++){
+      let hit=null;
+      for(const v of DV_VAR){if(v.rx.test(w)){w=w.replace(v.rx,'');hit=v.tag;break}}
+      if(!hit)break;
+      if(tags.indexOf(hit)<0)tags.push(hit);
+      kind='var';
+    }
+    return w;
+  };
+  let work=stripVar(s);
+  let dup=false;
+  for(const d of DV_DUP){
+    if(d.rx.test(work)){dup=true;if(tags.indexOf(d.tag)<0)tags.push(d.tag);work=dvStripAll(work,d.rx)}
+  }
+  if(dup){
+    // 배수 표기(x2/x4/ x8)는 복제 마커가 있을 때만 제거 — 일반 이름의 'x2' 오제거 방지
+    work=work.replace(/\s*[xX]\s*\d+/g,'');
+    work=dvStripAll(dvStripAll(work,DV_DUP[0].rx),DV_DUP[1].rx);
+    work=stripVar(work);   // xN 제거로 꼬리에 드러난 변형 마커 재수거(예 '[복제]…_전세계중국어x4')
+  }
+  // 복제+변형 동시 보유 → '복제'로 센다(증액 목적의 복제가 1차 성격, 변형은 태그로 표시)
+  if(dup)kind='dup';
+  const toks=work.replace(DV_EMOJI,'').split(/[_\s]+/).filter(t=>t&&!DV_DATE.test(t));
+  const label=toks.join('_');
+  return {kind:kind,tags:tags,key:label.toLowerCase().replace(/[^0-9a-z가-힣%]/g,''),label:label};
+}
+
+function dvBadge(tags){
+  if(!tags||!tags.length)return'';
+  return ' '+tags.map(t=>'<span style="display:inline-block;padding:0 4px;border-radius:7px;background:#eef2ff;color:#3730a3;font-size:8px;font-weight:700;vertical-align:1px">'+t+'</span>').join('');
+}
+function dvMemberHtml(m){
+  return '<div style="padding:3px 0;border-top:1px dotted #ddd">'
+    +'<div style="font-weight:600;line-height:1.3">'+abEsc(m.adset_name)+dvBadge(m.tags)+'</div>'
+    +'<div style="font-size:9px;color:#888;font-family:Consolas,monospace">'+abEsc(m.adset_id)+'</div>'
+    +'<div style="font-size:9px;color:#555">지출 '+money(m.spend)+' · 매출 '+money(m.revenue)
+    +' · <span class="'+RC(m.roas)+'" style="padding:0 3px;border-radius:2px">ROAS '+m.roas.toFixed(0)+'%</span></div>'
+    +'</div>';
+}
+
+function renderDupVar(){
+  const tbl=document.getElementById('dvTbl');
+  if(MODE!=='kr'&&MODE!=='vn'&&MODE!=='gl'){tbl.innerHTML='<tr><td>세트 모드(국내·밴스드·글로벌)에서만 사용</td></tr>';return}
+  const days=parseInt(document.getElementById('dvDays').value);
+  const sortKey=document.getElementById('dvSort').value;
+  const kw=(document.getElementById('dvFilter').value||'').trim().toLowerCase();
+  const showOrphan=document.getElementById('dvOrphan').checked;
+  const dd={};DATES.slice(0,days).forEach(d=>dd[d]=1);
+
+  // 1) 세트 단위 집계 (세트랭킹과 동일한 방식)
+  const byAs={};
+  AD.forEach(r=>{
+    if(!dd[r.date])return;
+    const id=r.adset_id;if(!id)return;
+    if(!byAs[id])byAs[id]={adset_id:id,adset_name:r.adset_name||'',product:r.product||'',spend:0,revenue:0,last:''};
+    const a=byAs[id];
+    a.spend+=r.spend;a.revenue+=r.revenue;
+    if(!a.adset_name&&r.adset_name)a.adset_name=r.adset_name;
+    if(r.date>a.last)a.last=r.date;
+  });
+
+  // 2) 계보 키로 가족 묶기
+  const fam={};
+  Object.values(byAs).forEach(a=>{
+    const c=dvClassify(a.adset_name);
+    if(!c.key)return;                       // 이름이 날짜·마커뿐이면 계보 판정 불가 → 제외
+    a.tags=c.tags;a.roas=a.spend>0?a.revenue/a.spend*100:0;
+    if(!fam[c.key])fam[c.key]={key:c.key,label:c.label,product:'',orig:[],dup:[],var:[]};
+    const f=fam[c.key];
+    f[c.kind].push(a);
+    if(!f.product&&a.product)f.product=a.product;
+    if(!f.label||c.label.length>f.label.length)f.label=c.label;
+  });
+
+  // 3) 파생(복제·변형)이 하나라도 있는 가족만 — 사용자가 보려는 건 '변형된 것'뿐
+  let list=Object.values(fam).filter(f=>f.dup.length||f.var.length);
+  const bySpend=(x,y)=>y.spend-x.spend;
+  list.forEach(f=>{
+    f.orig.sort(bySpend);f.dup.sort(bySpend);f.var.sort(bySpend);
+    f.spend=[].concat(f.orig,f.dup,f.var).reduce((s,m)=>s+m.spend,0);
+    f.revenue=[].concat(f.orig,f.dup,f.var).reduce((s,m)=>s+m.revenue,0);
+    f.roas=f.spend>0?f.revenue/f.spend*100:0;
+    f.orphan=!f.orig.length;
+  });
+  const totalFam=list.length,orphanN=list.filter(f=>f.orphan).length;
+  if(!showOrphan)list=list.filter(f=>!f.orphan);
+  if(kw)list=list.filter(f=>[].concat(f.orig,f.dup,f.var).some(m=>(m.adset_name||'').toLowerCase().indexOf(kw)>=0)||(f.product||'').toLowerCase().indexOf(kw)>=0);
+  if(sortKey==='dup')list.sort((a,b)=>b.dup.length-a.dup.length||b.spend-a.spend);
+  else if(sortKey==='var')list.sort((a,b)=>b.var.length-a.var.length||b.spend-a.spend);
+  else if(sortKey==='total')list.sort((a,b)=>(b.dup.length+b.var.length)-(a.dup.length+a.var.length)||b.spend-a.spend);
+  else list.sort(bySpend);
+
+  const dupN=list.reduce((s,f)=>s+f.dup.length,0),varN=list.reduce((s,f)=>s+f.var.length,0);
+  document.getElementById('dvInfo').innerHTML='전체 파생 가족 '+totalFam+'개 (원본 미확인 '+orphanN+') · 표시 '+list.length+'개 · 복제 '+dupN+' · 변형 '+varN;
+
+  let h='<thead><tr>'
+    +'<th style="min-width:60px">상품</th>'
+    +'<th style="min-width:230px">원본 세트</th>'
+    +'<th style="min-width:250px">🧬 복제 (증액용 복사)</th>'
+    +'<th style="min-width:250px">🔀 변형 (tROAS·결과당비용 등)</th>'
+    +'<th style="min-width:95px">가족 합계</th>'
+    +'</tr></thead><tbody>';
+  h+='<tr class="sr"><td>종합 ('+list.length+'가족)</td>'
+    +'<td>원본 확인 '+list.filter(f=>!f.orphan).length+' · 미확인 '+list.filter(f=>f.orphan).length+'</td>'
+    +'<td>복제 '+dupN+'개</td><td>변형 '+varN+'개</td>'
+    +'<td style="text-align:right">'+money(list.reduce((s,f)=>s+f.spend,0))+'</td></tr>';
+
+  list.forEach(f=>{
+    const cellSty='font-size:10px;text-align:left;vertical-align:top;max-width:330px';
+    h+='<tr style="vertical-align:top">';
+    h+='<td style="font-size:10px;font-weight:600;text-align:left;vertical-align:top">'+abEsc(f.product||'-')+'</td>';
+    // 원본
+    if(f.orig.length){
+      h+='<td style="'+cellSty+'">'+f.orig.map(dvMemberHtml).join('')
+        +(f.orig.length>1?'<div style="font-size:9px;color:#a00;margin-top:2px">※ 동명 원본 '+f.orig.length+'개(계정 이동·재생성 추정)</div>':'')
+        +'</td>';
+    }else{
+      h+='<td style="'+cellSty+';color:#999"><div style="font-weight:600;color:#c60">(원본 미확인)</div>'
+        +'<div style="font-size:9px;line-height:1.4;margin-top:2px">추정 계보명<br><b style="color:#666">'+abEsc(f.label)+'</b></div>'
+        +'<div style="font-size:9px;margin-top:2px">원본이 조회 기간 밖이거나 이름이 크게 바뀐 경우</div></td>';
+    }
+    // 복제 / 변형
+    [['dup','#1a73e8'],['var','#7c3aed']].forEach(([k,col])=>{
+      const arr=f[k];
+      if(!arr.length){h+='<td style="font-size:10px;color:#bbb;vertical-align:top">—</td>';return}
+      h+='<td style="'+cellSty+'"><div style="font-weight:700;color:'+col+';font-size:10px">'+arr.length+'개</div>'
+        +arr.map(dvMemberHtml).join('')+'</td>';
+    });
+    h+='<td style="font-size:10px;text-align:right;vertical-align:top">'+money(f.spend)
+      +'<div style="font-size:9px;color:#888">매출 '+money(f.revenue)+'</div>'
+      +'<div class="'+RC(f.roas)+'" style="font-size:9px;padding:0 3px;border-radius:2px;display:inline-block;margin-top:2px">ROAS '+f.roas.toFixed(0)+'%</div></td>';
+    h+='</tr>';
+  });
+  h+='</tbody>';
+  tbl.innerHTML=h;
 }
 
 let activeKrankFilter=null;
