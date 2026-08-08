@@ -275,7 +275,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
-<div class="panel" id="p-dupvar"><div class="filter"><label>기간</label><select id="dvDays" onchange="renderDupVar()"><option value="30">30일</option><option value="60">60일</option><option value="90" selected>90일</option><option value="180">180일</option></select><label style="margin-left:10px">정렬</label><select id="dvSort" onchange="renderDupVar()"><option value="spend" selected>가족 지출↓</option><option value="dup">복제 수↓</option><option value="var">변형 수↓</option><option value="total">파생 수↓</option></select><label style="margin-left:10px" title="복제·변형 중 '기간 내 최고 일예산'이 이 값 이상인 세트가 하나도 없는 가족은 표에 올리지 않습니다. 0 이면 예산 조건 없음.">일예산 하한</label><input type="number" id="dvBudget" step="10000" min="0" oninput="renderDupVar()" style="width:95px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><span id="dvBudgetCur" style="font-size:10px;color:#888;margin-left:3px"></span><label style="margin-left:10px">검색</label><input type="text" id="dvFilter" placeholder="원본/복제/변형 이름 키워드" oninput="renderDupVar()" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dvFilter').value='';renderDupVar()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><label style="margin-left:10px;font-size:10px;color:#555;cursor:pointer" title="복제·변형만 남고 원본 세트가 조회 기간 안에 없는 가족도 표시합니다(원본이 기간 밖이거나 이름이 크게 바뀐 경우)."><input type="checkbox" id="dvOrphan" checked onchange="renderDupVar()" style="vertical-align:-1px;margin-right:3px">원본 미확인 포함</label><span id="dvInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div><div class="sheet-wrap"><table id="dvTbl"></table></div></div>
+<div class="panel" id="p-dupvar"><div class="filter"><label>기간</label><select id="dvDays" onchange="renderDupVar()"><option value="30">30일</option><option value="60">60일</option><option value="90" selected>90일</option><option value="180">180일</option></select><label>보기</label><select id="dvView" onchange="renderDupVar()"><option value="map" selected>🫧 버블맵</option><option value="table">📋 표</option></select><label style="margin-left:10px">정렬</label><select id="dvSort" onchange="renderDupVar()"><option value="spend" selected>가족 지출↓</option><option value="dup">복제 수↓</option><option value="var">변형 수↓</option><option value="total">파생 수↓</option></select><label style="margin-left:10px" title="복제·변형 중 '기간 내 최고 일예산'이 이 값 이상인 세트가 하나도 없는 가족은 표에 올리지 않습니다. 0 이면 예산 조건 없음.">일예산 하한</label><input type="number" id="dvBudget" step="10000" min="0" oninput="renderDupVar()" style="width:95px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><span id="dvBudgetCur" style="font-size:10px;color:#888;margin-left:3px"></span><label style="margin-left:10px">검색</label><input type="text" id="dvFilter" placeholder="원본/복제/변형 이름 키워드" oninput="renderDupVar()" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dvFilter').value='';renderDupVar()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><label style="margin-left:10px;font-size:10px;color:#555;cursor:pointer" title="복제·변형만 남고 원본 세트가 조회 기간 안에 없는 가족도 표시합니다(원본이 기간 밖이거나 이름이 크게 바뀐 경우)."><input type="checkbox" id="dvOrphan" checked onchange="renderDupVar()" style="vertical-align:-1px;margin-right:3px">원본 미확인 포함</label><span id="dvInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div><div class="sheet-wrap" id="dvTblWrap" style="display:none"><table id="dvTbl"></table></div><div id="dvMap" style="max-height:calc(100vh - 100px);overflow:auto;margin-top:6px"></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
 <div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">밴스드</label><select id="chrVanced"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 제외</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>밴스드 제외</b>=밴스드 국내·밴스드 구글·대만 밴스드 행을 빼고 종합에서도 그만큼 매출(귀속)·지출을 차감(글로벌 매출탭 밴스드 토글과 동일 규칙) ·디멘드젠(타이트)=국내탭 🟢구글 디멘드젠 종합과 동일(지출=Ads API·매출=MP귀속) · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
@@ -3925,6 +3925,118 @@ function dvMemberHtml(m,th){
     +'</div>';
 }
 
+// ── 버블맵(마인드맵) 렌더 ─────────────────────────────────────────────
+// 원본 ●──[복제 n]──● ● ●
+//      └─[변형 n]──● ●
+// 버블 크기 = 지출(가족 안에서 상대), 색 = ROAS, 굵은 주황 테두리 = 일예산 하한 통과.
+const DV_MAP={origX:96,hubX:250,leafX:392,textX:428,width:980,rowH:58,minH:118};
+function dvRoasColor(r){
+  if(!r)return'#94a3b8';
+  if(r<70)return'#dc2626';if(r<100)return'#f97316';
+  if(r<150)return'#84cc16';if(r<200)return'#22c55e';return'#15803d';
+}
+function dvR(spend,max,lo,hi){   // 지출 → 반지름(면적 비례에 가깝게 sqrt)
+  if(!(max>0)||!(spend>0))return lo;
+  return lo+(hi-lo)*Math.sqrt(Math.min(1,spend/max));
+}
+function dvCurve(x1,y1,x2,y2,col,w){
+  const mx=(x1+x2)/2;
+  return '<path d="M'+x1+','+y1+' C'+mx+','+y1+' '+mx+','+y2+' '+x2+','+y2+'" fill="none" stroke="'+col+'" stroke-width="'+w+'" opacity="0.55"/>';
+}
+// 버블 1개 + 오른쪽 라벨(이름 / 예산·지출·ROAS)
+function dvBubble(m,cx,cy,r,branchCol,th,money){
+  const pass=th>0&&m.budget>=th;
+  const fill=dvRoasColor(m.roas);
+  const nm=(m.adset_name||'').length>44?(m.adset_name||'').slice(0,43)+'…':(m.adset_name||'');
+  const tip=(m.adset_name||'')+'\n'+m.adset_id+'\n예산 '+(m.budget>0?money(m.budget):'-')
+    +' · 지출 '+money(m.spend)+' · 매출 '+money(m.revenue)+' · ROAS '+m.roas.toFixed(0)+'%';
+  let s='<g><title>'+abEsc(tip)+'</title>';
+  s+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r.toFixed(1)+'" fill="'+fill+'" fill-opacity="0.88" stroke="'+(pass?'#b45309':branchCol)+'" stroke-width="'+(pass?3:1.5)+'"/>';
+  // 작은 버블도 ROAS 는 항상 찍는다(빈 원처럼 보이면 미완성으로 읽힘)
+  s+='<text x="'+cx+'" y="'+(cy+(r>=20?4:3))+'" text-anchor="middle" font-size="'+(r>=22?11:(r>=17?9.5:8))+'" font-weight="700" fill="#fff">'+m.roas.toFixed(0)+'</text>';
+  s+='<text x="'+DV_MAP.textX+'" y="'+(cy-3)+'" font-size="10.5" font-weight="600" fill="#1f2937">'+abEsc(nm)+dvTagText(m.tags)+'</text>';
+  s+='<text x="'+DV_MAP.textX+'" y="'+(cy+10)+'" font-size="9" fill="#6b7280">'
+    +(m.budget>0?'<tspan fill="'+(pass?'#b45309':'#6b7280')+'" font-weight="'+(pass?'700':'400')+'">예산 '+abEsc(money(m.budget))+'</tspan>':'예산 -')
+    +' · 지출 '+abEsc(money(m.spend))+' · ROAS '+m.roas.toFixed(0)+'%</text>';
+  return s+'</g>';
+}
+function dvTagText(tags){
+  if(!tags||!tags.length)return'';
+  return '<tspan font-size="9" font-weight="400" fill="#6366f1">  '+abEsc(tags.join('/'))+'</tspan>';
+}
+function dvHub(x,y,label,n,col){
+  const w=label.length*11+26;
+  return '<g><rect x="'+(x-w/2)+'" y="'+(y-10)+'" width="'+w+'" height="20" rx="10" fill="'+col+'"/>'
+    +'<text x="'+x+'" y="'+(y+4)+'" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">'+label+' '+n+'</text></g>';
+}
+
+function dvFamilyCard(f,budOn,budMin,money){
+  const dup=f.dup,vr=f.var,leaves=dup.length+vr.length;
+  const H=Math.max(DV_MAP.minH,26+leaves*DV_MAP.rowH);
+  const maxSp=Math.max.apply(null,[].concat(f.orig,dup,vr).map(m=>m.spend).concat([1]));
+  const oy=H/2;
+  let s='<svg width="'+DV_MAP.width+'" height="'+H+'" style="display:block">';
+  // 가지별 y 배치: 복제 위, 변형 아래
+  const ys=[];for(let i=0;i<leaves;i++)ys.push(26+i*DV_MAP.rowH+DV_MAP.rowH/2-8);
+  const dupYs=ys.slice(0,dup.length),varYs=ys.slice(dup.length);
+  const oR=f.orig.length?dvR(f.orig[0].spend,maxSp,20,34):22;
+  // 원본 → 허브 → 잎
+  [[dup,dupYs,'#1a73e8','🧬 복제'],[vr,varYs,'#7c3aed','🔀 변형']].forEach(([arr,yy,col,lab])=>{
+    if(!arr.length)return;
+    const hy=(yy[0]+yy[yy.length-1])/2;
+    s+=dvCurve(DV_MAP.origX+oR,oy,DV_MAP.hubX-((lab.length*11+26)/2),hy,col,3);
+    yy.forEach((y,i)=>{
+      const r=dvR(arr[i].spend,maxSp,13.5,26);
+      s+=dvCurve(DV_MAP.hubX+((lab.length*11+26)/2),hy,DV_MAP.leafX-r,y,col,1.6);
+    });
+    s+=dvHub(DV_MAP.hubX,hy,lab,arr.length+'개',col);
+    yy.forEach((y,i)=>{s+=dvBubble(arr[i],DV_MAP.leafX,y,dvR(arr[i].spend,maxSp,13.5,26),col,budOn?budMin:0,money)});
+  });
+  // 원본 버블
+  if(f.orig.length){
+    // 캡션은 버블 중심 기준 가운데 정렬이라 길면 카드 왼쪽 밖으로 잘린다 → 짧게 자르고
+    // 전체 이름은 카드 헤더와 <title> 툴팁이 책임진다.
+    const o=f.orig[0],nm=(o.adset_name||'').length>16?(o.adset_name||'').slice(0,15)+'…':(o.adset_name||'');
+    s+='<g><title>'+abEsc((o.adset_name||'')+'\n'+o.adset_id+'\n예산 '+(o.budget>0?money(o.budget):'-')+' · 지출 '+money(o.spend)+' · ROAS '+o.roas.toFixed(0)+'%')+'</title>';
+    s+='<circle cx="'+DV_MAP.origX+'" cy="'+oy+'" r="'+oR.toFixed(1)+'" fill="'+dvRoasColor(o.roas)+'" fill-opacity="0.95" stroke="#0f172a" stroke-width="2"/>';
+    s+='<text x="'+DV_MAP.origX+'" y="'+(oy+4)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">'+o.roas.toFixed(0)+'</text>';
+    s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+13)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1f2937">'+abEsc(nm)+'</text>';
+    s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+24)+'" text-anchor="middle" font-size="8.5" fill="#6b7280">'+abEsc(o.budget>0?'예산 '+money(o.budget):'예산 -')+'</text>';
+    if(f.orig.length>1)s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+35)+'" text-anchor="middle" font-size="8.5" fill="#b91c1c">동명 원본 +'+(f.orig.length-1)+'</text>';
+    s+='</g>';
+  }else{
+    s+='<g><title>'+abEsc('원본 미확인 — 추정 계보명 '+f.label)+'</title>'
+      +'<circle cx="'+DV_MAP.origX+'" cy="'+oy+'" r="22" fill="#f8fafc" stroke="#c60" stroke-width="2" stroke-dasharray="4 3"/>'
+      +'<text x="'+DV_MAP.origX+'" y="'+(oy+4)+'" text-anchor="middle" font-size="14" fill="#c60">?</text>'
+      +'<text x="'+DV_MAP.origX+'" y="'+(oy+37)+'" text-anchor="middle" font-size="9" font-weight="700" fill="#c60">원본 미확인</text>'
+      +'<text x="'+DV_MAP.origX+'" y="'+(oy+48)+'" text-anchor="middle" font-size="8.5" fill="#94a3b8">'+abEsc(f.label.length>26?f.label.slice(0,25)+'…':f.label)+'</text></g>';
+  }
+  s+='</svg>';
+  const oo=f.orig[0];
+  const head='<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;flex-wrap:wrap">'
+    +'<span style="background:#1a2744;color:#fff;font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:9px">'+abEsc(f.product||'-')+'</span>'
+    +(oo?'<span style="font-size:11.5px;font-weight:700;color:#111">'+abEsc(oo.adset_name)+'</span>'
+        +'<span style="font-size:9px;color:#9ca3af;font-family:Consolas,monospace">'+abEsc(oo.adset_id)+'</span>'
+       :'<span style="font-size:11.5px;font-weight:700;color:#c60">(원본 미확인) '+abEsc(f.label)+'</span>')
+    +'<span style="font-size:9.5px;color:#6b7280">복제 '+f.dup.length+' · 변형 '+f.var.length
+    +' · 가족 지출 '+abEsc(money(f.spend))+' · 매출 '+abEsc(money(f.revenue))+'</span>'
+    +'<span class="'+RC(f.roas)+'" style="font-size:9.5px;padding:0 5px;border-radius:3px;font-weight:700">ROAS '+f.roas.toFixed(0)+'%</span></div>';
+  return '<div style="border:1px solid #e5e7eb;border-radius:10px;padding:9px 12px 4px 12px;margin-bottom:10px;background:#fff;overflow-x:auto">'+head+s+'</div>';
+}
+
+function dvRenderMap(list,budOn,budMin){
+  const box=document.getElementById('dvMap');
+  if(!list.length){box.innerHTML='<div style="padding:20px;color:#888;font-size:12px">조건에 맞는 가족이 없습니다.</div>';return}
+  const legend='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:9.5px;color:#555;margin-bottom:8px;padding:6px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">'
+    +'<b style="color:#111">읽는 법</b>'
+    +'<span>버블 크기 = 지출</span>'
+    +'<span>숫자 = ROAS%</span>'
+    +'<span>색 '+[['#dc2626','~70'],['#f97316','~100'],['#84cc16','~150'],['#22c55e','~200'],['#15803d','200+']].map(c=>'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+c[0]+';margin:0 2px 0 6px;vertical-align:-1px"></span>'+c[1]).join('')+'</span>'
+    +(budOn?'<span style="color:#b45309;font-weight:700">굵은 주황 테두리 = 일예산 '+money(budMin)+' 이상</span>':'')
+    +'<span style="color:#888">버블에 마우스를 올리면 전체 이름·ID</span></div>';
+  box.innerHTML=legend+list.map(f=>dvFamilyCard(f,budOn,budMin,money)).join('');
+}
+
 // 일예산 하한 기본값 — 모드 통화 기준(국내·밴스드 ₩40만 / 글로벌은 대략 환산한 $300).
 // 모드를 바꾸면 해당 모드 기본값으로 되돌리고, 같은 모드 안에서 고친 값은 유지한다.
 const DV_BUDGET_DEF={kr:400000,vn:400000,gl:300};
@@ -3938,7 +4050,11 @@ function dvSyncBudget(){
 
 function renderDupVar(){
   const tbl=document.getElementById('dvTbl');
-  if(MODE!=='kr'&&MODE!=='vn'&&MODE!=='gl'){tbl.innerHTML='<tr><td>세트 모드(국내·밴스드·글로벌)에서만 사용</td></tr>';return}
+  if(MODE!=='kr'&&MODE!=='vn'&&MODE!=='gl'){
+    tbl.innerHTML='<tr><td>세트 모드(국내·밴스드·글로벌)에서만 사용</td></tr>';
+    document.getElementById('dvMap').innerHTML='<div style="padding:20px;color:#888;font-size:12px">세트 모드(국내·밴스드·글로벌)에서만 사용</div>';
+    return;
+  }
   const days=parseInt(document.getElementById('dvDays').value);
   const sortKey=document.getElementById('dvSort').value;
   const kw=(document.getElementById('dvFilter').value||'').trim().toLowerCase();
@@ -4005,6 +4121,12 @@ function renderDupVar(){
     +(budOn?' <span style="color:#b45309">(일예산 '+money(budMin)+' 미만만 있는 '+budCut+'개 제외)</span>':'')
     +(!anyBudget&&budMin>0?' <span style="color:#c00">(예산 데이터 없음 → 예산 조건 미적용)</span>':'')
     +' · 원본 미확인 '+orphanN+' · 복제 '+dupN+' · 변형 '+varN;
+
+  // 보기 전환: 버블맵(마인드맵) / 표
+  const view=document.getElementById('dvView').value;
+  document.getElementById('dvTblWrap').style.display=(view==='table')?'':'none';
+  document.getElementById('dvMap').style.display=(view==='table')?'none':'';
+  if(view!=='table'){dvRenderMap(list,budOn,budMin);return}
 
   let h='<thead><tr>'
     +'<th style="min-width:60px">상품</th>'
