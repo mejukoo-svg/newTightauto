@@ -275,7 +275,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div></div>
 <div class="panel" id="p-gweek"><div class="sheet-wrap"><table id="gweekTbl"></table></div></div>
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
-<div class="panel" id="p-dupvar"><div class="filter"><label>기간</label><select id="dvDays" onchange="renderDupVar()"><option value="30">30일</option><option value="60">60일</option><option value="90" selected>90일</option><option value="180">180일</option></select><label style="margin-left:10px">정렬</label><select id="dvSort" onchange="renderDupVar()"><option value="spend" selected>가족 지출↓</option><option value="dup">복제 수↓</option><option value="var">변형 수↓</option><option value="total">파생 수↓</option></select><label style="margin-left:10px">검색</label><input type="text" id="dvFilter" placeholder="원본/복제/변형 이름 키워드" oninput="renderDupVar()" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dvFilter').value='';renderDupVar()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><label style="margin-left:10px;font-size:10px;color:#555;cursor:pointer" title="복제·변형만 남고 원본 세트가 조회 기간 안에 없는 가족도 표시합니다(원본이 기간 밖이거나 이름이 크게 바뀐 경우)."><input type="checkbox" id="dvOrphan" checked onchange="renderDupVar()" style="vertical-align:-1px;margin-right:3px">원본 미확인 포함</label><span id="dvInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div><div class="sheet-wrap"><table id="dvTbl"></table></div></div>
+<div class="panel" id="p-dupvar"><div class="filter"><label>기간</label><select id="dvDays" onchange="renderDupVar()"><option value="30">30일</option><option value="60">60일</option><option value="90" selected>90일</option><option value="180">180일</option></select><label style="margin-left:10px">정렬</label><select id="dvSort" onchange="renderDupVar()"><option value="spend" selected>가족 지출↓</option><option value="dup">복제 수↓</option><option value="var">변형 수↓</option><option value="total">파생 수↓</option></select><label style="margin-left:10px" title="복제·변형 중 '기간 내 최고 일예산'이 이 값 이상인 세트가 하나도 없는 가족은 표에 올리지 않습니다. 0 이면 예산 조건 없음.">일예산 하한</label><input type="number" id="dvBudget" step="10000" min="0" oninput="renderDupVar()" style="width:95px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><span id="dvBudgetCur" style="font-size:10px;color:#888;margin-left:3px"></span><label style="margin-left:10px">검색</label><input type="text" id="dvFilter" placeholder="원본/복제/변형 이름 키워드" oninput="renderDupVar()" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dvFilter').value='';renderDupVar()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><label style="margin-left:10px;font-size:10px;color:#555;cursor:pointer" title="복제·변형만 남고 원본 세트가 조회 기간 안에 없는 가족도 표시합니다(원본이 기간 밖이거나 이름이 크게 바뀐 경우)."><input type="checkbox" id="dvOrphan" checked onchange="renderDupVar()" style="vertical-align:-1px;margin-right:3px">원본 미확인 포함</label><span id="dvInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div><div class="sheet-wrap"><table id="dvTbl"></table></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
 <div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">밴스드</label><select id="chrVanced"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 제외</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>밴스드 제외</b>=밴스드 국내·밴스드 구글·대만 밴스드 행을 빼고 종합에서도 그만큼 매출(귀속)·지출을 차감(글로벌 매출탭 밴스드 토글과 동일 규칙) ·디멘드젠(타이트)=국내탭 🟢구글 디멘드젠 종합과 동일(지출=Ads API·매출=MP귀속) · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
@@ -3912,13 +3912,28 @@ function dvBadge(tags){
   if(!tags||!tags.length)return'';
   return ' '+tags.map(t=>'<span style="display:inline-block;padding:0 4px;border-radius:7px;background:#eef2ff;color:#3730a3;font-size:8px;font-weight:700;vertical-align:1px">'+t+'</span>').join('');
 }
-function dvMemberHtml(m){
+function dvMemberHtml(m,th){
+  const pass=th>0&&m.budget>=th;   // 예산 하한을 넘긴 세트 = 이 가족이 표에 오른 근거
+  const bud=m.budget>0
+    ?'<span style="'+(pass?'font-weight:700;color:#b45309':'color:#888')+'">예산 '+money(m.budget)+'</span>'
+    :'<span style="color:#bbb">예산 -</span>';
   return '<div style="padding:3px 0;border-top:1px dotted #ddd">'
     +'<div style="font-weight:600;line-height:1.3">'+abEsc(m.adset_name)+dvBadge(m.tags)+'</div>'
     +'<div style="font-size:9px;color:#888;font-family:Consolas,monospace">'+abEsc(m.adset_id)+'</div>'
-    +'<div style="font-size:9px;color:#555">지출 '+money(m.spend)+' · 매출 '+money(m.revenue)
+    +'<div style="font-size:9px;color:#555">'+bud+' · 지출 '+money(m.spend)+' · 매출 '+money(m.revenue)
     +' · <span class="'+RC(m.roas)+'" style="padding:0 3px;border-radius:2px">ROAS '+m.roas.toFixed(0)+'%</span></div>'
     +'</div>';
+}
+
+// 일예산 하한 기본값 — 모드 통화 기준(국내·밴스드 ₩40만 / 글로벌은 대략 환산한 $300).
+// 모드를 바꾸면 해당 모드 기본값으로 되돌리고, 같은 모드 안에서 고친 값은 유지한다.
+const DV_BUDGET_DEF={kr:400000,vn:400000,gl:300};
+let dvBudgetMode=null;
+function dvSyncBudget(){
+  const el=document.getElementById('dvBudget');
+  if(dvBudgetMode!==MODE){dvBudgetMode=MODE;el.value=DV_BUDGET_DEF[MODE]!=null?DV_BUDGET_DEF[MODE]:0}
+  document.getElementById('dvBudgetCur').textContent=MODE==='gl'?'USD':'원';
+  return Math.max(0,parseFloat(el.value)||0);
 }
 
 function renderDupVar(){
@@ -3928,16 +3943,20 @@ function renderDupVar(){
   const sortKey=document.getElementById('dvSort').value;
   const kw=(document.getElementById('dvFilter').value||'').trim().toLowerCase();
   const showOrphan=document.getElementById('dvOrphan').checked;
+  const budMin=dvSyncBudget();
   const dd={};DATES.slice(0,days).forEach(d=>dd[d]=1);
 
   // 1) 세트 단위 집계 (세트랭킹과 동일한 방식)
+  //    예산은 일자별로 오르내리므로 '기간 내 최고 일예산'으로 본다 — 감액·중단된 뒤에도
+  //    그 세트가 어느 규모까지 밀어봤는지가 복제·변형 판단에 필요한 정보라서.
   const byAs={};
   AD.forEach(r=>{
     if(!dd[r.date])return;
     const id=r.adset_id;if(!id)return;
-    if(!byAs[id])byAs[id]={adset_id:id,adset_name:r.adset_name||'',product:r.product||'',spend:0,revenue:0,last:''};
+    if(!byAs[id])byAs[id]={adset_id:id,adset_name:r.adset_name||'',product:r.product||'',spend:0,revenue:0,budget:0,last:''};
     const a=byAs[id];
     a.spend+=r.spend;a.revenue+=r.revenue;
+    const b=+r.budget||0;if(b>a.budget)a.budget=b;
     if(!a.adset_name&&r.adset_name)a.adset_name=r.adset_name;
     if(r.date>a.last)a.last=r.date;
   });
@@ -3957,6 +3976,14 @@ function renderDupVar(){
 
   // 3) 파생(복제·변형)이 하나라도 있는 가족만 — 사용자가 보려는 건 '변형된 것'뿐
   let list=Object.values(fam).filter(f=>f.dup.length||f.var.length);
+  const famTotal=list.length;
+  // 4) 일예산 하한 — 복제·변형 중 예산이 하한 이상인 세트가 하나도 없으면 표에 올리지 않는다.
+  //    ★ 원본 예산은 자격 판단에 넣지 않는다("복제든 변형이든 … 하나도 없으면" 규칙).
+  //    예산 데이터가 아예 없는 모드에서는 전부 사라지지 않게 필터를 자동 해제한다.
+  const anyBudget=Object.values(byAs).some(a=>a.budget>0);
+  const budOn=budMin>0&&anyBudget;
+  if(budOn)list=list.filter(f=>f.dup.concat(f.var).some(m=>m.budget>=budMin));
+  const budCut=famTotal-list.length;
   const bySpend=(x,y)=>y.spend-x.spend;
   list.forEach(f=>{
     f.orig.sort(bySpend);f.dup.sort(bySpend);f.var.sort(bySpend);
@@ -3965,7 +3992,7 @@ function renderDupVar(){
     f.roas=f.spend>0?f.revenue/f.spend*100:0;
     f.orphan=!f.orig.length;
   });
-  const totalFam=list.length,orphanN=list.filter(f=>f.orphan).length;
+  const orphanN=list.filter(f=>f.orphan).length;
   if(!showOrphan)list=list.filter(f=>!f.orphan);
   if(kw)list=list.filter(f=>[].concat(f.orig,f.dup,f.var).some(m=>(m.adset_name||'').toLowerCase().indexOf(kw)>=0)||(f.product||'').toLowerCase().indexOf(kw)>=0);
   if(sortKey==='dup')list.sort((a,b)=>b.dup.length-a.dup.length||b.spend-a.spend);
@@ -3974,13 +4001,16 @@ function renderDupVar(){
   else list.sort(bySpend);
 
   const dupN=list.reduce((s,f)=>s+f.dup.length,0),varN=list.reduce((s,f)=>s+f.var.length,0);
-  document.getElementById('dvInfo').innerHTML='전체 파생 가족 '+totalFam+'개 (원본 미확인 '+orphanN+') · 표시 '+list.length+'개 · 복제 '+dupN+' · 변형 '+varN;
+  document.getElementById('dvInfo').innerHTML='파생 가족 '+famTotal+'개 중 표시 '+list.length+'개'
+    +(budOn?' <span style="color:#b45309">(일예산 '+money(budMin)+' 미만만 있는 '+budCut+'개 제외)</span>':'')
+    +(!anyBudget&&budMin>0?' <span style="color:#c00">(예산 데이터 없음 → 예산 조건 미적용)</span>':'')
+    +' · 원본 미확인 '+orphanN+' · 복제 '+dupN+' · 변형 '+varN;
 
   let h='<thead><tr>'
     +'<th style="min-width:60px">상품</th>'
     +'<th style="min-width:230px">원본 세트</th>'
-    +'<th style="min-width:250px">🧬 복제 (증액용 복사)</th>'
-    +'<th style="min-width:250px">🔀 변형 (tROAS·결과당비용 등)</th>'
+    +'<th style="min-width:250px">🧬 복제 (증액용 복사)'+(budOn?'<br><span style="font-weight:400;color:#b45309">일예산 '+money(budMin)+'↑ 굵게</span>':'')+'</th>'
+    +'<th style="min-width:250px">🔀 변형 (tROAS·결과당비용 등)'+(budOn?'<br><span style="font-weight:400;color:#b45309">일예산 '+money(budMin)+'↑ 굵게</span>':'')+'</th>'
     +'<th style="min-width:95px">가족 합계</th>'
     +'</tr></thead><tbody>';
   h+='<tr class="sr"><td>종합 ('+list.length+'가족)</td>'
@@ -3994,7 +4024,7 @@ function renderDupVar(){
     h+='<td style="font-size:10px;font-weight:600;text-align:left;vertical-align:top">'+abEsc(f.product||'-')+'</td>';
     // 원본
     if(f.orig.length){
-      h+='<td style="'+cellSty+'">'+f.orig.map(dvMemberHtml).join('')
+      h+='<td style="'+cellSty+'">'+f.orig.map(m=>dvMemberHtml(m,0)).join('')
         +(f.orig.length>1?'<div style="font-size:9px;color:#a00;margin-top:2px">※ 동명 원본 '+f.orig.length+'개(계정 이동·재생성 추정)</div>':'')
         +'</td>';
     }else{
@@ -4007,7 +4037,7 @@ function renderDupVar(){
       const arr=f[k];
       if(!arr.length){h+='<td style="font-size:10px;color:#bbb;vertical-align:top">—</td>';return}
       h+='<td style="'+cellSty+'"><div style="font-weight:700;color:'+col+';font-size:10px">'+arr.length+'개</div>'
-        +arr.map(dvMemberHtml).join('')+'</td>';
+        +arr.map(m=>dvMemberHtml(m,budOn?budMin:0)).join('')+'</td>';
     });
     h+='<td style="font-size:10px;text-align:right;vertical-align:top">'+money(f.spend)
       +'<div style="font-size:9px;color:#888">매출 '+money(f.revenue)+'</div>'
