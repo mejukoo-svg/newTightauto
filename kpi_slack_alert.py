@@ -6,11 +6,14 @@ kpi_slack_alert.py — Supabase 데이터 조건 검사 → Slack 알람 (중복
   [고예산 적자 세트] 오늘(실시간) 국내 광고세트 중
         일예산(budget) >= 700,000  AND  적자(지출-매출) >= 100,000
         + 오전 오알람 방지: 오늘 지출이 일예산의 SPEND_MATURITY(기본 15%) 이상인 세트만
-        → 적자 큰 순 목록(세트ID 포함). 조건 지속 시 매시간 재알림  · ad_performance_daily
+        → 적자 큰 순 목록(세트ID 포함). 세트당 하루 1회만 알림  · ad_performance_daily
   [일ROAS 경고] 어제 국내 광고 일ROAS < 100% (KR 지출 > 매출)   · ad_performance_daily
 
 중복 방지: alert_log(alert_key PK).
-  - 고예산세트 key = 날짜+시각(HH)+세트id → 매시간 재검사·재알림(같은 시각 중복 실행만 차단)
+  - 고예산세트 key = 날짜+세트id → 세트당 하루 1회(파이프라인이 매시간 돌아도 재알림 없음).
+      한 번 보낸 세트는 그날 적자가 더 커져도 다시 보내지 않는다 → 조용한 대신,
+      그날의 첫 판정(= SPEND_MATURITY 를 넘긴 첫 시각) 기준 수치가 찍힌다.
+      같은 날 처음 조건에 걸린 '다른' 세트는 그 시점에 정상 발송된다.
   - 일ROAS key = 날짜 → 하루 1회(어제 기준이라 불변)
 
 env: SUPABASE_URL, SUPABASE_SERVICE_KEY, SLACK_WEBHOOK_URL
@@ -156,24 +159,24 @@ def check_adset_low_roas():
             qual.append((loss, roas, r, budget, spend, rev))
     qual.sort(key=lambda x: -x[0])  # 적자 큰 순
     items = []
-    hh = f"{NOW:%H}"  # KST 시 — 매시간 재알림용 dedup 키 (조건 지속 시 매시간 재전송)
     for loss, roas, r, budget, spend, rev in qual[:ADSET_MAX_LINES]:
         name = (r.get("adset_name") or r.get("adset_id") or "?")[:46]
         prod = r.get("product") or "-"
         aid = r.get("adset_id") or "?"
-        key = f"adset_loss:{d}T{hh}:{aid}"   # 세트별 시간당 1회 → 매시간 재알림
+        key = f"adset_loss:{d}:{aid}"   # 세트별 하루 1회 (시각 미포함 → 매시간 재알림 안 함)
         line = (f"{sev_emoji(roas)} *{name}*  ·  {prod}\n"
                 f"↳ 적자 *{won(loss)}*  ·  지출 {won(spend)} → 매출 {won(rev)}  ·  ROAS {roas:.0f}%\n"
                 f"↳ 예산 {won(budget)}  ·  세트ID `{aid}`")
         items.append((key, line))
     extra = len(qual) - ADSET_MAX_LINES
     if extra > 0:
-        items.append((f"adset_loss_more:{d}T{hh}", f"_…외 {extra}개 세트 더 있음_"))
+        items.append((f"adset_loss_more:{d}", f"_…외 {extra}개 세트 더 있음_"))
     if not items:
         log.info(f"고예산 적자 세트 없음 ({d})")
         return None
     return {"title": f"🚨 고예산 적자 세트  ·  {len(qual)}건",
-            "subtitle": f"오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & 적자 {won(ADSET_LOSS_MIN)}↑ · 적자 큰 순",
+            "subtitle": (f"오늘 {d} · 일예산 {won(ADSET_BUDGET_MIN)}↑ & 적자 {won(ADSET_LOSS_MIN)}↑ · "
+                         f"적자 큰 순 · 세트당 하루 1회"),
             "items": items}
 
 
