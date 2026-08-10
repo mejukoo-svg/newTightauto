@@ -260,7 +260,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-change"><div class="filter"><label>보기</label><select id="cView" onchange="renderChange()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">세트필터</label><input type="text" id="cFilter" placeholder="키워드 입력 → 해당 세트만 표시" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('cFilter').value='';renderChange()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button></div><div class="sheet-wrap"><table id="cTbl"></table></div></div>
 <div class="panel" id="p-weekly"><div class="filter"><label>보기</label><select id="wMode"><option value="all">전체</option><option value="month">월별만</option><option value="week">주별만</option></select><label style="margin-left:10px">소스</label><select id="wSource"><option value="kr" selected>국내 메타</option><option value="dg">디멘드젠(타이트)</option><option value="both">국내 종합(메타+디멘드젠)</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 디멘드젠=google_demandgen_campaign_daily(지출=Google Ads·매출=MP귀속). 디멘드젠은 클릭·노출 없어 CVR/CTR 공백</span></div><div id="wBlocks" style="max-height:calc(100vh-90px);overflow:auto"></div></div>
 <div class="panel" id="p-budget"><div class="sheet-wrap"><table class="budget-table" id="bTbl"></table></div></div>
-<div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button><button id="abBtn" onclick="abOpen()" title="증감액이 마킹된 세트의 메타 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:auto;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 메타에 예산 적용</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
+<div class="panel" id="p-datetab"><div class="filter"><label>시작일</label><select id="dtStart"></select><label style="margin-left:8px">종료일</label><select id="dtEnd"></select><span id="dtInfo" style="color:#888;margin-left:10px;font-size:10px"></span><button onclick="dtSetToday()" style="margin-left:6px;padding:3px 8px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">어제 하루</button><label style="margin-left:10px">필터</label><input type="text" id="dtFilter" placeholder="키워드 입력 → 해당 행만 표시" title="캠페인 · 세트/소재명 · ID · 상품 에서 검색 (국내·글로벌 공통)" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dtFilter').value='';renderDateTab()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><button id="abBtn" onclick="abOpen()" title="증감액이 마킹된 세트의 메타 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:auto;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 메타에 예산 적용</button></div><div class="sheet-wrap"><table id="dtTbl"></table></div></div>
 <div class="panel" id="p-dateproduct"><div class="filter"><label>기간</label><select id="dpPeriod"><option value="day" selected>하루</option><option value="week">주간</option><option value="month">월간</option></select><label style="margin-left:10px">날짜</label><select id="dpSel"></select></div><div class="sheet-wrap"><div id="dpCountryWrap" style="display:none;margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏 나라별</div><table id="dpCountryTbl"></table></div><div id="dpProductLabel" style="display:none;font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품별</div><table id="dpTbl"></table><div id="dpCPWrap" style="display:none;margin-top:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🌏×📦 나라별 · 상품별 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">국가 × 상품 교차 — 지출순 정렬</span></div><table id="dpCPTbl"></table></div></div></div>
 <div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><label style="margin-left:10px">국가</label><select id="grevCountry" onchange="renderGlobalRevenue()"><option value="ALL" selected>🌐 전체</option><option value="TW">대만</option><option value="HK">홍콩</option><option value="JP">일본</option><option value="TH">태국</option><option value="SG">싱가포르</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중<br>🌐 국가 선택 시 매출·지출·순이익·ROAS·오가닉이 그 나라만으로 계산 — ⚠ 매출=Stripe 순매출(캡처액−환불액 = 미청구·환불 제외 · 일본=JPY·싱가포르=SGD 결제 기준, 대만·홍콩·태국=빌링주소 우선), 지출·귀속매출=세트 country(캠페인명 tw/hk 태그)로 분류 기준이 달라 국가별 ROAS·순이익은 근사치이고, country 태그 없는 세트 지출은 제외됩니다(전체 합과 불일치 가능).</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
@@ -932,6 +932,7 @@ function switchMode(m){
   dashState.dateA=null;dashState.dateB=null;
   document.getElementById('dtStart').innerHTML='';
   document.getElementById('dtEnd').innerHTML='';
+  {const _df=document.getElementById('dtFilter');if(_df)_df.value=''}  // 모드 바뀌면 필터 해제 — 이전 모드 키워드로 표가 빈 채 보이는 사고 방지
   document.getElementById('dpSel').innerHTML='';
   // Render active tab
   const activeTab=document.querySelector('.tab.active');
@@ -1462,6 +1463,7 @@ document.getElementById('wMode').addEventListener('change',renderWeekly);
 document.getElementById('wSource').addEventListener('change',renderWeekly);
 document.getElementById('dtStart').addEventListener('change',renderDateTab);
 document.getElementById('dtEnd').addEventListener('change',renderDateTab);
+document.getElementById('dtFilter').addEventListener('input',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
 document.getElementById('dpPeriod').addEventListener('change',renderDateProduct);
 document.getElementById('crDays').addEventListener('change',renderCreativeRanking);
@@ -2837,6 +2839,14 @@ function renderDateTab(){
       a.purchase_roas_meta=null;
       return a;
     }).sort((a,b)=>b.profit-a.profit);
+  }
+
+  // 필터: 캠페인 · 세트(소재)명 · ID · 상품에 키워드가 포함된 행만 표시.
+  //   종합 row·'메타에 예산 적용' 대상(DT_ROWS) 모두 필터 결과 기준 — 화면에 보이는 것과 항상 일치.
+  const dtKw=((document.getElementById('dtFilter')||{}).value||'').trim().toLowerCase();
+  if(dtKw){
+    rows=rows.filter(r=>((r.campaign_name||'')+' '+(r.adset_name||'')+' '+(r.ad_name||'')+' '+(r.product||'')+' '+(rowId(r)||'')).toLowerCase().includes(dtKw));
+    dtInfo.textContent+=' · 🔍"'+dtKw+'" '+rows.length+'개';
   }
 
   // 종합 row 계산
