@@ -97,64 +97,67 @@ def load_google_section():
     for ci, h in enumerate(hdr):
         if h: log.info(f"    col{ci}: {repr(h)[:60]}")
 
-    # 구글 검색광고 섹션 컬럼 찾기
-    cost_brand_ci = cost_general_ci = revenue_ci = None
-    # cost_brand: 헤더에 '구글' AND '브랜드' AND '지출'
-    for ci, h in enumerate(hdr):
-        if "구글" in h and "브랜드" in h and "지출" in h:
-            cost_brand_ci = ci; break
-    if cost_brand_ci is None:
-        log.error("  ❌ '구글 브랜드 지출' 컬럼 못 찾음"); return empty
+    # ── 섹션 단위 컬럼 탐지 (2026-08-11 재작성) ────────────────────────────
+    # 시트가 '네이버 파워링크 / 구글 국내 검색광고 / 구글 대만 검색광고 / 구글 국내·대만 디멘드젠 /
+    # 구글 PMAX' 섹션 구조로 바뀌면서, 섹션명은 각 섹션 첫 컬럼('… 총 지출')에만 붙고
+    # 뒤 컬럼은 '브랜드 지출'·'일반 구매전환값'처럼 섹션명 없이 온다.
+    # 구버전은 '구글 AND 브랜드 AND 지출' 한 셀을 찾아서 전 섹션이 통째로 스킵됐다 →
+    # 섹션 앵커(섹션명 포함 헤더)로 구간을 자르고, 그 안에서 하위 컬럼을 찾는다.
+    _SEC = re.compile(r"(네이버|구글|디멘드젠|PMAX)")
+    anchors = [ci for ci, h in enumerate(hdr) if h and _SEC.search(h)]
 
-    # cost_general: cost_brand 바로 뒤 1~3 col 내에 '일반' AND '지출'
-    for ci in range(cost_brand_ci + 1, min(cost_brand_ci + 4, len(hdr))):
-        h = hdr[ci]
-        if "일반" in h and "지출" in h:
-            cost_general_ci = ci; break
+    def _section(pred):
+        """섹션 앵커를 찾아 (start, end) 반환. 못 찾으면 (None, None)."""
+        for i, ci in enumerate(anchors):
+            if pred(hdr[ci]):
+                end = anchors[i + 1] if i + 1 < len(anchors) else len(hdr)
+                return ci, end
+        return None, None
 
-    # revenue: cost_brand 이후 '구매전환값' (브랜드/일반 suffix 없는 '총'성격)
-    for ci in range(cost_brand_ci + 1, len(hdr)):
-        h = hdr[ci].strip()
-        if h in ("구매전환값", "총 구매전환값"):
-            revenue_ci = ci; break
+    def _col(s, e, test):
+        if s is None:
+            return None
+        for ci in range(s, e):
+            if test(hdr[ci]):
+                return ci
+        return None
 
-    log.info(f"  → cost_brand={cost_brand_ci}({hdr[cost_brand_ci]!r})")
-    if cost_general_ci is not None:
-        log.info(f"  → cost_general={cost_general_ci}({hdr[cost_general_ci]!r})")
-    if revenue_ci is not None:
-        log.info(f"  → revenue={revenue_ci}({hdr[revenue_ci]!r})")
-    if revenue_ci is None:
-        log.error("  ❌ '구매전환값' 컬럼 못 찾음"); return empty
+    _is_total_rev = lambda h: h.strip() in ("구매전환값", "총 구매전환값")
+    _brand_cost   = lambda h: "브랜드" in h and "지출" in h
+    _gen_cost     = lambda h: "일반" in h and "지출" in h
+    _brand_rev    = lambda h: "브랜드" in h and "구매전" in h
+    _gen_rev      = lambda h: "일반" in h and "구매전" in h
 
-    # 구글 디멘드젠 섹션 (별도 채널): '디멘드젠 … 지출' + 바로 뒤 '구매전(환/홤)값'
-    # ※ 시트 헤더에 오타 '구매전홤값'(전환→전홤) 존재 → '구매전' 부분일치로 잡음
-    dg_cost_ci = dg_rev_ci = None
-    for ci, h in enumerate(hdr):
-        if "디멘드젠" in h and "지출" in h:
-            dg_cost_ci = ci; break
-    if dg_cost_ci is not None:
-        for ci in range(dg_cost_ci + 1, min(dg_cost_ci + 4, len(hdr))):
-            if "구매전" in hdr[ci]:  # '구매전환값' 또는 오타 '구매전홤값'
-                dg_rev_ci = ci; break
+    # 구글 국내 검색광고 (대만은 별도 섹션이라 제외 — 국내 채널 테이블이다)
+    g_s, g_e = _section(lambda h: "구글" in h and "검색광고" in h and "대만" not in h)
+    if g_s is None:
+        g_s, g_e = _section(lambda h: "구글" in h and "브랜드" in h and "지출" in h)  # 구 레이아웃 호환
+    cost_brand_ci = _col(g_s, g_e, _brand_cost)
+    cost_general_ci = _col(g_s, g_e, _gen_cost)
+    revenue_ci = _col(g_s, g_e, _is_total_rev)
+    if cost_brand_ci is None or revenue_ci is None:
+        log.error("  ❌ 구글 국내 검색광고 섹션 컬럼 못 찾음 — 시트 헤더 확인 필요"); return empty
+    log.info(f"  → search brand={cost_brand_ci}({hdr[cost_brand_ci]!r}) general={cost_general_ci} rev={revenue_ci}({hdr[revenue_ci]!r})")
+
+    # 구글 디멘드젠(국내) — 레거시 google_demandgen_daily 용. 지출 + 구매전환값(시트 오타 '구매전홤값' 허용)
+    d_s, d_e = _section(lambda h: "디멘드젠" in h and "대만" not in h)
+    dg_cost_ci = d_s if (d_s is not None and "지출" in hdr[d_s]) else _col(d_s, d_e, lambda h: "지출" in h)
+    dg_rev_ci = _col(d_s, d_e, lambda h: "구매전" in h)
     if dg_cost_ci is not None and dg_rev_ci is not None:
         log.info(f"  → demandgen cost={dg_cost_ci}({hdr[dg_cost_ci]!r}) rev={dg_rev_ci}({hdr[dg_rev_ci]!r})")
     else:
         log.warning("  ⚠️ 구글 디멘드젠 컬럼 못 찾음 — 디멘드젠 스킵")
 
-    # 네이버 파워링크 (별도 채널): '네이버 … 브랜드 … 지출'(col3) + '일반 지출'(col4) + '총 구매전환값'(col5)
-    nv_brand_ci = nv_gen_ci = nv_rev_ci = None
-    for ci, h in enumerate(hdr):
-        if "네이버" in h and "브랜드" in h and "지출" in h:
-            nv_brand_ci = ci; break
-    if nv_brand_ci is not None:
-        for ci in range(nv_brand_ci + 1, min(nv_brand_ci + 4, len(hdr))):
-            if "일반" in hdr[ci] and "지출" in hdr[ci]:
-                nv_gen_ci = ci; break
-        for ci in range(nv_brand_ci + 1, len(hdr)):
-            if hdr[ci].strip() in ("총 구매전환값", "구매전환값"):
-                nv_rev_ci = ci; break
+    # 네이버 파워링크 — 브랜드/일반을 지출·매출 모두 분리해 적재(매출탭 채널 2개로 쪼갬)
+    n_s, n_e = _section(lambda h: "네이버" in h)
+    nv_brand_ci = _col(n_s, n_e, _brand_cost)
+    nv_gen_ci = _col(n_s, n_e, _gen_cost)
+    nv_rev_ci = _col(n_s, n_e, _is_total_rev)
+    nv_brand_rev_ci = _col(n_s, n_e, _brand_rev)
+    nv_gen_rev_ci = _col(n_s, n_e, _gen_rev)
     if nv_brand_ci is not None and nv_rev_ci is not None:
-        log.info(f"  → naver brand={nv_brand_ci}({hdr[nv_brand_ci]!r}) general={nv_gen_ci} rev={nv_rev_ci}({hdr[nv_rev_ci]!r})")
+        log.info(f"  → naver brand={nv_brand_ci} general={nv_gen_ci} rev={nv_rev_ci} "
+                 f"brandRev={nv_brand_rev_ci} genRev={nv_gen_rev_ci}")
     else:
         log.warning("  ⚠️ 네이버 파워링크 컬럼 못 찾음 — 네이버 스킵")
 
@@ -207,6 +210,8 @@ def load_google_section():
             nv_brand = _num(row[nv_brand_ci]) if nv_brand_ci < len(row) else 0
             nv_gen = _num(row[nv_gen_ci]) if (nv_gen_ci is not None and nv_gen_ci < len(row)) else 0
             nv_rev = _num(row[nv_rev_ci]) if nv_rev_ci < len(row) else 0
+            nv_brand_rev = _num(row[nv_brand_rev_ci]) if (nv_brand_rev_ci is not None and nv_brand_rev_ci < len(row)) else None
+            nv_gen_rev = _num(row[nv_gen_rev_ci]) if (nv_gen_rev_ci is not None and nv_gen_rev_ci < len(row)) else None
             nv_cost = nv_brand + nv_gen
             if nv_cost != 0 or nv_rev != 0:
                 nv_profit = nv_rev - nv_cost
@@ -219,6 +224,9 @@ def load_google_section():
                     "roas": round(nv_roas, 2),
                     "brand_cost": round(nv_brand, 2),
                     "general_cost": round(nv_gen, 2),
+                    # 브랜드/일반 구매전환값 — 매출탭이 '네이버 브랜드검색'·'네이버 일반검색어'로 쪼개 쓴다.
+                    "brand_revenue": round(nv_brand_rev, 2) if nv_brand_rev is not None else None,
+                    "general_revenue": round(nv_gen_rev, 2) if nv_gen_rev is not None else None,
                 })
     return {"search": records, "dg": dg_records, "naver": nv_records}
 
