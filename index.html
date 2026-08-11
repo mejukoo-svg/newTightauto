@@ -237,6 +237,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="tab kr-only" data-t="nsadaily">🔍 네이버SA_추이차트</div>
 <div class="tab kr-only" data-t="nsaweekly">📅 네이버SA_주간추이</div>
 <div class="tab kr-only" data-t="ggdgkr">🟢 구글 디멘드젠</div>
+<div class="tab kr-only" data-t="tiktok">🎵 틱톡</div>
 <div class="tab vn-only" data-t="ggdgct">🟢 구글 디멘드젠</div>
 <div class="tab kpi-only" data-t="kpiDash">📊 KPI 대시보드</div>
 <div class="tab kpi-only" data-t="kpiWeekly">📅 주간</div>
@@ -302,6 +303,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
 <div class="panel" id="p-ggdgkr"><div class="filter"><label>최근</label><select id="ggdgkrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">보기</label><select id="ggdgkrView" onchange="renderGgdgTight()"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><label style="margin-left:10px">검색</label><input type="text" id="ggdgkrFilter" oninput="renderGgdgTight()" placeholder="캠페인/세트/ID 키워드" style="width:170px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('ggdgkrFilter').value='';renderGgdgTight()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><button id="abBtnG" onclick="abOpenGoogle()" title="증감액이 마킹된 광고그룹의 구글 예산을 실제로 변경합니다 (확인 창에서 승인 후 실행)" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">⚡ 구글에 예산 적용</button><span style="color:#888;margin-left:12px;font-size:10px">💡 캠페인명 [Tight] 디멘드젠만 · 지출=Google Ads API / 매출=Mixpanel · 최신 왼쪽 · 첫 컬럼=<b>최근 7일 일평균</b>(오늘 포함 · 지출·매출·건수는 하루 평균, ROAS는 7일 합계 기준 · 당일은 진행 중 부분값) · 추이차트처럼 📦 상품별로 나눠 소계 표시 · 🎨 캠페인·세트·세트ID 칸을 클릭하면 추이차트처럼 하이라이트(0시 자동 삭제 · 전체삭제 공유) · 🟩 <b>증감액 테두리</b>=⚡로 구글에 실제 반영된 날짜 셀에 색 링(+20%·+10%·-10%·-20%·OFF 검정 / 셀에 마우스를 올리면 변경 전→후 금액). 실패한 적용은 표시하지 않음</span></div><div class="sheet-wrap"><table id="ggdgkrTbl"></table></div></div>
+<div class="panel" id="p-tiktok"><div class="filter"><label>최근</label><select id="ttDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option></select><label style="margin-left:10px">캠페인필터</label><input type="text" id="ttFilter" placeholder="캠페인/ID 키워드" style="width:170px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('ttFilter').value='';renderTiktok()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><button onclick="loadTiktok(true).then(renderTiktok)" title="구글시트를 다시 읽어옵니다" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🔄 시트 새로고침</button><span style="color:#888;margin-left:12px;font-size:10px">🎵 틱톡 캠페인 추이 · 지출=틱톡 광고관리자 Campaign Report 실지출 / 매출·판매수=Mixpanel 결제완료(utm_id=캠페인ID 귀속·order_id dedup) · 셀=ROAS/순이익/지출/매출/판매수/구매당비용 · 최신 왼쪽 · 첫 컬럼=최근 7일 합계 · 추이차트처럼 📦 상품별 소계 · 출처=<a href="https://docs.google.com/spreadsheets/d/1PYGM70GseCggr6oSxFDgOdw5TUe1IiU0VzKayxM1A4A/edit#gid=0" target="_blank" style="color:#1a73e8">틱톡 추이차트 시트</a>(fill_tiktok.py) <span id="ttInfo"></span></span></div><div class="sheet-wrap"><table id="ttTbl"></table></div></div>
 <div class="panel" id="p-ggdgct"><div class="filter"><label>최근</label><select id="ggdgDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">콘텐츠</label><select id="ggdgTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select><label style="margin-left:10px">최소매출</label><input type="number" id="ggdgMinRev" value="0" style="width:100px"><span style="color:#888;margin-left:12px;font-size:10px">💡 ch=google · 디멘드젠(dg_) 콘텐츠만 · ROAS·순이익·지출·매출·건수 (매출=Mixpanel, 지출=Google Ads API)</span></div><div class="sheet-wrap"><table id="ggdgctTbl"></table></div></div>
 <div class="panel" id="p-kpiDash"><div id="kpiDashBody"></div></div>
 <div class="panel" id="p-kpiWeekly"><div class="sheet-wrap"><table id="kpiWTbl" class="kpi-table"></table></div></div>
@@ -881,6 +883,7 @@ function switchMode(m){
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
     if(t.dataset.t==='ggdgkr'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // [Tight] 디멘드젠은 국내(kr) 전용 (vn 의 ggdgct 와 라벨 중복 방지)
+    if(t.dataset.t==='tiktok'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // 틱톡은 국내(kr) 전용 — 밴스드(vn)엔 틱톡 집행이 없다
     if(t.dataset.t==='krank'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 세트랭킹: 국내·밴스드·글로벌 공통(kr-only 클래스보다 먼저 처리)
     if(t.dataset.t==='dupvar'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 복제·변형 계보: 국내·밴스드·글로벌 공통
     if(t.classList.contains('kr-only')){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'))?'inline-block':'none';return}
@@ -1430,6 +1433,7 @@ function renderTab(id){
   if(id==='nsaweekly')renderNsaWeekly();
   if(id==='ggdgct')renderGgdgContent();
   if(id==='ggdgkr')renderGgdgTight();
+  if(id==='tiktok'){renderTiktok();loadTiktok().then(renderTiktok)}  // 스냅샷 먼저 그리고 시트 읽으면 갱신
   if(id==='kpiDash')renderKpiDashboard();
   if(id==='kpiWeekly')renderKpiTable('weekly');
   if(id==='kpiMonthly')renderKpiTable('monthly');
@@ -1497,6 +1501,8 @@ document.getElementById('nsaWeeks').addEventListener('change',renderNsaWeekly);
 document.getElementById('nsawMinSpend').addEventListener('change',renderNsaWeekly);
 document.getElementById('ggdgDays').addEventListener('change',renderGgdgContent);
 document.getElementById('ggdgkrDays').addEventListener('change',renderGgdgTight);
+document.getElementById('ttDays').addEventListener('change',renderTiktok);
+document.getElementById('ttFilter').addEventListener('input',renderTiktok);
 document.getElementById('ggdgTop').addEventListener('change',renderGgdgContent);
 document.getElementById('ggdgMinRev').addEventListener('change',renderGgdgContent);
 
@@ -4319,19 +4325,24 @@ function _chrevHourly(){
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))}
   const cols=[];
   dates.forEach(d=>{[...BK].reverse().forEach(b=>{cols.push({date:d,bucket:b,key:d+'#'+b,label:DK(d).slice(3)+' '+bkLabel(b),dayStart:b===20})})});
-  // 채널 나열 = 표시기간 매출 내림차순 (일별 뷰 _chrevSortByRev 와 동일 규칙, 종합행 상단 고정)
+  // 채널 나열 = ①권역(국내→글로벌) ②소속(우리→밴스드) 그룹 → 그룹 안에서 표시기간 매출 내림차순
+  //   (일별 뷰 _chrevSortByRev 와 동일 규칙, 종합행 상단 고정 / 그룹 첫 행은 점선 구분선)
   const revOfCh=ch=>{let r=0;cols.forEach(col=>{r+=cell(col.date,col.bucket,ch).r});return r};
-  const byRev=list=>[...list].sort((a,b)=>revOfCh(b)-revOfCh(a));
+  const IS_VAN=n=>n==='밴스드 국내'||n==='밴스드 구글'||n==='대만 밴스드';
+  const grpOf=ch=>(DOM.indexOf(ch)>=0?'dom':'gl')+(IS_VAN(ch)?'_van':'_us');
+  const gRank=ch=>CHR_GRP_ORDER.indexOf(grpOf(ch));
+  const byRev=list=>[...list].sort((a,b)=>gRank(a)-gRank(b)||revOfCh(b)-revOfCh(a));
+  const mkRows=list=>{let prev=null;return byRev(list).map(ch=>{const r=mk(ch);r.grpTop=(prev!==null&&grpOf(ch)!==prev);prev=grpOf(ch);return r})};
   let rows;
-  if(scope==='dom')rows=[sumAll,{name:'국내 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM)},...byRev(DOM).map(mk)];
-  else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...byRev(GL).map(mk)];
-  else rows=[sumAll,...byRev(DOM.concat(GL)).map(mk)];
+  if(scope==='dom')rows=[sumAll,{name:'국내 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM)},...mkRows(DOM)];
+  else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...mkRows(GL)];
+  else rows=[sumAll,...mkRows(DOM.concat(GL))];
   // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
   const ths=cols.map(col=>'<th style="min-width:92px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
   rows.forEach(row=>{
     const nameBg=row.sum?'#c5d6ea':'#dce6f0';
-    h+='<tr'+(row.sum?' class="sr" style="border-top:2px solid #9bb5d4"':'')+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+row.name+'</td>';
+    h+='<tr'+(row.sum?' class="sr" style="border-top:2px solid #9bb5d4"':(row.grpTop?' style="border-top:2px dashed #b9c9db"':''))+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+row.name+'</td>';
     cols.forEach(col=>{const ix=INNER(row.get(col.date,col.bucket));const bg=row.sum?'background:#eef3f9;':'';h+='<td class="mc '+(row.sum?'':ix.cls)+'" style="'+bg+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
     h+='</tr>';
   });
@@ -4411,6 +4422,11 @@ function _chrevChannels(){
   const glChannels=incVan
     ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0}},glExcRow]   // VN_TW_ACC 단독 (KRW)
     : [glExcRow];
+  // 행 그룹 태그 — 나열 순서를 권역(국내→글로벌) → 소속(우리→밴스드) 로 묶기 위한 키.
+  //   실제 정렬/구분선은 _chrevSortByRev 가 처리(그룹 안에서만 매출 내림차순).
+  const IS_VAN=n=>n==='밴스드 국내'||n==='밴스드 구글'||n==='대만 밴스드';
+  domChannels.forEach(c=>{c.grp=IS_VAN(c.name)?'dom_van':'dom_us'});
+  glChannels.forEach(c=>{c.grp=IS_VAN(c.name)?'gl_van':'gl_us'});
   const scope=document.getElementById('chrScope')?.value||'all';
   // 권역별 상세 채널 + 종합매출 함수
   let head,detail,totalRev;
@@ -4435,13 +4451,24 @@ function _chrCell(v,revOnly,avg){
   return '<td class="mc '+RC(roas)+'"'+(avg?' style="font-weight:700"':'')+'>'+MC_CH(roas,p,v.s,v.r)+'</td>';
 }
 
-// 채널 행 나열 순서: 종합(sum) 상단 고정 → 상세채널은 표시기간 매출 합 내림차순 → 오가닉 맨 아래
+// 행 <tr> 스타일: 종합행=굵은 구분선, 그룹(권역·소속) 첫 행=점선 구분선.
+function _chrRowStyle(ch){
+  if(ch.sum)return ' style="border-top:2px solid #9bb5d4"';
+  return ch.grpTop?' style="border-top:2px dashed #b9c9db"':'';
+}
+
+// 채널 행 나열 순서: 종합(sum) 상단 고정 → 상세채널 → 오가닉 맨 아래.
+// 상세채널은 ①권역(국내→글로벌) ②소속(우리→밴스드) 로 묶고, 그 안에서만 표시기간 매출 내림차순.
+//   그룹 첫 행엔 grpTop=true 를 달아 표에서 점선 구분선을 그린다(그룹 태그는 _chrevChannels 가 부여).
+const CHR_GRP_ORDER=['dom_us','dom_van','gl_us','gl_van'];
 function _chrevSortByRev(channels,dates){
   const head=channels.filter(c=>c.sum);
   const tail=channels.filter(c=>!c.sum&&c.name==='오가닉');
+  const rank=c=>{const i=CHR_GRP_ORDER.indexOf(c.grp);return i<0?CHR_GRP_ORDER.length:i};  // 미태깅 그룹은 맨 뒤
   const mid=channels.filter(c=>!c.sum&&c.name!=='오가닉')
-    .map(c=>{let r=0;dates.forEach(d=>{r+=(c.get(d).r||0)});return{c,r}})
-    .sort((a,b)=>b.r-a.r).map(x=>x.c);
+    .map(c=>{let r=0;dates.forEach(d=>{r+=(c.get(d).r||0)});return{c,r,g:rank(c)}})
+    .sort((a,b)=>a.g-b.g||b.r-a.r).map(x=>x.c);
+  let prev=null;mid.forEach(c=>{const g=rank(c);c.grpTop=(prev!==null&&g!==prev);prev=g});
   return [...head,...mid,...tail];
 }
 
@@ -4461,7 +4488,7 @@ function _chrevDaily(channels,days){
     r7.forEach(d=>{const v=ch.get(d);a7s+=v.s;a7r+=v.r});
     const a7roas=a7s>0?a7r/a7s*100:0,a7p=a7r-a7s;
     const nameBg=ch.sum?'#c5d6ea':'#dce6f0';
-    h+='<tr'+(ch.sum?' style="border-top:2px solid #9bb5d4"':'')+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
+    h+='<tr'+_chrRowStyle(ch)+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
     h+=_chrCell({s:a7s,r:a7r},ch.revOnly,true);
     dates.forEach(d=>{
       h+=_chrCell(ch.get(d),ch.revOnly,false);
@@ -4503,7 +4530,7 @@ function _chrevPeriod(channels,view,count){
   let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
   channels.forEach(ch=>{
     const nameBg=ch.sum?'#c5d6ea':'#dce6f0';
-    h+='<tr'+(ch.sum?' style="border-top:2px solid #9bb5d4"':'')+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
+    h+='<tr'+_chrRowStyle(ch)+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
     periods.forEach(per=>{
       let s=0,r=0;
       per.dates.forEach(d=>{const v=ch.get(d);s+=v.s;r+=v.r});
@@ -5161,6 +5188,166 @@ async function toggleGgdgCreatives(adGroupId,anchorRow){
   trs.forEach(t=>frag.appendChild(t));
   anchorRow.parentNode.insertBefore(frag,anchorRow.nextSibling);
   if(caret)caret.textContent='▼';
+}
+
+// ===== 🎵 틱톡 (국내탭) — 추이차트와 같은 포맷 =====
+// 소스 = 구글시트 '틱톡 캠페인 추이차트'(fill_tiktok.py 가 채운다) gid=0.
+//   · 지출 = 틱톡 광고관리자 Campaign Report 실지출(활성 캠페인)
+//   · 매출·판매수 = Mixpanel 결제완료(utm_id=캠페인ID 귀속 · order_id dedup)
+//   틱톡은 Supabase 파이프라인이 없어 시트가 원장이다 → 시트를 gviz CSV 로 직접 읽고,
+//   읽기에 실패하면 아래 스냅샷(마지막 확인 2026-08-09)으로 폴백한다.
+const TT_SHEET_ID='1PYGM70GseCggr6oSxFDgOdw5TUe1IiU0VzKayxM1A4A';
+const TT_SHEET_URL='https://docs.google.com/spreadsheets/d/'+TT_SHEET_ID+'/gviz/tq?tqx=out:csv&gid=0&headers=0';
+const TT_SNAP_C={'1870671597111538':['무녀_헤드뱅잉_2600714',''],'1870672615781810':['무당_빙수범산_260714',''],'1872128852227393':['무당_aiUGC_ASC','-19만원'],'1872037759235186':['무당_애니메이션모음_ASC','-19만원'],'1872955572106417':['무당_애니메이션모음_ASC(2)','-10만원']};
+const TT_SNAP_D=[
+['2026-07-14','1870671597111538',36177,0,0],['2026-07-14','1870672615781810',50110,0,0],['2026-07-15','1870671597111538',54322,117000,3],['2026-07-15','1870672615781810',50111,136000,2],
+['2026-07-16','1870671597111538',57343,59000,1],['2026-07-16','1870672615781810',39854,39000,1],['2026-07-17','1870671597111538',105057,39000,1],['2026-07-17','1870672615781810',100442,305600,6],
+['2026-07-18','1870671597111538',94943,108800,2],['2026-07-18','1870672615781810',99205,0,0],['2026-07-19','1870671597111538',78304,0,0],['2026-07-19','1870672615781810',79334,46800,1],
+['2026-07-20','1870671597111538',105162,78000,2],['2026-07-20','1870672615781810',120906,39000,1],['2026-07-21','1870671597111538',112909,78000,2],['2026-07-21','1870672615781810',106911,0,0],
+['2026-07-22','1870671597111538',107238,107900,3],['2026-07-22','1870672615781810',101181,0,0],['2026-07-31','1872128852227393',13383,137100,3],['2026-07-31','1872037759235186',51560,96600,2],
+['2026-08-01','1872128852227393',48884,101500,2],['2026-08-01','1872037759235186',125000,370700,7],['2026-08-02','1872128852227393',10279,49800,1],['2026-08-02','1872037759235186',100613,315700,7],
+['2026-08-03','1872128852227393',14199,0,0],['2026-08-03','1872037759235186',57498,209400,4],['2026-08-04','1872128852227393',55575,159500,4],['2026-08-04','1872037759235186',55082,276900,7],
+['2026-08-05','1872128852227393',19141,0,0],['2026-08-05','1872037759235186',120030,556700,16],['2026-08-06','1872128852227393',150000,602400,13],['2026-08-06','1872037759235186',121127,455300,11],
+['2026-08-07','1872128852227393',48952,102500,3],['2026-08-07','1872037759235186',44350,149400,3],['2026-08-08','1872128852227393',46997,93600,2],['2026-08-08','1872037759235186',48200,116800,2],
+['2026-08-08','1872955572106417',46651,199200,4],['2026-08-09','1872128852227393',44950,231800,7],['2026-08-09','1872037759235186',111968,213400,4],['2026-08-09','1872955572106417',36779,2900,1]];
+const TT_SNAPSHOT=TT_SNAP_D.map(r=>({date:r[0],campaign:(TT_SNAP_C[r[1]]||['',''])[0],campaign_id:r[1],budget:(TT_SNAP_C[r[1]]||['',''])[1],spend:r[2],revenue:r[3],orders:r[4]}));
+let TIKTOK=TT_SNAPSHOT.slice(),TT_SRC='스냅샷(08/09까지)',TT_LOADED=false,TT_LOADING=null;
+
+// 따옴표 안 줄바꿈(셀 안 5줄)을 살리는 최소 CSV 파서
+function _ttCSV(txt){
+  const rows=[];let row=[],cur='',q=false;
+  for(let i=0;i<txt.length;i++){const c=txt[i];
+    if(q){ if(c==='"'){ if(txt[i+1]==='"'){cur+='"';i++} else q=false } else cur+=c }
+    else if(c==='"')q=true;
+    else if(c===','){row.push(cur);cur=''}
+    else if(c==='\n'){row.push(cur);cur='';rows.push(row);row=[]}
+    else if(c!=='\r')cur+=c;
+  }
+  if(cur!==''||row.length){row.push(cur);rows.push(row)}
+  return rows;
+}
+function _ttNum(s){s=String(s).replace(/[,원건%+\s]/g,'');if(!s||s==='-')return null;const v=parseFloat(s);return isNaN(v)?null:v}
+// 시트 → [{date,campaign,campaign_id,budget,spend,revenue,orders}]
+//   헤더행 = '캠페인 ＼ 날짜', 날짜 컬럼 = 'MM/DD (요일)' (최신 왼쪽), 셀 = ROAS/순이익/지출/매출/판매수 5줄.
+//   '전체' 행은 화면에서 다시 합산하므로 버린다(캠페인 합 = 전체 행과 일치함을 확인).
+function _ttParseSheet(txt){
+  const rows=_ttCSV(txt);
+  const hi=rows.findIndex(r=>r&&String(r[0]||'').trim().indexOf('캠페인')===0);
+  if(hi<0)return null;
+  const head=rows[hi];
+  let year=new Date().getFullYear();
+  for(let i=0;i<hi;i++){const m=String(rows[i][0]||'').match(/(20\d\d)-\d\d-\d\d/);if(m){year=+m[1];break}}
+  const cols=[];let prev='';
+  for(let j=2;j<head.length;j++){
+    const m=String(head[j]||'').trim().match(/^(\d\d)\/(\d\d)/);
+    if(!m)continue;
+    let d=year+'-'+m[1]+'-'+m[2];
+    if(prev&&d>prev){year--;d=year+'-'+m[1]+'-'+m[2]}  // 왼쪽이 최신 → 날짜가 커지면 연도 넘어감(12월↔1월)
+    prev=d;cols.push([j,d]);
+  }
+  const out=[];
+  for(let i=hi+1;i<rows.length;i++){
+    const r=rows[i];const raw=String(r[0]||'').trim();
+    if(!raw||raw.indexOf('ROAS 배경색')===0)continue;
+    const nm=raw.split('\n').map(s=>s.trim()).filter(Boolean);
+    const cname=nm[0];
+    if(!cname||cname==='전체')continue;
+    const budget=nm[1]||'';
+    const cid=String(r[1]||'').trim();
+    for(let k=0;k<cols.length;k++){
+      const j=cols[k][0],d=cols[k][1];
+      const c=String(r[j]||'').trim();
+      if(!c)continue;
+      const p=c.split('\n').map(s=>s.trim());
+      if(p.length<4)continue;
+      const spend=_ttNum(p[2]),rev=_ttNum(p[3]),ord=p.length>4?_ttNum(p[4]):null;
+      if(spend==null&&rev==null)continue;
+      out.push({date:d,campaign:cname,campaign_id:cid,budget:budget,spend:Math.abs(spend||0),revenue:rev||0,orders:ord||0});
+    }
+  }
+  return out.length?out:null;
+}
+function loadTiktok(force){
+  if(TT_LOADED&&!force)return Promise.resolve();
+  if(TT_LOADING&&!force)return TT_LOADING;
+  TT_LOADING=fetch(TT_SHEET_URL+'&_='+Date.now(),{cache:'no-store'})
+    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()})
+    .then(t=>{const d=_ttParseSheet(t);if(!d)throw new Error('시트 형식이 바뀜');
+      TIKTOK=d;TT_SRC='시트 실시간';TT_LOADED=true})
+    .catch(e=>{TIKTOK=TT_SNAPSHOT.slice();TT_SRC='스냅샷 폴백(시트 읽기 실패: '+(e.message||e)+')';TT_LOADED=true})
+    .then(()=>{TT_LOADING=null});
+  return TT_LOADING;
+}
+// 틱톡 셀 — 추이차트 MC 와 같은 배치. 클릭/노출이 없어 CVR·CPM 대신 판매수(건)를 넣는다.
+function TTC(roas,profit,spend,revenue,orders,cpa){
+  if(!spend&&!revenue)return'';
+  const pc=profit>=0?'p':'p neg';
+  let h='<div class="r">'+(spend>0?roas.toFixed(0):'')+'</div>'
+    +'<div class="'+pc+'">'+money(profit)+'</div>'
+    +'<div class="s">'+(spend?'-'+money(spend):'')+'</div>'
+    +'<div class="rv">'+money(revenue)+'</div>'
+    +'<div class="cv">'+(orders?orders+'건':'')+'</div>';
+  if(cpa)h+='<div class="cpa">'+money(cpa)+'</div>';
+  return h;
+}
+// 캠페인명 앞머리(무당_/무녀_)를 상품으로 — 추이차트의 📦 상품별 소계와 같은 모양
+function _ttProduct(name){const s=String(name||'');const i=s.indexOf('_');return (i>0?s.slice(0,i):s)||'기타'}
+function renderTiktok(){
+  const tbl=document.getElementById('ttTbl');if(!tbl)return;
+  const info=document.getElementById('ttInfo');
+  const days=parseInt(document.getElementById('ttDays').value)||30;
+  const kw=(document.getElementById('ttFilter').value||'').trim().toLowerCase();
+  const dd=[...new Set(TIKTOK.map(r=>r.date))].sort().reverse().slice(0,days);
+  if(info)info.innerHTML=' · 데이터 '+TT_SRC+(dd.length?' · 최신 '+dd[0]:'');
+  if(!dd.length){tbl.innerHTML='<tr><td style="padding:12px;color:#888">틱톡 데이터 없음 — 시트를 읽지 못했습니다</td></tr>';return}
+  const d7=dd.slice(0,7);
+  const _yd=new Date();_yd.setDate(_yd.getDate()-1);
+  const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // 캠페인별 그룹화
+  const byC={};
+  TIKTOK.forEach(r=>{
+    if(dd.indexOf(r.date)<0)return;
+    const id=r.campaign_id||r.campaign;
+    if(!byC[id])byC[id]={cn:r.campaign,id:id,bud:r.budget||'',product:_ttProduct(r.campaign),d:{}};
+    if(r.budget)byC[id].bud=r.budget;
+    byC[id].d[r.date]=r;
+  });
+  let list=Object.values(byC);
+  if(kw)list=list.filter(a=>((a.cn||'')+' '+(a.id||'')).toLowerCase().indexOf(kw)>=0);
+  list.forEach(a=>{let s=0,rv=0,o=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders}});
+    a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
+    a._yS=a.d[yDay]?a.d[yDay].spend:0;});
+  list.sort((a,b)=>(b._yS-a._yS)||(b._s-a._s));
+  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+  const colSpan=dd.length+4;  // 캠페인/ID/일예산/7일
+  const agg=(items,d)=>{let s=0,r=0,o=0;items.forEach(a=>{const x=a.d[d];if(x){s+=x.spend;r+=x.revenue;o+=x.orders}});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
+  const cellsOf=items=>dd.map(d=>{const t=agg(items,d);const yd=d===yDay?' col-yday':'';
+    return (t.s||t.r)?'<td class="mc '+RC(t.roas)+yd+'">'+TTC(t.roas,t.p,t.s,t.r,t.o,t.cpa)+'</td>':'<td class="'+yd+'"></td>'}).join('');
+  const sum7=items=>{let s=0,r=0,o=0;d7.forEach(d=>{const t=agg(items,d);s+=t.s;r+=t.r;o+=t.o});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
+  let h='<thead><tr><th style="text-align:left;white-space:nowrap">캠페인</th><th style="min-width:130px">캠페인 ID</th><th style="min-width:70px">일예산</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  // 종합
+  const T=sum7(list);
+  h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+list.length+'개)</td><td class="fx fx1" style="background:#e8e8e8"></td>'
+    +'<td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">판매수</div><div class="cpa">구매당비용</div></td>'
+    +'<td class="mc '+RC(T.roas)+'">'+TTC(T.roas,T.p,T.s,T.r,T.o,T.cpa)+'</td>'+cellsOf(list)+'</tr>';
+  // 📦 상품별
+  const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s});
+  Object.keys(byProd).sort((a,b)=>(byProd[b].yS-byProd[a].yS)||(byProd[b].s-byProd[a].s)).forEach(prod=>{
+    const g=byProd[prod];const P7=sum7(g.items);
+    h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.items.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+P7.roas.toFixed(0)+'%</td></tr>';
+    h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'
+      +'<td class="mc '+RC(P7.roas)+'">'+TTC(P7.roas,P7.p,P7.s,P7.r,P7.o,P7.cpa)+'</td>'+cellsOf(g.items)+'</tr>';
+    g.items.forEach(a=>{
+      const cells=dd.map(d=>{const x=a.d[d];const yd=d===yDay?' col-yday':'';
+        if(!x||(!x.spend&&!x.revenue))return'<td class="'+yd+'"></td>';
+        const roas=x.spend>0?x.revenue/x.spend*100:0;
+        return'<td class="mc '+RC(roas)+yd+'">'+TTC(roas,x.revenue-x.spend,x.spend,x.revenue,x.orders,x.orders>0?x.spend/x.orders:0)+'</td>'}).join('');
+      h+='<tr><td class="fx fx0">'+a.cn+'</td><td class="fx fx1" style="font-size:9px">'+a.id+'</td><td style="font-size:10px;color:#666">'+String(a.bud||'').replace(/^-/,'')+'</td>'
+        +'<td class="mc '+RC(a._roas)+'">'+TTC(a._roas,a._p,a._s,a._r,a._o,a._cpa)+'</td>'+cells+'</tr>';
+    });
+  });
+  h+='</tbody>';tbl.innerHTML=h;
+  requestAnimationFrame(()=>_fixSticky(tbl));
 }
 
 // ===== ZOOM =====
