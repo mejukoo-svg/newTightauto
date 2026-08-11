@@ -280,15 +280,6 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
 <div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">밴스드</label><select id="chrVanced"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 제외</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>밴스드 제외</b>=밴스드 운영 행(밴스드 국내·구글 검색/PMAX/디멘드젠(밴스드)·대만 밴스드·대만 구글)을 빼고 종합에서도 그만큼 매출(귀속)·지출을 차감 · <b>구글</b>=google_campaign_daily 한 소스를 국내/대만 × 검색·디멘드젠·PMAX·기타(GDN)로 분할(지출=Ads API·매출=MP utm_campaign 귀속, 대만 결제는 KRW 환산). 국내 디멘드젠은 [Tight]=우리 / [Vanced]=밴스드로 분리 ·<b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
-    <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
-    <select id="chrChartMode" style="font-size:11px"><option value="abs" selected>절대값(₩)</option><option value="pct">비율(100%)</option></select>
-    <select id="chrChartStyle" style="font-size:11px"><option value="stack" selected>누적 막대</option><option value="group">개별 막대(채널 나란히)</option></select>
-    <span style="color:#888;font-size:10px">누적=막대 전체가 채널 매출 합 · 개별=하루 안에 채널별 막대가 나란히 펼쳐짐 · 국내 채널은 귀속 매출 기준</span>
-  </div>
-  <div style="height:360px"><canvas id="chrChart"></canvas></div>
-</div>
-<div style="margin-top:22px;padding:16px 4px 0;border-top:1px dashed #d0d7e2">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출·지출·순이익 (가로 막대)</span>
     <label style="font-size:11px;color:#555">기간</label>
@@ -298,6 +289,15 @@ mark.sh.active{background:#ff6d01;color:#fff}
     <span style="color:#888;font-size:10px">선택 기간 <b>합계</b> · 채널(세로축)별 매출·지출·순이익 막대 · 캘린더로 기간을 직접 정하면 드롭다운 대신 그 구간 합계 · 권역·밴스드 토글 반영 · 매출 큰 순 · 지출 없는 채널(오가닉·메타(기타))은 매출=순이익</span>
   </div>
   <div id="chrBarWrap" style="height:420px"><canvas id="chrBar"></canvas></div>
+</div>
+<div style="margin-top:22px;padding:16px 4px 0;border-top:1px dashed #d0d7e2">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+    <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
+    <select id="chrChartMode" style="font-size:11px"><option value="abs" selected>절대값(₩)</option><option value="pct">비율(100%)</option></select>
+    <select id="chrChartStyle" style="font-size:11px"><option value="stack" selected>누적 막대</option><option value="group">개별 막대(채널 나란히)</option></select>
+    <span style="color:#888;font-size:10px">누적=막대 전체가 채널 매출 합 · 개별=하루 안에 채널별 막대가 나란히 펼쳐짐 · 국내 채널은 귀속 매출 기준</span>
+  </div>
+  <div style="height:360px"><canvas id="chrChart"></canvas></div>
 </div>
 <div style="margin-top:22px;padding:16px 4px 0;border-top:1px dashed #d0d7e2">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
