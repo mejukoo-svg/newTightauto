@@ -357,6 +357,37 @@ jobs:
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 구글_디멘드젠_캠페인_supabase.py
 
+  # ─── 구글 전 캠페인(유형 무관) — 매출탭 구글 채널 분할용 (독립 실행) ───
+  # 지출=Ads API campaign×date(전 유형), 매출=Mixpanel utm_campaign(=campaign.id) 귀속.
+  # 매출탭이 이 테이블로 국내/대만 × 검색/디멘드젠/PMAX 행을 만든다.
+  google-campaign:
+    name: 🔵 구글 전 캠페인
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install google-ads requests
+      - name: Run 구글 전 캠페인
+        env:
+          G_ADS_DEV_TOKEN: ${{ secrets.G_ADS_DEV_TOKEN }}
+          G_ADS_CLIENT_ID: ${{ secrets.G_ADS_CLIENT_ID }}
+          G_ADS_CLIENT_SECRET: ${{ secrets.G_ADS_CLIENT_SECRET }}
+          G_ADS_REFRESH_TOKEN: ${{ secrets.G_ADS_REFRESH_TOKEN }}
+          G_ADS_LOGIN_ID: ${{ secrets.G_ADS_LOGIN_ID }}
+          G_ADS_CUSTOMER_ID: ${{ secrets.G_ADS_CUSTOMER_ID }}
+          MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
+          MIXPANEL_USERNAME: ${{ secrets.MIXPANEL_USERNAME }}
+          MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
+          FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
+          REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+        run: python 구글_캠페인_supabase.py
+
   # ─── 알림톡 CRM (독립 실행) ───
   # 알림톡 대시보드(tightsaju-alimtalk) 일별 캠페인 매출·발송비용 → 매출탭 'CRM' 채널.
   # stdlib(urllib)만 사용 → pip 불필요. upsert라 매시 재실행 안전(최근 발송 지연분도 보정).

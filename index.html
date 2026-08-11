@@ -278,7 +278,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-crank"><div class="filter" id="crankFilter"><label>기간</label><select id="crDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="crSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearCrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="crTbl"></table></div></div>
 <div class="panel" id="p-dupvar"><div class="filter"><label>기간</label><select id="dvDays" onchange="renderDupVar()"><option value="30">30일</option><option value="60">60일</option><option value="90" selected>90일</option><option value="180">180일</option></select><label>보기</label><select id="dvView" onchange="renderDupVar()"><option value="map" selected>🫧 버블맵</option><option value="table">📋 표</option></select><label style="margin-left:10px">정렬</label><select id="dvSort" onchange="renderDupVar()"><option value="spend" selected>가족 지출↓</option><option value="dup">복제 수↓</option><option value="var">변형 수↓</option><option value="total">파생 수↓</option></select><label style="margin-left:10px" title="복제·변형 중 '기간 내 최고 일예산'이 이 값 이상인 세트가 하나도 없는 가족은 표에 올리지 않습니다. 0 이면 예산 조건 없음.">일예산 하한</label><input type="number" id="dvBudget" step="10000" min="0" oninput="renderDupVar()" style="width:95px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><span id="dvBudgetCur" style="font-size:10px;color:#888;margin-left:3px"></span><label style="margin-left:10px">검색</label><input type="text" id="dvFilter" placeholder="원본/복제/변형 이름 키워드" oninput="renderDupVar()" style="width:190px;padding:3px 6px;border:1px solid #ccc;border-radius:3px;font-size:11px"><button onclick="document.getElementById('dvFilter').value='';renderDupVar()" style="margin-left:4px;padding:3px 7px;border:1px solid #ccc;border-radius:3px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">✕</button><label style="margin-left:10px;font-size:10px;color:#555;cursor:pointer" title="복제·변형만 남고 원본 세트가 조회 기간 안에 없는 가족도 표시합니다(원본이 기간 밖이거나 이름이 크게 바뀐 경우)."><input type="checkbox" id="dvOrphan" checked onchange="renderDupVar()" style="vertical-align:-1px;margin-right:3px">원본 미확인 포함</label><span id="dvInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div><div class="sheet-wrap" id="dvTblWrap" style="display:none"><table id="dvTbl"></table></div><div id="dvMap" style="max-height:calc(100vh - 100px);overflow:auto;margin-top:6px"></div></div>
 <div class="panel" id="p-krank"><div class="filter" id="krankFilter"><label>기간</label><select id="krDays"><option value="7">7일</option><option value="14">14일</option><option value="30" selected>30일</option></select><label style="margin-left:10px">정렬</label><select id="krSort"><option value="spend">지출↓</option><option value="roas">ROAS↓</option><option value="profit">이익↓</option><option value="revenue">매출↓</option><option value="cvr">CVR↓</option></select><button onclick="clearKrankFilters()" style="margin-left:auto;padding:4px 10px;border:1px solid #888;border-radius:4px;background:#fff;font-size:10px;cursor:pointer;font-family:inherit">필터 초기화</button></div><div class="sheet-wrap"><table id="krTbl"></table></div></div>
-<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">밴스드</label><select id="chrVanced"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 제외</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>밴스드 제외</b>=밴스드 국내·밴스드 구글·대만 밴스드 행을 빼고 종합에서도 그만큼 매출(귀속)·지출을 차감(글로벌 매출탭 밴스드 토글과 동일 규칙) ·디멘드젠(타이트)=국내탭 🟢구글 디멘드젠 종합과 동일(지출=Ads API·매출=MP귀속) · <b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
+<div class="panel" id="p-chrev"><div class="filter"><label>권역</label><select id="chrScope"><option value="all" selected>전체</option><option value="dom">국내</option><option value="gl">글로벌</option></select><label style="margin-left:10px">밴스드</label><select id="chrVanced"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 제외</option></select><label style="margin-left:10px">보기</label><select id="chrView"><option value="daily" selected>일별</option><option value="weekly">주별</option><option value="monthly">월별</option><option value="hourly">시간별</option></select><label style="margin-left:10px">기간</label><select id="chrDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select><span style="color:#888;margin-left:12px;font-size:10px">💡 상단 종합(국내/글로벌/전체) + 권역별 채널 ROAS·순이익·매출·지출 · <b>밴스드 제외</b>=밴스드 운영 행(밴스드 국내·구글 검색/PMAX/디멘드젠(밴스드)·대만 밴스드·대만 구글)을 빼고 종합에서도 그만큼 매출(귀속)·지출을 차감 · <b>구글</b>=google_campaign_daily 한 소스를 국내/대만 × 검색·디멘드젠·PMAX·기타(GDN)로 분할(지출=Ads API·매출=MP utm_campaign 귀속, 대만 결제는 KRW 환산). 국내 디멘드젠은 [Tight]=우리 / [Vanced]=밴스드로 분리 ·<b>시간별</b>=채널을 4시간(00·04·08·12·16·20 KST)으로 분할 — 국내메타·밴스드국내·글로벌(밴스드제외)·대만밴스드는 Meta 시간대 지출로 ROAS까지, 네이버·디멘드젠(타이트)은 매출만(MP 귀속). 글로벌 종합=Stripe 실결제(정확), 대만밴스드/글로벌 매출 분할은 MP 세트귀속 근사(일별과 차이 가능)</span></div><div class="sheet-wrap"><table id="chrTbl"></table></div>
 <div style="margin-top:18px;padding:0 4px">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
     <span style="font-weight:700;font-size:13px">📊 채널별 매출 구성</span>
@@ -299,6 +299,15 @@ mark.sh.active{background:#ff6d01;color:#fff}
     <div style="width:340px;height:340px"><canvas id="chrDonut"></canvas></div>
     <div id="chrDonutLegend" style="font-size:12px;min-width:260px"></div>
   </div>
+</div>
+<div style="margin-top:22px;padding:16px 4px 0;border-top:1px dashed #d0d7e2">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-weight:700;font-size:13px">📊 채널별 매출·지출·순이익 (가로 막대)</span>
+    <label style="font-size:11px;color:#555">기간</label>
+    <select id="chrBarDays" style="font-size:11px"><option value="7">최근 7일</option><option value="14">최근 14일</option><option value="30" selected>최근 30일</option><option value="60">최근 60일</option><option value="90">최근 90일</option><option value="180">최근 180일</option></select>
+    <span style="color:#888;font-size:10px">선택 기간 <b>합계</b> · 채널(세로축)별 매출·지출·순이익 막대 · 권역·밴스드 토글 반영 · 매출 큰 순 · 지출 없는 채널(오가닉·메타(기타))은 매출=순이익 · 막대에 마우스를 올리면 ROAS</span>
+  </div>
+  <div id="chrBarWrap" style="height:420px"><canvas id="chrBar"></canvas></div>
 </div></div>
 <div class="panel" id="p-nsadaily"><div class="filter"><label>최근</label><select id="nsaDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="180">180일</option><option value="210">210일</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsaMinSpend" value="0" style="width:90px"><label style="margin-left:10px">정렬</label><select id="nsaSort"><option value="recent">어제 지출↓</option><option value="roas">ROAS↓</option><option value="spend">7일 지출↓</option><option value="profit">7일 이익↓</option></select><label style="margin-left:10px">검색어</label><select id="nsaKwTop"><option value="20" selected>Top20</option><option value="50">Top50</option><option value="100">Top100</option><option value="9999">전체</option></select></div><div class="sheet-wrap" style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🔍 검색어 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">Naver SA 키워드별 지출/매출/ROAS — 같은 셀 포맷으로 광고그룹 차트와 동일</span></div><table id="nsaKwTbl"></table></div><div class="sheet-wrap"><div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 광고그룹 추이</div><table id="nsaTbl"></table></div></div>
 <div class="panel" id="p-nsaweekly"><div class="filter"><label>최근</label><select id="nsaWeeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="13">13주</option><option value="26">26주</option><option value="30">30주</option></select><label style="margin-left:10px">최소지출</label><input type="number" id="nsawMinSpend" value="0" style="width:90px"></div><div class="sheet-wrap"><table id="nsawTbl"></table></div></div>
@@ -410,6 +419,9 @@ let KR_AD=[],GL_AD=[],CR_AD=[],GL_CR=[],VN_AD=[],STRIPE_DATA=[],TOSS_DATA=[];
 let CORE_FAIL={};   // 이번 로드에서 실패한 코어 테이블 {라벨: 사유} — 상단 경고 배너로 노출
 let COUNTRY='ALL';  // 국가 필터 (vn/gl 전용). ALL=전체(국가행을 adset당 합산)
 let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],NSA_KW=[],TOSS_DAILY=[],GGDG_CT=[],GGDG_SP=[],GGDG_TIGHT=[];
+// 구글 전 캠페인(google_campaign_daily) — 매출탭 구글 채널 분할(국내/대만 × 검색/디멘드젠/PMAX)용.
+//   지출=Ads API, 매출=MP utm_campaign 귀속, country=캠페인명 TW 태그, owner=[Tight]/그 외.
+let GCAMP=[];
 let ALIMTALK=[];  // CRM(알림톡) 채널 — alimtalk_daily_campaign (일자×캠페인, rev=귀속매출·cost=발송비용)
 // 구글 디멘드젠 증감액 테두리용 — budget_apply_log(region='gd') = '⚡ 구글에 예산 적용'으로 실제 반영된 기록.
 //   메타 추이차트는 ad_performance_daily.budget 의 전일 대비 변화로 테두리를 그리는데,
@@ -1064,7 +1076,7 @@ async function initData(){
   }
   const D180='&date=gte.'+_dateCutoff(215);
   // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
-  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','glcr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp','ggdg_tight','alimtalk'];
+  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','glcr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp','ggdg_tight','gcamp','alimtalk'];
   const cached={};
   await Promise.all(cKeys.map(k=>cacheGet('t_'+k).then(v=>{cached[k]=v?.data;})));
   let renderedFromCache=false;
@@ -1072,7 +1084,7 @@ async function initData(){
     _applyCore(cached);
     CR_AD=cached.cr||[];
     GL_CR=canonGLRows(cached.glcr||[]);   // 마케터탭(글로벌) 즉시 표시용 — fresh 는 renderMarketer 가 백그라운드로 갱신
-    NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];GGDG_CT=cached.ggdg_ct||[];GGDG_SP=cached.ggdg_sp||[];GGDG_TIGHT=cached.ggdg_tight||[];
+    NSA_KW=cached.nsa_kw||[];NAVER_KW=cached.naver_kw||[];GGDG_CT=cached.ggdg_ct||[];GGDG_SP=cached.ggdg_sp||[];GGDG_TIGHT=cached.ggdg_tight||[];GCAMP=cached.gcamp||[];
     // ⚠️ _BIG_LOADED.ggdgct 를 캐시에서 true 로 두지 않는다 — 그러면 ensureBigTable 이
     //    영영 fresh fetch 를 안 해서 새 적재(신규 날짜 지출 등)가 안 보임.
     //    캐시는 즉시 표시용, 갱신은 renderGgdgContent 의 stale-while-revalidate 가 담당.
@@ -1163,6 +1175,8 @@ async function ensureBigTable(name){
         sbQ('google_demandgen_content_spend_daily','select=*&order=date.desc&limit=20000'+D180).catch(()=>[]),
       ]).then(([rev,sp])=>{GGDG_CT=rev||[];GGDG_SP=sp||[];cacheSet('t_ggdg_ct',{ts:Date.now(),data:GGDG_CT});cacheSet('t_ggdg_sp',{ts:Date.now(),data:GGDG_SP});}),
     ggdgkr:()=>sbQ('google_demandgen_campaign_daily','select=*&order=date.desc&limit=20000'+D180).then(d=>{GGDG_TIGHT=d||[];cacheSet('t_ggdg_tight',{ts:Date.now(),data:GGDG_TIGHT});}),
+    // 매출탭 구글 5분할 — 필요한 컬럼만(행 1만 안팎). 실패 시 매출탭은 구 소스(시트 검색광고+[Tight]DG)로 폴백.
+    gcamp:()=>sbQ('google_campaign_daily','select=date,channel_type,country,owner,spend,revenue&order=date.desc&limit=30000'+D180).then(d=>{GCAMP=d||[];cacheSet('t_gcamp',{ts:Date.now(),data:GCAMP});}),
   };
   if(!tasks[name])return;
   window._BIG_LOADING[name]=tasks[name]().then(()=>{
@@ -1477,7 +1491,7 @@ function renderTab(id){
   if(id==='crank')renderCreativeRanking();
   if(id==='krank')renderAdsetRanking();
   if(id==='dupvar')renderDupVar();
-  if(id==='chrev'){renderChannelRevenue();renderChannelDonut();}
+  if(id==='chrev'){renderChannelRevenue();renderChannelDonut();renderChannelBars();}
   if(id==='nsadaily')renderNsaDaily();
   if(id==='nsaweekly')renderNsaWeekly();
   if(id==='ggdgct')renderGgdgContent();
@@ -1531,6 +1545,9 @@ document.getElementById('chrChartMode').addEventListener('change',renderChannelR
 document.getElementById('chrChartStyle').addEventListener('change',renderChannelRevenue);
 document.getElementById('chrDonutDays').addEventListener('change',renderChannelDonut);
 document.getElementById('chrScope').addEventListener('change',renderChannelDonut);
+document.getElementById('chrBarDays').addEventListener('change',renderChannelBars);
+document.getElementById('chrScope').addEventListener('change',renderChannelBars);
+document.getElementById('chrVanced').addEventListener('change',renderChannelBars);
 document.getElementById('chrView').addEventListener('change',function(){
   const view=this.value;
   const sel=document.getElementById('chrDays');
@@ -4334,6 +4351,10 @@ function renderChannelRevenue(){
   if(typeof TT_LOADED!=='undefined'&&!TT_LOADED){
     loadTiktok().then(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='chrev'){renderChannelRevenue();renderChannelDonut();}});
   }
+  // 구글 5분할 행 = google_campaign_daily(lazy). 도착 전엔 구 소스(시트 검색광고+[Tight]DG)로 폴백 렌더.
+  if(!(window._BIG_LOADED&&window._BIG_LOADED.gcamp)){
+    ensureBigTable('gcamp').then(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='chrev'){renderChannelRevenue();renderChannelDonut();}});
+  }
   // CRM 채널에 MP ch=kakao 매출을 합치려면 kr_channel_revenue_4h(채널='카카오')가 필요 → 먼저 로드.
   ensureKrRev4h(()=>{
     const count=parseInt(document.getElementById('chrDays').value);
@@ -4428,6 +4449,27 @@ function _chrevChannels(){
   //   지출=틱톡 광고관리자 실지출, 매출=MP 결제완료(utm_id=캠페인ID 귀속). 국내 집행만 있어 국내 채널로 둔다.
   const byDateTT={};
   (typeof TIKTOK!=='undefined'?TIKTOK:[]).forEach(r=>{if(!byDateTT[r.date])byDateTT[r.date]={s:0,r:0};byDateTT[r.date].s+=(+r.spend||0);byDateTT[r.date].r+=(+r.revenue||0)});
+  // 구글(전 캠페인) = google_campaign_daily → (국가 × 유형 × 소유) 버킷.
+  //   지출=Ads API campaign×date(전 유형), 매출=MP utm_campaign(=campaign.id) 귀속·비KRW는 KRW 환산.
+  //   국내 디멘드젠만 [Tight](우리)/[Vanced](밴스드)로 분리 — 나머지 구글 캠페인은 전부 밴스드 운영.
+  //   대만(캠페인명 TW 태그)은 글로벌 권역으로 보낸다(대만 결제는 Stripe 실결제라 글로벌 종합과 정합).
+  //   ★ 미로드/실패(gcOK=false)면 구 소스(시트 검색광고 google_ads_daily + [Tight]DG)로 폴백 — 조용한 0 방지.
+  const gB={};
+  const _gkey=r=>{
+    const c=(r.country==='TW')?'TW':'KR', t=r.channel_type||'';
+    if(t==='SEARCH')return c+'_SEARCH';
+    if(t==='DEMAND_GEN')return c==='KR'?('KR_DG_'+(r.owner==='tight'?'T':'V')):'TW_DG';
+    if(t==='PERFORMANCE_MAX'&&c==='KR')return 'KR_PMAX';
+    return c+'_ETC';   // GDN(DISPLAY)·VIDEO·대만 PMAX 등 — 지출이 사라지지 않게 '기타'로 보존
+  };
+  (GCAMP||[]).forEach(r=>{const k=_gkey(r);const m=gB[k]||(gB[k]={});const o=m[r.date]||(m[r.date]={s:0,r:0});o.s+=(+r.spend||0);o.r+=(+r.revenue||0)});
+  const gcOK=(GCAMP||[]).length>0;
+  const gGet=k=>(d=>((gB[k]||{})[d]||{s:0,r:0}));
+  const gHas=k=>Object.keys(gB[k]||{}).length>0;
+  const gSum=(d,keys)=>{let s=0,r=0;keys.forEach(k=>{const v=(gB[k]||{})[d];if(v){s+=v.s;r+=v.r}});return{s,r}};
+  const G_KR_ALL=['KR_SEARCH','KR_DG_T','KR_DG_V','KR_PMAX','KR_ETC'];
+  const G_KR_VAN=['KR_SEARCH','KR_DG_V','KR_PMAX','KR_ETC'];   // 국내 구글 중 밴스드 운영분
+  const G_TW_ALL=['TW_SEARCH','TW_DG','TW_ETC'];               // 대만 구글은 전부 밴스드 운영
   // CRM(알림톡): alimtalk_daily_campaign 을 일자별로 합산. 매출=Σrev(귀속), 지출=Σcost(발송비용=sent×13원).
   const byDateCRM={};
   ALIMTALK.forEach(r=>{if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].s+=(+r.cost||0);byDateCRM[r.date].r+=(+r.rev||0)});
@@ -4445,20 +4487,42 @@ function _chrevChannels(){
   //   귀속매출을 빼고, 지출에서 밴스드 지출을 뺀다. 밴스드 채널 = 국내 2개(밴스드 국내=메타,
   //   밴스드 구글=google_ads_daily) + 글로벌 1개(대만 밴스드=VN_TW_ACC).
   const incVan=(document.getElementById('chrVanced')?.value||'inc')==='inc';
-  const vanDomS=d=>((byDateVN[d]||{s:0}).s||0)+((byDateGG[d]||{s:0}).s||0);
-  const vanDomR=d=>((byDateVN[d]||{r:0}).r||0)+((byDateGG[d]||{r:0}).r||0);
+  // 국내 구글 지출·매출 — 신규 소스(전 유형 합) 또는 구 소스(시트 검색광고 + [Tight]DG)
+  const gKR=d=>gcOK?gSum(d,G_KR_ALL):{s:((byDateGG[d]||{s:0}).s||0)+((byDateGGDG[d]||{s:0}).s||0),
+                                       r:((byDateGG[d]||{r:0}).r||0)+((byDateGGDG[d]||{r:0}).r||0)};
+  const gKRvan=d=>gcOK?gSum(d,G_KR_VAN):{s:((byDateGG[d]||{s:0}).s||0),r:((byDateGG[d]||{r:0}).r||0)};
+  const gTW=d=>gcOK?gSum(d,G_TW_ALL):{s:0,r:0};
+  const vanDomS=d=>((byDateVN[d]||{s:0}).s||0)+gKRvan(d).s;
+  const vanDomR=d=>((byDateVN[d]||{r:0}).r||0)+gKRvan(d).r;
   const domRevAll=d=>(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0));
   const domRev=d=>incVan?domRevAll(d):domRevAll(d)-vanDomR(d);
-  const domSpendAll=d=>{const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDatePL[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0},cm=byDateCRM[d]||{s:0},tt=byDateTT[d]||{s:0};return k.s+v.s+n.s+g.s+gd.s+cm.s+tt.s};  // 국내메타+밴스드+네이버+구글+구글디멘드젠+CRM발송비용+틱톡
+  const domSpendAll=d=>{const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDatePL[d]||{s:0},cm=byDateCRM[d]||{s:0},tt=byDateTT[d]||{s:0};return k.s+v.s+n.s+gKR(d).s+cm.s+tt.s};  // 국내메타+밴스드+네이버+구글(전유형)+CRM발송비용+틱톡
   const domSpend=d=>incVan?domSpendAll(d):domSpendAll(d)-vanDomS(d);
   const glRevAll=d=>(byDateStripe[d]||0);  // 글로벌 종합 매출 = Stripe revenue_usd × usd_krw_rate (KRW, 실 결제액)
-  const glRev=d=>incVan?glRevAll(d):glRevAll(d)-((byDateVNTW[d]||{r:0}).r||0);
-  const glSpendAll=d=>{const vt=byDateVNTW[d]||{s:0},gl=byDateGL[d]||{s:0};return vt.s+gl.s};  // 대만밴스드 + 글로벌(타이트). 글로벌엔 대만밴스드 미포함이라 중복 없음
+  // 글로벌 밴스드 귀속매출 = 대만 밴스드(메타) + 대만 구글 — 밴스드 제외 시 종합·잔여행에서 함께 차감
+  const glVanR=d=>((byDateVNTW[d]||{r:0}).r||0)+gTW(d).r;
+  const glRev=d=>incVan?glRevAll(d):glRevAll(d)-glVanR(d);
+  const glSpendAll=d=>{const vt=byDateVNTW[d]||{s:0},gl=byDateGL[d]||{s:0};return vt.s+gl.s+gTW(d).s};  // 대만밴스드 + 글로벌(타이트) + 대만구글. 서로 중복 없음
   const glSpend=d=>incVan?glSpendAll(d):(byDateGL[d]||{s:0}).s;
   // 권역별 종합 행. 전체 종합은 항상 맨 위 고정, 국내/글로벌 종합은 해당 권역 탭에서만 표시
   const sumDom={name:'국내 종합', sum:true, get:d=>({s:domSpend(d),r:domRev(d)})};
   const sumGl ={name:'글로벌 종합',sum:true, get:d=>({s:glSpend(d),r:glRev(d)})};
   const sumAll={name:'전체 종합', sum:true, get:d=>({s:domSpend(d)+glSpend(d),r:domRev(d)+glRev(d)})};
+  // 구글 상세 행 — 국내는 유형별(디멘드젠은 타이트/밴스드 분리), 대만은 글로벌 권역으로.
+  //   van:true = 밴스드 운영(구분 컬럼 그룹 + 밴스드 제외 토글 대상).
+  const gRowsKR=gcOK
+    ? [['구글 국내 디멘드젠(타이트)','KR_DG_T',false],
+       ['구글 국내 디멘드젠(밴스드)','KR_DG_V',true],
+       ['구글 국내 검색광고','KR_SEARCH',true],
+       ['구글 PMAX','KR_PMAX',true],
+       ['구글 기타(GDN·동영상)','KR_ETC',true]]
+        .filter(x=>gHas(x[1])).map(x=>({name:x[0],get:gGet(x[1]),van:x[2]}))
+    : [{name:'밴스드 구글',get:d=>byDateGG[d]||{s:0,r:0},van:true},
+       {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}}];
+  const gRowsTW=gcOK
+    ? [['구글 대만 검색광고','TW_SEARCH'],['구글 대만 디멘드젠','TW_DG'],['구글 대만 기타','TW_ETC']]
+        .filter(x=>gHas(x[1])).map(x=>({name:x[0],get:gGet(x[1]),van:true}))
+    : [];
   // 권역별 상세 채널
   const domChannels=[
     {name:'국내 메타',  get:d=>byDateKR[d]||{s:0,r:0}},
@@ -4466,27 +4530,26 @@ function _chrevChannels(){
     // 네이버 매출 = max(시트 전환값, MP 귀속(ch=naver 포함)) — 검증(2026-07-17): 30일 전일 MP≥시트(시트는
     //   네이버 전환추적分만 커버). max 라 이중계상 없이 시트 밖 네이버 광고발 결제가 오가닉으로 새지 않음. 지출=시트.
     {name:'네이버',get:d=>{const pl=byDatePL[d]||{s:0,r:0};return {s:pl.s,r:Math.max(pl.r,byDateNvMP[d]||0)}}},
-    {name:'밴스드 구글',  get:d=>byDateGG[d]||{s:0,r:0}},
-    {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}},
+    ...gRowsKR,
     {name:'틱톡',get:d=>byDateTT[d]||{s:0,r:0}},   // 시트(TIKTOK): 지출=광고관리자 실지출, 매출=MP utm_id 귀속
     {name:'CRM',get:d=>byDateCRM[d]||{s:0,r:0}},  // 알림톡: 매출=귀속, 지출=발송비용
     // 메타(기타): 세트 귀속 불가한 Meta 광고 흔적 결제(만료세트 utm/ch=meta·ins utm소실/후행24h 크로스셀).
     //   kr_channel_revenue_4h 채널='메타(기타)' 일자합(매출만). 세트별 크로스셀 백필로 이미 국내메타에
     //   귀속된 결제는 파이프라인에서 제외되어 국내메타 행과 이중계상 없음(2026-07-17).
     {name:'메타(기타)',revOnly:true,get:d=>({s:0,r:byDateMetaEtc[d]||0})},
-  ].filter(c=>incVan||(c.name!=='밴스드 국내'&&c.name!=='밴스드 구글'));
-  // 글로벌(밴스드 제외) = 글로벌 전체(종합) − 대만 밴스드. 매출=Stripe 실결제−대만밴스드귀속, 지출=글로벌 전체지출−대만밴스드지출(=GL_AD).
-  // 이렇게 해야 매출이 실결제 기준이라 종합과 일치(흑자)하고, 두 상세행 합=글로벌 종합이 정확히 맞는다.
+  ].filter(c=>incVan||(c.name!=='밴스드 국내'&&!c.van));
+  // 글로벌(밴스드 제외) = 글로벌 전체(종합) − 밴스드(대만 밴스드 메타 + 대만 구글).
+  //   매출=Stripe 실결제−밴스드귀속, 지출=글로벌 전체지출−밴스드지출(=GL_AD) → 상세행 합=글로벌 종합.
   //   ★ 계산은 항상 '전체(All)' helper 기준 — 밴스드 제외 모드에서 glSpend/glRev 를 쓰면 이중 차감된다.
-  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s, r:glRevAll(d)-vt.r};}};
+  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s-gTW(d).s, r:glRevAll(d)-glVanR(d)};}};
   const glChannels=incVan
-    ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0}},glExcRow]   // VN_TW_ACC 단독 (KRW)
+    ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0},van:true},...gRowsTW,glExcRow]   // 대만밴스드=VN_TW_ACC 단독(KRW)
     : [glExcRow];
   // 행 그룹 태그 — 나열 순서를 권역(국내→글로벌) → 소속(우리→밴스드) 로 묶기 위한 키.
   //   실제 정렬/구분선은 _chrevSortByRev 가 처리(그룹 안에서만 매출 내림차순).
-  const IS_VAN=n=>n==='밴스드 국내'||n==='밴스드 구글'||n==='대만 밴스드';
-  domChannels.forEach(c=>{c.grp=IS_VAN(c.name)?'dom_van':'dom_us'});
-  glChannels.forEach(c=>{c.grp=IS_VAN(c.name)?'gl_van':'gl_us'});
+  const IS_VAN=c=>c.van===true||c.name==='밴스드 국내'||c.name==='밴스드 구글'||c.name==='대만 밴스드';
+  domChannels.forEach(c=>{c.grp=IS_VAN(c)?'dom_van':'dom_us'});
+  glChannels.forEach(c=>{c.grp=IS_VAN(c)?'gl_van':'gl_us'});
   const scope=document.getElementById('chrScope')?.value||'all';
   // 권역별 상세 채널 + 종합매출 함수
   let head,detail,totalRev;
@@ -4646,7 +4709,9 @@ function _chrevChart(channels,periods){
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
   const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
+    '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
+    '구글 PMAX':'#34A853','구글 기타(GDN·동영상)':'#9aa5b1','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -4687,7 +4752,9 @@ function renderChannelDonut(){
   const channels=_chrevChannels().filter(c=>!c.sum);   // 실제 채널만(종합 제외)
   const today=new Date();const dates=[];
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
+    '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
+    '구글 PMAX':'#34A853','구글 기타(GDN·동영상)':'#9aa5b1','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)
@@ -4710,6 +4777,50 @@ function renderChannelDonut(){
     leg.innerHTML='<div style="font-weight:700;margin-bottom:6px;border-bottom:1px solid #e5e9f0;padding-bottom:5px;display:flex;justify-content:space-between">합계<span>'+won(total)+'</span></div>'+rows;
   }
 }
+// ===== 채널별 매출·지출·순이익 가로 막대 — 매출탭 하단(도넛 아래), 자체 기간 드롭다운(chrBarDays) =====
+// 세로축=채널, 가로축=금액. 채널당 매출·지출·순이익 3개 막대(선택 기간 합계).
+// 권역(chrScope)·밴스드(chrVanced) 선택은 _chrevChannels()가 이미 반영 · 종합(sum)행은 제외.
+let _chrBarInst=null;
+function renderChannelBars(){
+  if(typeof Chart==='undefined')return;
+  const cv=document.getElementById('chrBar');if(!cv)return;
+  // 도넛과 같은 이유 — 메타(기타)·CRM(카카오)·네이버MP 매출은 kr_channel_revenue_4h 기반이라 로드 후 그린다
+  if(!_KR_REV4H_LOADED){ensureKrRev4h(()=>renderChannelBars());return}
+  const days=parseInt(document.getElementById('chrBarDays')?.value)||30;
+  const channels=_chrevChannels().filter(c=>!c.sum);
+  const today=new Date();const dates=[];
+  for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
+  let agg=channels.map(ch=>{let r=0,s=0;dates.forEach(d=>{const v=ch.get(d)||{};r+=(+v.r||0);s+=(+v.s||0)});
+    return {name:ch.name,rev:r,spend:s,profit:r-s,roas:s>0?r/s*100:null};});
+  agg=agg.filter(x=>x.rev!==0||x.spend!==0).sort((a,b)=>b.rev-a.rev);
+  const wrap=document.getElementById('chrBarWrap');
+  if(wrap)wrap.style.height=Math.max(240,agg.length*54+72)+'px';   // 채널 수에 맞춰 높이 자동
+  const won=v=>'₩'+Math.round(v).toLocaleString('ko-KR');
+  const axMoney=v=>{const a=Math.abs(v);return a>=1e8?(v/1e8).toFixed(1)+'억':a>=1e4?Math.round(v/1e4).toLocaleString('ko-KR')+'만':String(Math.round(v))};
+  if(_chrBarInst){try{_chrBarInst.destroy()}catch(e){}}
+  if(!agg.length){
+    _chrBarInst=new Chart(cv,{type:'bar',data:{labels:[],datasets:[]},options:{responsive:true,maintainAspectRatio:false}});
+    return;
+  }
+  const byName={};agg.forEach(x=>{byName[x.name]=x});
+  _chrBarInst=new Chart(cv,{type:'bar',
+    data:{labels:agg.map(x=>x.name),datasets:[
+      {label:'매출',data:agg.map(x=>x.rev),backgroundColor:'#1a73e8'},
+      {label:'지출',data:agg.map(x=>x.spend),backgroundColor:'#ea4335'},
+      {label:'순이익',data:agg.map(x=>x.profit),backgroundColor:agg.map(x=>x.profit>=0?'#34a853':'#f97316')},
+    ]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,animation:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,font:{size:11}}},
+        tooltip:{callbacks:{
+          label:ctx=>ctx.dataset.label+': '+won(ctx.parsed.x),
+          footer:items=>{if(!items.length)return'';const x=byName[items[0].label];if(!x)return'';
+            return 'ROAS '+(x.roas!=null?x.roas.toFixed(0)+'%':'—(지출 없음)')}}}},
+      scales:{
+        x:{beginAtZero:true,ticks:{font:{size:10},callback:v=>axMoney(v)},grid:{color:'#eef2f7'}},
+        y:{ticks:{font:{size:11},autoSkip:false},grid:{display:false}}}}});
+}
+
 // 채널별 매출 탭용 셀 (ROAS / 순이익 / 매출 / 지출)
 function MC_CH(roas,profit,spend,revenue){
   if(!spend&&!revenue)return'';
