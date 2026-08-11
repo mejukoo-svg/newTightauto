@@ -4487,8 +4487,9 @@ function _chrevChannels(){
   const gGet=k=>(d=>((gB[k]||{})[d]||{s:0,r:0}));
   const gHas=k=>Object.keys(gB[k]||{}).length>0;
   const gSum=(d,keys)=>{let s=0,r=0;keys.forEach(k=>{const v=(gB[k]||{})[d];if(v){s+=v.s;r+=v.r}});return{s,r}};
-  const G_KR_ALL=['KR_SEARCH','KR_DG_T','KR_DG_V','KR_PMAX','KR_ETC'];
-  const G_KR_VAN=['KR_SEARCH','KR_DG_V','KR_PMAX','KR_ETC'];   // 국내 구글 중 밴스드 운영분
+  // KR_ETC(GDN·동영상 등 미분류)는 매출탭에서 제외 — 행·종합 양쪽에서 함께 빼야 채널 합 = 종합이 맞는다.
+  const G_KR_ALL=['KR_SEARCH','KR_DG_T','KR_DG_V','KR_PMAX'];
+  const G_KR_VAN=['KR_SEARCH','KR_DG_V','KR_PMAX'];   // 국내 구글 중 밴스드 운영분
   const G_TW_ALL=['TW_SEARCH','TW_DG','TW_ETC'];               // 대만 구글은 전부 밴스드 운영
   // CRM(알림톡): alimtalk_daily_campaign 을 일자별로 합산. 매출=Σrev(귀속), 지출=Σcost(발송비용=sent×13원).
   const byDateCRM={};
@@ -4534,8 +4535,11 @@ function _chrevChannels(){
     ? [['구글 국내 디멘드젠(타이트)','KR_DG_T',false],
        ['구글 국내 디멘드젠(밴스드)','KR_DG_V',true],
        ['구글 국내 검색광고','KR_SEARCH',true],
-       ['구글 PMAX','KR_PMAX',true],
-       ['구글 기타(GDN·동영상)','KR_ETC',true]]
+       ['구글 PMAX','KR_PMAX',true]]
+       // '구글 기타(GDN·동영상)'(KR_ETC)는 사용자 요청으로 매출탭에서 제외(2026-08-11).
+       //   행뿐 아니라 아래 G_KR_ALL·G_KR_VAN(종합 지출·밴스드 차감)에서도 빼서 채널 합 = 종합이 유지된다.
+       //   → 국내 종합 지출은 그만큼 작아지고(=구글 실집행액보다 과소), KR_ETC 귀속매출은 오가닉으로 잡힌다.
+       //   대만 '구글 대만 기타'(TW_ETC)는 그대로 유지.
         .filter(x=>gHas(x[1])).map(x=>({name:x[0],get:gGet(x[1]),van:x[2]}))
     : [{name:'밴스드 구글',get:d=>byDateGG[d]||{s:0,r:0},van:true},
        {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}}];
@@ -4748,7 +4752,7 @@ function _chrevChart(channels,periods){
   const labels=pers.map(p=>p.label);
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 기타(GDN·동영상)':'#9aa5b1','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -4791,7 +4795,7 @@ function renderChannelDonut(){
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 기타(GDN·동영상)':'#9aa5b1','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)
