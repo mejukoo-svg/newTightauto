@@ -1079,6 +1079,8 @@ def main():
             break
         _off += 1000
     log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 로드")
+    # activities 를 '완전하다'고 믿는 시작일 — 이 이전 날짜는 스냅샷(prev_budget) 우선.
+    _rel_from = bud_hist.reliable_from(TODAY)
 
     # =======================================================
     # 5) 병합 → Supabase 레코드 생성
@@ -1127,17 +1129,21 @@ def main():
             #   1순위: activities 재구성(해당 세트에 예산 변경이력이 있으면 그 날짜값 복원).
             #   2순위(폴백): 변경이력 없음/activities 실패 → 일자별 스냅샷 보존
             #     (오늘만 현재값, 과거는 기존 저장값 유지 → 평탄화 방지).
+            #   ★ 단 activities 신뢰창(_rel_from) 밖의 과거는, 그날 변경이벤트가 없는 한
+            #     재구성으로 덮어쓰지 않는다 — 메타가 넓은 창에서 이벤트를 누락하기 때문
+            #     (budget_history docstring 실측). 그날 찍어둔 스냅샷이 더 정확하다.
             budget_raw_cur = budget_map.get(asid, 0)
-            if bud_hist.has_events_for(asid):
+            budget_cur = round(budget_raw_cur / bdiv * fx) if budget_raw_cur > 0 else 0
+            _pb = prev_budget.get((iso_date, str(asid)))
+            if iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
+                budget_val = _pb
+            elif bud_hist.has_events_for(asid):
                 b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
                 budget_val = round(b_raw / bdiv * fx) if b_raw > 0 else 0
+            elif iso_date == _pe:
+                budget_val = budget_cur
             else:
-                budget_cur = round(budget_raw_cur / bdiv * fx) if budget_raw_cur > 0 else 0
-                if iso_date == _pe:
-                    budget_val = budget_cur
-                else:
-                    _pb = prev_budget.get((iso_date, str(asid)))
-                    budget_val = _pb if _pb else budget_cur
+                budget_val = _pb if _pb else budget_cur
 
             # 상품 추출
             product = extract_product(mr["adset_name"], mr["campaign_name"])
@@ -1203,7 +1209,7 @@ def main():
         log.info(f"\n6.5단계: 예산 자가교정 ({_bs}~{_be2})")
         reconcile_budget(sb.base_url, sb.headers, "ad_performance_daily", "budget",
                          bud_hist, budget_map, lambda raw: int(round(raw)),
-                         _bs, _be2, req_lib, log, tol=0.5)
+                         _bs, _be2, req_lib, log, tol=0.5, reliable_from=_rel_from)
     except Exception as _e:
         log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 

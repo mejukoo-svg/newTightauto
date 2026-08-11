@@ -28,13 +28,22 @@ BUDGET_HIST_DAYS_DEFAULT = 180
 
 def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budget_map,
                      transform, start_iso, end_iso, req_lib, log=None,
-                     id_col="adset_id", tol=0.5, dry_run=False, extra_cols=()):
+                     id_col="adset_id", tol=0.5, dry_run=False, extra_cols=(),
+                     reliable_from=None):
     """[start_iso, end_iso] 구간 저장행의 budget_col 을 activities 재구성값으로 교정.
        - has_events_for(세트)=True → raw_on 재구성값
        - False & 현재예산>0        → 현재값(변경 없음 = 평탄)
        - False & 현재예산 미상(0)   → 기존값 보존(교정 안 함)
        extra_cols: 부분 업서트 시 충돌키를 맞추기 위해 함께 읽어 되돌려 보낼 컬럼
                    (예: 글로벌 테이블 PK 에 포함된 'country'). 값은 갱신하지 않고 그대로 echo.
+
+       reliable_from (YYYY-MM-DD): activities 를 '완전하다'고 믿는 시작일.
+         ★ 이 날짜 이전(=오래된 구간)에서는 저장값이 이미 있으면(>0) 덮어쓰지 않는다.
+           메타 activities 는 넓은 창에서 이벤트를 조용히 누락하는데(budget_history
+           docstring 의 실측), 그 누락된 재구성으로 과거를 덮어쓰면 파이프라인이 매일
+           찍어둔 올바른 스냅샷이 지워져 증감액 테두리가 통째로 사라진다. 실제 사고.
+           단 '그날 변경 이벤트가 있는 날짜'(has_event_on)는 종료시점 값이 확실하므로 교정하고,
+           저장값이 비어 있으면(0) 재구성으로 채운다. None 이면 예전처럼 전 구간 교정.
        반환: 교정(예정) 행 리스트."""
     read_headers = {**sb_headers, "Prefer": ""}
     _sel = ",".join(["date", id_col, budget_col, *extra_cols])
@@ -56,11 +65,21 @@ def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budge
         off += 1000
 
     updates = []
+    kept = 0
     for r in rows:
         aid = str(r.get(id_col))
         d = r.get("date")
         stored = r.get(budget_col)
         cur = budget_map.get(aid, 0) or 0
+        # 신뢰창 밖 + 이미 스냅샷이 있음 + 그날 변경이벤트 없음 → 스냅샷을 지키고 건너뛴다.
+        if reliable_from and d and d < reliable_from:
+            try:
+                _sv0 = float(stored) if stored is not None else 0.0
+            except (TypeError, ValueError):
+                _sv0 = 0.0
+            if _sv0 > 0 and not bud_hist.has_event_on(aid, d):
+                kept += 1
+                continue
         if bud_hist.has_events_for(aid):
             raw = bud_hist.raw_on(aid, d, cur)
             val = transform(raw) if raw and raw > 0 else 0
@@ -80,6 +99,7 @@ def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budge
 
     if log:
         log.info(f"  🔧 예산 교정 {len(updates)}/{len(rows)}행 ({table}, {start_iso}~{end_iso})"
+                 + (f" · 스냅샷 보존 {kept}행(신뢰창 {reliable_from} 이전)" if kept else "")
                  + (" [DRY-RUN]" if dry_run else ""))
     if dry_run or not updates:
         return updates
@@ -169,7 +189,8 @@ def _standalone():
     kr_bh, kr_cur = build_hist(KR)
     reconcile_budget(SB_URL, SBH, "ad_performance_daily", "budget",
                      kr_bh, kr_cur, lambda raw: int(round(raw)),
-                     start_iso, end_iso, req_lib, log, tol=0.5, dry_run=not APPLY)
+                     start_iso, end_iso, req_lib, log, tol=0.5, dry_run=not APPLY,
+                     reliable_from=kr_bh.reliable_from(now))
 
     # 글로벌 (raw cents → budget_usd = raw/100)
     _g1 = os.environ.get("META_TOKEN_1", "")
@@ -185,7 +206,7 @@ def _standalone():
     reconcile_budget(SB_URL, SBH, "global_ad_performance_daily", "budget_usd",
                      gl_bh, gl_cur, lambda raw: round(raw / 100, 2),
                      start_iso, end_iso, req_lib, log, tol=0.01, dry_run=not APPLY,
-                     extra_cols=("country",))
+                     extra_cols=("country",), reliable_from=gl_bh.reliable_from(now))
 
     log.info("완료." + ("" if APPLY else "  (dry-run — 실제 반영하려면 --apply)"))
 
