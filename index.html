@@ -4281,6 +4281,10 @@ function renderChannelRevenue(){
   if(!(window._BIG_LOADED&&window._BIG_LOADED.ggdgkr)){
     ensureBigTable('ggdgkr').then(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='chrev'){renderChannelRevenue();renderChannelDonut();}});
   }
+  // 틱톡 행 = 구글시트(TIKTOK). 미로드면 스냅샷으로 먼저 그리고, 시트 도착 후 재렌더(표+도넛).
+  if(typeof TT_LOADED!=='undefined'&&!TT_LOADED){
+    loadTiktok().then(()=>{const at=document.querySelector('.tab.active');if(at&&at.dataset.t==='chrev'){renderChannelRevenue();renderChannelDonut();}});
+  }
   // CRM 채널에 MP ch=kakao 매출을 합치려면 kr_channel_revenue_4h(채널='카카오')가 필요 → 먼저 로드.
   ensureKrRev4h(()=>{
     const count=parseInt(document.getElementById('chrDays').value);
@@ -4332,21 +4336,23 @@ function _chrevHourly(){
   const grpOf=ch=>(DOM.indexOf(ch)>=0?'dom':'gl')+(IS_VAN(ch)?'_van':'_us');
   const gRank=ch=>CHR_GRP_ORDER.indexOf(grpOf(ch));
   const byRev=list=>[...list].sort((a,b)=>gRank(a)-gRank(b)||revOfCh(b)-revOfCh(a));
-  const mkRows=list=>{let prev=null;return byRev(list).map(ch=>{const r=mk(ch);r.grpTop=(prev!==null&&grpOf(ch)!==prev);prev=grpOf(ch);return r})};
+  const mkRows=list=>{let prev=null;return byRev(list).map(ch=>{const r=mk(ch);r.grp=grpOf(ch);r.grpTop=(prev!==null&&r.grp!==prev);prev=r.grp;return r})};
   let rows;
   if(scope==='dom')rows=[sumAll,{name:'국내 종합',sum:true,get:(d,b)=>sumOf(d,b,DOM)},...mkRows(DOM)];
   else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...mkRows(GL)];
   else rows=[sumAll,...mkRows(DOM.concat(GL))];
   // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
   const ths=cols.map(col=>'<th style="min-width:92px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
-  let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
-  rows.forEach(row=>{
+  let h='<thead><tr>'+CHR_TH_GRP+'<th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
+  const grpCells=_chrGrpCells(rows);
+  rows.forEach((row,ri)=>{
     const nameBg=row.sum?'#c5d6ea':'#dce6f0';
-    h+='<tr'+(row.sum?' class="sr" style="border-top:2px solid #9bb5d4"':(row.grpTop?' style="border-top:2px dashed #b9c9db"':''))+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+row.name+'</td>';
+    h+='<tr'+(row.sum?' class="sr" style="border-top:2px solid #9bb5d4"':(row.grpTop?' style="border-top:2px dashed #b9c9db"':''))+'>'+grpCells[ri]+'<td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+row.name+'</td>';
     cols.forEach(col=>{const ix=INNER(row.get(col.date,col.bucket));const bg=row.sum?'background:#eef3f9;':'';h+='<td class="mc '+(row.sum?'':ix.cls)+'" style="'+bg+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+ix.html+'</td>'});
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+  requestAnimationFrame(()=>_fixSticky(document.getElementById('chrTbl')));
   // 하단 누적 막대차트 (채널별 매출) — 종합행 제외, scope 반영
   const chList=(scope==='dom'?byRev(DOM):scope==='gl'?byRev(GL):byRev(DOM.concat(GL)));
   const channels=chList.map(c=>({name:c,get:k=>{const p=k.split('#');return {s:0,r:cell(p[0],+p[1],c).r}}}));
@@ -4369,6 +4375,10 @@ function _chrevChannels(){
   // 디멘드젠(타이트) = 국내탭 '🟢 구글 디멘드젠' 종합과 동일 소스(google_demandgen_campaign_daily: 지출=Ads API·매출=MP귀속).
   //   구 소스 GOOGLE_DG(google_demandgen_daily, 시트 지출·구글전환값)는 매출 기준이 달라 폐기.
   GGDG_TIGHT.forEach(r=>{if(!byDateGGDG[r.date])byDateGGDG[r.date]={s:0,r:0};byDateGGDG[r.date].s+=(+r.spend||0);byDateGGDG[r.date].r+=(+r.revenue||0)});
+  // 틱톡(국내) = 🎵 틱톡 탭과 동일 소스(구글시트 '틱톡 캠페인 추이차트' → TIKTOK, 미로드 시 스냅샷).
+  //   지출=틱톡 광고관리자 실지출, 매출=MP 결제완료(utm_id=캠페인ID 귀속). 국내 집행만 있어 국내 채널로 둔다.
+  const byDateTT={};
+  (typeof TIKTOK!=='undefined'?TIKTOK:[]).forEach(r=>{if(!byDateTT[r.date])byDateTT[r.date]={s:0,r:0};byDateTT[r.date].s+=(+r.spend||0);byDateTT[r.date].r+=(+r.revenue||0)});
   // CRM(알림톡): alimtalk_daily_campaign 을 일자별로 합산. 매출=Σrev(귀속), 지출=Σcost(발송비용=sent×13원).
   const byDateCRM={};
   ALIMTALK.forEach(r=>{if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].s+=(+r.cost||0);byDateCRM[r.date].r+=(+r.rev||0)});
@@ -4390,7 +4400,7 @@ function _chrevChannels(){
   const vanDomR=d=>((byDateVN[d]||{r:0}).r||0)+((byDateGG[d]||{r:0}).r||0);
   const domRevAll=d=>(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0));
   const domRev=d=>incVan?domRevAll(d):domRevAll(d)-vanDomR(d);
-  const domSpendAll=d=>{const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDatePL[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0},cm=byDateCRM[d]||{s:0};return k.s+v.s+n.s+g.s+gd.s+cm.s};  // 국내메타+밴스드+네이버+구글+구글디멘드젠+CRM발송비용
+  const domSpendAll=d=>{const k=byDateKR[d]||{s:0},v=byDateVN[d]||{s:0},n=byDatePL[d]||{s:0},g=byDateGG[d]||{s:0},gd=byDateGGDG[d]||{s:0},cm=byDateCRM[d]||{s:0},tt=byDateTT[d]||{s:0};return k.s+v.s+n.s+g.s+gd.s+cm.s+tt.s};  // 국내메타+밴스드+네이버+구글+구글디멘드젠+CRM발송비용+틱톡
   const domSpend=d=>incVan?domSpendAll(d):domSpendAll(d)-vanDomS(d);
   const glRevAll=d=>(byDateStripe[d]||0);  // 글로벌 종합 매출 = Stripe revenue_usd × usd_krw_rate (KRW, 실 결제액)
   const glRev=d=>incVan?glRevAll(d):glRevAll(d)-((byDateVNTW[d]||{r:0}).r||0);
@@ -4409,6 +4419,7 @@ function _chrevChannels(){
     {name:'네이버',get:d=>{const pl=byDatePL[d]||{s:0,r:0};return {s:pl.s,r:Math.max(pl.r,byDateNvMP[d]||0)}}},
     {name:'밴스드 구글',  get:d=>byDateGG[d]||{s:0,r:0}},
     {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}},
+    {name:'틱톡',get:d=>byDateTT[d]||{s:0,r:0}},   // 시트(TIKTOK): 지출=광고관리자 실지출, 매출=MP utm_id 귀속
     {name:'CRM',get:d=>byDateCRM[d]||{s:0,r:0}},  // 알림톡: 매출=귀속, 지출=발송비용
     // 메타(기타): 세트 귀속 불가한 Meta 광고 흔적 결제(만료세트 utm/ch=meta·ins utm소실/후행24h 크로스셀).
     //   kr_channel_revenue_4h 채널='메타(기타)' 일자합(매출만). 세트별 크로스셀 백필로 이미 국내메타에
@@ -4457,6 +4468,34 @@ function _chrRowStyle(ch){
   return ch.grpTop?' style="border-top:2px dashed #b9c9db"':'';
 }
 
+// ===== '구분' 컬럼 (채널 왼쪽 최좌측) — 행이 속한 카테고리를 rowspan 으로 병합 표시 =====
+// 종합 / 국내·우리 / 국내·밴스드 / 글로벌·우리 / 글로벌·밴스드 / 미귀속(오가닉).
+// sticky 는 추이차트와 같은 방식: 구분=fxa(left 0), 채널=fx0 → 렌더 후 _fixSticky 가 left 계산.
+const CHR_GRP_META={
+  sum      :{label:'종합',            bg:'#b9cde4'},
+  dom_us   :{label:'국내<br>우리',     bg:'#d9e8d4'},
+  dom_van  :{label:'국내<br>밴스드',   bg:'#e6dcf2'},
+  gl_us    :{label:'글로벌<br>우리',   bg:'#d3e7f2'},
+  gl_van   :{label:'글로벌<br>밴스드', bg:'#f2dee6'},
+  organic  :{label:'미귀속',          bg:'#e5e7eb'},
+  etc      :{label:'기타',            bg:'#e9edf2'},
+};
+function _chrGrpKey(ch){return ch.sum?'sum':(ch.name==='오가닉'?'organic':(CHR_GRP_META[ch.grp]?ch.grp:'etc'))}
+// rows 와 같은 길이의 배열 반환 — 그룹 첫 행만 <td rowspan>, 병합돼 생략되는 행은 ''.
+function _chrGrpCells(rows){
+  const out=rows.map(()=>'');
+  for(let i=0;i<rows.length;){
+    const k=_chrGrpKey(rows[i]);let j=i;
+    while(j+1<rows.length&&_chrGrpKey(rows[j+1])===k)j++;
+    const m=CHR_GRP_META[k]||CHR_GRP_META.etc;
+    out[i]='<td class="fx fxa" rowspan="'+(j-i+1)+'" style="background:'+m.bg+';font-size:10px;font-weight:700;color:#33475a;'
+      +'text-align:center;line-height:1.25;padding:3px 4px;vertical-align:middle;cursor:default">'+m.label+'</td>';
+    i=j+1;
+  }
+  return out;
+}
+const CHR_TH_GRP='<th style="min-width:58px;text-align:center">구분</th>';
+
 // 채널 행 나열 순서: 종합(sum) 상단 고정 → 상세채널 → 오가닉 맨 아래.
 // 상세채널은 ①권역(국내→글로벌) ②소속(우리→밴스드) 로 묶고, 그 안에서만 표시기간 매출 내림차순.
 //   그룹 첫 행엔 grpTop=true 를 달아 표에서 점선 구분선을 그린다(그룹 태그는 _chrevChannels 가 부여).
@@ -4481,14 +4520,15 @@ function _chrevDaily(channels,days){
   }
   channels=_chrevSortByRev(channels,dates.slice(0,7));  // 정렬 기준 = '7일 합계' 컬럼과 동일한 최근 7일 매출
   const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
-  let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 합계</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr>'+CHR_TH_GRP+'<th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 합계</th>'+ths+'</tr></thead><tbody>';
   const r7=dates.slice(0,7);
-  channels.forEach(ch=>{
+  const grpCells=_chrGrpCells(channels);
+  channels.forEach((ch,ci)=>{
     let a7s=0,a7r=0;
     r7.forEach(d=>{const v=ch.get(d);a7s+=v.s;a7r+=v.r});
     const a7roas=a7s>0?a7r/a7s*100:0,a7p=a7r-a7s;
     const nameBg=ch.sum?'#c5d6ea':'#dce6f0';
-    h+='<tr'+_chrRowStyle(ch)+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
+    h+='<tr'+_chrRowStyle(ch)+'>'+grpCells[ci]+'<td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
     h+=_chrCell({s:a7s,r:a7r},ch.revOnly,true);
     dates.forEach(d=>{
       h+=_chrCell(ch.get(d),ch.revOnly,false);
@@ -4496,6 +4536,7 @@ function _chrevDaily(channels,days){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+  requestAnimationFrame(()=>_fixSticky(document.getElementById('chrTbl')));   // 구분(fxa) 폭만큼 채널(fx0) left 보정
   const periods=dates.map(d=>({label:DK(d)+'('+WD(d)+')',dates:[d]}));
   _chrevChart(channels,periods);
 }
@@ -4527,10 +4568,11 @@ function _chrevPeriod(channels,view,count){
   // 일별 뷰(_chrevDaily)와 동일한 행=채널 / 열=기간 매트릭스. 각 셀은 MC_CH(ROAS/순이익/매출/지출).
   channels=_chrevSortByRev(channels,periods.flatMap(p=>p.dates));
   const ths=periods.map(per=>'<th style="min-width:100px">'+per.label+'</th>').join('');
-  let h='<thead><tr><th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
-  channels.forEach(ch=>{
+  let h='<thead><tr>'+CHR_TH_GRP+'<th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
+  const grpCells=_chrGrpCells(channels);
+  channels.forEach((ch,ci)=>{
     const nameBg=ch.sum?'#c5d6ea':'#dce6f0';
-    h+='<tr'+_chrRowStyle(ch)+'><td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
+    h+='<tr'+_chrRowStyle(ch)+'>'+grpCells[ci]+'<td class="fx fx0" style="background:'+nameBg+';font-weight:700;padding:4px 6px">'+ch.name+'</td>';
     periods.forEach(per=>{
       let s=0,r=0;
       per.dates.forEach(d=>{const v=ch.get(d);s+=v.s;r+=v.r});
@@ -4539,6 +4581,7 @@ function _chrevPeriod(channels,view,count){
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('chrTbl').innerHTML=h;
+  requestAnimationFrame(()=>_fixSticky(document.getElementById('chrTbl')));
   _chrevChart(channels,periods);
 }
 
@@ -4554,7 +4597,7 @@ function _chrevChart(channels,periods){
   const chs=channels.filter(c=>!c.sum);                 // 종합행 제외 → 실제 채널만
   const pers=periods.slice();                           // 최근→오래된 (최근이 왼쪽, 표와 동일 방향)
   const labels=pers.map(p=>p.label);
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -4595,7 +4638,7 @@ function renderChannelDonut(){
   const channels=_chrevChannels().filter(c=>!c.sum);   // 실제 채널만(종합 제외)
   const today=new Date();const dates=[];
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
-  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+  const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)
