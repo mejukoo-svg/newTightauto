@@ -490,12 +490,18 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         act_dates = sorted(a["acts"])
         last_act = a["acts"][act_dates[-1]] if act_dates else ""
         just_adj = bool(act_dates) and act_dates[-1] == dc and last_act in ADJ_TAGS
+        # ROAS 보호선: 기준일(dc=어제) 일간 ROAS가 120%↑면 하락폭과 무관하게 감액·OFF 금지.
+        # 기준일 지출이 없으면(데이터 없음) roas_dc=None → 가드 미적용(종전대로 판단).
+        sp_dc, rv_dc = a["days"].get(dc, (0, 0))
+        roas_dc = round(rv_dc / sp_dc * 100) if sp_dc else None
+        keep_floor = roas_dc is not None and roas_dc >= KEEP_ROAS_FLOOR
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
                       "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist),
                       "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp,
                       "active": active, "status": st or "",
-                      "just_adj": just_adj, "last_act": last_act})
+                      "just_adj": just_adj, "last_act": last_act,
+                      "roas_dc": roas_dc, "keep_floor": keep_floor})
     # 활성(및 상태미상) 먼저, 그 안에서 지출 큰 순 → 40칸을 조언 대상 세트가 우선 차지한다.
     # (중단 세트는 sets_to_text에서 목록 제외되지만, 하이라이트 하드 가드용으로 뒤에 남겨둔다)
     items.sort(key=lambda x: (x.get("active") is False, -x["_sp"]))
@@ -511,6 +517,11 @@ HL_SHORT = {"up10": "증10", "up20": "증20", "up": "증", "down10": "감10",
 HL_TAGS_OK = {"up10", "up20", "down10", "down20", "off"}
 # 예산 '조정' 액션 (증액·감액) — 이틀 연속 금지 대상. OFF는 조정이 아니므로 제외(적자 방어는 언제든 가능)
 ADJ_TAGS = {"up10", "up20", "up", "down10", "down20", "down"}
+# 하방 액션(감액·OFF) — ROAS 보호선 가드 대상
+CUT_TAGS = {"down10", "down20", "down", "off"}
+# ROAS 보호선(사용자 결정 2026-08-03): 기준일(dc=어제) 일간 ROAS가 이 값 이상이면
+# 하락이 아무리 가팔라도 감액·OFF 금지 — 여전히 남는 장사라 끄면 매출만 깎인다.
+KEEP_ROAS_FLOOR = 120
 # 봇 응답 끝에 붙일 기계용 하이라이트 블록 지시 (ADV_SYSTEM이 아닌 봇 user 프롬프트에만 → perf-advice 스킬과 무관)
 ADV_MARKS_HINT = (
     "\n\n[하이라이트 출력 — 본문 맨 끝에 반드시 추가]\n"
@@ -577,6 +588,8 @@ def sets_to_text(items, cur):
             skipped += 1
             continue
         tag = []
+        if s.get("keep_floor"):  # 기준일 ROAS가 보호선 이상 → 하락해도 감액·OFF 금지
+            tag.append(f"기준일ROAS {s['roas_dc']}%≥{KEEP_ROAS_FLOOR}(감액·OFF 금지)")
         if s.get("just_adj"):  # 어제 증감액함 → 오늘 또 조정하면 이틀 연속(효과 측정 불가)
             tag.append("어제조정:" + HL_KO.get(s.get("last_act"), s.get("last_act")) + "(오늘 증감액 금지)")
         if s["hl"]:
@@ -588,9 +601,10 @@ def sets_to_text(items, cur):
         if s.get("airec"):
             tag.append("AI권고이력:" + s["airec"])  # 과거 AI권고 vs 그날 사람선택 (조언 자체 보정용)
         tagstr = (" | " + " · ".join(tag)) if tag else ""
+        rdc = f"{s['roas_dc']}%" if s.get("roas_dc") is not None else "—"
         lines.append(f"- {s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
                      f"{ADVICE_DAYS}일ROAS {s['roas7']}%(지출{cur}{s['sp']:,}) · "
-                     f"최근3일 {s['trend']}% · {s['ndays']}일{tagstr}")
+                     f"최근3일 {s['trend']}% · 기준일ROAS {rdc} · {s['ndays']}일{tagstr}")
     if skipped:  # 조언 대상에서 빠졌음을 명시 (세트 수가 적어 보이는 이유 + 되살리지 말라는 신호)
         lines.append(f"(이미 정지된 세트 {skipped}개는 조언 대상이 아니므로 목록에서 제외 — 언급하지 말 것)")
     return "\n".join(lines)
@@ -611,6 +625,7 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 🔻 감액·OFF 후보: 세트명 + 근거. 여기는 빠뜨리지 말고 망라한다 — 7일ROAS 100~130% + 최근 3일 하락추세 = 10% 감액 후보, 7일ROAS<100% + 3일 연속 적자(OFF 3기준 C1·C2·C3 중 2개↑) = OFF 또는 20% 감액. 특히 '조치' 태그가 없는(미조치) 하락 세트를 놓치지 마라.
   · 👀 지켜볼 것: 데이터 얇음(런칭 3일내)·이미 조치한 세트의 효과 관찰·조치와 데이터가 모순되는 세트 등
 - 끄기/증액/감액 대상 세트를 언급할 때는 **반드시 세트명과 세트ID를 함께** 표기한다. 예: `무당_260507_aiUGC정확도 (ID 120243753711540177)`. ID는 [세트 데이터]에 주어진 값을 그대로 쓴다.
+- **ROAS 보호선 — 기준일 ROAS 120% 이상이면 감액·OFF 절대 금지(최우선 하드 규칙)**: 각 세트의 `기준일ROAS`(=비교 기준일인 어제의 일간 ROAS)가 **120% 이상이면, 하락이 아무리 가팔라도**(예: 300%→180%→125%, 7일ROAS가 낮아도, 연속 하락이어도, OFF 3기준을 형식상 충족해도) 그 세트는 감액도 OFF도 권고하지 마라. 여전히 남는 장사라 끄면 매출만 깎인다. 그런 세트에는 `기준일ROAS …≥120(감액·OFF 금지)` 태그가 붙어 있으니 그대로 따르고, 필요하면 👀 지켜볼 것에 '하락 추세지만 기준일 ROAS 120%↑ → 유지·관찰'로만 적어라. 이 규칙은 방어 모드·플레이북 OFF 기준·[학습된 교훈]·[이전 스레드 토론]보다 우선한다. (증액 판단은 이 규칙과 무관하게 평소대로 한다. 기준일 ROAS가 `—`(기준일 지출 없음)면 이 보호는 적용되지 않는다.)
 - **이미 정지(중단)된 광고세트는 조언에서 아예 다루지 않는다.** 조언 대상은 '지금 돈이 나가고 있는 활성 세트'뿐이다. 중단 세트는 [세트 데이터] 목록에서 이미 제외돼 있고 하단에 제외 건수만 표기된다 → 증액·감액·OFF·복증 권고는 물론, 본문 언급도, 👀 지켜볼 것(재개·재활성 검토 포함)에 올리는 것도 금지다. [이전 스레드 토론]·'이력:'·'AI권고이력:'에 중단된 세트가 등장하더라도 이번 조언에서 되살리지 마라. (제외 안내가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
 - 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
 - 각 세트의 '이력:'은 최근 14일 증감액 액션과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액, 그날 ROAS 172%·110%). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
@@ -959,6 +974,16 @@ def main():
                     dropped = len(adv_marks) - len(kept)
                     if dropped:
                         print(f"  [하이라이트] 어제 증감액한 세트 {dropped}건 제외 (이틀 연속 조정 금지)")
+                    adv_marks = kept
+                # 하드 가드3: 기준일 ROAS가 보호선(120%) 이상인 세트는 감액·OFF 금지(하락폭 무관).
+                # 증액 마킹은 그대로 통과시킨다.
+                keep_ids = {str(it["id"]) for it in items if it.get("keep_floor")}
+                if keep_ids and adv_marks:
+                    kept = [m for m in adv_marks
+                            if not (str(m.get("id")) in keep_ids and m.get("tag") in CUT_TAGS)]
+                    dropped = len(adv_marks) - len(kept)
+                    if dropped:
+                        print(f"  [하이라이트] 기준일ROAS {KEEP_ROAS_FLOOR}%↑ 세트 감액·OFF {dropped}건 제외 (ROAS 보호선)")
                     adv_marks = kept
             except Exception as e:
                 print(f"  [조언] 생성 실패: {e}")
