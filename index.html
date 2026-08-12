@@ -5322,7 +5322,11 @@ function renderGgdgTight(){
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
   // 그룹화 — 행=세트(ad_group_id), 상품(prod)은 표시용 묶음 키. d[date]={s,r,c}
   const byC={};
-  GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.ad_group_id;if(!byC[id])byC[id]={id,camp:r.campaign_name||'',name:r.ad_group_name||id,prod:_dgProduct(r.ad_group_name||r.campaign_name),d:{}};if(r.campaign_name)byC[id].camp=r.campaign_name;if(r.ad_group_name)byC[id].name=r.ad_group_name;const x=byC[id].d[r.date]||(byC[id].d[r.date]={s:0,r:0,c:0});x.s+=(r.spend||0);x.r+=(r.revenue||0);x.c+=(r.purchase_count||0)});
+  GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.ad_group_id;if(!byC[id])byC[id]={id,camp:r.campaign_name||'',name:r.ad_group_name||id,prod:_dgProduct(r.ad_group_name||r.campaign_name),d:{}};/* 이름은 ★선택 기간 내 최신 날짜 행★ 기준 (2026-08-12). 구글에서 캠페인/광고그룹 이름을 바꾸면
+   파이프라인이 재적재 창 안쪽 날짜만 새 이름으로 갱신해 한 id 에 옛/새 이름이 공존한다.
+   무조건 덮어쓰면 date.desc 로드 순서상 '가장 오래된 이름'이 남아 새 이름으로는 표·검색에서
+   사라진다(예: 23948103750 이 0618_구미호_2nd → 0811_임신 개명 후 구미호로만 보이던 건). */
+if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if(r.ad_group_name){byC[id].name=r.ad_group_name;byC[id].prod=_dgProduct(r.ad_group_name||r.campaign_name)}byC[id]._nd=r.date}const x=byC[id].d[r.date]||(byC[id].d[r.date]={s:0,r:0,c:0});x.s+=(r.spend||0);x.r+=(r.revenue||0);x.c+=(r.purchase_count||0)});
   // 보기(일/주/월) → 컬럼 = 기간키. colOf[key]=[dates]
   const colKey=d=>view==='week'?WM(d):view==='month'?d.slice(0,7):d;
   const colOf={};allDates.forEach(d=>{const k=colKey(d);(colOf[k]||(colOf[k]=[])).push(d)});
