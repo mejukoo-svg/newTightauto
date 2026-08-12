@@ -121,10 +121,11 @@ STRIPE_DIVISOR = {"jpy": 1, "twd": 100, "hkd": 100, "usd": 100, "krw": 1, "thb":
 # 빌링주소(ISO) → country_name. 통화-only 분류의 누락 보정용(홍콩 고객이 -tw 스토어에서 TWD로 결제해도
 #   빌링주소=HK 이면 홍콩 매출로 잡는다). 금액 환산은 결제 통화 기준 유지.
 #   ★ JP 는 의도적으로 뺐다 — 일본만 결제통화(JPY) 단독 기준(2026-07-31, 아래 분류부 주석 참조).
-#   ★ SG 도 뺐다 — 싱가포르는 결제통화(SGD) 단독 기준(2026-08-07). SG 빌링 고객의 -tw 스토어
-#     TWD 결제(최근 30일 $15.5k·전체 1.98%)까지 옮기면 기존 대만 매출이 그만큼 줄고, 재적재 창
-#     밖 과거는 대만으로 남아 히스토리가 끊긴다 → 싱가포르 컬럼은 SGD 실결제만 잡는다.
-STRIPE_BILLING_COUNTRY = {"TW": "대만", "HK": "홍콩", "TH": "태국"}
+#   ★ SG 도 뺐다 — 싱가포르는 결제통화(SGD) 단독 기준(2026-08-07).
+#   ★ HK 도 뺐다 — 홍콩도 결제통화(HKD) 단독 기준(2026-08-12). HK 빌링 고객의 -tw 스토어
+#     TWD 결제는 대만으로 간다(전기간 소급). 아래 분류부 주석의 dry-run 실측 참조.
+#   ※ 이 맵 자체는 2026-07-31 이전 결제에만 쓰인다 — 2026-08-01 이후는 통화 단독이라 미사용.
+STRIPE_BILLING_COUNTRY = {"TW": "대만", "TH": "태국"}
 
 
 # =========================================================
@@ -477,27 +478,32 @@ def fetch_stripe_revenue(start_date, end_date):
         charge_dt = datetime.fromtimestamp(ch.created, tz=KST)
         date_str = charge_dt.strftime('%Y-%m-%d')
         dk = make_date_key(charge_dt)
-        # 국가 분류 (2026-07-31 확정 · 2026-08-07 SG 추가): 일본·싱가포르만 결제통화 기준,
-        #   나머지는 빌링주소 우선.
-        #   ① currency=JPY → 무조건 일본, currency=SGD → 무조건 싱가포르
-        #   ② 빌링주소(TW/HK/TH) → 해당 국가   ※ JP·SG 는 STRIPE_BILLING_COUNTRY 에서 제외됨
-        #   ③ 통화 폴백(twd=대만/hkd=홍콩/thb=태국/sgd=싱가포르)
-        #   금액 환산은 아래에서 결제 통화(currency) 기준 그대로 → 정확.
+        # 국가 분류 (2026-08-12 개편): 매출 국가 = 결제통화 기준으로 통일. 컷오버 2026-08-01.
+        #   · 2026-08-01 이후 결제: 통화 단독(빌링주소 무시).
+        #       jpy=일본 / sgd=싱가포르 / twd=대만 / hkd=홍콩 / thb=태국 / usd=글로벌 / krw=한국
+        #   · 2026-07-31 이전 결제: 기존 빌링주소 우선(TW/TH)을 유지하되 ★홍콩만 통화 기준★
+        #       → HK 빌링 고객의 -tw 스토어 TWD 결제는 대만으로 간다(그 전에는 홍콩에 있었다).
+        #   금액 환산은 아래에서 결제 통화(currency) 기준 그대로 → 전 기간 정확(변경 없음).
         #
-        #   왜 일본만 다른가: 일본 빌링 고객이 -tw 스토어에서 TWD로 결제한 건이 일본
-        #   매출로 잡혀 Stripe 화면(통화 기준)과 대조가 안 된다는 요구. 7월 기준
-        #   일본 14,300→11,487(-2,813, 대만으로 이동), 홍콩·태국·합계는 불변.
+        #   왜 홍콩을 통화 기준으로 옮겼나: Stripe 화면(통화 기준)과 대조가 되게 하라는 요구.
+        #   dry-run 실측(2025-12~2026-08-12, 63,647건): 홍콩 $378.8k→$174.3k(-54%),
+        #   대만 $2,062.8k→$2,267.7k(+9.9%), 일본·싱가포르 불변, 태국 -$432.
+        #   특히 2026-07 은 홍콩 $139.2k→$13.1k(-91%) — 7월에 HK 빌링 고객의 -tw 스토어
+        #   TWD 결제가 6월 $5.4k → 7월 $126.1k 로 23배 뛴 별건 이슈가 겹쳐 있다(원인 미규명).
         #
-        #   ⚠️ 홍콩까지 통화 기준으로 확대하지 말 것 — 홍콩 매출의 91%가 HK 빌링 고객의
-        #      -tw 스토어 TWD 결제라 7월 홍콩이 $136k→$13k 로 붕괴한다. 게다가 매출탭
-        #      지출은 세트 country(캠페인명 hk 태그) 기준이라 홍콩 광고비는 그대로 남아
-        #      홍콩 ROAS·순이익이 무의미해진다(9781ba1 에서 시도했다가 dca67bf 로 되돌림).
-        #   싱가포르(SGD)도 통화 단독 기준 — SG 빌링 고객의 -tw 스토어 TWD 결제(최근 30일 $15.5k)
-        #   까지 옮기면 기존 대만 매출이 줄고 재적재 창 밖 과거와 어긋난다(2026-08-07 결정).
+        #   ⚠️ 지출은 여전히 세트 country(캠페인명 hk 태그) 기준이라 홍콩 광고비는 홍콩에 남는다
+        #      → 국가별 ROAS·순이익은 분류 기준이 어긋난 근사치다(7월 홍콩 ROAS 2.17→0.20).
+        #      과거 9781ba1 에서 같은 시도를 했다가 dca67bf 로 되돌린 이유가 이것 —
+        #      이번에는 그 왜곡을 알고 감수하는 결정(2026-08-12). 대시보드 안내문구에 명시.
+        _cur_only = date_str >= '2026-08-01'
         if currency == 'jpy':
             country_name = STRIPE_COUNTRY_NAMES['JP']
         elif currency == 'sgd':
             country_name = STRIPE_COUNTRY_NAMES['SG']
+        elif _cur_only:
+            country_code = STRIPE_CURRENCY_MAP.get(currency)
+            if country_code not in STRIPE_COUNTRY_NAMES: continue
+            country_name = STRIPE_COUNTRY_NAMES[country_code]
         else:
             addr_country = None
             bd = getattr(ch, 'billing_details', None)
@@ -506,6 +512,7 @@ def fetch_stripe_revenue(start_date, end_date):
                 if addr:
                     ac = getattr(addr, 'country', None)
                     if ac: addr_country = str(ac).strip().upper()
+            # ★ HK 는 STRIPE_BILLING_COUNTRY 에서 제거됨 → 자동으로 통화 폴백(TWD 결제=대만)
             if addr_country in STRIPE_BILLING_COUNTRY:
                 country_name = STRIPE_BILLING_COUNTRY[addr_country]
             else:
