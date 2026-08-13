@@ -17,7 +17,7 @@ gviz 기본 CSV는 Row 0을 결합 헤더로 제공:
   col16: '일반 구매전환값'
 
 환경변수:
-  SUPABASE_URL / SUPABASE_SERVICE_KEY
+  SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
   NAV_GOO_SHEET_ID (기본 내장) / NAV_GOO_TAB (기본 '00. 네이버/구글 Daily')
   REFRESH_DAYS / FULL_REFRESH
   (GCP_SERVICE_ACCOUNT_KEY 불필요 — 시트가 '링크있는 사람 보기'여야 함)
@@ -37,7 +37,7 @@ NAV_GOO_SHEET_ID = os.environ.get("NAV_GOO_SHEET_ID",
 NAV_GOO_TAB = os.environ.get("NAV_GOO_TAB", "00. 네이버/구글 Daily")
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None).date()

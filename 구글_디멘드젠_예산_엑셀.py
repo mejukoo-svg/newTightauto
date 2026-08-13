@@ -20,7 +20,7 @@ ch=google 인 행만, ct 별로 비용/클릭/노출/전환 합산.
   사용: python 구글_디멘드젠_예산_엑셀.py [엑셀폴더]  (생략 시 바탕화면)
   --dry 옵션: Supabase 적재 없이 집계만 출력
 
-환경변수: SUPABASE_URL / SUPABASE_SERVICE_KEY  (--dry 면 불필요)
+환경변수: SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)  (--dry 면 불필요)
 """
 
 import os, re, sys, glob, time, logging
@@ -221,7 +221,8 @@ def main():
             log.info(f"    {r}")
         return
 
-    sb = SupabaseClient(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    _sb_key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
+    sb = SupabaseClient(os.environ["SUPABASE_URL"], _sb_key)
     # ⚠️ 기본은 upsert(merge)만 — 부분 다운로드(일부 광고그룹만)로 돌려도 다른 콘텐츠 지출 보존.
     #    (date,content) PK 기준 덮어쓰기/추가. 전체 기간을 싹 지우고 다시 넣으려면 --replace.
     if "--replace" in sys.argv:

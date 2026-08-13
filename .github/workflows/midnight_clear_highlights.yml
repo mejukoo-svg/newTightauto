@@ -22,13 +22,14 @@ jobs:
       - name: Purge stale trend highlights
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
         run: |
           python3 - <<'PY'
           import os, sys, datetime, urllib.request, urllib.parse
           SB = os.environ["SUPABASE_URL"].rstrip("/")
-          KEY = os.environ["SUPABASE_SERVICE_KEY"]
+          KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
           H = {"apikey": KEY, "Authorization": "Bearer " + KEY, "Prefer": "return=minimal"}
           KST = datetime.timezone(datetime.timedelta(hours=9))
           # 오늘 0시(KST)를 UTC ISO로 → 그 이전 updated_at 행만 삭제(오늘 새 마킹 보존)

@@ -12,7 +12,7 @@ GitHub Actions cron으로 하루 2회 실행.
 환경변수:
   - META_TOKEN_1 / META_TOKEN_2  (Meta 광고 토큰)
   - MIXPANEL_PROJECT_ID / MIXPANEL_USERNAME / MIXPANEL_SECRET
-  - SUPABASE_URL / SUPABASE_SERVICE_KEY
+  - SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
   - REFRESH_DAYS (기본 10)
   - FULL_REFRESH (true면 전체 기간)
 """
@@ -46,7 +46,7 @@ log = logging.getLogger(__name__)
 # 환경변수 로드
 # =========================================================
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 
 META_TOKEN_A = os.environ.get("META_TOKEN_1", "")
 META_TOKEN_B = os.environ.get("META_TOKEN_2", "")

@@ -21,7 +21,7 @@ google_demandgen_content_mp_daily 테이블 upsert
 
 환경변수:
   MIXPANEL_PROJECT_ID / MIXPANEL_USERNAME / MIXPANEL_SECRET
-  SUPABASE_URL / SUPABASE_SERVICE_KEY
+  SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
   REFRESH_DAYS (기본 10), FULL_REFRESH
 """
 
@@ -41,7 +41,7 @@ MIXPANEL_SECRET     = os.environ["MIXPANEL_SECRET"]
 MIXPANEL_EVENTS     = ["결제완료", "payment_complete"]
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None).date()

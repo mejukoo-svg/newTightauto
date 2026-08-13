@@ -24,7 +24,7 @@ reportTp=AD 컬럼 (run #81):
 
 환경변수:
   NAVER_API_KEY, NAVER_SECRET_KEY, NAVER_CUSTOMER_ID
-  SUPABASE_URL, SUPABASE_SERVICE_KEY
+  SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
   REFRESH_DAYS (기본 10), FULL_REFRESH
 """
 
@@ -44,7 +44,7 @@ NAVER_SECRET_KEY  = os.environ["NAVER_SECRET_KEY"]
 NAVER_CUSTOMER_ID = os.environ["NAVER_CUSTOMER_ID"]
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None).date()

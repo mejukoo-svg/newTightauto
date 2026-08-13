@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 META_TOKEN = os.environ.get("META_TOKEN_VANCED", "")
 # 밴스드 광고 계정들 — 여러 계정 데이터를 합쳐 밴스드 탭(vanced_ad_creative_daily)에 표시.
 #   act_25183853061243175 = 타이트사주 (밴스드)

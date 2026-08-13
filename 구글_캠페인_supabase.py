@@ -27,7 +27,7 @@
 자격증명(.env 또는 GitHub Secrets):
   G_ADS_DEV_TOKEN / G_ADS_CLIENT_ID / G_ADS_CLIENT_SECRET / G_ADS_REFRESH_TOKEN / G_ADS_LOGIN_ID
   G_ADS_CUSTOMER_ID(권장) / MIXPANEL_PROJECT_ID / MIXPANEL_USERNAME / MIXPANEL_SECRET
-  SUPABASE_URL / SUPABASE_SERVICE_KEY / SUPABASE_DB_SCHEMA
+  SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백) / SUPABASE_DB_SCHEMA
 
 실행: py 구글_캠페인_supabase.py [--dry] [--replace] [--from 2026-06-01 --to 2026-06-30]
 의존성: pip install google-ads requests
@@ -385,7 +385,8 @@ def main():
     if DRY:
         log.info("  🧪 --dry: 적재 생략")
         return
-    sb = SupabaseClient(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    _sb_key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
+    sb = SupabaseClient(os.environ["SUPABASE_URL"], _sb_key)
     if REPLACE:
         sb.delete_range(TABLE, START_ISO, END_ISO)
     sb.upsert(TABLE, records)

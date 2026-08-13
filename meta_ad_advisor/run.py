@@ -12,7 +12,8 @@ Tight Saju — Meta 광고 세트 일일 증감액 자문 봇.
 
 환경변수 (GitHub Secrets — newTightauto 레포 기존 시크릿 재사용)
   - SUPABASE_URL              : https://<ref>.supabase.co
-  - SUPABASE_SERVICE_KEY      : service-role JWT
+  - SUPABASE_SECRET_KEY       : Supabase API secret key (sb_secret_…) — 우선 사용
+  - SUPABASE_SERVICE_KEY      : service-role JWT (SECRET_KEY 없을 때 폴백)
   - GCP_SERVICE_ACCOUNT_KEY   : 서비스 계정 JSON 전체
   - ANTHROPIC_API_KEY         : Claude API key (신규 등록 필요)
   - AI_ADVISOR_META           : Google Sheet URL or bare key
@@ -40,7 +41,7 @@ def _extract_sheet_key(raw: str) -> str:
 
 KST = timezone(timedelta(hours=9))
 SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 SHEET_ID = _extract_sheet_key(os.environ["AI_ADVISOR_META"])
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
 

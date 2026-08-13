@@ -141,13 +141,13 @@ def main():
     pw = cfg("ALIMTALK_PASS") or env.get("비밀번호") or ""
     # Supabase 타깃: 전용 ALIMTALK_* 우선, 없으면 기존 파이프라인 공용 시크릿(SUPABASE_*) 폴백.
     sb_url = (cfg("ALIMTALK_SUPABASE_URL") or cfg("SUPABASE_URL")).rstrip("/")
-    sb_key = cfg("ALIMTALK_SUPABASE_KEY") or cfg("SUPABASE_SERVICE_KEY")
+    sb_key = cfg("ALIMTALK_SUPABASE_KEY") or cfg("SUPABASE_SECRET_KEY") or cfg("SUPABASE_SERVICE_KEY")
     # 스키마: SUPABASE_DB_SCHEMA(기존 워크플로우와 동일) 있으면 사용, 없으면 new-tightauto.
     global DB_SCHEMA
     DB_SCHEMA = cfg("SUPABASE_DB_SCHEMA") or DB_SCHEMA
 
     if not sb_url or not sb_key:
-        sys.exit("ERROR: ALIMTALK_SUPABASE_URL/KEY (또는 SUPABASE_URL/SUPABASE_SERVICE_KEY) 가 필요합니다.")
+        sys.exit("ERROR: ALIMTALK_SUPABASE_URL/KEY (또는 SUPABASE_URL/SUPABASE_SECRET_KEY|SUPABASE_SERVICE_KEY) 가 필요합니다.")
     if not pw:
         sys.exit("ERROR: ALIMTALK_PASS (알림톡 Basic Auth 비밀번호) 가 필요합니다.")
 

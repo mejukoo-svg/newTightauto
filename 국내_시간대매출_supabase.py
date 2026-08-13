@@ -23,7 +23,7 @@ dedup  : order_id(utm_term우선·max revenue) → $insert_id → (date,distinct
          (memory: mixpanel-fetch-fail-zeroes-revenue)
 
 환경변수: MIXPANEL_PROJECT_ID, MIXPANEL_USERNAME, MIXPANEL_SECRET,
-          SUPABASE_URL, SUPABASE_SERVICE_KEY,
+          SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백),
           REFRESH_DAYS(기본4), FULL_REFRESH(기본false)
 
 [사용법]  python 국내_시간대매출_supabase.py
@@ -58,7 +58,7 @@ MIXPANEL_PROJECT_ID = os.environ.get("MIXPANEL_PROJECT_ID", "3390233")
 MIXPANEL_USERNAME   = os.environ.get("MIXPANEL_USERNAME", "")
 MIXPANEL_SECRET     = os.environ.get("MIXPANEL_SECRET", "")
 SUPABASE_URL        = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY        = os.environ.get("SUPABASE_SERVICE_KEY", "")
+SUPABASE_KEY        = os.environ.get("SUPABASE_SECRET_KEY", "") or os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 MIXPANEL_EVENTS = ["결제완료", "payment_complete"]
 
@@ -606,7 +606,7 @@ def fetch_stripe_hourly(start_d, end_d):
 # =========================================================
 def main():
     for name, val in [("MIXPANEL_USERNAME", MIXPANEL_USERNAME), ("MIXPANEL_SECRET", MIXPANEL_SECRET),
-                      ("SUPABASE_URL", SUPABASE_URL), ("SUPABASE_SERVICE_KEY", SUPABASE_KEY)]:
+                      ("SUPABASE_URL", SUPABASE_URL), ("SUPABASE_SECRET_KEY/SERVICE_KEY", SUPABASE_KEY)]:
         if not val:
             log.error(f"❌ 환경변수 없음: {name}"); sys.exit(1)
 

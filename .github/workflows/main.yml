@@ -106,6 +106,7 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_KR_ADSET }}
@@ -163,6 +164,7 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_VANCED }}
@@ -193,6 +195,7 @@ jobs:
           MIXPANEL_SECRET: ${{ secrets.MIXPANEL_SECRET }}
           MIXPANEL_PROJECT_ID: ${{ secrets.MIXPANEL_PROJECT_ID }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           SPREADSHEET_URL: ${{ secrets.SPREADSHEET_URL_VANCED_creative }}

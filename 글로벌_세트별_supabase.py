@@ -12,7 +12,7 @@ Stripe: 국가별(대만/홍콩/일본) 매출 → USD/KRW
   META_TOKEN_1, META_TOKEN_GlobalTT (or META_TOKEN_4, META_TOKEN_3)
   MIXPANEL_PROJECT_ID, MIXPANEL_USERNAME, MIXPANEL_SECRET
   STRIPE_API_KEY
-  SUPABASE_URL, SUPABASE_SERVICE_KEY
+  SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
   REFRESH_DAYS (기본 10), FULL_REFRESH (true/false)
 """
 
@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 # 환경변수
 # =========================================================
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 
 META_TOKEN_1 = os.environ.get("META_TOKEN_1", "")
 META_TOKEN_GLOBAL = os.environ.get("META_TOKEN_GlobalTT", "")

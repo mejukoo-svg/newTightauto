@@ -13,16 +13,16 @@ backfill_thailand.py
 
 사용법:
     $env:SUPABASE_URL="https://qkvqiorazdrhtuicnpec.supabase.co"
-    $env:SUPABASE_SERVICE_KEY="<service_role_key>"
+    $env:SUPABASE_SECRET_KEY="<sb_secret_...>"   # 없으면 SUPABASE_SERVICE_KEY 폴백
     py backfill_thailand.py            # DRY RUN (조회만)
     py backfill_thailand.py --apply    # 실제 UPDATE
 """
 import os, sys, json, re, requests
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://qkvqiorazdrhtuicnpec.supabase.co")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_KEY")
 if not SUPABASE_KEY:
-    print("ERROR: SUPABASE_SERVICE_KEY 환경변수가 필요합니다.")
+    print("ERROR: SUPABASE_SECRET_KEY (또는 SUPABASE_SERVICE_KEY) 환경변수가 필요합니다.")
     sys.exit(1)
 
 APPLY = "--apply" in sys.argv

@@ -27,7 +27,7 @@ google_demandgen_content_spend_daily 테이블에 upsert.
                         미지정 시 MCC 하위에서 통화=KRW 인 운영(비매니저) 계정을 자동 탐색.
 
 Supabase:
-  SUPABASE_URL / SUPABASE_SERVICE_KEY
+  SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
 
 기간/옵션 (다른 *_supabase.py 와 동일 규약):
   REFRESH_DAYS (기본 10)  — 최근 N일
@@ -325,7 +325,8 @@ def main():
             log.info(f"    {r}")
         return
 
-    sb = SupabaseClient(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    _sb_key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
+    sb = SupabaseClient(os.environ["SUPABASE_URL"], _sb_key)
     # 기본은 merge upsert (부분 조회로 돌려도 다른 콘텐츠 지출 보존).
     # --replace 면 기간 전체 삭제 후 재삽입 (이 배치에 없는 콘텐츠 지출도 삭제됨).
     if REPLACE:

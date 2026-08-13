@@ -24,6 +24,7 @@ jobs:
       - name: Run dashboard_bot
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}

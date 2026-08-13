@@ -152,7 +152,7 @@ def _standalone():
     end_iso = now.strftime("%Y-%m-%d")
 
     SB_URL = os.environ["SUPABASE_URL"]
-    SB_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+    SB_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
     SCHEMA = os.environ.get("SUPABASE_DB_SCHEMA", "new-tightauto").strip()
     SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY,
            "Content-Type": "application/json",

@@ -40,6 +40,7 @@ jobs:
         working-directory: meta_ad_advisor
         env:
           SUPABASE_URL:           ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY:    ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY:   ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}

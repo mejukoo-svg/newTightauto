@@ -11,7 +11,7 @@ Toss Payments `/v1/transactions` endpoint로 일별 결제완료/취소 집계:
   - total_count   : 결제 건수
 
 환경변수:
-  TOSS_SECRET_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+  TOSS_SECRET_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
   REFRESH_DAYS (기본 10), FULL_REFRESH
 """
 
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 TOSS_SECRET_KEY = os.environ["TOSS_SECRET_KEY"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 
 KST = timezone(timedelta(hours=9))
 TODAY = datetime.now(KST).replace(tzinfo=None).date()

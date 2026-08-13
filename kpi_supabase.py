@@ -18,7 +18,7 @@ kpi_supabase.py — 지표 하이아라키 KPI 직통 파이프라인 → kpi_me
 upsert PK = (period, period_start) → 재실행 시 갱신(idempotent).
 
 환경변수:
-  SUPABASE_URL, SUPABASE_SERVICE_KEY,
+  SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백),
   MIXPANEL_USERNAME, MIXPANEL_SECRET, MIXPANEL_PROJECT_ID
   WEEKS_BACK(기본 30), MONTH_START(기본 2026-01)
 옵션:  --dry  (upsert 생략, 계산 결과만 출력)
@@ -50,7 +50,7 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 SB_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SB_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SB_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json"}
 # new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)
 _sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()

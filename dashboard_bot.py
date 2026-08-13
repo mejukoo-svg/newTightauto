@@ -11,7 +11,7 @@ dashboard_bot.py — 대시보드(Supabase) 지표를 가공해 마케팅 채널
 
 전송: 봇 1개의 Slack Bot 토큰(chat.postMessage)으로 채널에 게시.
   필요한 .env 키:
-    SUPABASE_URL, SUPABASE_SERVICE_KEY, SLACK_BOT_TOKEN
+    SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백), SLACK_BOT_TOKEN
     SLACK_CH_KR_MARKETING   (국내 메시지 게시 채널 ID)
     SLACK_CH_GL_MARKETING   (글로벌 메시지 게시 채널 ID; 같은 채널이면 동일값)
 
@@ -50,7 +50,7 @@ def load_env():
                 k, v = line.split("=", 1)
                 env[k.strip()] = v.strip().strip('"').strip("'").replace("\r", "")
     # .env에 없는 키는 환경변수에서 보강 (GitHub Actions에서는 .env 없이 secrets 주입)
-    for k in ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SLACK_BOT_TOKEN",
+    for k in ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_KEY", "SLACK_BOT_TOKEN",
               "SLACK_CH_KR_MARKETING", "SLACK_CH_GL_MARKETING", "ANTHROPIC_API_KEY"):
         if not env.get(k) and os.environ.get(k):
             env[k] = os.environ[k].strip()
@@ -58,7 +58,7 @@ def load_env():
 
 ENV = load_env()
 SB_URL = ENV["SUPABASE_URL"].rstrip("/")
-SB_KEY = ENV["SUPABASE_SERVICE_KEY"]
+SB_KEY = ENV.get("SUPABASE_SECRET_KEY") or ENV["SUPABASE_SERVICE_KEY"]
 SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY}
 # new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)
 _sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()

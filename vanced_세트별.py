@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 META_TOKEN = os.environ.get("META_TOKEN_VANCED", "")
 META_AD_ACCOUNT = os.environ.get("META_AD_ACCOUNT_ID_VANCED", "") or "act_25183853061243175"
 META_API_VERSION = "v21.0"

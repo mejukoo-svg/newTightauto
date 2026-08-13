@@ -16,7 +16,7 @@ kpi_slack_alert.py — Supabase 데이터 조건 검사 → Slack 알람 (중복
       같은 날 처음 조건에 걸린 '다른' 세트는 그 시점에 정상 발송된다.
   - 일ROAS key = 날짜 → 하루 1회(어제 기준이라 불변)
 
-env: SUPABASE_URL, SUPABASE_SERVICE_KEY, SLACK_WEBHOOK_URL
+env: SUPABASE_URL, SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백), SLACK_WEBHOOK_URL
 옵션: --dry (전송/기록 생략, 판정만 출력)
 로컬 실행 시 ./.env 또는 ../meta_scraper/.env 자동 로드.
 
@@ -64,7 +64,7 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 SB_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SB_KEY = os.environ["SUPABASE_SERVICE_KEY"]
+SB_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
 SLACK = os.environ.get("SLACK_WEBHOOK_URL", "")
 SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY, "Content-Type": "application/json"}
 # new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)

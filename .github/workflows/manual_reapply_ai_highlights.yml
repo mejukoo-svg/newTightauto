@@ -20,13 +20,14 @@ jobs:
       - name: Reset & reapply AI highlights
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
         run: |
           python3 - <<'PY'
           import os, sys, json, datetime, urllib.request
           SB = os.environ["SUPABASE_URL"].rstrip("/")
-          KEY = os.environ["SUPABASE_SERVICE_KEY"]
+          KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
           AUTH = {"apikey": KEY, "Authorization": "Bearer " + KEY}
           KST = datetime.timezone(datetime.timedelta(hours=9))
           today = datetime.datetime.now(KST).date().isoformat()

@@ -20,7 +20,7 @@ index.html '🟢 구글 디멘드젠'(국내 탭, renderGgdgTight)이 이 테이
   G_ADS_REFRESH_TOKEN / G_ADS_LOGIN_ID  (필수)
   G_ADS_CUSTOMER_ID  (권장 — 미지정 시 MCC 하위 KRW 운영계정 자동탐색)
   MIXPANEL_PROJECT_ID / MIXPANEL_USERNAME / MIXPANEL_SECRET
-  SUPABASE_URL / SUPABASE_SERVICE_KEY
+  SUPABASE_URL / SUPABASE_SECRET_KEY(없으면 SUPABASE_SERVICE_KEY 폴백)
 
 기간/옵션 (다른 *_supabase.py 와 동일 규약):
   REFRESH_DAYS (기본 10) / FULL_REFRESH=true (2025-01-01부터)
@@ -494,7 +494,8 @@ def main():
             log.info(f"    [소재] {r}")
         return
 
-    sb = SupabaseClient(os.environ["SUPABASE_URL"], os.environ["SUPABASE_SERVICE_KEY"])
+    _sb_key = os.environ.get("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_KEY"]
+    sb = SupabaseClient(os.environ["SUPABASE_URL"], _sb_key)
     dates = sorted({r["date"] for r in records})
     if REPLACE:
         log.warning("  🧨 --replace: 기간 전체 삭제 후 재삽입")
