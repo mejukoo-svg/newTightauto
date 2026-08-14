@@ -517,10 +517,13 @@ function onCountryChange(){
   COUNTRY=document.getElementById('countrySel').value||'ALL';
   AD=buildAD(MODE); rebuildLookups();
   const t=document.querySelector('.tab.active'); if(t)renderTab(t.dataset.t);
+  navPush();   // 국가 필터 변경도 히스토리에 기록
 }
 
 // ===== MODE SWITCH =====
-function switchMode(m){
+// applyMode = 화면만 바꾸는 순수 적용 함수(히스토리 기록 없음).
+// 사용자가 직접 누르는 경로는 아래 switchMode() 래퍼가 담당해 히스토리에 기록한다.
+function applyMode(m){
   MODE=m;
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
   const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI',mkt:'👤 마케터별 소재 성과',exp:'🧪 실험 · 세트 A/B 비교'};
@@ -594,6 +597,85 @@ function switchMode(m){
   const activeTab=document.querySelector('.tab.active');
   if(activeTab)renderTab(activeTab.dataset.t);
 }
+
+// ===== 라우팅 · 브라우저 히스토리 (뒤로가기/앞으로가기) =====
+// 화면 상태 = MODE(모드 버튼) × 활성 탭 × COUNTRY(국가 필터) 세 가지다.
+// 이 셋을 URL 해시(#모드/탭/국가)에 실어 pushState 로 기록하면 뒤로가기가 이전 화면으로 돌아간다.
+// 해시를 쓰는 이유: Vercel 제로컨피그 정적 배포라 경로형(/gl/trend)을 쓰면 새로고침 시 404 가 나고
+// rewrite 설정이 따로 필요하다. 해시는 서버 설정 없이 새로고침·북마크·공유가 그대로 된다.
+let _navApplying=false;   // popstate 복원 중 재기록 방지 (뒤로가기 무한루프 차단)
+
+function navState(){
+  const at=document.querySelector('.tab.active');
+  return {mode:MODE, tab:at?at.dataset.t:null, country:COUNTRY||'ALL'};
+}
+function navHash(s){
+  const c=(s.country&&s.country!=='ALL')?s.country:'';
+  const t=s.tab||'';
+  if(!t&&!c)return '#'+s.mode;              // 실험 모드처럼 탭이 없는 화면
+  if(!c)return '#'+s.mode+'/'+t;
+  return '#'+s.mode+'/'+(t||'-')+'/'+c;
+}
+function navParse(h){
+  const p=String(h||'').replace(/^#/,'').split('/').filter(x=>x!=='');
+  if(!p.length)return null;
+  if(['kr','gl','cr','vn','exp','kpi','mkt'].indexOf(p[0])<0)return null;   // 모르는 해시는 무시
+  return {mode:p[0], tab:(p[1]&&p[1]!=='-')?p[1]:null, country:p[2]||'ALL'};
+}
+function navPush(replace){
+  if(_navApplying)return;                                    // 복원 중에는 기록하지 않는다
+  const s=navState(), h=navHash(s);
+  if(!replace&&location.hash===h)return;                     // 같은 화면 반복 클릭은 기록하지 않는다
+  try{history[replace?'replaceState':'pushState'](s,'',h)}catch(e){}
+}
+function navApply(s,force){
+  _navApplying=true;
+  try{
+    const modeChanged=(s.mode!==MODE);
+    const countryChanged=((s.country||'ALL')!==COUNTRY);
+    COUNTRY=s.country||'ALL';    // applyMode 안의 _populateCountrySel 이 이 값을 유지·보정한다
+    // 목표 탭을 먼저 활성화해 두면 applyMode 가 그 탭을 바로 렌더한다 (이중 렌더 방지)
+    const el=s.tab?document.querySelector('.tab[data-t="'+s.tab+'"]'):null;
+    const panel=s.tab?document.getElementById('p-'+s.tab):null;
+    if(el&&panel){
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+      el.classList.add('active');panel.classList.add('active');
+    }
+    if(force||modeChanged){
+      applyMode(s.mode);                                     // 데이터 재구성 + 활성 탭 렌더까지 담당
+    } else if(countryChanged){
+      const sel=document.getElementById('countrySel');if(sel)sel.value=COUNTRY;
+      AD=buildAD(MODE);rebuildLookups();
+      const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
+    } else if(el&&panel){
+      renderTab(s.tab);                                      // 같은 모드 안에서 탭만 이동
+    }
+    // 그 모드에 없는 탭 조합(예: #gl/chrev)으로 들어온 경우 대시보드로 안전 복귀
+    const at=document.querySelector('.tab.active');
+    if(at&&at.style.display==='none'){
+      const d=document.querySelector('.tab[data-t="dashboard"]');
+      if(d&&d.style.display!=='none'){
+        document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+        d.classList.add('active');document.getElementById('p-dashboard').classList.add('active');
+        renderTab('dashboard');
+      }
+    }
+  }finally{_navApplying=false}
+}
+// 사용자가 모드 버튼을 누르는 경로 — 화면을 바꾸고 히스토리에 한 칸 쌓는다 (index.html 의 onclick 이 부른다)
+function switchMode(m){applyMode(m);navPush()}
+// 최초 진입·새로고침: URL 이 가리키는 화면으로 복원한다 (해시가 없으면 국내 대시보드)
+function navBoot(){
+  const s=navParse(location.hash)||{mode:'kr',tab:'dashboard',country:'ALL'};
+  navApply(s,true);
+  navPush(true);            // 첫 화면은 새 기록을 쌓지 않고 현재 항목을 덮어쓴다
+}
+window.addEventListener('popstate',e=>{
+  const s=e.state||navParse(location.hash);
+  if(s)navApply(s,false);
+});
 
 function rebuildLookups(){
   const bd={};
@@ -713,7 +795,7 @@ async function initData(){
     //    영영 fresh fetch 를 안 해서 새 적재(신규 날짜 지출 등)가 안 보임.
     //    캐시는 즉시 표시용, 갱신은 renderGgdgContent 의 stale-while-revalidate 가 담당.
     window._CR_BY_ADSET=null;
-    switchMode('kr'); // 캐시로 즉시 렌더
+    navBoot(); // 캐시로 즉시 렌더 — URL 해시가 가리키는 화면으로 복원(없으면 국내 대시보드)
     renderedFromCache=true;
   }
   // 2단계: 핵심 데이터 fresh fetch (캐시 있으면 백그라운드, 없으면 await)
@@ -760,7 +842,7 @@ async function initData(){
       const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
     } else {
       CR_AD=[];NAVER_KW=[];NSA_KW=[];
-      switchMode('kr');
+      navBoot();
     }
     // 캐시 저장 — 실패(null)한 테이블은 건너뛴다. 빈 값으로 덮으면 다음 새로고침도 0 인 채로 고착된다.
     const ts=Date.now();
@@ -1137,6 +1219,7 @@ document.querySelectorAll('.tab').forEach(t=>{t.addEventListener('click',()=>{
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');document.getElementById('p-'+t.dataset.t).classList.add('active');
   renderTab(t.dataset.t);
+  navPush();   // 탭 이동을 히스토리에 기록 — 뒤로가기로 이전 탭 복귀
 })});
 document.getElementById('tGran').addEventListener('change',renderTrendMain);
 document.getElementById('tDays').addEventListener('change',renderTrendMain);
