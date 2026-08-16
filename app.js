@@ -123,6 +123,13 @@ async function cacheSet(k,v){
     }catch(e){res()}
   });
 }
+// 캐시 전체 삭제 후 새로고침 — 경고 배너의 '🧹 캐시 비우고 다시 불러오기' 버튼용.
+//   캐시가 있으면 그걸로 먼저 그리고 fresh fetch 는 백그라운드라, fetch 가 계속 실패/지연되면
+//   옛 데이터가 무기한 남는다. 캐시를 지우면 fresh fetch 를 await 하는 경로로 들어가 원인이 바로 드러난다.
+function purgeCacheAndReload(){
+  try{ indexedDB.deleteDatabase(_IDB_NAME) }catch(e){}
+  setTimeout(()=>location.reload(),300);
+}
 
 function money(n){
   if(n==null||n===0)return'';
@@ -733,24 +740,53 @@ function csvDownloadRange(){
 // ===== 코어 데이터 경고 배너 =====
 // fetch 실패나 0건은 화면상 '지출/매출이 진짜 0' 과 구분되지 않는다 → 상단에 명시적으로 띄운다.
 //   (2026-08-11: 글로벌 광고 테이블이 비어 매출탭 '글로벌' 행 지출이 0·ROAS 0 으로 그려진 사고)
-function renderCoreWarn(){
-  const fails=Object.keys(CORE_FAIL||{});
+// ★ 낡음(stale) 감지도 함께 한다 — 캐시(IndexedDB)로 그린 뒤 fresh fetch 가 실패하거나
+//   아예 응답 없이 매달리면, 화면은 '옛날 데이터'를 아무 표시 없이 계속 보여준다.
+//   실제로 글로벌 탭이 9일간 8/6 에 고착됐는데 배너가 없어 아무도 몰랐다(2026-08-16).
+//   각 코어 테이블의 최신 날짜가 '어제'보다 오래되면 며칠 밀렸는지 배너에 띄운다.
+//   (파이프라인 cron 이 매일 밤에 어제치를 적재하므로 '어제'가 정상 하한 — 하루 여유가 있어 오탐 없음)
+function _lastDate(rows){let m='';(rows||[]).forEach(r=>{if(r&&r.date>m)m=r.date});return m}
+function _staleList(){
+  const _y=new Date();_y.setDate(_y.getDate()-1);
+  const yDay=_y.getFullYear()+'-'+String(_y.getMonth()+1).padStart(2,'0')+'-'+String(_y.getDate()).padStart(2,'0');
+  const out=[];
+  [['국내 광고',KR_AD],['글로벌 광고',GL_AD],['밴스드 광고',VN_AD]].forEach(([label,rows])=>{
+    if(!rows||!rows.length)return;                 // 0건은 empty 쪽에서 이미 경고
+    const last=_lastDate(rows);
+    if(!last||last>=yDay)return;
+    const days=Math.round((new Date(yDay)-new Date(last))/864e5);
+    out.push(label+' (최신 '+last+', '+days+'일 밀림)');
+  });
+  return out;
+}
+// staleOnly=true: 캐시 렌더 직후 호출용. 이 시점의 '0건'은 아직 fresh fetch 전이라
+//   정상인 경우가 많다(캐시에 없던 테이블) → 낡음만 본다. 실패/0건 판정은 fetch 완료 후에.
+function renderCoreWarn(staleOnly){
+  const fails=staleOnly?[]:Object.keys(CORE_FAIL||{});
   const empty=[];
-  if(!KR_AD.length)empty.push('국내 광고');
-  if(!GL_AD.length)empty.push('글로벌 광고');
-  if(!VN_AD.length)empty.push('밴스드 광고');
-  if(!STRIPE_DATA.length)empty.push('Stripe 매출');
-  if(!TOSS_DAILY.length)empty.push('토스 매출');
+  if(!staleOnly){
+    if(!KR_AD.length)empty.push('국내 광고');
+    if(!GL_AD.length)empty.push('글로벌 광고');
+    if(!VN_AD.length)empty.push('밴스드 광고');
+    if(!STRIPE_DATA.length)empty.push('Stripe 매출');
+    if(!TOSS_DAILY.length)empty.push('토스 매출');
+  }
+  const stale=_staleList();
   let el=document.getElementById('coreWarn');
-  if(!fails.length&&!empty.length){if(el)el.remove();return}
+  if(!fails.length&&!empty.length&&!stale.length){if(el)el.remove();return}
   if(!el){el=document.createElement('div');el.id='coreWarn';document.body.appendChild(el)}
   el.style.cssText='position:fixed;left:0;right:0;top:0;z-index:9999;background:#b91c1c;color:#fff;'
     +'font-size:12px;line-height:1.5;padding:7px 12px;box-shadow:0 2px 6px rgba(0,0,0,.3);font-family:inherit';
   const btn='style="margin-left:8px;padding:2px 8px;border:1px solid #fff;border-radius:3px;background:transparent;color:#fff;font-size:11px;cursor:pointer;font-family:inherit"';
-  el.innerHTML='⚠️ <b>데이터 로드 실패</b> — 아래 지표는 0 으로 그려질 수 있습니다(실제 0 이 아님). '
+  const head=(fails.length||empty.length)
+    ? '⚠️ <b>데이터 로드 실패</b> — 아래 지표는 0 으로 그려질 수 있습니다(실제 0 이 아님). '
+    : '⚠️ <b>옛날 데이터를 보고 있습니다</b> — 최신 적재분이 반영되지 않았습니다. ';
+  el.innerHTML=head
     +(fails.length?'<b>실패:</b> '+fails.join(' · ')+'. ':'')
     +(empty.length?'<b>0건:</b> '+empty.join(' · ')+'. ':'')
+    +(stale.length?'<b>낡음:</b> '+stale.join(' · ')+'. ':'')
     +'<button onclick="location.reload()" '+btn+'>🔄 다시 불러오기</button>'
+    +'<button onclick="purgeCacheAndReload()" '+btn+'>🧹 캐시 비우고 다시 불러오기</button>'
     +'<span onclick="document.getElementById(\'coreWarn\').remove()" style="float:right;cursor:pointer;padding:0 4px">✕</span>';
 }
 
@@ -797,6 +833,10 @@ async function initData(){
     window._CR_BY_ADSET=null;
     navBoot(); // 캐시로 즉시 렌더 — URL 해시가 가리키는 화면으로 복원(없으면 국내 대시보드)
     renderedFromCache=true;
+    // 캐시가 낡았으면 이 시점에 바로 알린다. fresh fetch 가 응답 없이 매달리면
+    // applyAndRerender 가 영영 안 불려서 배너도 못 뜬다 — 그 구멍을 막는다.
+    // (fresh 가 도착하면 applyAndRerender 의 renderCoreWarn 이 배너를 지운다)
+    renderCoreWarn(true);
   }
   // 2단계: 핵심 데이터 fresh fetch (캐시 있으면 백그라운드, 없으면 await)
   //   실패한 테이블은 [] 가 아니라 null 로 넘긴다 → _applyCore 가 기존 값 유지, 캐시도 덮어쓰지 않음.
@@ -2540,15 +2580,25 @@ function renderDateTab(){
   const selEnd=document.getElementById('dtEnd');
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
-  // 옵션 초기화 (최초 1회)
-  if(!selStart.options.length){
+  // 옵션 초기화 — DATES 가 바뀔 때마다 다시 만든다.
+  //   ⚠️ 예전엔 '최초 1회'(options.length 로 판정)만 채웠다. 그래서
+  //     ① 캐시로 먼저 그린 뒤 fresh 데이터가 도착해 renderDateTab 이 다시 불려도 날짜 목록이 옛날 그대로 남고
+  //     ② 국내→글로벌 모드 전환처럼 DATES 가 통째로 바뀌는 경우에도 갱신되지 않았다
+  //   → 새로고침 전까지 드롭다운이 옛 마지막 날짜에 고착됐다(2026-08-16: 글로벌 날짜탭이 8/6 까지만 나온 건).
+  //   선택값은 살려두되, 새 목록에 없는 날짜면 기본값(어제)으로 돌린다.
+  const dtSig=DATES.length+'|'+(DATES[0]||'')+'|'+(DATES[DATES.length-1]||'');
+  if(selStart.dataset.sig!==dtSig){
+    const prevS=selStart.value,prevE=selEnd.value;
+    selStart.innerHTML='';selEnd.innerHTML='';
     DATES.forEach(d=>{
       const o1=document.createElement('option');o1.value=d;o1.textContent=DK(d)+' ('+WD(d)+')';selStart.appendChild(o1);
       const o2=document.createElement('option');o2.value=d;o2.textContent=DK(d)+' ('+WD(d)+')';selEnd.appendChild(o2);
     });
-    // 기본값: 시작/종료 모두 어제
-    if(DATES.includes(yDay)){selStart.value=yDay;selEnd.value=yDay}
-    else{selStart.value=DATES[0];selEnd.value=DATES[0]}
+    selStart.dataset.sig=dtSig;selEnd.dataset.sig=dtSig;
+    // 기본값: 시작/종료 모두 어제 (없으면 가장 최근 날짜)
+    const def=DATES.includes(yDay)?yDay:DATES[0];
+    selStart.value=DATES.includes(prevS)?prevS:def;
+    selEnd.value=DATES.includes(prevE)?prevE:def;
   }
   let sd=selStart.value||DATES[0];
   let ed=selEnd.value||DATES[0];
