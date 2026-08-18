@@ -1957,6 +1957,36 @@ function drawMetaDailyTable(){
   wrap.innerHTML=h;
 }
 
+// 추이차트 세트 계보 정렬 — 오리지널 세트를 맨 위, 그 아래에 troas·구매당비용·복제 등
+//   파생 세트를 들여쓰기로 붙여 '하위 세트'처럼 보이게 한다(실제 트리는 아니고 배치만).
+//   ▶ 토글(소재 펼침)은 그대로 — 펼치면 여전히 소재가 나온다.
+//   가족 판정은 🧬복제·변형 탭과 같은 dvClassify(세트명 마커·날짜토큰 제거 후 계보키).
+//   정렬: ① 가족(원본+파생) 매출 합 큰 순 ② 가족 안에서는 원본 먼저, 나머지는 매출 큰 순.
+//   원본이 기간 안에 없으면(중단·이름변경) 매출 1위 파생이 가족 머리가 되고 들여쓰기 없음.
+function dvTreeOrder(adsets,enabled){
+  if(!enabled){adsets.forEach(a=>{a._dvChild=false});return adsets}
+  const fam={};
+  adsets.forEach(a=>{
+    const c=dvClassify(a.an||'');a._dv=c;
+    const k=c.key||('#'+a.id);
+    if(!fam[k])fam[k]={mem:[],r:0,s:0};
+    fam[k].mem.push(a);fam[k].r+=(a._r||0);fam[k].s+=(a._s||0);
+  });
+  const fams=Object.keys(fam).map(k=>fam[k]);
+  fams.forEach(f=>{
+    f.mem.sort((x,y)=>{
+      const ox=(x._dv&&x._dv.kind==='orig')?0:1,oy=(y._dv&&y._dv.kind==='orig')?0:1;
+      if(ox!==oy)return ox-oy;
+      return ((y._r||0)-(x._r||0))||((y._s||0)-(x._s||0));
+    });
+    //   들여쓰기는 '원본이 아닌' 파생만 — 동명 원본이 둘이면 둘 다 맨 위에 나란히 두고,
+    //   원본이 아예 없는 가족은 머리(매출 1위 파생)를 들여쓰지 않는다(위가 비어 보이지 않게).
+    f.mem.forEach((m,i)=>{m._dvChild=(i>0&&m._dv.kind!=='orig')});
+  });
+  fams.sort((a,b)=>(b.r-a.r)||(b.s-a.s));
+  const out=[];fams.forEach(f=>f.mem.forEach(m=>out.push(m)));
+  return out;
+}
 // ===== TREND (상품별 그룹) =====
 function renderTrend(opts){
   // opts.tableId/daysElId/filterElId/accFilter — 대만 추이차트 등 분리 뷰용. (이벤트핸들러가 Event를 넘겨도 안전)
@@ -2045,8 +2075,8 @@ function renderTrend(opts){
     const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+(AUX?MCAUX(t.s,t.r,t.uc,t.mp,t.imp):MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm,t.ctr,t.mp>0?t.s/t.mp:0))+'</td>':'<td class="'+yd+'"></td>'}).join('');
     h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm,null,pMp>0?pS/pMp:0))+'</td>'+pCells+'</tr>';
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
-    g.adsets.forEach(a=>{
-      if(isHidden(a))return;
+    //   국내·글로벌은 계보 정렬(오리지널 위 / 파생 들여쓰기). 나머지 모드는 기존 순서 유지.
+    dvTreeOrder(g.adsets.filter(a=>!isHidden(a)),MODE==='kr'||MODE==='gl').forEach(a=>{
       // 세트별 예산 변화 테두리 색 맵: 전체 히스토리(budHist)를 오름차순으로 전일(직전 보유일) 대비 비교.
       //   테두리는 표시기간(dd) 내 날짜에만 그리되, 비교 기준일은 dd 밖(직전일)도 허용 → 첫 열 증감도 표시.
       const budBc={};{const bh=budHist[a.id]||{};let pv=null;Object.keys(bh).sort().forEach(d=>{const b=bh[d];if(pv>0&&b!==pv){const k=budBorderKey((b-pv)/pv*100);if(k&&dd.includes(d))budBc[d]=HL_CONFIG[k].bg}pv=b})}
@@ -2065,7 +2095,7 @@ function renderTrend(opts){
       }
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr data-adset-row="'+a.id+'">'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'">'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -2173,12 +2203,12 @@ function renderTrendAgg(gran){
     const pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0),pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pCvr=pUc>0&&pMp>0?pMp/pUc*100:0,pCtr=pImp>0?pUc/pImp*100:0;
     const pCells=cols.map(ck=>cell(pByCol[ck])).join('');
     h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
-    g.adsets.forEach(a=>{
+    dvTreeOrder(g.adsets.slice(),MODE==='kr'||MODE==='gl').forEach(a=>{
       const cells=cols.map(ck=>cell(a.b[ck])).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      h+='<tr>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
