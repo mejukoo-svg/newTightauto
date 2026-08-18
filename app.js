@@ -418,16 +418,23 @@ const canonGLRows=rows=>(rows||[]).map(r=>{
   const c=GL_PRODUCT_CANON[String(r.product).trim().toLowerCase()];
   return c?{...r,product:c}:r;
 });
+// 밴스드 행의 상품명 보정 (테이블 product 는 대부분 'etc' 라 캠페인명에서 복원한다).
+//   norm() 의 vn 분기와 주간종합의 '밴스드 포함' 합산이 같은 규칙을 쓰도록 분리해둔다.
+function vnProduct(r){
+  // 캠페인명에 MZMUDANG 포함 → Shaman (언더바/공백/대소문자·HK/TW 변형 모두 포함)
+  if(/mzmudang/i.test(r.campaign_name||''))return 'Shaman';
+  if(!r.product||r.product==='etc'){
+    // 구분자 언더바·공백 모두 허용 (예: '[Vanced]_Career_' , '[Vanced] Possessive_')
+    const m=(r.campaign_name||'').match(/^\[Vanced\][_ ]([^_ ]+)[_ ]/i);
+    if(m){const raw=m[1];return VANCED_PRODUCT_MAP[raw.toUpperCase()]||VANCED_PRODUCT_MAP[raw]||raw}
+  }
+  return r.product;
+}
 function norm(r){
   if(MODE==='gl')return{...r,spend:r.spend_usd,revenue:r.revenue_usd,profit:r.profit_usd,budget:r.budget_usd};
   if(MODE==='vn'){
-    // 캠페인명에 MZMUDANG 포함 → Shaman (언더바/공백/대소문자·HK/TW 변형 모두 포함)
-    if(/mzmudang/i.test(r.campaign_name||''))return{...r,product:'Shaman'};
-    if(!r.product||r.product==='etc'){
-      // 구분자 언더바·공백 모두 허용 (예: '[Vanced]_Career_' , '[Vanced] Possessive_')
-      const m=(r.campaign_name||'').match(/^\[Vanced\][_ ]([^_ ]+)[_ ]/i);
-      if(m){const raw=m[1];return{...r,product:VANCED_PRODUCT_MAP[raw.toUpperCase()]||VANCED_PRODUCT_MAP[raw]||raw}}
-    }
+    const p=vnProduct(r);
+    if(p!==r.product)return{...r,product:p};
   }
   return r;
 }
@@ -535,14 +542,22 @@ function onCountryChange(){
 //   → 소스 선택은 국내(kr)에서만 열고, 나머지 모드는 해당 모드 메타 1개로 고정·라벨 교체.
 //   ('🟢 구글 디멘드젠' 탭이 m==='kr' 전용으로 숨겨지는 것과 같은 기준)
 const _WSRC_LABEL={kr:'국내 메타',gl:'글로벌 메타',vn:'밴스드 메타',cr:'국내소재 메타'};
-let _wSrcKr='kr';   // 국내 모드에서 고른 소스를 기억 → 모드 왕복해도 복원
+let _wSrcKr='kr';    // 국내 모드에서 고른 소스를 기억 → 모드 왕복해도 복원
+let _wSrcGl='glv';   // 글로벌 모드 선택 기억. 기본=밴스드 포함(매출탭 grevVanced 와 동일 기본값)
+let _wSrcHint0=null; // index.html 에 적힌 국내(디멘드젠) 안내문구 원본
+const _WSRC_HINT_GL='💡 밴스드=대만 밴스드 계정(vanced_ad_performance_daily) 지출·매출을 일별 USD/KRW 환율로 환산해 합산. 국가필터가 대만·전체가 아니면 밴스드는 자동 제외';
 function _syncWeeklySource(m){
   const sel=document.getElementById('wSource'); if(!sel) return;
   const hint=document.getElementById('wSrcHint');
+  if(hint&&_wSrcHint0===null)_wSrcHint0=hint.textContent;
   if(m==='kr'){
     sel.innerHTML='<option value="kr">국내 메타</option><option value="dg">디멘드젠(타이트)</option><option value="both">국내 종합(메타+디멘드젠)</option>';
     sel.value=_wSrcKr; sel.disabled=false;
-    if(hint)hint.style.display='';
+    if(hint){hint.style.display='';hint.textContent=_wSrcHint0;}
+  }else if(m==='gl'){
+    sel.innerHTML='<option value="glv">글로벌 메타 (밴스드 포함)</option><option value="kr">글로벌 메타 (밴스드 미포함)</option>';
+    sel.value=_wSrcGl; sel.disabled=false;
+    if(hint){hint.style.display='';hint.textContent=_WSRC_HINT_GL;}
   }else{
     sel.innerHTML='<option value="kr">'+(_WSRC_LABEL[m]||'메타')+'</option>';
     sel.value='kr'; sel.disabled=true;   // 디멘드젠(국내 원화)은 선택지에서 제거
@@ -1298,7 +1313,7 @@ document.getElementById('tpUnit').addEventListener('change',renderTrendProduct);
 document.getElementById('tpFilter').addEventListener('input',renderTrendProduct);
 document.getElementById('cFilter').addEventListener('input',renderChange);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
-document.getElementById('wSource').addEventListener('change',function(){if(MODE==='kr')_wSrcKr=this.value;renderWeekly()});
+document.getElementById('wSource').addEventListener('change',function(){if(MODE==='kr')_wSrcKr=this.value;else if(MODE==='gl')_wSrcGl=this.value;renderWeekly()});
 document.getElementById('dtStart').addEventListener('change',renderDateTab);
 document.getElementById('dtEnd').addEventListener('change',renderDateTab);
 document.getElementById('dtFilter').addEventListener('input',renderDateTab);
@@ -2463,12 +2478,24 @@ function _dgProduct(name){const s=String(name||'');for(const p of _DG_PROD_KW){i
 // 디멘드젠(GGDG_TIGHT) → AD 유사 행 (spend/revenue/profit/results_mp/product/클릭·노출)
 //   클릭·노출=Google Ads API clicks/impressions (메타의 unique_clicks 와 달리 전체 클릭 — CVR/CTR 계산용)
 function _dgRows(){return (GGDG_TIGHT||[]).map(r=>{const s=+r.spend||0,rv=+r.revenue||0;return {date:r.date,spend:s,revenue:rv,profit:rv-s,results_mp:+r.purchase_count||0,unique_clicks:+r.clicks||0,impressions:+r.impressions||0,product:_dgProduct(r.ad_group_name||r.campaign_name)}})}
+// 주간종합 '밴스드 포함' 합산용 — 대만 밴스드(VN_TW_ACC) 행을 USD 환산(vnTwUsdRows)한 뒤
+//   상품명을 캠페인명에서 복원하고 글로벌 상품 캐논(무당/shaman 등)까지 태워 AD 와 스키마를 맞춘다.
+//   ★ 국가필터가 대만·전체가 아니면 빈 배열 — 밴스드 대만 물량이 홍콩·일본 컬럼에 섞이면 안 된다
+//     (매출탭 renderGlobalRevenue 의 twOK 와 동일 기준).
+function _vnTwWeeklyRows(){
+  if(COUNTRY!=='ALL'&&COUNTRY!=='TW')return [];
+  return canonGLRows(vnTwUsdRows().map(r=>({...r,product:vnProduct(r)||'기타'})));
+}
 function renderWeekly(){
   const mode=document.getElementById('wMode').value;
-  //   ★ 디멘드젠(GGDG_TIGHT)은 국내 원화 테이블 → 국내(kr) 모드에서만 소스 선택 허용.
-  //     타 모드는 셀렉트 상태와 무관하게 'kr'(=그 모드의 AD, 통화 일치)로 고정한다.
-  const src=(MODE==='kr')?((document.getElementById('wSource')||{}).value||'kr'):'kr';
-  // 소스 데이터셋: 메타=AD(모드별 재빌드), 디멘드젠=GGDG_TIGHT, 종합=둘 합산.
+  //   ★ 소스 선택지는 모드마다 다르다(_syncWeeklySource 가 셀렉트를 다시 그린다).
+  //     · 국내(kr): 'kr' 국내메타 / 'dg' 디멘드젠 / 'both' 둘 합산
+  //     · 글로벌(gl): 'glv' 글로벌메타+밴스드대만(기본) / 'kr' 글로벌메타 단독
+  //     · 밴스드·국내소재: 선택 없음 → 'kr'(그 모드의 AD)
+  //     디멘드젠(GGDG_TIGHT)은 국내 원화 테이블이라 kr 밖에서는 절대 섞이지 않게 막는다.
+  const _sv=(document.getElementById('wSource')||{}).value||'';
+  const src=MODE==='kr'?(_sv||'kr'):(MODE==='gl'?(_sv==='kr'?'kr':'glv'):'kr');
+  // 소스 데이터셋: 메타=AD(모드별 재빌드), 디멘드젠=GGDG_TIGHT, 밴스드=_vnTwWeeklyRows().
   //   디멘드젠 테이블은 lazy 로드 → 없으면 로딩 트리거 후 재렌더.
   let ROWS;
   if(src==='dg'||src==='both'){
@@ -2478,6 +2505,8 @@ function renderWeekly(){
       return;
     }
     ROWS=(src==='dg')?_dgRows():AD.concat(_dgRows());
+  }else if(src==='glv'){
+    ROWS=AD.concat(_vnTwWeeklyRows());
   }else{
     ROWS=AD;
   }
