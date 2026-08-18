@@ -202,6 +202,257 @@ function _expCell(o,cur){        // o={s,r,uc,mp,imp}
   if(cpm)h+='<div class="cm">'+_expMoney(cpm,cur)+'</div>';
   return h;
 }
+// ===== 📋 실험 현황 — 원본 vs 파생(복제·tROAS 등) 자동 나열 =====
+//   실험탭(A/B)에 '원본 + 그 변형들'을 직접 넣었을 때 나오는 화면(추이표·평균표·퍼널·그래프)을
+//   가족마다 자동으로 만들어 세로로 쭉 보여준다. 손으로 ID 를 넣지 않아도 되는 버전.
+//   가족 판정 = dvClassify(추이차트·🧬복제·변형 탭과 같은 계보키) → 파생이 하나라도 있으면 '실험'.
+const ES_COLORS=['#1a73e8','#d81b60','#00897b','#f57c00','#6d4c41','#7b1fa2','#455a64','#ad1457'];
+let ES_CHARTS=[];            // 카드별 Chart 인스턴스(재렌더 시 파기)
+let ES_OBS=null;             // 화면에 들어온 카드만 그래프를 그리는 관찰자
+const ES_DATA={};            // canvas id → sides (지연 그래프용)
+
+function _esVal(id,dflt){const e=document.getElementById(id);return e?e.value:dflt}
+
+// 소스 행 → 세트 단위 집계(기간 컷 적용). 통화·필드 규칙은 실험탭(_expFindSet)과 동일.
+function _esCollect(src,days){
+  const cut=DATES.length?DATES[Math.min(days,DATES.length)-1]:'';
+  const srcs=[];
+  if(src==='kr'||src==='all')srcs.push({rows:KR_AD,cur:'₩',usd:false,tag:'국내'});
+  if(src==='gl'||src==='all')srcs.push({rows:GL_AD,cur:'$',usd:true,tag:'글로벌'});
+  if(src==='vn'||src==='all')srcs.push({rows:VN_AD,cur:'₩',usd:false,tag:'밴스드'});
+  const sets={};
+  srcs.forEach(S=>{
+    (S.rows||[]).forEach(r=>{
+      if(cut&&r.date<cut)return;
+      const id=String(r.adset_id||'');if(!id)return;
+      const k=S.tag+'|'+id;
+      let o=sets[k];
+      if(!o)o=sets[k]={id:id,name:r.adset_name||'',product:r.product||'기타',cur:S.cur,tag:S.tag,byDate:{},s:0,r:0,first:r.date};
+      if(r.adset_name)o.name=r.adset_name;
+      if(r.date<o.first)o.first=r.date;
+      const sp=S.usd?(+r.spend_usd||+r.spend||0):(+r.spend||0);
+      const rv=S.usd?(+r.revenue_usd||+r.revenue||0):(+r.revenue||0);
+      let b=o.byDate[r.date];if(!b)b=o.byDate[r.date]={s:0,r:0,uc:0,mp:0,imp:0,rch:0};
+      b.s+=sp;b.r+=rv;b.uc+=(+r.unique_clicks||0);b.mp+=(+r.results_mp||0);b.imp+=(+r.impressions||0);b.rch+=(+r.reach||0);
+      o.s+=sp;o.r+=rv;
+    });
+  });
+  return Object.keys(sets).map(k=>sets[k]);
+}
+// 계보로 묶어 '파생이 있는' 가족만 남긴다(=실험이 걸린 원본).
+function _esFamilies(sets){
+  const fam={};
+  sets.forEach(o=>{
+    const c=dvClassify(o.name||'');o.kind=c.kind;o.tags=c.tags;
+    const key=o.tag+'::'+(c.key||o.id);
+    let f=fam[key];
+    if(!f)f=fam[key]={key:key,tag:o.tag,product:o.product,mem:[],s:0,r:0,varFirst:'9999-99-99'};
+    f.mem.push(o);f.s+=o.s;f.r+=o.r;
+    if(o.kind==='orig'&&o.product)f.product=o.product;
+    if(o.kind!=='orig'&&o.first<f.varFirst)f.varFirst=o.first;
+  });
+  return Object.keys(fam).map(k=>fam[k]).filter(f=>f.mem.length>1&&f.mem.some(m=>m.kind!=='orig'));
+}
+// 세트 하나 → 실험탭 사이드와 같은 모양 {name,id,cur,range,tot,calDays,lab,role,col}
+function _esSide(m,i){
+  const range=m.byDate,tot={s:0,r:0,uc:0,mp:0,imp:0,rch:0};
+  const ks=Object.keys(range).sort();
+  ks.forEach(d=>{const o=range[d];tot.s+=o.s;tot.r+=o.r;tot.uc+=o.uc;tot.mp+=o.mp;tot.imp+=o.imp;tot.rch+=o.rch});
+  let calDays=ks.length?Math.round((new Date(ks[ks.length-1])-new Date(ks[0]))/864e5)+1:0;
+  if(calDays<1)calDays=ks.length;
+  const role=m.kind==='orig'?'원본':((m.tags&&m.tags.length)?m.tags.join('/'):'변형');
+  return {id:m.id,name:m.name,cur:m.cur,range:range,tot:tot,calDays:calDays,kind:m.kind,
+          lab:String.fromCharCode(65+i),role:role,col:ES_COLORS[i%ES_COLORS.length]};
+}
+// 추이표 — 실험탭 expTbl 과 같은 포맷(사이드마다 '날짜 row' + '데이터 row', 왼쪽=각자 최신일)
+function _esTrendTable(sides){
+  const per=sides.map(S=>Object.keys(S.range).sort().reverse());
+  let maxLen=0;per.forEach(a=>{if(a.length>maxLen)maxLen=a.length});
+  if(!maxLen)return '';
+  let ths='';
+  for(let i=0;i<maxLen;i++)ths+='<th style="min-width:96px;font-size:9px;color:#aaa;font-weight:400">'+(i===0?'◀최신':(i+1))+'</th>';
+  let h='<table><thead><tr><th style="min-width:230px;max-width:230px;text-align:left">세트'
+    +'<div style="font-size:8px;font-weight:400;color:#999;line-height:1.3">셀: ROAS / 순이익 / 지출 / 매출 / 전환율(클릭률) / CPM</div></th>'
+    +'<th style="min-width:112px;background:#eef3f9">전체</th>'+ths+'</tr></thead><tbody>';
+  sides.forEach((S,si)=>{
+    const dts=per[si];
+    h+='<tr><td style="background:#eef1f6;font-size:9px;font-weight:700;color:'+S.col+'">'+S.lab+' 날짜</td><td style="background:#eef1f6"></td>';
+    for(let i=0;i<maxLen;i++){const d=dts[i];h+='<td style="background:#f4f6fa;font-size:9px;color:#555;font-weight:600">'+(d?DK(d).slice(3)+'('+WD(d)+')':'')+'</td>'}
+    h+='</tr>';
+    const tot=S.tot,roasT=tot.s>0?tot.r/tot.s*100:0;
+    h+='<tr><td style="text-align:left;font-size:10px;background:#fff;min-width:230px;max-width:230px;white-space:normal;word-break:break-all;line-height:1.35">'
+      +'<b style="color:'+S.col+';font-size:12px">'+S.lab+'</b> <span style="font-size:9px;color:#fff;background:'+S.col+';border-radius:7px;padding:0 5px">'+abEsc(S.role)+'</span> <b>'+abEsc(S.name||'-')+'</b>'
+      +'<br><span style="color:#999;font-size:9px">'+abEsc(S.id)+' · '+S.cur+'</span></td>'
+      +'<td class="mc '+(tot.s?RC(roasT):'')+'" style="background:#eef3f9">'+_expCell(tot,S.cur)+'</td>';
+    for(let i=0;i<maxLen;i++){
+      const d=dts[i];
+      if(!d){h+='<td></td>';continue}
+      const o=S.range[d],roas=o.s>0?o.r/o.s*100:0;
+      h+='<td class="mc '+RC(roas)+'">'+_expCell(o,S.cur)+'</td>';
+    }
+    h+='</tr>';
+  });
+  return h+'</tbody></table>';
+}
+// 기간 평균표 — 실험탭 expAvgTbl 과 같은 항목(지출·매출·순이익=하루 평균, 나머지=기간 비율)
+//   ROAS 칸 아래에 '원본 대비 몇 %p' 를 덧붙여 실험 결과를 바로 읽게 한다.
+function _esAvgTable(sides){
+  let h='<table><thead><tr><th style="min-width:230px;max-width:230px;text-align:left">세트</th><th style="min-width:52px">일수</th>'
+    +'<th>ROAS</th><th title="일별 ROAS 표준편차 — 변동성">편차</th><th>순이익/일</th><th>지출/일</th><th>매출/일</th>'
+    +'<th>CVR</th><th>CTR</th><th>빈도</th><th>구매당비용</th><th>CPM</th></tr></thead><tbody>';
+  const base=sides[0];
+  const bR=(base&&base.tot&&base.tot.s>0)?base.tot.r/base.tot.s*100:0;
+  sides.forEach(S=>{
+    const days=S.calDays||0,t=S.tot||{s:0};
+    const nm='<td style="text-align:left;font-size:11px;min-width:230px;max-width:230px;white-space:normal;word-break:break-all;line-height:1.35">'
+      +'<b style="color:'+S.col+'">'+S.lab+'</b> <span style="font-size:9px;color:'+S.col+'">['+abEsc(S.role)+']</span> '+abEsc(S.name||'-')+'</td>';
+    if(!days||!t.s){h+='<tr>'+nm+'<td style="text-align:center;color:#999">0</td><td colspan="10" style="color:#999">데이터 없음</td></tr>';return}
+    const roas=t.s>0?t.r/t.s*100:0,pf=(t.r-t.s)/days,cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0,ctr=t.imp>0?t.uc/t.imp*100:0,
+      cpm=t.imp>0?t.s/t.imp*1000:0,freq=t.rch>0?t.imp/t.rch:0,cpa=t.mp>0?t.s/t.mp:0,cur=S.cur;
+    const rd=Object.keys(S.range).map(d=>S.range[d]).filter(o=>o.s>0).map(o=>o.r/o.s*100);
+    let sd=null;
+    if(rd.length>=2){const mn=rd.reduce((a,x)=>a+x,0)/rd.length;sd=Math.sqrt(rd.reduce((a,x)=>a+(x-mn)*(x-mn),0)/rd.length)}
+    else if(rd.length===1)sd=0;
+    const dlt=(S!==base&&bR>0)?(roas-bR):null;
+    h+='<tr>'+nm
+      +'<td style="text-align:center">'+days+'일</td>'
+      +'<td class="'+RC(roas)+'" style="text-align:right;font-weight:700">'+roas.toFixed(0)+'%'
+      +(dlt==null?'':'<div style="font-size:9px;font-weight:600;color:'+(dlt>=0?'#1a6b1a':'#d00')+'">'+(dlt>=0?'+':'')+dlt.toFixed(0)+'p</div>')+'</td>'
+      +'<td style="text-align:right;color:#666" title="지출 있는 날의 일별 ROAS 표준편차('+rd.length+'일)">'+(sd==null?'':'±'+sd.toFixed(0))+'</td>'
+      +'<td style="text-align:right;color:'+(pf>=0?'#1a6b1a':'#d00')+'">'+_expMoney(pf,cur)+'</td>'
+      +'<td style="text-align:right;color:#d00">'+_expMoney(t.s/days,cur)+'</td>'
+      +'<td style="text-align:right;color:#0000dd">'+_expMoney(t.r/days,cur)+'</td>'
+      +'<td style="text-align:right">'+P(cvr)+'</td><td style="text-align:right">'+P(ctr)+'</td>'
+      +'<td style="text-align:right">'+(freq?freq.toFixed(2):'')+'</td>'
+      +'<td style="text-align:right">'+(cpa?_expMoney(cpa,cur):'')+'</td>'
+      +'<td style="text-align:right">'+_expMoney(cpm,cur)+'</td></tr>';
+  });
+  return h+'</tbody></table>';
+}
+// 퍼널 — 실험탭과 동일(노출→도달→클릭→구매, 전환=바로 윗단계 대비). 사이드마다 값·전환 2열.
+function _esFunnelTable(sides){
+  const stages=S=>{
+    const t=S.tot||{imp:0,rch:0,uc:0,mp:0};
+    const imp=t.imp||0,rch=t.rch||0,clk=t.uc||0,buy=t.mp||0,base=rch>0?rch:imp;
+    return [{n:'노출',v:imp,rate:null},{n:'도달',v:rch>0?rch:null,rate:(rch>0&&imp>0)?rch/imp*100:null},
+            {n:'클릭',v:clk,rate:base>0?clk/base*100:null},{n:'구매',v:buy,rate:clk>0?buy/clk*100:null}];
+  };
+  const st=sides.map(stages),ok=sides.map(S=>!!(S.tot&&S.tot.imp));
+  let h='<table><thead><tr><th style="min-width:70px;text-align:left">단계</th>';
+  sides.forEach(S=>{h+='<th style="color:'+S.col+'">'+S.lab+' 값</th><th style="color:'+S.col+'">'+S.lab+' 전환</th>'});
+  h+='</tr></thead><tbody>';
+  for(let i=0;i<4;i++){
+    h+='<tr><td style="text-align:left;font-weight:600">'+st[0][i].n+'</td>';
+    sides.forEach((S,si)=>{
+      const x=st[si][i];
+      h+='<td style="text-align:right">'+(ok[si]&&x.v!=null?F(x.v):'')+'</td>'
+       +'<td style="text-align:right;color:#888">'+(ok[si]&&x.rate!=null?x.rate.toFixed(1)+'%':(i===0&&ok[si]?'-':''))+'</td>';
+    });
+    h+='</tr>';
+  }
+  return h+'</tbody></table>';
+}
+// 그래프 — 실험탭과 같은 지표 선택, 사이드마다 선 1개.
+//   카드가 많아 한 번에 다 그리면 무거우므로 화면에 들어올 때 그린다(IntersectionObserver).
+function _esDrawChart(cv){
+  const d=ES_DATA[cv.id];
+  if(!d||typeof Chart==='undefined')return;
+  const sides=d.sides,metric=d.metric;
+  const kind=(metric==='roas'||metric==='cvr'||metric==='ctr')?'pct':(metric==='freq'?'ratio':'money');
+  const mval=o=>{
+    if(!o)return null;
+    const s=o.s||0,r=o.r||0,uc=o.uc||0,mp=o.mp||0,imp=o.imp||0,rch=o.rch||0;
+    switch(metric){
+      case 'roas':return s>0?+(r/s*100).toFixed(1):null;
+      case 'profit':return Math.round(r-s);
+      case 'spend':return Math.round(s);
+      case 'revenue':return Math.round(r);
+      case 'cvr':return (uc>0&&mp>0)?+(mp/uc*100).toFixed(2):null;
+      case 'ctr':return imp>0?+(uc/imp*100).toFixed(2):null;
+      case 'freq':return rch>0?+(imp/rch).toFixed(2):null;
+      case 'cpa':return mp>0?Math.round(s/mp):null;
+      case 'cpm':return imp>0?Math.round(s/imp*1000):null;
+    }
+    return null;
+  };
+  const all={};sides.forEach(S=>Object.keys(S.range).forEach(k=>{all[k]=1}));
+  const dates=Object.keys(all).sort().reverse();     // 왼쪽=최신(표와 같은 방향)
+  if(!dates.length)return;
+  const labels=dates.map(k=>DK(k).slice(3)+'('+WD(k)+')');
+  const cur=sides[0]?sides[0].cur:'₩';
+  const moneyAxis=v=>{const a=Math.abs(v);if(cur==='$')return '$'+(a>=1000?(v/1000).toFixed(1)+'k':Math.round(v));return '₩'+(a>=10000?Math.round(v/10000)+'만':Math.round(v).toLocaleString('ko-KR'))};
+  const fmt=v=>{if(v==null)return'';if(kind==='pct')return v+'%';if(kind==='ratio')return v.toFixed(2);return cur+Math.round(v).toLocaleString(cur==='$'?'en-US':'ko-KR')};
+  const ds=sides.map(S=>({label:S.lab+' '+S.role,data:dates.map(k=>mval(S.range[k])),borderColor:S.col,
+    backgroundColor:'transparent',tension:0.3,borderWidth:2,pointRadius:2,spanGaps:true}));
+  const ch=new Chart(cv,{type:'line',data:{labels:labels,datasets:ds},options:{responsive:true,maintainAspectRatio:false,
+    interaction:{mode:'index',intersect:false},
+    plugins:{legend:{labels:{font:{size:10},boxWidth:12}},tooltip:{callbacks:{label:c=>c.dataset.label+': '+fmt(c.parsed.y)}}},
+    scales:{x:{ticks:{font:{size:9}}},y:{beginAtZero:kind!=='pct',ticks:{font:{size:9},callback:v=>kind==='pct'?v+'%':(kind==='ratio'?v:moneyAxis(v))}}}}});
+  ES_CHARTS.push(ch);
+}
+// 가족 카드 1개 — 헤더 + 평균표 + 추이표 + 퍼널 + 그래프 (실험탭 화면 그대로)
+function _esCard(f,idx,metric){
+  const mem=f.mem.slice().sort((x,y)=>{
+    const ox=x.kind==='orig'?0:1,oy=y.kind==='orig'?0:1;
+    if(ox!==oy)return ox-oy;                 // 원본이 항상 A
+    return (y.r-x.r)||(y.s-x.s);             // 그다음 매출 큰 순
+  });
+  const sides=mem.map((m,i)=>_esSide(m,i));
+  const cid='esCh'+idx;
+  ES_DATA[cid]={sides:sides,metric:metric};
+  const orig=sides[0],cur=orig?orig.cur:'₩',roas=f.s>0?f.r/f.s*100:0;
+  const varN=mem.filter(m=>m.kind!=='orig').length;
+  const head='<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<span style="background:#1a2744;color:#fff;font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:9px">'+abEsc(f.product||'-')+'</span>'
+    +'<span style="background:#eef2ff;color:#3730a3;font-size:9px;font-weight:700;padding:1px 6px;border-radius:9px">'+abEsc(f.tag)+'</span>'
+    +'<span style="font-size:12.5px;font-weight:700;color:#111">'+abEsc(orig?orig.name:f.key)+'</span>'
+    +'<span style="font-size:10px;color:#6b7280">실험 '+varN+'개 · 가족 지출 '+_expMoney(f.s,cur)+' · 매출 '+_expMoney(f.r,cur)+'</span>'
+    +'<span class="'+RC(roas)+'" style="font-size:10px;padding:0 5px;border-radius:3px;font-weight:700">ROAS '+roas.toFixed(0)+'%</span></div>';
+  return '<div class="es-card">'+head
+    +'<div class="es-sub">📊 기간 평균 <span>· 지출·매출·순이익=하루 평균 / ROAS 아래 값=원본(A) 대비 차이(%p)</span></div>'
+    +'<div class="es-wrap">'+_esAvgTable(sides)+'</div>'
+    +'<div class="es-sub">📅 추이 <span>· 세트마다 자기 날짜 기준(왼쪽=최신) · 셀=ROAS/순이익/지출/매출/전환율(클릭률)/CPM</span></div>'
+    +'<div class="es-wrap">'+_esTrendTable(sides)+'</div>'
+    +'<div class="es-sub">🔻 퍼널 <span>· 전환=바로 윗단계 대비 · 구매=Mixpanel 귀속</span></div>'
+    +'<div class="es-wrap">'+_esFunnelTable(sides)+'</div>'
+    +'<div class="es-sub">📈 추이 그래프</div>'
+    +'<div style="height:230px;padding:0 4px 6px"><canvas class="es-chart" id="'+cid+'"></canvas></div>'
+    +'</div>';
+}
+function renderExpStatus(){
+  const box=document.getElementById('esBox');
+  if(!box)return;
+  ES_CHARTS.forEach(c=>{try{c.destroy()}catch(e){}});ES_CHARTS=[];
+  if(ES_OBS){try{ES_OBS.disconnect()}catch(e){}ES_OBS=null}
+  Object.keys(ES_DATA).forEach(k=>{delete ES_DATA[k]});
+  const src=_esVal('esSrc','kr'),days=parseInt(_esVal('esDays','14'))||14;
+  const minSp=parseFloat(_esVal('esMin','0'))||0,sort=_esVal('esSort','spend');
+  const limit=parseInt(_esVal('esLimit','20'))||0,metric=_esVal('esMetric','roas');
+  const kw=(_esVal('esFilter','')||'').trim().toLowerCase();
+  let fams=_esFamilies(_esCollect(src,days));
+  const total=fams.length;
+  if(kw)fams=fams.filter(f=>f.mem.some(m=>((m.name||'')+' '+m.id).toLowerCase().indexOf(kw)>=0));
+  if(minSp>0)fams=fams.filter(f=>f.s>=minSp);
+  fams.sort((a,b)=>{
+    if(sort==='rev')return b.r-a.r;
+    if(sort==='new')return a.varFirst<b.varFirst?1:(a.varFirst>b.varFirst?-1:0);
+    return b.s-a.s;
+  });
+  const shown=limit>0?fams.slice(0,limit):fams;
+  const info=document.getElementById('esInfo');
+  if(info)info.textContent='실험 '+total+'건 중 조건 통과 '+fams.length+'건 · 표시 '+shown.length+'건'
+    +(fams.length>shown.length?(' (나머지 '+(fams.length-shown.length)+'건은 표시 개수 제한으로 생략)'):'');
+  if(!shown.length){box.innerHTML='<div style="padding:20px;color:#888;font-size:12px">조건에 맞는 실험(원본+파생)이 없습니다. 기간을 늘리거나 소스를 바꿔보세요.</div>';return}
+  box.innerHTML=shown.map((f,i)=>_esCard(f,i,metric)).join('');
+  if(typeof IntersectionObserver!=='undefined'&&typeof Chart!=='undefined'){
+    ES_OBS=new IntersectionObserver(function(ents){
+      ents.forEach(function(e){if(!e.isIntersecting)return;ES_OBS.unobserve(e.target);_esDrawChart(e.target)});
+    },{rootMargin:'250px'});
+    box.querySelectorAll('canvas.es-chart').forEach(c=>ES_OBS.observe(c));
+  }else{
+    box.querySelectorAll('canvas.es-chart').forEach(c=>_esDrawChart(c));
+  }
+}
 // 입력 ID 를 KR/밴스드/글로벌(세트) → 구글 디멘드젠(광고그룹) → 소재(ad) 순으로 검색해 정규화.
 //   반환 {name,cur,byDate:{date:{s,r,uc,mp,imp,rch}}}
 function _expFindSet(id){
@@ -581,6 +832,7 @@ function applyMode(m){
   // Tab visibility (unified)
   document.querySelectorAll('.tab').forEach(t=>{
     if(t.dataset.t==='vntwtrend'){t.style.display='none';return} // 레거시 대만 추이차트 — 국가 필터(countrySel)로 대체
+    if(t.classList.contains('exp-only')){t.style.display=isExp?'inline-block':'none';return}
     if(t.classList.contains('mkt-only')){t.style.display=isMkt?'inline-block':'none';return}
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
@@ -612,6 +864,7 @@ function applyMode(m){
   if(isExp){
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
     document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+    const _et=document.querySelector('.tab[data-t="exp"]');if(_et)_et.classList.add('active');
     document.getElementById('p-exp').classList.add('active');
     _expEnsureSrc(()=>renderExperiment());  // 소재(ad_id) · 구글 디멘드젠 세트(ad_group_id) 조회용 lazy 로드
     renderExperiment();
@@ -1286,6 +1539,8 @@ function renderTab(id){
   if(id==='kpiWeekly')renderKpiTable('weekly');
   if(id==='kpiMonthly')renderKpiTable('monthly');
   if(id==='mktDash')renderMarketer();
+  if(id==='exp')renderExperiment();
+  if(id==='expstat'){_expEnsureSrc(()=>renderExpStatus());renderExpStatus()}
   if(id==='allmedia')renderAllMedia();
   if(id==='compet'){renderCompet();loadCompet().then(renderCompet)}  // 시트 도착하면 다시 그림
 }
@@ -5525,7 +5780,13 @@ function _ttParseSheet(txt){
     const nm=raw.split('\n').map(s=>s.trim()).filter(Boolean);
     const cname=nm[0];
     if(!cname||cname==='전체')continue;
-    const budget=nm[1]||'';
+    // A열 라벨 = 캠페인명 / (다르면) '└ 광고그룹명' / 예산 메모.
+    // 광고그룹을 복사하면 그룹명이 (2-1)·(2-2) 로 갈려 캠페인명만으론 행을 구분할 수 없다.
+    const gl=nm.slice(1).filter(x=>x.indexOf('└')===0);
+    const gname=gl.length?gl[0].replace(/^└\s*/,''):cname;
+    // 예산은 2026-08-18부터 C열이 원장(광고관리자 설정 스냅샷, fill_tiktok.py --budget).
+    // 그 이전엔 A열에 손으로 적어두던 메모였어서 C열이 비면 옛 방식으로 폴백한다.
+    const budget=String(r[2]||'').trim()||nm.slice(1).filter(x=>x.indexOf('└')!==0)[0]||'';
     const cid=String(r[1]||'').trim();
     for(let k=0;k<cols.length;k++){
       const j=cols[k][0],d=cols[k][1];
@@ -5535,7 +5796,7 @@ function _ttParseSheet(txt){
       if(p.length<4)continue;
       const spend=_ttNum(p[2]),rev=_ttNum(p[3]),ord=p.length>4?_ttNum(p[4]):null;
       if(spend==null&&rev==null)continue;
-      out.push({date:d,campaign:cname,campaign_id:cid,budget:budget,spend:Math.abs(spend||0),revenue:rev||0,orders:ord||0});
+      out.push({date:d,campaign:cname,adgroup:gname,campaign_id:cid,budget:budget,spend:Math.abs(spend||0),revenue:rev||0,orders:ord||0});
     }
   }
   return out.length?out:null;
@@ -5581,12 +5842,12 @@ function renderTiktok(){
   TIKTOK.forEach(r=>{
     if(dd.indexOf(r.date)<0)return;
     const id=r.campaign_id||r.campaign;
-    if(!byC[id])byC[id]={cn:r.campaign,id:id,bud:r.budget||'',product:_ttProduct(r.campaign),d:{}};
+    if(!byC[id])byC[id]={cn:r.campaign,gn:r.adgroup||r.campaign,id:id,bud:r.budget||'',product:_ttProduct(r.campaign),d:{}};
     if(r.budget)byC[id].bud=r.budget;
     byC[id].d[r.date]=r;
   });
   let list=Object.values(byC);
-  if(kw)list=list.filter(a=>((a.cn||'')+' '+(a.id||'')).toLowerCase().indexOf(kw)>=0);
+  if(kw)list=list.filter(a=>((a.cn||'')+' '+(a.gn||'')+' '+(a.id||'')).toLowerCase().indexOf(kw)>=0);
   list.forEach(a=>{let s=0,rv=0,o=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders}});
     a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
     a._yS=a.d[yDay]?a.d[yDay].spend:0;});
@@ -5615,7 +5876,8 @@ function renderTiktok(){
         if(!x||(!x.spend&&!x.revenue))return'<td class="'+yd+'"></td>';
         const roas=x.spend>0?x.revenue/x.spend*100:0;
         return'<td class="mc '+RC(roas)+yd+'">'+TTC(roas,x.revenue-x.spend,x.spend,x.revenue,x.orders,x.orders>0?x.spend/x.orders:0)+'</td>'}).join('');
-      h+='<tr><td class="fx fx0">'+a.cn+'</td><td class="fx fx1" style="font-size:9px">'+a.id+'</td><td style="font-size:10px;color:#666">'+String(a.bud||'').replace(/^-/,'')+'</td>'
+      const lbl=a.gn&&a.gn!==a.cn?a.cn+'<div style="font-size:9px;color:#888">└ '+a.gn+'</div>':a.cn;
+      h+='<tr><td class="fx fx0">'+lbl+'</td><td class="fx fx1" style="font-size:9px">'+a.id+'</td><td style="font-size:10px;color:#666">'+String(a.bud||'').replace(/^-/,'')+'</td>'
         +'<td class="mc '+RC(a._roas)+'">'+TTC(a._roas,a._p,a._s,a._r,a._o,a._cpa)+'</td>'+cells+'</tr>';
     });
   });
