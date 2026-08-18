@@ -1958,13 +1958,13 @@ function drawMetaDailyTable(){
 }
 
 // 추이차트 세트 계보 정렬 — 오리지널 세트를 맨 위, 그 아래에 troas·구매당비용·복제 등
-//   파생 세트를 들여쓰기로 붙여 '하위 세트'처럼 보이게 한다(실제 트리는 아니고 배치만).
-//   ▶ 토글(소재 펼침)은 그대로 — 펼치면 여전히 소재가 나온다.
+//   실험(파생) 세트를 들여쓰기로 붙여 '하위 세트'처럼 보이게 한다(실제 트리는 아니고 배치만).
+//   토글 2단: 오리지널 행의 🧬N = 실험세트 접기/펼치기(기본 펼침), ▶ = 소재 펼치기(기존 그대로).
 //   가족 판정은 🧬복제·변형 탭과 같은 dvClassify(세트명 마커·날짜토큰 제거 후 계보키).
 //   정렬: ① 가족(원본+파생) 매출 합 큰 순 ② 가족 안에서는 원본 먼저, 나머지는 매출 큰 순.
 //   원본이 기간 안에 없으면(중단·이름변경) 매출 1위 파생이 가족 머리가 되고 들여쓰기 없음.
 function dvTreeOrder(adsets,enabled){
-  if(!enabled){adsets.forEach(a=>{a._dvChild=false});return adsets}
+  if(!enabled){adsets.forEach(a=>{a._dvChild=false;a._dvHead=null;a._dvKids=0});return adsets}
   const fam={};
   adsets.forEach(a=>{
     const c=dvClassify(a.an||'');a._dv=c;
@@ -1981,11 +1981,36 @@ function dvTreeOrder(adsets,enabled){
     });
     //   들여쓰기는 '원본이 아닌' 파생만 — 동명 원본이 둘이면 둘 다 맨 위에 나란히 두고,
     //   원본이 아예 없는 가족은 머리(매출 1위 파생)를 들여쓰지 않는다(위가 비어 보이지 않게).
-    f.mem.forEach((m,i)=>{m._dvChild=(i>0&&m._dv.kind!=='orig')});
+    f.mem.forEach((m,i)=>{m._dvChild=(i>0&&m._dv.kind!=='orig');m._dvHead=null;m._dvKids=0});
+    //   가족 머리(맨 윗행) ↔ 실험세트 연결 — 머리의 🧬 토글이 data-dvfam 으로 자식 행을 찾는다.
+    const _hd=f.mem[0],_kid=f.mem.filter(m=>m._dvChild);
+    _kid.forEach(m=>{m._dvHead=_hd.id});_hd._dvKids=_kid.length;
   });
   fams.sort((a,b)=>(b.r-a.r)||(b.s-a.s));
   const out=[];fams.forEach(f=>f.mem.forEach(m=>out.push(m)));
   return out;
+}
+// 오리지널 행에 붙는 실험세트 토글 버튼(자식 없으면 빈 문자열).
+function famBtn(a){
+  if(!a._dvKids)return'';
+  return `<span class="fam-caret" data-open="1" title="실험(복제·변형) 세트 ${a._dvKids}개 접기" onclick="event.stopPropagation();toggleFamily('${a.id}',this)">▼${a._dvKids}</span>`;
+}
+// 실험세트 토글 — 오리지널 행의 🧬N 클릭 시 그 가족의 실험(복제·변형) 행을 접기/펼치기.
+//   기본은 펼침(렌더 시 그대로 노출), 클릭하면 접힌다. 접을 때는 그 실험세트들이
+//   ▶ 로 펼쳐둔 소재 행(tr.creative-expanded)도 함께 숨긴다.
+function toggleFamily(headId,btn){
+  const tbody=btn.closest('tbody');if(!tbody)return;
+  const rows=tbody.querySelectorAll('tr[data-dvfam="'+CSS.escape(headId)+'"]');
+  const open=btn.dataset.open!=='0';
+  const show=!open;
+  rows.forEach(tr=>{
+    tr.style.display=show?'':'none';
+    const cid=tr.dataset.adsetRow;
+    if(cid)tbody.querySelectorAll('tr.creative-expanded[data-parent="'+CSS.escape(cid)+'"]').forEach(r=>{r.style.display=show?'':'none'});
+  });
+  btn.dataset.open=show?'1':'0';
+  btn.textContent=(show?'▼':'▶')+rows.length;
+  btn.title='실험(복제·변형) 세트 '+rows.length+'개 '+(show?'접기':'펼치기');
 }
 // ===== TREND (상품별 그룹) =====
 function renderTrend(opts){
@@ -2095,7 +2120,7 @@ function renderTrend(opts){
       }
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr data-adset-row="'+a.id+'">'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -2208,7 +2233,7 @@ function renderTrendAgg(gran){
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
