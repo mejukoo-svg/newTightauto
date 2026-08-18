@@ -68,6 +68,11 @@ td.fxa{left:0;max-width:120px;color:#555}
 #p-trend th.hacc,#p-auxmetric th.hacc,#p-vntwtrend th.hacc{width:var(--fit-acc,auto)}
 #p-trend th.hcn,#p-auxmetric th.hcn,#p-vntwtrend th.hcn{width:var(--fit-cn,auto)}
 #p-trend th.han,#p-auxmetric th.han,#p-vntwtrend th.han{width:var(--fit-an,auto)}
+#p-trend th.hid,#p-auxmetric th.hid,#p-vntwtrend th.hid{width:var(--fit-id,130px);min-width:0}
+#p-trend th.hmemo,#p-auxmetric th.hmemo,#p-vntwtrend th.hmemo{width:var(--fit-memo,130px);min-width:0}
+#p-trend td.idc,#p-auxmetric td.idc,#p-vntwtrend td.idc{max-width:var(--fit-id,none);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#p-trend td.memo-cell,#p-auxmetric td.memo-cell,#p-vntwtrend td.memo-cell{min-width:0;max-width:var(--fit-memo,none)}
+#p-trend .memo-input,#p-auxmetric .memo-input,#p-vntwtrend .memo-input{min-width:0}
 .col-rz{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:12}
 .col-rz:hover,.col-rz:active{background:rgba(26,115,232,.45)}
 tr.sr{background:#e8e8e8;font-weight:700}
@@ -336,29 +341,14 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-mktDash"><div id="mktBody"></div></div>
 <div class="panel" id="p-allmedia"><iframe id="allmediaFrame" data-src="allmedia.html" style="width:100%;height:calc(100vh - 150px);min-height:600px;border:0;display:block"></iframe></div>
 <div class="panel" id="p-compet">
-<div class="filter"><span style="font-weight:600">🏢 경쟁사분석</span><button onclick="loadCompet(true).then(renderCompet)" title="구글시트를 다시 읽어옵니다" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🔄 시트 새로고침</button><span id="cpInfo" style="color:#888;margin-left:12px;font-size:10px"></span><span style="color:#888;margin-left:auto;font-size:10px">출처=<a href="https://docs.google.com/spreadsheets/d/1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo/edit" target="_blank" style="color:#1a73e8">경쟁사분석 시트</a> · 매일 00:15/00:20 KST 수집</span></div>
-<div id="cpGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));gap:18px;padding:4px;align-items:start">
-  <div style="border:1px solid #e2e8f0;border-radius:6px;padding:12px 14px;background:#fff;min-width:0">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-      <span style="font-weight:700;font-size:13px">📦 경쟁사 상품 수 추이</span>
-      <label style="font-size:11px;color:#555">최근</label>
-      <select id="cpProdWeeks" style="font-size:11px"><option value="8">8주</option><option value="13" selected>13주</option><option value="26">26주</option><option value="52">52주</option></select>
-    </div>
-    <div style="height:360px"><canvas id="cpProdChart"></canvas></div>
-    <div style="color:#888;font-size:10px;margin-top:8px">사이트별 <b>노출 상품 수</b>(주 단위 관측) · 툴팁에 무료 상품 수 표시 · 타이트사주는 Supabase products(KR 노출 기준), 청월당은 카테고리 HTML, 용용사주는 공개 API · 카테고리 체계가 달라 총계만 비교</div>
-  </div>
-  <div style="border:1px solid #e2e8f0;border-radius:6px;padding:12px 14px;background:#fff;min-width:0">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
-      <span style="font-weight:700;font-size:13px">📣 일별 광고 수 추이</span>
-      <label style="font-size:11px;color:#555">단위</label>
-      <select id="cpAdGran" style="font-size:11px"><option value="day" selected>일별</option><option value="week">주별</option></select>
-      <label style="font-size:11px;color:#555">최근</label>
-      <select id="cpAdN" style="font-size:11px"><option value="14">14</option><option value="30" selected>30</option><option value="60">60</option><option value="90">90</option></select>
-      <span id="cpAdUnit" style="font-size:11px;color:#555">일</span>
-    </div>
-    <div style="height:360px"><canvas id="cpAdChart"></canvas></div>
-    <div style="color:#888;font-size:10px;margin-top:8px">회사별 <b>Meta 광고 라이브러리 KR 활성 광고 수</b>(하루 1회 00:20 KST 관측 스냅샷) · 일별은 2026-08-18부터 수집, 그 이전은 <b>주별</b>로만 남아 있음 · 여러 페이지로 집행하는 회사는 페이지 합계 · ⚠ 2026.7/6 이전 주는 계측 정의가 달라(스크랩 누적 distinct) 단절</div>
-  </div>
+<div class="filter"><label>광고 수 단위</label><select id="cpAdGran"><option value="day" selected>일별</option><option value="week">주별</option></select><label style="margin-left:10px">최근</label><select id="cpAdN"><option value="14">14</option><option value="30" selected>30</option><option value="60">60</option><option value="90">90</option></select><span id="cpAdUnit" style="font-size:11px;color:#555">일</span><label style="margin-left:14px">상품 수 최근</label><select id="cpProdWeeks"><option value="8">8주</option><option value="13" selected>13주</option><option value="26">26주</option><option value="52">52주</option></select><button onclick="loadCompet(true).then(renderCompet)" title="구글시트를 다시 읽어옵니다" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🔄 시트 새로고침</button><span id="cpInfo" style="color:#888;margin-left:12px;font-size:10px"></span></div>
+<div class="sheet-wrap" style="max-height:none;margin-bottom:20px">
+  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📣 광고 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">회사별 Meta 광고 라이브러리 <b>KR 활성 광고 수</b> · 하루 1회(00:20 KST) 관측 스냅샷 · 최신 왼쪽 · 셀 아래 ▲▼=직전 관측 대비 증감 · 여러 페이지로 집행하는 회사는 페이지 합계 · 일별은 2026-08-18부터 수집(그 이전은 <b>주별</b>로만 존재) · ⚠ 주별 2026.7/6 이전은 계측 정의가 달라(스크랩 누적 distinct) 단절</span></div>
+  <table id="cpAdTbl"></table>
+</div>
+<div class="sheet-wrap" style="max-height:none">
+  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">사이트별 <b>노출 상품 수</b>(주 단위 관측) · 괄호=무료 상품 수 · 타이트사주는 Supabase products(KR 노출 기준) · 청월당은 카테고리 HTML · 용용사주는 공개 API · 카테고리 체계가 서로 달라 총계만 비교 · 출처=<a href="https://docs.google.com/spreadsheets/d/1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo/edit" target="_blank" style="color:#1a73e8">경쟁사분석 시트</a></span></div>
+  <table id="cpProdTbl"></table>
 </div>
 </div>
 <div class="panel" id="p-exp"><div class="filter" style="flex-wrap:wrap;gap:10px;align-items:center">
@@ -415,7 +405,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260818g"></script>
+<script src="app.js?v=20260818h"></script>
 </div>
 </body>
 </html>
