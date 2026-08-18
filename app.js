@@ -527,11 +527,35 @@ function onCountryChange(){
   navPush();   // 국가 필터 변경도 히스토리에 기록
 }
 
+// 주간종합 '소스' 셀렉트를 모드에 맞춘다 (2026-08-18).
+//   본문 데이터(ROWS=AD)는 이미 모드별로 재빌드되지만(buildAD) 이 셀렉트는 정적 마크업이라
+//   글로벌·밴스드·국내소재 모드에서도 '국내 메타'로 보였다. 더 나쁜 건 dg/both 옵션이 읽는
+//   GGDG_TIGHT(google_demandgen_campaign_daily)가 국내 원화 전용이라는 것 — 글로벌 모드에서
+//   고르면 ₩ 수치가 $ 로 찍히거나(dg) USD 합계에 원화가 그대로 더해졌다(both).
+//   → 소스 선택은 국내(kr)에서만 열고, 나머지 모드는 해당 모드 메타 1개로 고정·라벨 교체.
+//   ('🟢 구글 디멘드젠' 탭이 m==='kr' 전용으로 숨겨지는 것과 같은 기준)
+const _WSRC_LABEL={kr:'국내 메타',gl:'글로벌 메타',vn:'밴스드 메타',cr:'국내소재 메타'};
+let _wSrcKr='kr';   // 국내 모드에서 고른 소스를 기억 → 모드 왕복해도 복원
+function _syncWeeklySource(m){
+  const sel=document.getElementById('wSource'); if(!sel) return;
+  const hint=document.getElementById('wSrcHint');
+  if(m==='kr'){
+    sel.innerHTML='<option value="kr">국내 메타</option><option value="dg">디멘드젠(타이트)</option><option value="both">국내 종합(메타+디멘드젠)</option>';
+    sel.value=_wSrcKr; sel.disabled=false;
+    if(hint)hint.style.display='';
+  }else{
+    sel.innerHTML='<option value="kr">'+(_WSRC_LABEL[m]||'메타')+'</option>';
+    sel.value='kr'; sel.disabled=true;   // 디멘드젠(국내 원화)은 선택지에서 제거
+    if(hint)hint.style.display='none';
+  }
+}
+
 // ===== MODE SWITCH =====
 // applyMode = 화면만 바꾸는 순수 적용 함수(히스토리 기록 없음).
 // 사용자가 직접 누르는 경로는 아래 switchMode() 래퍼가 담당해 히스토리에 기록한다.
 function applyMode(m){
   MODE=m;
+  _syncWeeklySource(m);
   document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
   const mLabels={kr:'국내 · KRW',gl:'글로벌 · USD',cr:'국내소재 · KRW',vn:'밴스드 · KRW',kpi:'📈 지표 하이아라키 KPI',mkt:'👤 마케터별 소재 성과',exp:'🧪 실험 · 세트 A/B 비교'};
   document.getElementById('modeLabel').textContent=mLabels[m]||m;
@@ -1274,7 +1298,7 @@ document.getElementById('tpUnit').addEventListener('change',renderTrendProduct);
 document.getElementById('tpFilter').addEventListener('input',renderTrendProduct);
 document.getElementById('cFilter').addEventListener('input',renderChange);
 document.getElementById('wMode').addEventListener('change',renderWeekly);
-document.getElementById('wSource').addEventListener('change',renderWeekly);
+document.getElementById('wSource').addEventListener('change',function(){if(MODE==='kr')_wSrcKr=this.value;renderWeekly()});
 document.getElementById('dtStart').addEventListener('change',renderDateTab);
 document.getElementById('dtEnd').addEventListener('change',renderDateTab);
 document.getElementById('dtFilter').addEventListener('input',renderDateTab);
@@ -2441,8 +2465,10 @@ function _dgProduct(name){const s=String(name||'');for(const p of _DG_PROD_KW){i
 function _dgRows(){return (GGDG_TIGHT||[]).map(r=>{const s=+r.spend||0,rv=+r.revenue||0;return {date:r.date,spend:s,revenue:rv,profit:rv-s,results_mp:+r.purchase_count||0,unique_clicks:+r.clicks||0,impressions:+r.impressions||0,product:_dgProduct(r.ad_group_name||r.campaign_name)}})}
 function renderWeekly(){
   const mode=document.getElementById('wMode').value;
-  const src=(document.getElementById('wSource')||{}).value||'kr';
-  // 소스 데이터셋: 국내메타=AD, 디멘드젠=GGDG_TIGHT, 종합=둘 합산.
+  //   ★ 디멘드젠(GGDG_TIGHT)은 국내 원화 테이블 → 국내(kr) 모드에서만 소스 선택 허용.
+  //     타 모드는 셀렉트 상태와 무관하게 'kr'(=그 모드의 AD, 통화 일치)로 고정한다.
+  const src=(MODE==='kr')?((document.getElementById('wSource')||{}).value||'kr'):'kr';
+  // 소스 데이터셋: 메타=AD(모드별 재빌드), 디멘드젠=GGDG_TIGHT, 종합=둘 합산.
   //   디멘드젠 테이블은 lazy 로드 → 없으면 로딩 트리거 후 재렌더.
   let ROWS;
   if(src==='dg'||src==='both'){
