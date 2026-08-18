@@ -1101,6 +1101,7 @@ function _applyCore(d){
   (d.vnhl||[]).forEach(x=>{if(_hlIsToday(x.updated_at)){VN_HL[x.adset_id]=x.highlight;VN_HM[x.adset_id]=x.memo||null;VN_SRC[x.adset_id]=x.source||null}});
   // durable 메모(daily_memos) → DMEMO 맵. dmemo 없으면(캐시경로/미실행) 기존 값 유지.
   if(d.dmemo){DMEMO={};d.dmemo.forEach(x=>{if(x&&x.date&&x.entity_id&&x.region)DMEMO[_dmKey(x.region,x.date,x.entity_id)]=x.memo||null})}
+  memoIdxInvalidate();
 }
 async function initData(){
   // 0시 롤오버 감지 → 추이차트 하이라이트·메모 자동 삭제 (탭 열려있는 상태로 자정 넘길 때)
@@ -1686,7 +1687,7 @@ async function saveHLGgdg(id,c){
 function showCPGgdg(id,el){showCP(id,el);currentHlGgdg=true}
 function showCP(id,el){currentHlId=id;currentHlGgdg=false;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
-  if(!confirm('추이차트 하이라이트와 메모가 삭제됩니다.\n날짜탭에 저장된 기록(하이라이트·메모)은 유지됩니다.\n\n계속할까요?'))return;
+  if(!confirm('추이차트 하이라이트가 삭제됩니다.\n메모는 날짜별로 남습니다(추이차트 메모칸·날짜탭 모두 유지).\n\n계속할까요?'))return;
   const tbl=hlTbl();const col=hlIdCol();
   // 하이라이트 또는 추이차트 메모가 있는 모든 id (메모만 있는 행도 삭제 대상)
   const ids=[...new Set([...Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]),...Object.keys(HL_MEMO).filter(k=>HL_MEMO[k])])];
@@ -1722,6 +1723,41 @@ document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b
 // .clickable = 하이라이트 지정 셀 전용 클래스(추이차트·디멘드젠). fx 유무와 무관하게 피커가 닫히지 않도록.
 document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.target.closest('.clickable'))document.getElementById('colorPicker').classList.remove('show')});
 
+// ===== 추이차트 메모 이력 =====
+// 메모는 '쓴 날짜'로 durable 저장소(daily_memos)에 남는다 → 0시 자동삭제·하이라이트 전체삭제와 무관하게 보존.
+//   · 오늘 칸(textarea) = 오늘 쓴 메모(수정 가능)
+//   · 그 아래 = 지난 메모를 '날짜 + 내용' 으로 최신순 나열 → 하루가 지나면 자동으로 날짜가 붙어 내려간다.
+let _MEMO_IDX=null;
+function memoIdxInvalidate(){_MEMO_IDX=null}
+function _memoIndex(){
+  if(_MEMO_IDX)return _MEMO_IDX;
+  const idx={};
+  Object.keys(DMEMO).forEach(k=>{
+    const v=DMEMO[k];if(!v)return;
+    const p=k.split('|');if(p.length<3)return;
+    const key=p[0]+'|'+p.slice(2).join('|');      // region|entity_id (id 에 | 가 있어도 안전)
+    (idx[key]||(idx[key]=[])).push({date:p[1],memo:v});
+  });
+  Object.keys(idx).forEach(k=>idx[k].sort((a,b)=>a.date<b.date?1:(a.date>b.date?-1:0)));
+  _MEMO_IDX=idx;
+  return idx;
+}
+function _mEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+// 지난 메모(오늘 제외) 목록 HTML. 기본 4개까지 보여주고 나머지는 마우스오버로.
+function _memoHistHtml(id,today){
+  const arr=(_memoIndex()[MODE+'|'+id]||[]).filter(x=>x.date!==today);
+  if(!arr.length)return '';
+  const N=4;
+  let h='<div class="memo-hist">';
+  arr.slice(0,N).forEach(x=>{
+    h+='<div class="mh" title="'+_mEsc(DK(x.date)+' · '+x.memo)+'"><b>'+DK(x.date).slice(3)+'</b> '+_mEsc(x.memo)+'</div>';
+  });
+  if(arr.length>N){
+    const rest=arr.slice(N).map(x=>DK(x.date).slice(3)+' '+x.memo).join(' / ');
+    h+='<div class="mh mh-more" title="'+_mEsc(rest)+'">+'+(arr.length-N)+'개 더</div>';
+  }
+  return h+'</div>';
+}
 // ===== MEMO =====
 // 날짜탭 메모: perfTbl.memo (해당 날짜·영구저장) — 하이라이트 전체삭제와 무관하게 유지
 async function saveMemo(date,id,memo,el){
@@ -1732,7 +1768,7 @@ async function saveMemo(date,id,memo,el){
   await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&'+idCol+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo:m})});
   // 2) durable 저장소(daily_memos) — 행 존재 무관(B)
   fetch(SB_URL+'/rest/v1/daily_memos',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({date,entity_id:id,region:MODE,memo:m,updated_at:new Date().toISOString()})}).catch(()=>{});
-  DMEMO[_dmKey(MODE,date,id)]=m;
+  DMEMO[_dmKey(MODE,date,id)]=m;memoIdxInvalidate();
   // 3) 추이차트에도 반영(C) — 하이라이트 테이블 memo + HL_MEMO. 다음 렌더에 추이차트 메모칸에 표시.
   fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({[hlIdCol()]:id,memo:m,updated_at:new Date().toISOString()})}).catch(()=>{});
   HL_MEMO[id]=m;
@@ -1752,7 +1788,7 @@ async function saveTrendMemo(date,id,memo,el){
   //    perfTbl.memo PATCH도 병행(행 있으면 갱신 — 봇/CSV 등 기존 리더 호환).
   if(date){
     fetch(SB_URL+'/rest/v1/daily_memos',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({date,entity_id:id,region:MODE,memo:m,updated_at:new Date().toISOString()})}).catch(()=>{});
-    DMEMO[_dmKey(MODE,date,id)]=m;
+    DMEMO[_dmKey(MODE,date,id)]=m;memoIdxInvalidate();
     fetch(SB_URL+'/rest/v1/'+perfTbl()+'?date=eq.'+date+'&'+hlIdCol()+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo:m})}).catch(()=>{});
     _syncRowField(id,date,'memo',m);
   }
@@ -2365,11 +2401,14 @@ function renderTrend(opts){
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const mk=d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight);let bcol=budBc[d];if(!bcol&&mk==='off')bcol=HL_CONFIG.off.bg;const cb=(showChg&&bcol)?' style="box-shadow:inset 0 0 0 3px '+bcol+'"':'';if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr,r.results_mp>0?r.spend/r.results_mp:0))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const chgTd='';  // 증감 컬럼 제거(국내·글로벌 추이차트)
-      // 메모(추이차트): HL_MEMO(하이라이트 테이블)에서 읽고 saveTrendMemo로 저장.
-      //  → 하이라이트 전체삭제 시 함께 사라짐. 단 날짜탭 perfTbl.memo 에도 같은 날짜로 영구저장됨.
-      //  date-attr: 어제(yDay) 기준, 없으면 보유한 최신일로 폴백 → 날짜탭 영구저장 키.
+      // 메모(추이차트): '오늘' 칸에 쓰면 오늘 날짜로 durable(daily_memos) 저장 → 0시가 지나도 남는다.
+      //  하루가 지나면 그 메모는 아래 이력으로 내려가고 앞에 날짜(MM/DD)가 붙는다.
+      //  날짜탭 perfTbl.memo·하이라이트 테이블에도 함께 써서 기존 리더(봇 등)와 호환.
       let memoTd='';
-      if(showChg){let md=a.d[yDay]?yDay:'';if(!md){for(const k in a.d){if(k>md)md=k}}const _dmv=DMEMO[_dmKey(MODE,md,a.id)];const mmv=((HL_MEMO[a.id]!=null?HL_MEMO[a.id]:_dmv)||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');memoTd='<td class="memo-cell"><textarea class="memo-input" rows="4" placeholder="메모" data-date="'+md+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveTrendMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mmv+'</textarea><span class="memo-saved">✓</span></td>'}
+      if(showChg){
+        const mmv=_mEsc(DMEMO[_dmKey(MODE,today,a.id)]||'');
+        memoTd='<td class="memo-cell"><textarea class="memo-input" rows="3" placeholder="오늘 메모" data-date="'+today+'" data-id="'+a.id+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveTrendMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mmv+'</textarea><span class="memo-saved">✓</span>'+_memoHistHtml(a.id,today)+'</td>';
+      }
       // KR/GL/VN: caret 클릭 → 인라인 소재 목록 펼침
       let caretBtn='';
       if(MODE==='kr'||MODE==='gl'||MODE==='vn'){

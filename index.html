@@ -151,6 +151,11 @@ td.clickable{cursor:pointer}
 .memo-input{display:block;box-sizing:border-box;width:100%;min-width:130px;height:60px;padding:4px 5px;border:1px solid #ddd;border-radius:2px;font-size:10px;font-family:inherit;line-height:1.4;resize:vertical;vertical-align:top;white-space:pre-wrap;overflow:auto}
 .memo-input:focus{border-color:#4285f4;outline:none;background:#f0f7ff}
 td.memo-cell{min-width:140px;padding:3px 4px;vertical-align:top}
+/* 추이차트 메모 이력 — 오늘 칸(textarea) 아래에 지난 메모를 '날짜 + 내용' 으로 쌓아 보여준다 */
+.memo-hist{margin-top:3px;max-height:86px;overflow-y:auto;text-align:left}
+.memo-hist .mh{font-size:9px;line-height:1.35;color:#555;padding:1px 3px;border-top:1px dotted #e0e0e0;white-space:normal;word-break:break-all}
+.memo-hist .mh b{color:#b45309;font-weight:700;margin-right:3px}
+.memo-hist .mh-more{color:#999;font-style:italic;cursor:help}
 .memo-saved{color:#1a73e8;font-size:9px;opacity:0;transition:opacity 0.3s;margin-left:4px}
 .memo-saved.show{opacity:1}
 /* Dashboard */
@@ -417,7 +422,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260818k"></script>
+<script src="app.js?v=20260819a"></script>
 </div>
 </body>
 </html>
