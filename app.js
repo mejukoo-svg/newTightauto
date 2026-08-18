@@ -5656,7 +5656,7 @@ document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='En
 const CP_SHEET_ID='1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo';
 const CP_GID={prod:'254863227',adDay:'2116795530',adWeek:'104726849'};
 function _cpUrl(gid){return 'https://docs.google.com/spreadsheets/d/'+CP_SHEET_ID+'/gviz/tq?tqx=out:csv&gid='+gid+'&headers=1'}
-let COMPET={prod:null,adDay:null,adWeek:null},CP_ERR={},CP_LOADED=false,CP_LOADING=null,cpCharts={};
+let COMPET={prod:null,adDay:null,adWeek:null},CP_ERR={},CP_LOADED=false,CP_LOADING=null;
 
 // 셀 '86 (무료 44)' 또는 '476' → {total,free}
 function _cpVal(v){
@@ -5710,85 +5710,108 @@ function loadCompet(force){
     .then(function(){CP_LOADED=true;CP_LOADING=null});
   return CP_LOADING;
 }
-// 자사(타이트사주)는 굵고 진한 파랑, 나머지는 브랜드 팔레트 순서
-function _cpColor(name,i){return /타이트사주/.test(name)?'#1a73e8':BRAND_COLORS[(i+1)%BRAND_COLORS.length]}
-function _cpDrawEmpty(canvasId,msg){
-  const cv=document.getElementById(canvasId);if(!cv)return;
-  if(cpCharts[canvasId]){cpCharts[canvasId].destroy();delete cpCharts[canvasId]}
-  const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);
-  ctx.font='12px sans-serif';ctx.fillStyle='#888';ctx.fillText(msg,12,24);
+// 추이차트와 같은 표 배치 — 행=회사, 열=기간(최신 좌측), 첫 칸은 요약.
+// 지출·매출과 달리 광고 수·상품 수는 '스톡' 지표라 기간 합계가 뜻이 없다.
+// 그래서 추이차트의 '전체'(기간 합계) 자리에 '최신'(최근 관측값 + 표시 구간 증감)을 둔다.
+function _cpDeltaHtml(d, cls) {
+  if (d == null || !d) return '';
+  // 증가=빨강 / 감소=파랑 (좋고 나쁨이 아니라 방향 표시 — 경쟁사 증가는 '나쁨'이 아니다)
+  return '<div class="' + (cls || 'cv') + '" style="color:' + (d > 0 ? '#d00' : '#1a56db') + '">'
+       + (d > 0 ? '▲' : '▼') + Math.abs(d).toLocaleString('ko-KR') + '</div>';
 }
-function _cpDrawChart(canvasId,data,n,unitWord,errKey){
-  if(!data){_cpDrawEmpty(canvasId,'시트를 읽지 못했습니다 — '+(CP_ERR[errKey]||'🔄 새로고침을 눌러보세요'));return}
-  const periods=data.periods.slice(0,n).reverse();     // 차트는 과거 → 최신
-  const last=periods[periods.length-1];
-  const labels=periods.map(_cpLabel);
-  const rows=data.rows.slice().sort(function(a,b){
-    const la=a.vals[last],lb=b.vals[last];
-    return (lb?lb.total:0)-(la?la.total:0);            // 최신 값 큰 순 = 범례 순서
+function _cpCell(cur, prev) {
+  if (!cur) return '<td></td>';
+  let h = '<div class="r">' + cur.total.toLocaleString('ko-KR') + '</div>';
+  if (cur.free != null) h += '<div class="rv">무료 ' + cur.free + '</div>';
+  h += _cpDeltaHtml(prev ? cur.total - prev.total : null);
+  return '<td class="mc">' + h + '</td>';
+}
+// 행 하나의 표시 구간 요약 — 최신값 + (가장 오래된 표시열 대비 증감)
+function _cpSummaryCell(vals, cols) {
+  const cur = vals[cols[0]];
+  if (!cur) return '<td class="mc"></td>';
+  let base = null;
+  for (let i = cols.length - 1; i > 0; i--) { if (vals[cols[i]]) { base = vals[cols[i]]; break } }
+  let h = '<div class="r">' + cur.total.toLocaleString('ko-KR') + '</div>';
+  if (cur.free != null) h += '<div class="rv">무료 ' + cur.free + '</div>';
+  h += _cpDeltaHtml(base ? cur.total - base.total : null);
+  return '<td class="mc" style="background:#f5f8ff">' + h + '</td>';
+}
+function _cpTable(tblId, data, n, errKey, nameLabel) {
+  const tbl = document.getElementById(tblId); if (!tbl) return;
+  if (!data) {
+    tbl.innerHTML = '<tr><td style="padding:12px;color:#888">시트를 읽지 못했습니다 — '
+      + (CP_ERR[errKey] || '🔄 시트 새로고침을 눌러보세요') + '</td></tr>';
+    return;
+  }
+  const cols = data.periods.slice(0, n);            // 최신이 왼쪽 — 시트·추이차트와 같은 방향
+  if (!cols.length) { tbl.innerHTML = '<tr><td style="padding:12px;color:#888">관측 데이터가 없습니다</td></tr>'; return }
+  const rows = data.rows.slice().sort(function (a, b) {
+    const la = a.vals[cols[0]], lb = b.vals[cols[0]];
+    return (lb ? lb.total : 0) - (la ? la.total : 0);
   });
-  const ds=rows.map(function(r,i){return {
-    label:r.name,
-    data:periods.map(function(k){return r.vals[k]?r.vals[k].total:null}),
-    _free:periods.map(function(k){return r.vals[k]?r.vals[k].free:null}),
-    borderColor:_cpColor(r.name,i),
-    backgroundColor:_cpColor(r.name,i),
-    borderWidth:/타이트사주/.test(r.name)?3:1.6,
-    pointRadius:periods.length>45?0:(periods.length<3?4:2),
-    pointHoverRadius:4,tension:.25,spanGaps:true
-  }});
-  const cv=document.getElementById(canvasId);if(!cv)return;
-  if(cpCharts[canvasId])cpCharts[canvasId].destroy();
-  cpCharts[canvasId]=new Chart(cv,{type:'line',data:{labels:labels,datasets:ds},options:{
-    responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-    plugins:{
-      legend:{position:'bottom',labels:{font:{size:10},boxWidth:12,usePointStyle:true,pointStyle:'line'}},
-      tooltip:{itemSort:function(a,b){return (b.parsed.y||0)-(a.parsed.y||0)},callbacks:{
-        label:function(c){const f=c.dataset._free&&c.dataset._free[c.dataIndex];
-          return c.dataset.label+': '+(c.parsed.y==null?'-':c.parsed.y.toLocaleString('ko-KR'))
-            +(f!=null?' (무료 '+f+')':'')}
-      }}
-    },
-    scales:{x:{ticks:{font:{size:9},maxRotation:0,autoSkipPadding:12}},
-            y:{beginAtZero:true,ticks:{font:{size:9},precision:0},title:{display:true,text:unitWord,font:{size:10}}}}
-  }});
+  // 컬럼별 합계(= 시트의 합계 행을 표시 대상 행만으로 다시 계산)
+  const tot = {};
+  cols.forEach(function (k) {
+    let t = 0, f = 0, hasF = false, any = false;
+    rows.forEach(function (r) {
+      const v = r.vals[k]; if (!v) return;
+      any = true; t += v.total; if (v.free != null) { f += v.free; hasF = true }
+    });
+    tot[k] = any ? { total: t, free: hasF ? f : null } : null;
+  });
+
+  let h = '<thead><tr><th class="hcn" style="text-align:left;white-space:nowrap;min-width:130px">' + nameLabel + '</th>'
+        + '<th style="min-width:74px">최신</th>'
+        + cols.map(function (k) { return '<th style="min-width:74px">' + _cpLabel(k) + '</th>' }).join('')
+        + '</tr></thead><tbody>';
+  h += '<tr class="sr"><td class="fx fx0">종합</td>' + _cpSummaryCell(tot, cols)
+     + cols.map(function (k, i) { return _cpCell(tot[k], tot[cols[i + 1]]) }).join('') + '</tr>';
+  rows.forEach(function (r) {
+    const own = /타이트사주/.test(r.name);
+    h += '<tr><td class="fx fx0"' + (own ? ' style="font-weight:700;color:#1a73e8"' : '') + '>' + r.name + '</td>'
+       + _cpSummaryCell(r.vals, cols)
+       + cols.map(function (k, i) { return _cpCell(r.vals[k], r.vals[cols[i + 1]]) }).join('')
+       + '</tr>';
+  });
+  tbl.innerHTML = h + '</tbody>';
 }
-function renderCompet(){
-  if(!document.getElementById('cpProdChart'))return;
-  const info=document.getElementById('cpInfo');
-  const granEl=document.getElementById('cpAdGran'),nEl=document.getElementById('cpAdN'),
-        pwEl=document.getElementById('cpProdWeeks');
-  const gran=granEl?granEl.value:'day';
-  const adN=parseInt(nEl?nEl.value:30)||30;
-  const pw=parseInt(pwEl?pwEl.value:13)||13;
-  const u=document.getElementById('cpAdUnit');if(u)u.textContent=(gran==='week'?'주':'일');
+function renderCompet() {
+  if (!document.getElementById('cpAdTbl')) return;
+  const granEl = document.getElementById('cpAdGran'), nEl = document.getElementById('cpAdN'),
+        pwEl = document.getElementById('cpProdWeeks');
+  const gran = granEl ? granEl.value : 'day';
+  const adN = parseInt(nEl ? nEl.value : 30) || 30;
+  const pw = parseInt(pwEl ? pwEl.value : 13) || 13;
+  const u = document.getElementById('cpAdUnit'); if (u) u.textContent = (gran === 'week' ? '주' : '일');
 
-  _cpDrawChart('cpProdChart',COMPET.prod,pw,'상품 수','prod');
-  _cpDrawChart('cpAdChart',gran==='week'?COMPET.adWeek:COMPET.adDay,adN,'활성 광고 수',
-               gran==='week'?'adWeek':'adDay');
+  _cpTable('cpAdTbl', gran === 'week' ? COMPET.adWeek : COMPET.adDay, adN,
+           gran === 'week' ? 'adWeek' : 'adDay', '회사');
+  _cpTable('cpProdTbl', COMPET.prod, pw, 'prod', '사이트');
 
-  if(info){
-    if(!CP_LOADED){info.textContent=' · 시트 읽는 중…';return}
-    const ad=gran==='week'?COMPET.adWeek:COMPET.adDay;
-    const bits=[];
-    if(COMPET.prod&&COMPET.prod.periods.length)bits.push('상품수 최신 '+_cpLabel(COMPET.prod.periods[0]));
-    if(ad&&ad.periods.length)bits.push('광고수 최신 '+_cpLabel(ad.periods[0])+' (관측 '+ad.periods.length+'개)');
-    const errs=Object.keys(CP_ERR);
-    if(errs.length)bits.push('⚠ 읽기 실패: '+errs.join(', '));
-    info.textContent=bits.length?' · '+bits.join(' · '):'';
+  const info = document.getElementById('cpInfo');
+  if (info) {
+    if (!CP_LOADED) { info.textContent = ' · 시트 읽는 중…'; return }
+    const ad = gran === 'week' ? COMPET.adWeek : COMPET.adDay;
+    const bits = [];
+    if (ad && ad.periods.length) bits.push('광고수 최신 ' + _cpLabel(ad.periods[0]) + ' (관측 ' + ad.periods.length + '개)');
+    if (COMPET.prod && COMPET.prod.periods.length) bits.push('상품수 최신 ' + _cpLabel(COMPET.prod.periods[0]));
+    const errs = Object.keys(CP_ERR);
+    if (errs.length) bits.push('⚠ 읽기 실패: ' + errs.join(', '));
+    info.textContent = bits.length ? ' · ' + bits.join(' · ') : '';
   }
 }
-['cpProdWeeks','cpAdGran','cpAdN'].forEach(function(id){
-  const el=document.getElementById(id);
-  if(!el)return;
-  el.addEventListener('change',function(){
+['cpProdWeeks', 'cpAdGran', 'cpAdN'].forEach(function (id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('change', function () {
     // 단위를 바꾸면 '최근 N' 선택지도 그 단위에 맞게 갈아끼운다(일 30 / 주 13 기본)
-    if(id==='cpAdGran'){
-      const sel=document.getElementById('cpAdN');
-      if(sel){
-        const opts=this.value==='week'?['8','13','26','52']:['14','30','60','90'];
-        sel.innerHTML=opts.map(function(o){return '<option value="'+o+'">'+o+'</option>'}).join('');
-        sel.value=this.value==='week'?'13':'30';
+    if (id === 'cpAdGran') {
+      const sel = document.getElementById('cpAdN');
+      if (sel) {
+        const opts = this.value === 'week' ? ['8', '13', '26', '52'] : ['14', '30', '60', '90'];
+        sel.innerHTML = opts.map(function (o) { return '<option value="' + o + '">' + o + '</option>' }).join('');
+        sel.value = this.value === 'week' ? '13' : '30';
       }
     }
     renderCompet();
