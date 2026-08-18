@@ -2010,6 +2010,7 @@ function toggleFamily(headId,btn){
     if(cid)tbody.querySelectorAll('tr.creative-expanded[data-parent="'+CSS.escape(cid)+'"]').forEach(r=>{r.style.display=show?'':'none'});
   });
   btn.dataset.open=show?'1':'0';
+  const _t=btn.closest('table');if(_t){_fitNameCols(_t);_fixSticky(_t)}
   btn.textContent=(show?'▼':'▶')+rows.length;
   btn.title='실험(복제·변형) 세트 '+rows.length+'개 '+(show?'접기':'펼치기');
 }
@@ -2127,7 +2128,36 @@ function renderTrend(opts){
   const tblEl=document.getElementById(TBL);
   h+='</tbody>';tblEl.innerHTML=h;
   tblEl.dataset.daysEl=daysElId; // 소재펼침(caret)이 올바른 기간 컨트롤을 읽도록
-  requestAnimationFrame(()=>_fixSticky(tblEl));
+  requestAnimationFrame(()=>{_fitNameCols(tblEl);_fixSticky(tblEl)});
+}
+// 캠페인·세트 컬럼 폭을 '세트 행의 가장 긴 이름'에 딱 맞춘다(--fit-cn/--fit-an CSS 변수).
+//   소재를 펼치면 소재명이 세트 컬럼(fx1)에 들어가는데, 소재명은 세트명보다 훨씬 길어
+//   컬럼이 그만큼 늘어난 채 남았다 → 소재 행은 이 폭에서 …로 잘리고(전체 이름은 title 툴팁)
+//   컬럼은 세트 이름 기준으로만 넓어진다. 접힌 행(display:none)은 폭 계산에서 빠진다.
+function _fitNameCols(tblEl){
+  if(!tblEl||!tblEl.offsetParent)return;   // 탭이 안 열려 있으면 측정 불가 → 건너뜀
+  const rows=tblEl.querySelectorAll('tbody tr:not(.creative-expanded)');
+  if(!rows.length)return;
+  const rng=document.createRange();
+  //   box-sizing:border-box 라서 max-width 는 패딩·테두리까지 포함한 값이어야 글자가 안 잘린다.
+  const widest=cls=>{
+    let m=0;
+    rows.forEach(tr=>{
+      const td=tr.querySelector('td.'+cls);
+      if(!td)return;
+      rng.selectNodeContents(td);
+      const txt=rng.getBoundingClientRect().width;
+      if(!txt)return;
+      const cs=getComputedStyle(td);
+      const pad=parseFloat(cs.paddingLeft)+parseFloat(cs.paddingRight)+parseFloat(cs.borderLeftWidth)+parseFloat(cs.borderRightWidth);
+      const w=txt+(pad||11);
+      if(w>m)m=w;
+    });
+    return m;
+  };
+  const cn=Math.ceil(widest('fx0')),an=Math.ceil(widest('fx1'));
+  if(cn>0)tblEl.style.setProperty('--fit-cn',(cn+1)+'px');   // +1 = 소수점 반올림 여유(말줄임 방지)
+  if(an>0)tblEl.style.setProperty('--fit-an',(an+1)+'px');
 }
 // sticky 좌측 컬럼 left 오프셋 재계산.
 //   컬럼 순서: [광고 계정(fxa)] · 캠페인(fx0) · 세트(fx1) — 계정 컬럼 유무에 따라 fx0/fx1 시작점이 달라진다.
@@ -2239,7 +2269,7 @@ function renderTrendAgg(gran){
   });
   const tblEl=document.getElementById(TBL);
   h+='</tbody>';tblEl.innerHTML=h;
-  requestAnimationFrame(()=>_fixSticky(tblEl));
+  requestAnimationFrame(()=>{_fitNameCols(tblEl);_fixSticky(tblEl)});
 }
 // 보조지표 — 추이차트와 동일 구조(국내탭), 셀만 CTR/CVR/CPM/CPP/구매당단가로 렌더
 function renderAux(){

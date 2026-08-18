@@ -59,7 +59,10 @@ td.fx{position:sticky;background:#fff;z-index:5;text-align:left;white-space:nowr
 td.fx0{left:0}td.fx1{left:200px}
 /* 광고 계정 컬럼(추이차트 최좌측 sticky). 있을 때 fx0/fx1 의 left 는 JS(_fixSticky)가 계산해 덮어씀 */
 td.fxa{left:0;max-width:120px;color:#555}
-#p-trend td.fx0,#p-trend td.fx1{max-width:none}
+/* 추이차트 캠페인·세트 컬럼 — JS(_fitNameCols)가 '세트 행 최장 이름' 폭을 --fit-cn/--fit-an 으로 넣어 딱 맞춘다.
+   소재 펼침 행의 긴 소재명은 이 폭에서 …로 잘려(전체 이름은 title 툴팁) 컬럼을 늘리지 못한다. */
+#p-trend td.fx0,#p-auxmetric td.fx0,#p-vntwtrend td.fx0{max-width:var(--fit-cn,none)}
+#p-trend td.fx1,#p-auxmetric td.fx1,#p-vntwtrend td.fx1{max-width:var(--fit-an,none)}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
@@ -405,7 +408,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260818e"></script>
+<script src="app.js?v=20260818f"></script>
 </div>
 </body>
 </html>
