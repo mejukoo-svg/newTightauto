@@ -2081,9 +2081,9 @@ function renderTrend(opts){
   const timp=d7.reduce((a,d)=>a+(totD[d]?.imp||0),0),tcpm=timp>0?ts/timp*1000:0,tctr=timp>0?tuc/timp*100:0;
   const chgTh='';  // 증감 컬럼 제거(국내·글로벌 추이차트)
   const memoTh=showChg?'<th class="h-memo" style="min-width:130px">메모</th>':'';
-  const accTh=showAcc?'<th style="text-align:left;white-space:nowrap">광고 계정</th>':'';
+  const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';  // 종합·소계 행의 빈 계정칸
-  let h='<thead><tr>'+accTh+'<th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th>'+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th>'+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
   const legend=AUX?'<div class="r">CTR</div><div class="cv">CVR</div><div class="cm">CPM</div><div class="s">구매당비용</div>':'<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
   h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+(showChg?'<td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+(AUX?MCAUX(ts,tr,tuc,tmp,timp):MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0))+'</td>';
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+(AUX?MCAUX(x.s,x.r,x.uc,x.mp,x.imp):MC(roas,x.p,x.s,x.r,cvr,cpm,ctr,x.mp>0?x.s/x.mp:0))+'</td>'});
@@ -2121,14 +2121,16 @@ function renderTrend(opts){
         caretBtn='<span class="ex-caret" onclick="event.stopPropagation();toggleAdsetCreatives(\''+a.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
       }
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
+      const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr data-adset-row="'+a.id+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
   h+='</tbody>';tblEl.innerHTML=h;
   tblEl.dataset.daysEl=daysElId; // 소재펼침(caret)이 올바른 기간 컨트롤을 읽도록
-  requestAnimationFrame(()=>{_fitNameCols(tblEl);_fixSticky(tblEl)});
+  requestAnimationFrame(()=>{_fitNameCols(tblEl);_initColResize(tblEl);_fixSticky(tblEl)});
 }
 // 캠페인·세트 컬럼 폭을 '세트 행의 가장 긴 이름'에 딱 맞춘다(--fit-cn/--fit-an CSS 변수).
 //   소재를 펼치면 소재명이 세트 컬럼(fx1)에 들어가는데, 소재명은 세트명보다 훨씬 길어
@@ -2155,9 +2157,60 @@ function _fitNameCols(tblEl){
     });
     return m;
   };
-  const cn=Math.ceil(widest('fx0')),an=Math.ceil(widest('fx1'));
-  if(cn>0)tblEl.style.setProperty('--fit-cn',(cn+1)+'px');   // +1 = 소수점 반올림 여유(말줄임 방지)
-  if(an>0)tblEl.style.setProperty('--fit-an',(an+1)+'px');
+  //   사용자가 헤더를 드래그해 정한 폭(COLW)이 있으면 그 값이 자동 맞춤보다 우선한다.
+  const use=(vr,c,auto)=>{const u=COLW[_colwKey(tblEl,c)];const px=u>0?u:auto;if(px>0)tblEl.style.setProperty(vr,px+'px')};
+  use('--fit-acc','acc',0);                                  // 계정 컬럼은 지정 없으면 CSS 기본(120px)
+  use('--fit-cn','cn',Math.ceil(widest('fx0'))+1);           // +1 = 소수점 반올림 여유(말줄임 방지)
+  use('--fit-an','an',Math.ceil(widest('fx1'))+1);
+}
+
+// ===== 컬럼 폭 드래그 조절 (스프레드시트처럼) =====
+//   헤더 오른쪽 끝 얇은 손잡이를 끌면 광고계정·캠페인·세트 컬럼 폭이 바뀐다.
+//   폭은 모드·테이블별로 localStorage 에 남고(새로고침해도 유지), 손잡이를 더블클릭하면
+//   저장값을 지우고 다시 '가장 긴 이름 자동 맞춤'으로 돌아간다.
+const COLW_KEY='ntc_colw_v1';
+let COLW={};try{COLW=JSON.parse(localStorage.getItem(COLW_KEY)||'{}')||{}}catch(e){COLW={}}
+function _colwSave(){try{localStorage.setItem(COLW_KEY,JSON.stringify(COLW))}catch(e){}}
+function _colwKey(tblEl,c){return MODE+'|'+tblEl.id+'|'+c}
+const RZ_COLS=[['hacc','--fit-acc','acc'],['hcn','--fit-cn','cn'],['han','--fit-an','an']];
+function _initColResize(tblEl){
+  if(!tblEl)return;
+  RZ_COLS.forEach(cfg=>{
+    const cls=cfg[0],vr=cfg[1],c=cfg[2];
+    const th=tblEl.querySelector('thead th.'+cls);
+    if(!th||th.querySelector('.col-rz'))return;
+    const h=document.createElement('span');
+    h.className='col-rz';
+    h.title='드래그: 컬럼 폭 조절 · 더블클릭: 자동 맞춤으로 되돌리기';
+    h.addEventListener('mousedown',e=>_colRzStart(e,tblEl,vr,_colwKey(tblEl,c)));
+    h.addEventListener('dblclick',e=>{
+      e.preventDefault();e.stopPropagation();
+      delete COLW[_colwKey(tblEl,c)];_colwSave();
+      tblEl.style.removeProperty(vr);_fitNameCols(tblEl);_fixSticky(tblEl);
+    });
+    th.appendChild(h);
+  });
+}
+function _colRzStart(e,tblEl,vr,key){
+  e.preventDefault();e.stopPropagation();
+  const th=e.target.parentNode;
+  const x0=e.clientX,w0=th.getBoundingClientRect().width;
+  let raf=0;
+  const move=ev=>{
+    const w=Math.max(40,Math.round(w0+ev.clientX-x0));   // 40px 미만으로는 못 줄임
+    tblEl.style.setProperty(vr,w+'px');
+    COLW[key]=w;
+    if(!raf)raf=requestAnimationFrame(()=>{raf=0;_fixSticky(tblEl)});   // 고정컬럼 오프셋 즉시 추종
+  };
+  const up=()=>{
+    document.removeEventListener('mousemove',move);
+    document.removeEventListener('mouseup',up);
+    document.body.style.cursor='';document.body.style.userSelect='';
+    _colwSave();_fixSticky(tblEl);
+  };
+  document.addEventListener('mousemove',move);
+  document.addEventListener('mouseup',up);
+  document.body.style.cursor='col-resize';document.body.style.userSelect='none';
 }
 // sticky 좌측 컬럼 left 오프셋 재계산.
 //   컬럼 순서: [광고 계정(fxa)] · 캠페인(fx0) · 세트(fx1) — 계정 컬럼 유무에 따라 fx0/fx1 시작점이 달라진다.
@@ -2234,7 +2287,7 @@ function renderTrendAgg(gran){
   const ths=cols.map(ck=>'<th style="min-width:90px">'+colLabel(ck)+'</th>').join('');
   // 광고 계정 컬럼(캠페인 왼쪽) — 일별 뷰(renderTrend)와 동일하게 국내·글로벌만
   const showAcc=MODE==='kr'||MODE==='gl';
-  const accTh=showAcc?'<th style="text-align:left;white-space:nowrap">광고 계정</th>':'';
+  const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';
   const colSpan=cols.length+4+(showAcc?1:0);
   const cell=t=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm,ctr,t.mp>0?t.s/t.mp:0)+'</td>'};
@@ -2244,7 +2297,7 @@ function renderTrendAgg(gran){
   const timp=cols.reduce((a,ck)=>a+totC[ck].imp,0),tcpm=timp>0?ts/timp*1000:0;
   const tmp=cols.reduce((a,ck)=>a+totC[ck].mp,0),tuc=cols.reduce((a,ck)=>a+totC[ck].uc,0),tcvr=tuc>0&&tmp>0?tmp/tuc*100:0,tctr=timp>0?tuc/timp*100:0;
   const legend='<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
-  let h='<thead><tr>'+accTh+'<th style="text-align:left;white-space:nowrap">캠페인</th><th style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
   h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
   cols.forEach(ck=>{h+=cell(totC[ck])});
   h+='</tr>';
@@ -2263,13 +2316,15 @@ function renderTrendAgg(gran){
       const cells=cols.map(ck=>cell(a.b[ck])).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
+      const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+'>'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+'>'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="'+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
   h+='</tbody>';tblEl.innerHTML=h;
-  requestAnimationFrame(()=>{_fitNameCols(tblEl);_fixSticky(tblEl)});
+  requestAnimationFrame(()=>{_fitNameCols(tblEl);_initColResize(tblEl);_fixSticky(tblEl)});
 }
 // 보조지표 — 추이차트와 동일 구조(국내탭), 셀만 CTR/CVR/CPM/CPP/구매당단가로 렌더
 function renderAux(){

@@ -63,6 +63,13 @@ td.fxa{left:0;max-width:120px;color:#555}
    소재 펼침 행의 긴 소재명은 이 폭에서 …로 잘려(전체 이름은 title 툴팁) 컬럼을 늘리지 못한다. */
 #p-trend td.fx0,#p-auxmetric td.fx0,#p-vntwtrend td.fx0{max-width:var(--fit-cn,none)}
 #p-trend td.fx1,#p-auxmetric td.fx1,#p-vntwtrend td.fx1{max-width:var(--fit-an,none)}
+#p-trend td.fxa,#p-auxmetric td.fxa,#p-vntwtrend td.fxa{max-width:var(--fit-acc,120px)}
+/* 헤더 오른쪽 끝 손잡이를 끌어 컬럼 폭 조절(스프레드시트처럼) — 폭은 th width, 잘림은 td max-width 가 담당 */
+#p-trend th.hacc,#p-auxmetric th.hacc,#p-vntwtrend th.hacc{width:var(--fit-acc,auto)}
+#p-trend th.hcn,#p-auxmetric th.hcn,#p-vntwtrend th.hcn{width:var(--fit-cn,auto)}
+#p-trend th.han,#p-auxmetric th.han,#p-vntwtrend th.han{width:var(--fit-an,auto)}
+.col-rz{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:12}
+.col-rz:hover,.col-rz:active{background:rgba(26,115,232,.45)}
 tr.sr{background:#e8e8e8;font-weight:700}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
@@ -408,7 +415,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260818f"></script>
+<script src="app.js?v=20260818g"></script>
 </div>
 </body>
 </html>
