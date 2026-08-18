@@ -691,6 +691,14 @@ def main():
 
     # C열 예산 — 리포트에 있는 광고그룹만 덮어쓴다(없는 행은 시트 값 유지).
     if budgets:
+        # 컬럼을 끼워 넣으면 오른쪽(합계) 컬럼의 ROAS 배경색을 그대로 물려받는다.
+        # 예산은 ROAS 와 무관하니 데이터 구간을 흰색으로 되돌린다.
+        reqs.append({"repeatCell": {
+            "range": {"sheetId": GID, "startRowIndex": 4, "endRowIndex": LASTROW,
+                      "startColumnIndex": COL_BUD, "endColumnIndex": COL_BUD + 1},
+            "cell": {"userEnteredFormat": {"backgroundColorStyle":
+                     {"rgbColor": {"red": 1.0, "green": 1.0, "blue": 1.0}}}},
+            "fields": "userEnteredFormat.backgroundColorStyle"}})
         for ri, (_n, aid, _c) in enumerate(ROWS):
             if not aid or aid not in budgets:
                 continue
