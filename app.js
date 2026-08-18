@@ -1210,10 +1210,10 @@ async function ensureBigTable(name){
     nsakw:()=>sbAll('naver_sa_keyword_daily','cost_vat',D180).then(d=>{NSA_KW=d||[];cacheSet('t_nsa_kw',{ts:Date.now(),data:NSA_KW});}),
     naverkw:()=>sbQ('naver_keyword_mp_daily','select=*&order=date.desc&limit=10000'+D180).then(d=>{NAVER_KW=d||[];cacheSet('t_naver_kw',{ts:Date.now(),data:NAVER_KW});}),
     ggdgct:()=>Promise.all([
-        sbQ('google_demandgen_content_mp_daily','select=*&order=date.desc&limit=20000'+D180).catch(()=>[]),
-        sbQ('google_demandgen_content_spend_daily','select=*&order=date.desc&limit=20000'+D180).catch(()=>[]),
+        sbQ('google_demandgen_content_mp_daily','select=*&order=date.desc'+D180).catch(()=>[]),
+        sbQ('google_demandgen_content_spend_daily','select=*&order=date.desc'+D180).catch(()=>[]),
       ]).then(([rev,sp])=>{GGDG_CT=rev||[];GGDG_SP=sp||[];cacheSet('t_ggdg_ct',{ts:Date.now(),data:GGDG_CT});cacheSet('t_ggdg_sp',{ts:Date.now(),data:GGDG_SP});}),
-    ggdgkr:()=>sbQ('google_demandgen_campaign_daily','select=*&order=date.desc&limit=20000'+D180).then(d=>{GGDG_TIGHT=d||[];cacheSet('t_ggdg_tight',{ts:Date.now(),data:GGDG_TIGHT});}),
+    ggdgkr:()=>sbQ('google_demandgen_campaign_daily','select=*&order=date.desc'+D180).then(d=>{GGDG_TIGHT=d||[];cacheSet('t_ggdg_tight',{ts:Date.now(),data:GGDG_TIGHT});}),
     // 매출탭 구글 5분할 — 필요한 컬럼만(행 1만 안팎). 실패 시 매출탭은 구 소스(시트 검색광고+[Tight]DG)로 폴백.
     gcamp:()=>sbQ('google_campaign_daily','select=date,channel_type,country,owner,spend,revenue&order=date.desc&limit=30000'+D180).then(d=>{GCAMP=d||[];cacheSet('t_gcamp',{ts:Date.now(),data:GCAMP});}),
   };
@@ -4630,7 +4630,7 @@ function renderChannelRevenue(){
 let KR_REV4H=[],_KR_REV4H_LOADED=false;
 function ensureKrRev4h(cb){
   if(_KR_REV4H_LOADED){cb&&cb();return}
-  sbQ('kr_channel_revenue_4h','select=*&order=date.desc,bucket.desc&limit=20000')
+  sbQ('kr_channel_revenue_4h','select=*&order=date.desc,bucket.desc')
     .then(d=>{KR_REV4H=d||[];_KR_REV4H_LOADED=true;cb&&cb();})
     .catch(()=>{KR_REV4H=[];cb&&cb();});   // 실패(테이블 미생성 등)는 캐시 안 함 → 다음 선택 시 재시도
 }
@@ -5951,71 +5951,98 @@ document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='En
 }catch(e){document.getElementById('loginPw').focus()}})();
 
 // ===== 🏢 경쟁사분석 (국내 전용) =====
-//   원장은 '경쟁사분석' 구글시트다(meta-scraper 저장소의 GH Actions 잡이 매일 채운다).
-//   Supabase 파이프라인이 없어 틱톡 탭과 같은 방식으로 gviz CSV 를 브라우저에서 직접 읽는다.
-//   ⚠ headers=1 필수 — 숫자 컬럼의 문자열 헤더(날짜·주차 라벨)가 headers=0 이면 빈칸으로 온다.
-const CP_SHEET_ID='1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo';
-const CP_GID={prod:'254863227',adDay:'2116795530',adWeek:'104726849',
-              prodAds:'920742754',prodAdsDay:'1240062514'};
-const CP_PA_META=7;   // 상품별_통계 탭은 앞 7열이 메타(회사·상품명·URL·총광고수·소재유형·최초/최근게재일)
-function _cpUrl(gid){return 'https://docs.google.com/spreadsheets/d/'+CP_SHEET_ID+'/gviz/tq?tqx=out:csv&gid='+gid+'&headers=1'}
-let COMPET={prod:null,adDay:null,adWeek:null,prodAds:null,prodAdsDay:null},
+//   2026-08-18 이전엔 '경쟁사분석' 구글시트를 브라우저가 gviz CSV 로 직접 읽었다.
+//   지금은 수집 스크립트가 대시보드 DB(new-tightauto)에 바로 적재하고 여기서 읽는다.
+//   · gviz 는 숨긴 행을 조용히 빼고, 숫자 컬럼의 문자열 헤더를 빈칸으로 준다(틱톡 탭에서 실제 사고)
+//   · 시트를 브라우저가 읽으려면 '링크가 있는 누구나' 공개여야 했다 — 이제 RLS 뒤로 들어갔다
+//   시트 적재는 그대로 유지된다(사람이 보는 뷰 + Drive 리비전 복구용).
+let COMPET={adDay:null,adWeek:null,prodDay:null,prodWeek:null,paDay:null,paWeek:null},
     CP_ERR={},CP_LOADED=false,CP_LOADING=null;
 
-// 셀 '86 (무료 44)' 또는 '476' → {total,free}
-function _cpVal(v){
-  const t=String(v==null?'':v).trim();if(!t)return null;
-  const m=t.match(/^([\d,]+)/);if(!m)return null;
-  const f=t.match(/무료\s*([\d,]+)/);
-  return {total:parseInt(m[1].replace(/,/g,''),10),free:f?parseInt(f[1].replace(/,/g,''),10):null};
+// {period: {name: {total, free}}} 형태로 접는다 — 표 렌더러가 쓰는 모양.
+function _cpPivot(rows,periodKey,nameKey,valKey,freeKey){
+  const periods=[],seen={},out={};
+  rows.forEach(function(r){
+    const p=String(r[periodKey]||'').slice(0,10);
+    const n=String(r[nameKey]||'');
+    if(!p||!n)return;
+    if(!seen[p]){seen[p]=1;periods.push(p)}
+    (out[n]||(out[n]={}))[p]={total:+r[valKey]||0,
+                              free:(freeKey&&r[freeKey]!=null)?+r[freeKey]:null};
+  });
+  periods.sort(function(a,b){return a<b?1:-1});   // 최신 좌측
+  return {periods:periods,rows:Object.keys(out).map(function(n){return {name:n,vals:out[n]}})};
 }
-// 정렬용 키 — '2026-08-18' / '2026.8/17~8/23' 둘 다 YYYYMMDD 로
-function _cpKey(k){
-  let m=String(k).match(/^(\d{4})-(\d\d)-(\d\d)/);if(m)return m[1]+m[2]+m[3];
-  m=String(k).match(/^(\d{4})\.(\d+)\/(\d+)/);
-  if(m)return m[1]+String(m[2]).padStart(2,'0')+String(m[3]).padStart(2,'0');
-  return String(k);
+// 상품별: 회사 그룹 + 상품 행
+function _cpPivotProducts(rows,periodKey,valKey){
+  const periods=[],seen={},byCo={};
+  rows.forEach(function(r){
+    const p=String(r[periodKey]||'').slice(0,10);
+    const co=String(r.company||''),pn=String(r.product||'');
+    if(!p||!co||!pn)return;
+    if(!seen[p]){seen[p]=1;periods.push(p)}
+    const g=byCo[co]||(byCo[co]={items:{},vals:{}});
+    (g.items[pn]||(g.items[pn]={}))[p]={total:+r[valKey]||0,free:null};
+    g.vals[p]={total:(g.vals[p]?g.vals[p].total:0)+(+r[valKey]||0),free:null};
+  });
+  periods.sort(function(a,b){return a<b?1:-1});
+  return {periods:periods,groups:Object.keys(byCo).map(function(co){
+    const g=byCo[co];
+    return {company:co,vals:g.vals,all:null,
+            items:Object.keys(g.items).map(function(pn){return {name:pn,vals:g.items[pn],all:null}})};
+  })};
 }
 function _cpLabel(k){
-  let m=String(k).match(/^\d{4}-(\d\d)-(\d\d)/);if(m)return (+m[1])+'/'+(+m[2]);
-  m=String(k).match(/^\d{4}\.(\d+)\/(\d+)/);if(m)return m[1]+'/'+m[2];
-  return String(k);
+  const m=String(k).match(/^\d{4}-(\d\d)-(\d\d)/);
+  return m?((+m[1])+'/'+(+m[2])):String(k);
 }
-// 행=대상 / 열=기간(최신 좌측) 피벗 → {periods:[key…최신순], rows:[{name,vals:{key:{total,free}}}]}
-function _cpParsePivot(txt){
-  const grid=_ttCSV(txt).filter(r=>r.some(c=>String(c||'').trim()!==''));
-  if(grid.length<2)return null;
-  const head=grid[0],cols=[];
-  for(let j=1;j<head.length;j++){const lab=String(head[j]||'').trim();if(lab)cols.push([j,lab])}
-  if(!cols.length)return null;
-  cols.sort((a,b)=>_cpKey(b[1])<_cpKey(a[1])?-1:1);   // 최신 먼저
-  const rows=[];
-  for(let i=1;i<grid.length;i++){
-    const name=String(grid[i][0]||'').trim();
-    if(!name||name==='합계')continue;                  // 합계 행은 선에서 제외(스케일을 잡아먹는다)
-    const vals={};
-    cols.forEach(c=>{const v=_cpVal(grid[i][c[0]]);if(v)vals[c[1]]=v});
-    if(Object.keys(vals).length)rows.push({name:name,vals:vals});
-  }
-  return {periods:cols.map(c=>c[1]),rows:rows};
+// 회사 그레인 일별 광고수 = 페이지 그레인 합
+function _cpFoldAdDaily(rows){
+  const agg={};
+  rows.forEach(function(r){
+    const k=String(r.date).slice(0,10)+' '+r.company;
+    agg[k]=(agg[k]||0)+(+r.ads||0);
+  });
+  return _cpPivot(Object.keys(agg).map(function(k){
+    const p=k.split(' ');return {date:p[0],company:p[1],ads:agg[k]};
+  }),'date','company','ads',null);
 }
-function _cpFetch(key,gid,parser){
-  return fetch(_cpUrl(gid)+'&_='+Date.now(),{cache:'no-store'})
-    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()})
-    .then(t=>{const d=(parser||_cpParsePivot)(t);if(!d)throw new Error('시트 형식이 바뀜');
-      COMPET[key]=d;delete CP_ERR[key]})
-    .catch(e=>{COMPET[key]=null;CP_ERR[key]=e.message||String(e)});
+const CP_DAYS_MAX=120, CP_WEEKS_MAX=80;
+function _cpCut(days){const d=new Date();d.setDate(d.getDate()-days);return d.toISOString().slice(0,10)}
+// ⚠ PostgREST 는 한 번에 1000행까지만 준다(db-max-rows). 경쟁사 주별 상품 테이블은
+//    9천 행이라 페이징 없이 받으면 조용히 잘린다 — 2026-08-18 실측.
+function _cpPage(table,q,acc,off){
+  acc=acc||[];off=off||0;
+  return sbQ(table,q+'&limit=1000&offset='+off).then(function(rows){
+    acc=acc.concat(rows);
+    if(rows.length<1000||acc.length>=60000)return acc;
+    return _cpPage(table,q,acc,off+1000);
+  });
+}
+function _cpLoad(key,table,q,fold){
+  return _cpPage(table,q).then(function(rows){COMPET[key]=fold(rows);delete CP_ERR[key]})
+    .catch(function(e){COMPET[key]=null;CP_ERR[key]=e.message||String(e)});
 }
 function loadCompet(force){
   if(CP_LOADED&&!force)return Promise.resolve();
   if(CP_LOADING&&!force)return CP_LOADING;
-  CP_LOADING=Promise.all([_cpFetch('prod',CP_GID.prod),_cpFetch('adDay',CP_GID.adDay),
-                          _cpFetch('adWeek',CP_GID.adWeek),
-                          _cpFetch('prodAds',CP_GID.prodAds,_cpParseProdAds),
-                          _cpFetch('prodAdsDay',CP_GID.prodAdsDay,_cpParseProdAdsDay)])
-    .then(function(){CP_LOADED=true;CP_LOADING=null});
+  const dCut=_cpCut(CP_DAYS_MAX), wCut=_cpCut(CP_WEEKS_MAX*7);
+  CP_LOADING=Promise.all([
+    _cpLoad('adDay','competitor_ad_daily','select=date,company,ads&date=gte.'+dCut+'',_cpFoldAdDaily),
+    _cpLoad('adWeek','competitor_ad_weekly','select=week_start,company,ads&week_start=gte.'+wCut+'',
+            function(r){return _cpPivot(r,'week_start','company','ads',null)}),
+    _cpLoad('prodDay','competitor_product_count','select=date,site,total,free&date=gte.'+dCut+'',
+            function(r){return _cpPivot(r,'date','site','total','free')}),
+    _cpLoad('prodWeek','competitor_product_count_weekly','select=week_start,site,total,free&week_start=gte.'+wCut+'',
+            function(r){return _cpPivot(r,'week_start','site','total','free')}),
+    _cpLoad('paDay','competitor_product_ad_daily','select=date,company,product,ads&date=gte.'+dCut+'',
+            function(r){return _cpPivotProducts(r,'date','ads')}),
+    _cpLoad('paWeek','competitor_product_ad_weekly','select=week_start,company,product,ads&week_start=gte.'+wCut+'',
+            function(r){return _cpPivotProducts(r,'week_start','ads')})
+  ]).then(function(){CP_LOADED=true;CP_LOADING=null});
   return CP_LOADING;
 }
+
 // 추이차트와 같은 표 배치 — 행=회사, 열=기간(최신 좌측), 첫 칸은 요약.
 // 지출·매출과 달리 광고 수·상품 수는 '스톡' 지표라 기간 합계가 뜻이 없다.
 // 그래서 추이차트의 '전체'(기간 합계) 자리에 '최신'(최근 관측값 + 표시 구간 증감)을 둔다.
@@ -6093,30 +6120,42 @@ function renderCompet() {
 
   _cpTable('cpAdTbl', gran === 'week' ? COMPET.adWeek : COMPET.adDay, adN,
            gran === 'week' ? 'adWeek' : 'adDay', '회사');
-  _cpTable('cpProdTbl', COMPET.prod, pw, 'prod', '사이트');
+  const pGran=(document.getElementById('cpProdGran')||{}).value||'day';
+  const pu2=document.getElementById('cpProdUnit'); if(pu2)pu2.textContent=(pGran==='week'?'주':'일');
+  _cpTable('cpProdTbl', pGran==='week'?COMPET.prodWeek:COMPET.prodDay, pw,
+           pGran==='week'?'prodWeek':'prodDay', '사이트');
   const paGran=(document.getElementById('cpPaGran')||{}).value||'day';
   const pu=document.getElementById('cpPaUnit'); if(pu)pu.textContent=(paGran==='week'?'주':'일');
   _cpProdAdsTable(parseInt((document.getElementById('cpPaWeeks')||{}).value)||(paGran==='week'?13:30),
-                  paGran==='week'?COMPET.prodAds:COMPET.prodAdsDay,
-                  paGran==='week'?'prodAds':'prodAdsDay');
+                  paGran==='week'?COMPET.paWeek:COMPET.paDay,
+                  paGran==='week'?'paWeek':'paDay');
 
   const info = document.getElementById('cpInfo');
   if (info) {
     if (!CP_LOADED) { info.textContent = ' · 시트 읽는 중…'; return }
     const ad = gran === 'week' ? COMPET.adWeek : COMPET.adDay;
+    const pc = (document.getElementById('cpProdGran')||{}).value === 'week' ? COMPET.prodWeek : COMPET.prodDay;
     const bits = [];
     if (ad && ad.periods.length) bits.push('광고수 최신 ' + _cpLabel(ad.periods[0]) + ' (관측 ' + ad.periods.length + '개)');
-    if (COMPET.prod && COMPET.prod.periods.length) bits.push('상품수 최신 ' + _cpLabel(COMPET.prod.periods[0]));
+    if (pc && pc.periods.length) bits.push('상품수 최신 ' + _cpLabel(pc.periods[0]));
     const errs = Object.keys(CP_ERR);
     if (errs.length) bits.push('⚠ 읽기 실패: ' + errs.join(', '));
     info.textContent = bits.length ? ' · ' + bits.join(' · ') : '';
   }
 }
-['cpProdWeeks', 'cpAdGran', 'cpAdN', 'cpPaWeeks', 'cpPaGran'].forEach(function (id) {
+['cpProdWeeks', 'cpAdGran', 'cpAdN', 'cpPaWeeks', 'cpPaGran', 'cpProdGran'].forEach(function (id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('change', function () {
     // 단위를 바꾸면 '최근 N' 선택지도 그 단위에 맞게 갈아끼운다(일 30 / 주 13 기본)
+    if (id === 'cpProdGran') {
+      const sel = document.getElementById('cpProdWeeks');
+      if (sel) {
+        const opts = this.value === 'week' ? ['8', '13', '26', '52'] : ['14', '30', '60', '90'];
+        sel.innerHTML = opts.map(function (o) { return '<option value="' + o + '">' + o + '</option>' }).join('');
+        sel.value = this.value === 'week' ? '13' : '30';
+      }
+    }
     if (id === 'cpPaGran') {
       const sel = document.getElementById('cpPaWeeks');
       if (sel) {
@@ -6136,80 +6175,6 @@ function renderCompet() {
     renderCompet();
   });
 });
-// ----- 🏷 상품별 광고 수 (상품별_통계 탭) -----
-// 앞의 두 표와 시트 모양이 다르다: 앞 7열이 메타(회사·상품명·URL·총광고수·소재유형·최초/최근게재일)이고
-// 8열부터가 주차다. 행은 '회사의 상품들 → ▶ 회사 소계' 순서로 반복된다.
-function _cpParseProdAds(txt) {
-  const grid = _ttCSV(txt).filter(function (r) { return r.some(function (c) { return String(c || '').trim() !== '' }) });
-  if (grid.length < 2) return null;
-  const head = grid[0], cols = [];
-  for (let j = CP_PA_META; j < head.length; j++) {
-    const lab = String(head[j] || '').trim();
-    if (lab) cols.push([j, lab]);
-  }
-  if (!cols.length) return null;
-  cols.sort(function (a, b) { return _cpKey(b[1]) < _cpKey(a[1]) ? -1 : 1 });
-  const groups = [];
-  let cur = null;
-  for (let i = 1; i < grid.length; i++) {
-    const r = grid[i];
-    const co = String(r[0] || '').trim();
-    if (!co) continue;
-    const vals = {};
-    cols.forEach(function (c) { const v = _cpVal(r[c[0]]); if (v) vals[c[1]] = v });
-    if (co.indexOf('▶') === 0) {                       // ▶ 회사 소계 — 그룹을 닫는다
-      const name = co.replace(/^▶\s*/, '').replace(/\s*소계$/, '');
-      if (!cur) cur = { company: name, items: [] };
-      cur.company = name;
-      cur.vals = vals;
-      cur.all = _cpVal(r[3]);                          // 총광고수(전 기간 distinct)
-      groups.push(cur);
-      cur = null;
-    } else {
-      if (!cur) cur = { company: co, items: [] };
-      cur.items.push({ name: String(r[1] || '').trim() || '(이름 없음)', vals: vals, all: _cpVal(r[3]) });
-    }
-  }
-  if (cur && cur.items.length) groups.push(cur);
-  return { periods: cols.map(function (c) { return c[1] }), groups: groups };
-}
-// 일별 탭('상품별_일별광고수')은 앞 2열만 메타(경쟁사·상품명)이고 '▶ 회사 소계' 행이
-// 그룹 위에 온다(주간 탭은 아래). 관측한 날짜만 열로 쌓이고 과거 열은 재계산되지 않는다.
-function _cpParseProdAdsDay(txt){
-  const grid=_ttCSV(txt).filter(function(r){return r.some(function(c){return String(c||'').trim()!==''})});
-  if(grid.length<2)return null;
-  const head=grid[0],cols=[];
-  for(let j=2;j<head.length;j++){const lab=String(head[j]||'').trim();if(lab)cols.push([j,lab])}
-  if(!cols.length)return null;
-  cols.sort(function(a,b){return _cpKey(b[1])<_cpKey(a[1])?-1:1});
-  const groups=[];let cur=null;
-  for(let i=1;i<grid.length;i++){
-    const r=grid[i];const co=String(r[0]||'').trim();
-    if(!co)continue;
-    const vals={};
-    cols.forEach(function(c){const v=_cpVal(r[c[0]]);if(v)vals[c[1]]=v});
-    if(co.indexOf('▶')===0){
-      cur={company:co.replace(/^▶\s*/,'').replace(/\s*소계$/,''),items:[],vals:vals,all:null};
-      groups.push(cur);
-    }else{
-      if(!cur||cur.company!==co)  // 소계 행이 없는 회사도 받아준다
-        {cur={company:co,items:[],vals:null,all:null};groups.push(cur)}
-      cur.items.push({name:String(r[1]||'').trim()||'(이름 없음)',vals:vals,all:null});
-    }
-  }
-  // 소계 행이 없던 그룹은 상품 합으로 채운다
-  groups.forEach(function(g){
-    if(g.vals)return;
-    const v={};
-    cols.forEach(function(c){
-      let t=0,any=false;
-      g.items.forEach(function(it){const x=it.vals[c[1]];if(x){t+=x.total;any=true}});
-      if(any)v[c[1]]={total:t,free:null};
-    });
-    g.vals=v;
-  });
-  return {periods:cols.map(function(c){return c[1]}),groups:groups};
-}
 function _cpProdAdsTable(n, data, errKey) {
   const tbl = document.getElementById('cpPaTbl'); if (!tbl) return;
   if (!data) {
