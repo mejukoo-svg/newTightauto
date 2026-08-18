@@ -5862,7 +5862,7 @@ function renderTiktok(){
   // 종합
   const T=sum7(list);
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+list.length+'개)</td><td class="fx fx1" style="background:#e8e8e8"></td>'
-    +'<td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">판매수</div><div class="cpa">구매당비용</div></td>'
+    +'<td style="background:#e8e8e8"></td>'   // 일예산 칸은 색 없이 비워둔다
     +'<td class="mc '+RC(T.roas)+'">'+TTC(T.roas,T.p,T.s,T.r,T.o,T.cpa)+'</td>'+cellsOf(list)+'</tr>';
   // 📦 상품별
   const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s});
@@ -5877,7 +5877,7 @@ function renderTiktok(){
         const roas=x.spend>0?x.revenue/x.spend*100:0;
         return'<td class="mc '+RC(roas)+yd+'">'+TTC(roas,x.revenue-x.spend,x.spend,x.revenue,x.orders,x.orders>0?x.spend/x.orders:0)+'</td>'}).join('');
       const lbl=a.gn&&a.gn!==a.cn?a.cn+'<div style="font-size:9px;color:#888">└ '+a.gn+'</div>':a.cn;
-      h+='<tr><td class="fx fx0">'+lbl+'</td><td class="fx fx1" style="font-size:9px">'+a.id+'</td><td style="font-size:10px;color:#666">'+String(a.bud||'').replace(/^-/,'')+'</td>'
+      h+='<tr><td class="fx fx0">'+lbl+'</td><td class="fx fx1" style="font-size:9px">'+a.id+'</td><td style="font-size:10px">'+String(a.bud||'').replace(/^-/,'')+'</td>'
         +'<td class="mc '+RC(a._roas)+'">'+TTC(a._roas,a._p,a._s,a._r,a._o,a._cpa)+'</td>'+cells+'</tr>';
     });
   });
@@ -5916,9 +5916,10 @@ document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='En
 //   Supabase 파이프라인이 없어 틱톡 탭과 같은 방식으로 gviz CSV 를 브라우저에서 직접 읽는다.
 //   ⚠ headers=1 필수 — 숫자 컬럼의 문자열 헤더(날짜·주차 라벨)가 headers=0 이면 빈칸으로 온다.
 const CP_SHEET_ID='1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo';
-const CP_GID={prod:'254863227',adDay:'2116795530',adWeek:'104726849'};
+const CP_GID={prod:'254863227',adDay:'2116795530',adWeek:'104726849',prodAds:'920742754'};
+const CP_PA_META=7;   // 상품별_통계 탭은 앞 7열이 메타(회사·상품명·URL·총광고수·소재유형·최초/최근게재일)
 function _cpUrl(gid){return 'https://docs.google.com/spreadsheets/d/'+CP_SHEET_ID+'/gviz/tq?tqx=out:csv&gid='+gid+'&headers=1'}
-let COMPET={prod:null,adDay:null,adWeek:null},CP_ERR={},CP_LOADED=false,CP_LOADING=null;
+let COMPET={prod:null,adDay:null,adWeek:null,prodAds:null},CP_ERR={},CP_LOADED=false,CP_LOADING=null;
 
 // 셀 '86 (무료 44)' 또는 '476' → {total,free}
 function _cpVal(v){
@@ -5957,10 +5958,10 @@ function _cpParsePivot(txt){
   }
   return {periods:cols.map(c=>c[1]),rows:rows};
 }
-function _cpFetch(key,gid){
+function _cpFetch(key,gid,parser){
   return fetch(_cpUrl(gid)+'&_='+Date.now(),{cache:'no-store'})
     .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()})
-    .then(t=>{const d=_cpParsePivot(t);if(!d)throw new Error('시트 형식이 바뀜');
+    .then(t=>{const d=(parser||_cpParsePivot)(t);if(!d)throw new Error('시트 형식이 바뀜');
       COMPET[key]=d;delete CP_ERR[key]})
     .catch(e=>{COMPET[key]=null;CP_ERR[key]=e.message||String(e)});
 }
@@ -5968,7 +5969,8 @@ function loadCompet(force){
   if(CP_LOADED&&!force)return Promise.resolve();
   if(CP_LOADING&&!force)return CP_LOADING;
   CP_LOADING=Promise.all([_cpFetch('prod',CP_GID.prod),_cpFetch('adDay',CP_GID.adDay),
-                          _cpFetch('adWeek',CP_GID.adWeek)])
+                          _cpFetch('adWeek',CP_GID.adWeek),
+                          _cpFetch('prodAds',CP_GID.prodAds,_cpParseProdAds)])
     .then(function(){CP_LOADED=true;CP_LOADING=null});
   return CP_LOADING;
 }
@@ -6050,6 +6052,7 @@ function renderCompet() {
   _cpTable('cpAdTbl', gran === 'week' ? COMPET.adWeek : COMPET.adDay, adN,
            gran === 'week' ? 'adWeek' : 'adDay', '회사');
   _cpTable('cpProdTbl', COMPET.prod, pw, 'prod', '사이트');
+  _cpProdAdsTable(parseInt((document.getElementById('cpPaWeeks')||{}).value)||13);
 
   const info = document.getElementById('cpInfo');
   if (info) {
@@ -6063,7 +6066,7 @@ function renderCompet() {
     info.textContent = bits.length ? ' · ' + bits.join(' · ') : '';
   }
 }
-['cpProdWeeks', 'cpAdGran', 'cpAdN'].forEach(function (id) {
+['cpProdWeeks', 'cpAdGran', 'cpAdN', 'cpPaWeeks'].forEach(function (id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('change', function () {
@@ -6079,3 +6082,77 @@ function renderCompet() {
     renderCompet();
   });
 });
+// ----- 🏷 상품별 광고 수 (상품별_통계 탭) -----
+// 앞의 두 표와 시트 모양이 다르다: 앞 7열이 메타(회사·상품명·URL·총광고수·소재유형·최초/최근게재일)이고
+// 8열부터가 주차다. 행은 '회사의 상품들 → ▶ 회사 소계' 순서로 반복된다.
+function _cpParseProdAds(txt) {
+  const grid = _ttCSV(txt).filter(function (r) { return r.some(function (c) { return String(c || '').trim() !== '' }) });
+  if (grid.length < 2) return null;
+  const head = grid[0], cols = [];
+  for (let j = CP_PA_META; j < head.length; j++) {
+    const lab = String(head[j] || '').trim();
+    if (lab) cols.push([j, lab]);
+  }
+  if (!cols.length) return null;
+  cols.sort(function (a, b) { return _cpKey(b[1]) < _cpKey(a[1]) ? -1 : 1 });
+  const groups = [];
+  let cur = null;
+  for (let i = 1; i < grid.length; i++) {
+    const r = grid[i];
+    const co = String(r[0] || '').trim();
+    if (!co) continue;
+    const vals = {};
+    cols.forEach(function (c) { const v = _cpVal(r[c[0]]); if (v) vals[c[1]] = v });
+    if (co.indexOf('▶') === 0) {                       // ▶ 회사 소계 — 그룹을 닫는다
+      const name = co.replace(/^▶\s*/, '').replace(/\s*소계$/, '');
+      if (!cur) cur = { company: name, items: [] };
+      cur.company = name;
+      cur.vals = vals;
+      cur.all = _cpVal(r[3]);                          // 총광고수(전 기간 distinct)
+      groups.push(cur);
+      cur = null;
+    } else {
+      if (!cur) cur = { company: co, items: [] };
+      cur.items.push({ name: String(r[1] || '').trim() || '(이름 없음)', vals: vals, all: _cpVal(r[3]) });
+    }
+  }
+  if (cur && cur.items.length) groups.push(cur);
+  return { periods: cols.map(function (c) { return c[1] }), groups: groups };
+}
+function _cpProdAdsTable(n) {
+  const tbl = document.getElementById('cpPaTbl'); if (!tbl) return;
+  const data = COMPET.prodAds;
+  if (!data) {
+    tbl.innerHTML = '<tr><td style="padding:12px;color:#888">시트를 읽지 못했습니다 — '
+      + (CP_ERR.prodAds || '🔄 시트 새로고침을 눌러보세요') + '</td></tr>';
+    return;
+  }
+  const cols = data.periods.slice(0, n);
+  const groups = data.groups.slice().sort(function (a, b) {
+    return ((b.vals && b.vals[cols[0]]) ? b.vals[cols[0]].total : 0)
+         - ((a.vals && a.vals[cols[0]]) ? a.vals[cols[0]].total : 0);
+  });
+  let h = '<thead><tr><th class="hcn" style="text-align:left;white-space:nowrap;min-width:230px">회사 · 상품</th>'
+        + '<th style="min-width:74px">최신</th>'
+        + cols.map(function (k) { return '<th style="min-width:74px">' + _cpLabel(k) + '</th>' }).join('')
+        + '</tr></thead><tbody>';
+  groups.forEach(function (g) {
+    const own = /타이트사주/.test(g.company);
+    h += '<tr class="sr"><td class="fx fx0"' + (own ? ' style="font-weight:700;color:#1a73e8"' : '')
+       + ' title="전 기간 누적 광고 ' + ((g.all && g.all.total) || 0).toLocaleString('ko-KR') + '개">'
+       + g.company + ' (' + g.items.length + '개 상품)</td>'
+       + _cpSummaryCell(g.vals || {}, cols)
+       + cols.map(function (k, i) { return _cpCell((g.vals || {})[k], (g.vals || {})[cols[i + 1]]) }).join('')
+       + '</tr>';
+    g.items.slice().sort(function (a, b) {
+      return ((b.vals[cols[0]]) ? b.vals[cols[0]].total : 0) - ((a.vals[cols[0]]) ? a.vals[cols[0]].total : 0);
+    }).forEach(function (it) {
+      h += '<tr><td class="fx fx0" style="padding-left:18px;color:#444" title="전 기간 누적 광고 '
+         + ((it.all && it.all.total) || 0).toLocaleString('ko-KR') + '개">└ ' + it.name + '</td>'
+         + _cpSummaryCell(it.vals, cols)
+         + cols.map(function (k, i) { return _cpCell(it.vals[k], it.vals[cols[i + 1]]) }).join('')
+         + '</tr>';
+    });
+  });
+  tbl.innerHTML = h + '</tbody>';
+}

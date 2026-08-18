@@ -356,6 +356,11 @@ mark.sh.active{background:#ff6d01;color:#fff}
   <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">사이트별 <b>노출 상품 수</b>(주 단위 관측) · 괄호=무료 상품 수 · 타이트사주는 Supabase products(KR 노출 기준) · 청월당은 카테고리 HTML · 용용사주는 공개 API · 카테고리 체계가 서로 달라 총계만 비교 · 출처=<a href="https://docs.google.com/spreadsheets/d/1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo/edit" target="_blank" style="color:#1a73e8">경쟁사분석 시트</a></span></div>
   <table id="cpProdTbl"></table>
 </div>
+<div class="sheet-wrap" style="max-height:none;margin-top:20px">
+  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">🏷 상품별 광고 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">회사 소계 아래 <b>상품별</b> 활성 광고 수(주 단위) · 랜딩 URL을 Claude가 상품으로 분류한 결과 · 회사명에 마우스를 올리면 전 기간 누적 광고 수 · ⚠ <b>맨 위 표와 숫자가 다르다</b> — 위는 라이브러리가 찍어주는 결과 건수, 여기는 <b>실제로 스크랩해 상품까지 분류한 광고만</b> 세므로 스로틀에 걸린 만큼 적게 나온다(2026.8/17주 타이트사주 476 vs 421). 회사 간 비교·상품 구성 보는 용도이고, 절대 수치는 위 표 기준 · 갱신도 <b>매주 월요일 03:00 소재 스크래퍼가 돌 때만</b>(로그인·무한스크롤이 필요해 매일 못 돌린다) · 같은 상품이 표기 차이로 갈린 행이 있을 수 있음(클러스터 매핑 7월 시드)</span></div>
+  <div class="filter" style="margin:0 0 6px 0"><label>최근</label><select id="cpPaWeeks"><option value="8">8주</option><option value="13" selected>13주</option><option value="26">26주</option><option value="52">52주</option></select></div>
+  <table id="cpPaTbl"></table>
+</div>
 </div>
 <div class="panel" id="p-exp"><div class="filter" style="flex-wrap:wrap;gap:10px;align-items:center">
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><b style="color:#1a73e8;font-size:13px">A</b>
