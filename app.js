@@ -1287,6 +1287,7 @@ function renderTab(id){
   if(id==='kpiMonthly')renderKpiTable('monthly');
   if(id==='mktDash')renderMarketer();
   if(id==='allmedia')renderAllMedia();
+  if(id==='compet'){renderCompet();loadCompet().then(renderCompet)}  // 시트 도착하면 다시 그림
 }
 function renderAllMedia(){
   const f=document.getElementById('allmediaFrame');
@@ -5560,3 +5561,149 @@ document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='En
   if(session){SBH.Authorization='Bearer '+session.access_token;showApp()}
   else{document.getElementById('loginPw').focus()}
 }catch(e){document.getElementById('loginPw').focus()}})();
+
+// ===== 🏢 경쟁사분석 (국내 전용) =====
+//   원장은 '경쟁사분석' 구글시트다(meta-scraper 저장소의 GH Actions 잡이 매일 채운다).
+//   Supabase 파이프라인이 없어 틱톡 탭과 같은 방식으로 gviz CSV 를 브라우저에서 직접 읽는다.
+//   ⚠ headers=1 필수 — 숫자 컬럼의 문자열 헤더(날짜·주차 라벨)가 headers=0 이면 빈칸으로 온다.
+const CP_SHEET_ID='1O7EkMrm7qp6UxfObJcgm9bVrzywq9NOiQ8YJQvrCvUo';
+const CP_GID={prod:'254863227',adDay:'2116795530',adWeek:'104726849'};
+function _cpUrl(gid){return 'https://docs.google.com/spreadsheets/d/'+CP_SHEET_ID+'/gviz/tq?tqx=out:csv&gid='+gid+'&headers=1'}
+let COMPET={prod:null,adDay:null,adWeek:null},CP_ERR={},CP_LOADED=false,CP_LOADING=null,cpCharts={};
+
+// 셀 '86 (무료 44)' 또는 '476' → {total,free}
+function _cpVal(v){
+  const t=String(v==null?'':v).trim();if(!t)return null;
+  const m=t.match(/^([\d,]+)/);if(!m)return null;
+  const f=t.match(/무료\s*([\d,]+)/);
+  return {total:parseInt(m[1].replace(/,/g,''),10),free:f?parseInt(f[1].replace(/,/g,''),10):null};
+}
+// 정렬용 키 — '2026-08-18' / '2026.8/17~8/23' 둘 다 YYYYMMDD 로
+function _cpKey(k){
+  let m=String(k).match(/^(\d{4})-(\d\d)-(\d\d)/);if(m)return m[1]+m[2]+m[3];
+  m=String(k).match(/^(\d{4})\.(\d+)\/(\d+)/);
+  if(m)return m[1]+String(m[2]).padStart(2,'0')+String(m[3]).padStart(2,'0');
+  return String(k);
+}
+function _cpLabel(k){
+  let m=String(k).match(/^\d{4}-(\d\d)-(\d\d)/);if(m)return (+m[1])+'/'+(+m[2]);
+  m=String(k).match(/^\d{4}\.(\d+)\/(\d+)/);if(m)return m[1]+'/'+m[2];
+  return String(k);
+}
+// 행=대상 / 열=기간(최신 좌측) 피벗 → {periods:[key…최신순], rows:[{name,vals:{key:{total,free}}}]}
+function _cpParsePivot(txt){
+  const grid=_ttCSV(txt).filter(r=>r.some(c=>String(c||'').trim()!==''));
+  if(grid.length<2)return null;
+  const head=grid[0],cols=[];
+  for(let j=1;j<head.length;j++){const lab=String(head[j]||'').trim();if(lab)cols.push([j,lab])}
+  if(!cols.length)return null;
+  cols.sort((a,b)=>_cpKey(b[1])<_cpKey(a[1])?-1:1);   // 최신 먼저
+  const rows=[];
+  for(let i=1;i<grid.length;i++){
+    const name=String(grid[i][0]||'').trim();
+    if(!name||name==='합계')continue;                  // 합계 행은 선에서 제외(스케일을 잡아먹는다)
+    const vals={};
+    cols.forEach(c=>{const v=_cpVal(grid[i][c[0]]);if(v)vals[c[1]]=v});
+    if(Object.keys(vals).length)rows.push({name:name,vals:vals});
+  }
+  return {periods:cols.map(c=>c[1]),rows:rows};
+}
+function _cpFetch(key,gid){
+  return fetch(_cpUrl(gid)+'&_='+Date.now(),{cache:'no-store'})
+    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.text()})
+    .then(t=>{const d=_cpParsePivot(t);if(!d)throw new Error('시트 형식이 바뀜');
+      COMPET[key]=d;delete CP_ERR[key]})
+    .catch(e=>{COMPET[key]=null;CP_ERR[key]=e.message||String(e)});
+}
+function loadCompet(force){
+  if(CP_LOADED&&!force)return Promise.resolve();
+  if(CP_LOADING&&!force)return CP_LOADING;
+  CP_LOADING=Promise.all([_cpFetch('prod',CP_GID.prod),_cpFetch('adDay',CP_GID.adDay),
+                          _cpFetch('adWeek',CP_GID.adWeek)])
+    .then(function(){CP_LOADED=true;CP_LOADING=null});
+  return CP_LOADING;
+}
+// 자사(타이트사주)는 굵고 진한 파랑, 나머지는 브랜드 팔레트 순서
+function _cpColor(name,i){return /타이트사주/.test(name)?'#1a73e8':BRAND_COLORS[(i+1)%BRAND_COLORS.length]}
+function _cpDrawEmpty(canvasId,msg){
+  const cv=document.getElementById(canvasId);if(!cv)return;
+  if(cpCharts[canvasId]){cpCharts[canvasId].destroy();delete cpCharts[canvasId]}
+  const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.font='12px sans-serif';ctx.fillStyle='#888';ctx.fillText(msg,12,24);
+}
+function _cpDrawChart(canvasId,data,n,unitWord,errKey){
+  if(!data){_cpDrawEmpty(canvasId,'시트를 읽지 못했습니다 — '+(CP_ERR[errKey]||'🔄 새로고침을 눌러보세요'));return}
+  const periods=data.periods.slice(0,n).reverse();     // 차트는 과거 → 최신
+  const last=periods[periods.length-1];
+  const labels=periods.map(_cpLabel);
+  const rows=data.rows.slice().sort(function(a,b){
+    const la=a.vals[last],lb=b.vals[last];
+    return (lb?lb.total:0)-(la?la.total:0);            // 최신 값 큰 순 = 범례 순서
+  });
+  const ds=rows.map(function(r,i){return {
+    label:r.name,
+    data:periods.map(function(k){return r.vals[k]?r.vals[k].total:null}),
+    _free:periods.map(function(k){return r.vals[k]?r.vals[k].free:null}),
+    borderColor:_cpColor(r.name,i),
+    backgroundColor:_cpColor(r.name,i),
+    borderWidth:/타이트사주/.test(r.name)?3:1.6,
+    pointRadius:periods.length>45?0:(periods.length<3?4:2),
+    pointHoverRadius:4,tension:.25,spanGaps:true
+  }});
+  const cv=document.getElementById(canvasId);if(!cv)return;
+  if(cpCharts[canvasId])cpCharts[canvasId].destroy();
+  cpCharts[canvasId]=new Chart(cv,{type:'line',data:{labels:labels,datasets:ds},options:{
+    responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+    plugins:{
+      legend:{position:'bottom',labels:{font:{size:10},boxWidth:12,usePointStyle:true,pointStyle:'line'}},
+      tooltip:{itemSort:function(a,b){return (b.parsed.y||0)-(a.parsed.y||0)},callbacks:{
+        label:function(c){const f=c.dataset._free&&c.dataset._free[c.dataIndex];
+          return c.dataset.label+': '+(c.parsed.y==null?'-':c.parsed.y.toLocaleString('ko-KR'))
+            +(f!=null?' (무료 '+f+')':'')}
+      }}
+    },
+    scales:{x:{ticks:{font:{size:9},maxRotation:0,autoSkipPadding:12}},
+            y:{beginAtZero:true,ticks:{font:{size:9},precision:0},title:{display:true,text:unitWord,font:{size:10}}}}
+  }});
+}
+function renderCompet(){
+  if(!document.getElementById('cpProdChart'))return;
+  const info=document.getElementById('cpInfo');
+  const granEl=document.getElementById('cpAdGran'),nEl=document.getElementById('cpAdN'),
+        pwEl=document.getElementById('cpProdWeeks');
+  const gran=granEl?granEl.value:'day';
+  const adN=parseInt(nEl?nEl.value:30)||30;
+  const pw=parseInt(pwEl?pwEl.value:13)||13;
+  const u=document.getElementById('cpAdUnit');if(u)u.textContent=(gran==='week'?'주':'일');
+
+  _cpDrawChart('cpProdChart',COMPET.prod,pw,'상품 수','prod');
+  _cpDrawChart('cpAdChart',gran==='week'?COMPET.adWeek:COMPET.adDay,adN,'활성 광고 수',
+               gran==='week'?'adWeek':'adDay');
+
+  if(info){
+    if(!CP_LOADED){info.textContent=' · 시트 읽는 중…';return}
+    const ad=gran==='week'?COMPET.adWeek:COMPET.adDay;
+    const bits=[];
+    if(COMPET.prod&&COMPET.prod.periods.length)bits.push('상품수 최신 '+_cpLabel(COMPET.prod.periods[0]));
+    if(ad&&ad.periods.length)bits.push('광고수 최신 '+_cpLabel(ad.periods[0])+' (관측 '+ad.periods.length+'개)');
+    const errs=Object.keys(CP_ERR);
+    if(errs.length)bits.push('⚠ 읽기 실패: '+errs.join(', '));
+    info.textContent=bits.length?' · '+bits.join(' · '):'';
+  }
+}
+['cpProdWeeks','cpAdGran','cpAdN'].forEach(function(id){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.addEventListener('change',function(){
+    // 단위를 바꾸면 '최근 N' 선택지도 그 단위에 맞게 갈아끼운다(일 30 / 주 13 기본)
+    if(id==='cpAdGran'){
+      const sel=document.getElementById('cpAdN');
+      if(sel){
+        const opts=this.value==='week'?['8','13','26','52']:['14','30','60','90'];
+        sel.innerHTML=opts.map(function(o){return '<option value="'+o+'">'+o+'</option>'}).join('');
+        sel.value=this.value==='week'?'13':'30';
+      }
+    }
+    renderCompet();
+  });
+});
