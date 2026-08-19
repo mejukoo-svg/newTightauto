@@ -932,22 +932,45 @@ def distill_lessons():
 #   '계보 키'로 묶고, 파생이 하나라도 있는 가족만 실험으로 본다. 판정 규칙이 바뀌면
 #   app.js 의 DV_DUP/DV_VAR 와 **양쪽을 함께** 고쳐야 한다(정본은 app.js).
 #
+#   각 실험은 '무엇을 바꿨는가'(세트 이름의 변형 마커)로부터 검증하려는 가설이 정해진다.
+#   → ES_HYP / es_hypothesis. 알림은 그 가설에 대한 답(지지·기각·판단보류)을 함께 싣는다.
+#
 #   변화 판정(기준일 dc = 메시지의 '어제' 완결일)
 #     🆕 새 변형 시작 : 파생 세트의 첫 지출일 == dc
 #     ⏹️ 지출 중단    : dc-1 까지 돌던 세트가 dc 에 지출 0
-#     🔄 우열 역전    : 원본 대비 누적 ROAS 격차의 부호가 dc 에서 뒤집힘
-#     🏁 격차 확정    : |누적 ROAS 격차| 가 dc 에 처음 ES_GAP%p 돌파
-#     📈📉 급변       : 세트의 dc 일간 ROAS 가 직전 7일 대비 ±ES_SPIKE%p
+#     🔬 가설 판정 변화: 그 실험의 결론이 어제와 달라짐(판단보류→지지 등)
+#     📈📉 급변       : 세트의 dc 일간 ROAS 가 직전 7일 대비 ±ES_SPIKE%p (포아송 검정 통과분만)
 #     💰 지출 급변    : 세트의 dc 지출이 직전 7일 평균 대비 ES_SPEND_UP↑ / ES_SPEND_DN↓
 # =====================================================================
 ES_WINDOW = 14            # 집계 기간(실험현황 탭 기본값과 동일)
 ES_MAX_CARDS = 6          # 한 메시지에 담을 가족 수 상한(슬랙 길이 보호)
 ES_PRIOR = 7              # 급변 판정에 쓰는 '직전 며칠'
-ES_FLIP_MIN = 20          # 역전으로 인정할 최소 격차(%p) — 0 근처 잡음 제거
-ES_GAP = 50               # '격차 확정' 임계(%p)
 ES_SPIKE = 100            # 일간 ROAS 급변 임계(%p, 전체흐름 보정 후) — 하루 ROAS는 원래 출렁여서 높게 잡음
 ES_MIN_BUY_PRIOR = 5      # 급변 판정 최소 표본: 직전 7일 구매수(기대치 λ 를 추정할 최소 근거)
-ES_P = 0.01               # 급변 유의수준 — 구매수가 '우연히 이만큼 벗어날' 확률이 이보다 작을 때만 알림
+ES_P = 0.01               # 유의수준 — 구매수가 '우연히 이만큼 벗어날' 확률이 이보다 작을 때만 인정
+ES_HYP_MIN_LAM = 10       # 가설 판정 최소 표본: 원본 효율 기준 기대 구매수(이하면 판단보류)
+ES_NONINF = 10            # 비열등 마진(%) — '유지된다' 가설은 기대 대비 이만큼 안쪽이어야 지지.
+                          #   '유의하게 나쁘지 않다'를 곧바로 지지로 부르면, 기대 대비 -27% 인데도
+                          #   p 값이 0.01 을 스치는 것만으로 기각↔지지가 뒤집힌다(실측 사례 있음).
+
+# ── 변형 마커 → 그 실험이 검증하려는 가설 ────────────────────────────
+#   세트 이름의 마커는 '무엇을 바꿨는가'를 말해준다. 그 변경이 노린 결과를 가설로 적어두고,
+#   원본 대비 구매 효율로 지지/기각을 판정한다. 새 마커를 쓰기 시작하면 app.js DV_VAR 에
+#   추가한 뒤 여기에도 가설 한 줄을 적는다(없으면 아래 기본 가설로 떨어진다).
+#     up   = 원본보다 나아야 지지 (효율 개선을 노린 변경)
+#     keep = 원본만큼만 나오면 지지 (규모 확대가 목적 — 효율 유지가 조건)
+ES_HYP = {
+    "tROAS":      ("입찰을 tROAS 로 바꾸면", "구매 효율이 오른다", "up"),
+    "구매당비용":  ("구매당비용 입찰로 바꾸면", "구매 효율이 오른다", "up"),
+    "결과당비용":  ("결과당비용 입찰로 바꾸면", "구매 효율이 오른다", "up"),
+    "구매자제외":  ("기존 구매자를 타겟에서 빼면", "구매 효율이 오른다", "up"),
+    "전세계중국어": ("타겟을 전세계 중국어로 넓혀도", "구매 효율은 유지된다", "keep"),
+    "복제":       ("세트를 복제해 증액해도", "구매 효율은 유지된다", "keep"),
+    "사본":       ("세트를 복사해 증액해도", "구매 효율은 유지된다", "keep"),
+    "복제증액":    ("세트를 복제해 증액해도", "구매 효율은 유지된다", "keep"),
+    "테스트":      ("이 변형으로 바꾸면", "구매 효율이 오른다", "up"),
+}
+ES_HYP_DEFAULT = ("이 변형으로 바꾸면", "구매 효율이 오른다", "up")
 ES_SPEND_UP, ES_SPEND_DN = 2.0, 0.4   # 지출 급변 배수(전체흐름 보정 후)
 # 통화별 하한 — 이보다 작으면 잡음으로 보고 판정하지 않는다(fam=14일 누적, day=하루)
 ES_TH = {"kr": {"fam": 1_000_000, "day": 50_000},
@@ -1027,7 +1050,8 @@ def es_collect(region, dc, days=ES_WINDOW):
     since = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=days - 1)).isoformat()
     rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
                      f"&select=date,adset_id,adset_name,product,{sf},{rf},"
-                     f"unique_clicks,results_mp,impressions,reach")
+                     f"unique_clicks,results_mp,impressions,reach"
+                     f"&order=date.asc,adset_id.asc")   # offset 페이지네이션은 정렬이 없으면 불안정
     sets = {}
     for r in rows:
         aid = str(r.get("adset_id") or "")
@@ -1146,6 +1170,51 @@ def es_market(sets, dc):
     return {"spend": (ts / pm) if pm > 0 else 1.0,
             "roas": ((_es_roas(ts, tr) or 0) - (_es_roas(ps, pr) or 0)) if (ts > 0 and ps > 0) else 0.0}
 
+def es_hypothesis(m, base, upto):
+    """변형 m 을 원본 base 와 견줘 '그 실험의 가설이 지지되는가'를 판정한다(upto 까지 누적).
+
+    검정: 원본과 구매 효율이 같다면(H0), 변형의 지출로 기대되는 구매수는
+          λ = 변형지출 ÷ 원본 구매당비용. 실제 구매수가 λ 에서 우연히 그만큼
+          벗어날 포아송 확률이 ES_P 미만일 때만 차이를 인정한다.
+          매출이 아니라 구매 '건수'로 검정하는 이유 = 건수는 셀 수 있는 사건이라
+          표본이 작을 때 얼마나 못 믿을지가 확률로 정확히 나온다.
+    반환 {text, mode, verdict, lam, k, p, lift, gap} — 판정 불가면 verdict='판단보류'."""
+    tag = next((t for t in (m.get("tags") or []) if t in ES_HYP), None)
+    if_c, then_c, mode = ES_HYP.get(tag, ES_HYP_DEFAULT)
+    bs, br = _es_cum(base, upto)
+    vs, vr = _es_cum(m, upto)
+    bmp = sum(o["mp"] for d, o in base["byDate"].items() if d <= upto)
+    k = sum(o["mp"] for d, o in m["byDate"].items() if d <= upto)
+    out = {"if": if_c, "then": then_c, "mode": mode, "verdict": "판단보류", "why": "표본 없음",
+           "lam": 0.0, "k": k, "p": None, "lift": None, "short": True,
+           "gap": ((_es_roas(vs, vr) or 0) - (_es_roas(bs, br) or 0)) if (vs > 0 and bs > 0) else None}
+    if bmp <= 0 or bs <= 0 or vs <= 0:
+        return out
+    lam = vs / (bs / bmp)          # 원본 구매당비용으로 변형 지출을 돌렸다면 나왔을 구매수
+    out["lam"] = lam
+    out["lift"] = (k / lam - 1) * 100 if lam > 0 else None
+    if lam < ES_HYP_MIN_LAM:
+        out["why"] = "표본 부족"
+        return out
+    out["short"] = False
+    p_up, p_dn = _poisson_p(k, lam, True), _poisson_p(k, lam, False)
+    better, worse = p_up < ES_P, p_dn < ES_P
+    out["p"] = p_up if k >= lam else p_dn      # 관측된 방향의 꼬리확률을 그대로 보인다
+    if mode == "keep":
+        # 규모 확대가 목적 — 유의하게 나쁘면 기각, 기대 대비 비열등 마진 안쪽이면 지지.
+        # 그 사이(나쁜 쪽으로 기울었지만 유의하진 않음)는 단정하지 않고 판단보류로 남긴다.
+        if worse:
+            out["verdict"], out["why"] = "기각", "효율 하락"
+        elif out["lift"] >= -ES_NONINF:
+            out["verdict"] = "지지"
+            out["why"] = "효율 유지, 오히려 개선" if better else "효율 유지"
+        else:
+            out["verdict"], out["why"] = "판단보류", f"기대 대비 {out['lift']:+.0f}% — 유지 여부 불명확"
+    else:
+        out["verdict"] = "지지" if better else ("기각" if worse else "판단보류")
+        out["why"] = {"지지": "효율 개선", "기각": "효율 하락", "판단보류": "차이 불명확"}[out["verdict"]]
+    return out
+
 def es_changes(fam, dc, th, mkt=None):
     """가족 하나에서 기준일 dc 에 생긴 변화 목록(문자열). 비었으면 '변화 없음'.
     mkt = es_market() 결과 — 전 지역 공통 움직임을 뺀 '이 세트만의 변화'로 판정한다."""
@@ -1194,26 +1263,21 @@ def es_changes(fam, dc, th, mkt=None):
                 if rt >= ES_SPEND_UP or rt <= ES_SPEND_DN:
                     out.append(f"💰 {L} 지출 {_es_money(pm, cur)} → {_es_money(ts, cur)}"
                                f" (전체흐름 보정 {(rt - 1) * 100:+.0f}%)")
-    # 🔄 우열 역전 / 🏁 격차 확정 — 원본 대비 누적 ROAS 격차의 어제→오늘 변화
-    if orig:
-        bR_c = _es_roas(*_es_cum(orig, dc))
-        bR_p = _es_roas(*_es_cum(orig, dp))
+    # 🔬 가설 판정 변화 — 그 실험의 답이 어제와 달라졌는가.
+    #   임의 임계(몇 %p 벌어졌나)가 아니라 '판단보류→지지' 처럼 결론이 바뀐 날에만 알린다.
+    base = mem[0] if mem else None      # 카드의 A = 원본(없으면 매출 최대 세트), 표와 같은 기준
+    if base:
         for m in mem:
-            if m is orig:
+            if m is base or m["kind"] == "orig":
                 continue
-            L = m.get("_lab", "")
-            vs_c, vr_c = _es_cum(m, dc)
-            vR_c = _es_roas(vs_c, vr_c)
-            vR_p = _es_roas(*_es_cum(m, dp))
-            if None in (bR_c, bR_p, vR_c, vR_p) or vs_c < th["day"]:
-                continue
-            gc, gp = vR_c - bR_c, vR_p - bR_p
-            if gc * gp < 0 and abs(gc) >= ES_FLIP_MIN:
-                who = "원본을 앞섬" if gc > 0 else "원본에 뒤집힘"
-                out.append(f"🔄 {L} 우열 역전 — {who} ({gp:+.0f}%p → {gc:+.0f}%p)")
-            elif abs(gp) < ES_GAP <= abs(gc):
-                who = "변형 우세" if gc > 0 else "원본 우세"
-                out.append(f"🏁 {L} 격차 확정 — {who} ({gc:+.0f}%p)")
+            hc = es_hypothesis(m, base, dc)
+            hp = es_hypothesis(m, base, dp)
+            # '답이 나온 날'만 알린다. 판단보류로 되돌아가는 건(표본이 늘며 경계를 스치는 경우가
+            # 대부분) 알림거리가 아니다 — 현재 판정은 어차피 카드의 가설 블록에 늘 찍힌다.
+            if hc["verdict"] != hp["verdict"] and hc["verdict"] != "판단보류":
+                L = m.get("_lab", "")
+                out.append(f"🔬 {L} 가설 판정: {hp['verdict']} → *{hc['verdict']}*"
+                           f" ({hc['why']} · 구매 {hc['k']}건/기대 {hc['lam']:.1f}건)")
     return out
 
 # ── 표시: 실험현황 카드의 헤더 + 기간 평균 ────────────────────────────
@@ -1240,8 +1304,38 @@ def _es_side(m, i, cur):
     return {"lab": chr(65 + i), "role": role, "name": m["name"] or "-",
             "days": cal, "tot": tot, "sd": sd}
 
-def fmt_exp_card(fam, sides, reasons, cur):
-    """카드 1개 = 헤더(상품·원본이름·가족 지출/매출/ROAS) + 변화 사유 + 세트별 기간 평균."""
+ES_VERDICT_ICON = {"지지": "✅", "기각": "❌", "판단보류": "⏳"}
+
+def fmt_exp_hyp(fam, sides, dc, cur):
+    """가설 블록 — 변형마다 '무엇을 검증 중인가 / 지금 답은 무엇인가'를 한 쌍으로 적는다.
+    숫자만 늘어놓으면 읽는 사람이 매번 '그래서 이 실험은 뭘 보려던 거였지'를 되짚어야 한다."""
+    mem = fam["mem"]
+    base = mem[0]
+    lines = []
+    for m, S in zip(mem, sides):
+        # 가설은 '무언가를 바꾼' 파생에만 붙는다. 같은 계보에 원본이 둘 있는 경우
+        # (이름이 같은 별개 세트) 두 번째 원본은 실험이 아니므로 건너뛴다.
+        if m is base or m["kind"] == "orig":
+            continue
+        h = es_hypothesis(m, base, dc)
+        icon = ES_VERDICT_ICON.get(h["verdict"], "⏳")
+        lines.append(f"　🔬 *{S['lab']} [{S['role']}]* 가설 — 만약 {h['if']}, {h['then']}")
+        # 근거는 항상 같은 형식: 실제 구매 vs 원본 효율로 기대되는 구매
+        ev = f"구매 {h['k']}건 / 기대 {h['lam']:.1f}건"
+        if h["short"]:
+            # 기대 0.2건에 '-100%' 같은 수치는 뜻이 없다 — 표본이 모자란다는 사실만 말한다
+            ev += f" — 판정에 최소 {ES_HYP_MIN_LAM}건 필요"
+        elif h["lift"] is not None:
+            ev += f" ({h['lift']:+.0f}%)"
+        elif h["p"] is not None:
+            ev += f" · 우연확률 {h['p'] * 100:.1f}%"
+        if h["gap"] is not None:
+            ev += f" · ROAS {h['gap']:+.0f}%p"
+        lines.append(f"　　→ {icon} *{h['verdict']}* ({h['why']})  {ev}")
+    return "\n".join(lines)
+
+def fmt_exp_card(fam, sides, reasons, cur, dc):
+    """카드 1개 = 헤더 + 오늘의 변화 + 가설·판정 + 세트별 기간 평균."""
     fr = _es_roas(fam["s"], fam["r"]) or 0
     orig = sides[0]
     varn = sum(1 for s in sides if s["role"] != "원본")
@@ -1273,7 +1367,8 @@ def fmt_exp_card(fam, sides, reasons, cur):
                     f" · 매출/일 {_es_money(t['r'] / days, cur)}")
         body.append(f"        · CVR {cvr:.1f}% · CTR {ctr:.1f}% · 빈도 {freq:.2f}"
                     f" · 구매당 {_es_money(cpa, cur) if cpa else '-'} · CPM {_es_money(cpm, cur)}")
-    return head + "\n" + why + "\n```\n" + "\n".join(body) + "\n```"
+    hyp = fmt_exp_hyp(fam, sides, dc, cur)
+    return head + "\n" + why + ("\n" + hyp if hyp else "") + "\n```\n" + "\n".join(body) + "\n```"
 
 def build_exp_message(label, region, dc):
     """기준일에 변화가 있는 실험 가족만 골라 메시지 문자열 반환. 없으면 None."""
@@ -1307,7 +1402,7 @@ def build_exp_message(label, region, dc):
             f"   ·  실험 {total}건 중 변화 {len(hits)}건")
     if len(hits) > len(shown):
         head += f" (지출 상위 {len(shown)}건만 표시)"
-    return head + "\n\n" + "\n\n".join(fmt_exp_card(f, s, r, cur) for f, s, r in shown)
+    return head + "\n\n" + "\n\n".join(fmt_exp_card(f, s, r, cur, dc) for f, s, r in shown)
 
 
 # =====================================================================
