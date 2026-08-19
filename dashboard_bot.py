@@ -946,8 +946,8 @@ ES_PRIOR = 7              # 급변 판정에 쓰는 '직전 며칠'
 ES_FLIP_MIN = 20          # 역전으로 인정할 최소 격차(%p) — 0 근처 잡음 제거
 ES_GAP = 50               # '격차 확정' 임계(%p)
 ES_SPIKE = 100            # 일간 ROAS 급변 임계(%p, 전체흐름 보정 후) — 하루 ROAS는 원래 출렁여서 높게 잡음
-ES_MIN_BUY_PRIOR = 5      # 급변 판정 최소 표본: 직전 7일 구매수
-ES_MIN_BUY_DAY = 3        # 급변 판정 최소 표본: 기준일 기대 구매수(평소 구매당비용 기준)
+ES_MIN_BUY_PRIOR = 5      # 급변 판정 최소 표본: 직전 7일 구매수(기대치 λ 를 추정할 최소 근거)
+ES_P = 0.01               # 급변 유의수준 — 구매수가 '우연히 이만큼 벗어날' 확률이 이보다 작을 때만 알림
 ES_SPEND_UP, ES_SPEND_DN = 2.0, 0.4   # 지출 급변 배수(전체흐름 보정 후)
 # 통화별 하한 — 이보다 작으면 잡음으로 보고 판정하지 않는다(fam=14일 누적, day=하루)
 ES_TH = {"kr": {"fam": 1_000_000, "day": 50_000},
@@ -1094,6 +1094,31 @@ def _es_cum(m, upto):
 def _es_roas(s, r):
     return (r / s * 100) if s > 0 else None
 
+def _poisson_p(k, lam, upper):
+    """구매수가 우연히 이만큼 벗어날 확률. upper=True → P(X>=k), False → P(X<=k).
+
+    하루 구매 3~5건짜리 세트는 아무 일이 없어도 0건인 날이 종종 나온다(λ=3.5면 3%).
+    실제로 대만_무당_ASC 는 8/13·8/18 두 번 0건이었는데, 이건 '변화'가 아니라 그 세트의
+    평상시 변동폭이다. 단순 임계(기대 구매 N건 이상)로는 이걸 걸러낼 수 없어서,
+    표본 크기가 판정에 자동으로 반영되도록 포아송 꼬리확률을 쓴다.
+    → 구매가 많은 세트는 작은 변화도 잡히고, 적은 세트는 어지간해선 안 잡힌다."""
+    if lam <= 0:
+        return 1.0
+    k = int(k)
+    import math
+    if upper and k <= 0:
+        return 1.0
+    top = k - 1 if upper else k
+    if top < 0:
+        return 0.0
+    term = math.exp(-lam)
+    cdf = term
+    for i in range(1, top + 1):
+        term *= lam / i
+        cdf += term
+    cdf = min(1.0, max(0.0, cdf))
+    return (1.0 - cdf) if upper else cdf
+
 def _es_prior_days(m, dc, n=ES_PRIOR):
     """dc 직전의 '지출 있는 날' 최대 n일."""
     ds = sorted((d for d, o in m["byDate"].items() if d < dc and o["s"] > 0), reverse=True)
@@ -1148,17 +1173,20 @@ def es_changes(fam, dc, th, mkt=None):
             pr = sum(o["r"] for o in prior)
             base = _es_roas(ps, pr)
             now = _es_roas(ts, today["r"])
-            # 구매 몇 건으로 하루 ROAS 가 100%p 씩 튀는 소액 세트는 급변 판정에서 제외한다.
-            # '평소 구매당비용으로 오늘 지출을 돌렸다면 몇 건이 나왔어야 하는가' = 기대 구매수.
+            # λ = 평소 구매당비용으로 오늘 지출을 돌렸다면 나왔어야 할 구매수(기대치).
+            # 관측 구매수가 이 기대치에서 우연히 벗어날 확률(포아송)이 ES_P 미만일 때만 급변으로 본다.
             pmp = sum(o["mp"] for o in prior)
-            exp_buy = (ts / (ps / pmp)) if pmp > 0 else 0
-            if base is not None and now is not None and pmp >= ES_MIN_BUY_PRIOR and exp_buy >= ES_MIN_BUY_DAY:
+            lam = (ts / (ps / pmp)) if pmp > 0 else 0
+            if base is not None and now is not None and pmp >= ES_MIN_BUY_PRIOR:
                 exc = (now - base) - mkt["roas"]
-                if abs(exc) >= ES_SPIKE and (now >= base * 2 or now <= base * 0.5):
-                    arrow = "📈" if exc > 0 else "📉"
+                up = exc > 0
+                pv = _poisson_p(today["mp"], lam, up)
+                if abs(exc) >= ES_SPIKE and (now >= base * 2 or now <= base * 0.5) and pv < ES_P:
+                    arrow = "📈" if up else "📉"
                     out.append(f"{arrow} {L} ROAS {base:.0f}% → {now:.0f}%"
                                f" (직전 {len(prior)}일 대비 {now - base:+.0f}%p"
-                               f" · 전체흐름 보정 {exc:+.0f}%p)")
+                               f" · 전체흐름 보정 {exc:+.0f}%p"
+                               f" · 구매 {today['mp']}건/기대 {lam:.1f}건, 우연확률 {pv * 100:.1f}%)")
             # 💰 지출 급변 — 마찬가지로 지역 전체 증감 배수로 나눠 '이 세트만의 조정'만 잡는다
             pm = ps / len(prior)
             if pm >= th["day"]:
