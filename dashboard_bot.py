@@ -20,9 +20,13 @@ dashboard_bot.py — 대시보드(Supabase) 지표를 가공해 마케팅 채널
   py dashboard_bot.py --dry-run       # 전송 없이 메시지 + 구성요소 출력
   py dashboard_bot.py --dry-run --dates 2026-06-27,2026-06-28   # 특정 두 날짜로 검증
   py dashboard_bot.py --kr-only | --gl-only
+  py dashboard_bot.py --dry-run --exp-only   # 🧪 실험 현황 알림만 미리보기
+  py dashboard_bot.py --no-exp               # 실험 현황 알림 끄기
 
 ※ '전체 종합' 공식은 calc_kr_total / calc_gl_total 에 분리해 두었다(아래 주석 참고).
    예시 숫자와 대조해 이 두 함수만 조정하면 된다.
+※ 채널에 나가는 메시지는 3개다: ①퍼포먼스 표 ②그 스레드 댓글(증감액 조언)
+   ③🧪 실험 현황 · 오늘의 변화(별도 메시지, 변화 있는 날만).
 """
 import os, sys, json, re, datetime, urllib.request, urllib.parse
 from pathlib import Path
@@ -31,6 +35,8 @@ BASE = Path(__file__).parent
 DRY = "--dry-run" in sys.argv
 KR_ONLY = "--kr-only" in sys.argv
 GL_ONLY = "--gl-only" in sys.argv
+NO_EXP = "--no-exp" in sys.argv    # 🧪 실험 현황 알림 끄기
+EXP_ONLY = "--exp-only" in sys.argv  # 실험 현황 알림만 (퍼포먼스 표·조언 생략)
 DAYS_BACK = 1  # 0=어제vs오늘, 1=그제vs어제(완결일) ← 11시 전송은 완결일 비교 권장
 
 # 특정 날짜 강제 (검증용): --dates D_PREV,D_CUR
@@ -916,6 +922,367 @@ def distill_lessons():
         print(f"[교훈] {label}: {len(txt):,}자 저장 → advice_lessons({region})")
 
 # =====================================================================
+# 🧪 실험 현황 · 오늘의 변화  (index.html '📋 실험 현황' 탭의 파이썬 이식)
+#
+#   대시보드 실험현황 탭은 '원본 + 그 파생(복제·tROAS 등)' 가족을 자동으로 찾아
+#   가족마다 [헤더 + 기간 평균표]를 보여준다. 이 봇은 그중 **기준일에 실제로
+#   변화가 생긴 가족만** 골라, 그 헤더 + 기간 평균 내용을 게시한다.
+#
+#   가족 판정 = _dv_classify(app.js dvClassify 이식) → 이름의 복제·변형 마커를 걷어낸
+#   '계보 키'로 묶고, 파생이 하나라도 있는 가족만 실험으로 본다. 판정 규칙이 바뀌면
+#   app.js 의 DV_DUP/DV_VAR 와 **양쪽을 함께** 고쳐야 한다(정본은 app.js).
+#
+#   변화 판정(기준일 dc = 메시지의 '어제' 완결일)
+#     🆕 새 변형 시작 : 파생 세트의 첫 지출일 == dc
+#     ⏹️ 지출 중단    : dc-1 까지 돌던 세트가 dc 에 지출 0
+#     🔄 우열 역전    : 원본 대비 누적 ROAS 격차의 부호가 dc 에서 뒤집힘
+#     🏁 격차 확정    : |누적 ROAS 격차| 가 dc 에 처음 ES_GAP%p 돌파
+#     📈📉 급변       : 세트의 dc 일간 ROAS 가 직전 7일 대비 ±ES_SPIKE%p
+#     💰 지출 급변    : 세트의 dc 지출이 직전 7일 평균 대비 ES_SPEND_UP↑ / ES_SPEND_DN↓
+# =====================================================================
+ES_WINDOW = 14            # 집계 기간(실험현황 탭 기본값과 동일)
+ES_MAX_CARDS = 6          # 한 메시지에 담을 가족 수 상한(슬랙 길이 보호)
+ES_PRIOR = 7              # 급변 판정에 쓰는 '직전 며칠'
+ES_FLIP_MIN = 20          # 역전으로 인정할 최소 격차(%p) — 0 근처 잡음 제거
+ES_GAP = 50               # '격차 확정' 임계(%p)
+ES_SPIKE = 100            # 일간 ROAS 급변 임계(%p, 전체흐름 보정 후) — 하루 ROAS는 원래 출렁여서 높게 잡음
+ES_MIN_BUY_PRIOR = 5      # 급변 판정 최소 표본: 직전 7일 구매수
+ES_MIN_BUY_DAY = 3        # 급변 판정 최소 표본: 기준일 기대 구매수(평소 구매당비용 기준)
+ES_SPEND_UP, ES_SPEND_DN = 2.0, 0.4   # 지출 급변 배수(전체흐름 보정 후)
+# 통화별 하한 — 이보다 작으면 잡음으로 보고 판정하지 않는다(fam=14일 누적, day=하루)
+ES_TH = {"kr": {"fam": 1_000_000, "day": 50_000},
+         "gl": {"fam": 700, "day": 40}}
+# 글로벌 상품명 통합 — app.js GL_PRODUCT_CANON 과 동일(대시보드 배지와 같은 이름이 찍히도록)
+ES_GL_CANON = {"솔로": "solo", "solo": "solo",
+               "무당": "shaman", "mudang": "shaman", "shaman": "shaman",
+               "무녀": "mzpian", "mzpian": "mzpian",
+               "집착": "possessive", "possessive": "possessive",
+               "커리어": "job", "job": "job"}
+
+# ── 계보 분류 (app.js dvClassify 이식) ────────────────────────────────
+_DV_DUP = [(re.compile(r"\[\s*복제\s*\]"), "복제"),
+           (re.compile(r"\s*-\s*(사본|복사본|copy)\s*$", re.I), "사본"),
+           (re.compile(r"\s*-\s*복제증액\s*$"), "복제증액")]
+_DV_VAR = [(re.compile(r"[_\-\s]+troas(실험)?$", re.I), "tROAS"),
+           (re.compile(r"[_\-\s]+구매당(비용)?(변경|전환)?$"), "구매당비용"),
+           (re.compile(r"[_\-\s]+결과당비용(전환|변경)?$"), "결과당비용"),
+           (re.compile(r"[_\-\s]+(기존)?구매자\s*제외(실험)?$"), "구매자제외"),
+           (re.compile(r"[_\-\s]+(테스트|test)$", re.I), "테스트"),
+           (re.compile(r"[_\-\s]+전세계중국어$"), "전세계중국어")]
+_DV_EMOJI = re.compile(u'[🀀-🫿☀-➿️‍]')
+_DV_DATE = re.compile(r"^\d{4}(\d{2})?(\d{2})?$")
+_DV_XN = re.compile(r"\s*[xX]\s*\d+")
+_DV_KEY = re.compile(r"[^0-9a-z가-힣%]")
+
+def _dv_strip_all(s, rx):
+    while True:
+        n = rx.sub("", s, count=1)
+        if n == s:
+            return s
+        s = n
+
+def _dv_classify(name):
+    """세트 이름 → {kind:'orig'|'dup'|'var', tags:[...], key}. app.js dvClassify 와 동일 규칙."""
+    s = str(name or "").strip()
+    tags, kind = [], "orig"
+
+    def strip_var(w):
+        nonlocal kind
+        for _ in range(4):
+            hit = None
+            for rx, tag in _DV_VAR:
+                if rx.search(w):
+                    w = rx.sub("", w, count=1)
+                    hit = tag
+                    break
+            if not hit:
+                break
+            if hit not in tags:
+                tags.append(hit)
+            kind = "var"
+        return w
+
+    work = strip_var(s)
+    dup = False
+    for rx, tag in _DV_DUP:
+        if rx.search(work):
+            dup = True
+            if tag not in tags:
+                tags.append(tag)
+            work = _dv_strip_all(work, rx)
+    if dup:
+        # 배수 표기(x2/x4)는 복제 마커가 있을 때만 제거 — 일반 이름의 'x2' 오제거 방지
+        work = _DV_XN.sub("", work)
+        work = _dv_strip_all(_dv_strip_all(work, _DV_DUP[0][0]), _DV_DUP[1][0])
+        work = strip_var(work)   # xN 제거로 꼬리에 드러난 변형 마커 재수거
+        kind = "dup"             # 복제+변형 동시 보유 → '복제'로 센다
+    toks = [t for t in re.split(r"[_\s]+", _DV_EMOJI.sub("", work)) if t and not _DV_DATE.match(t)]
+    label = "_".join(toks)
+    return {"kind": kind, "tags": tags, "key": _DV_KEY.sub("", label.lower())}
+
+# ── 수집·묶기 (app.js _esCollect / _esFamilies 이식) ──────────────────
+def es_collect(region, dc, days=ES_WINDOW):
+    """세트 단위 기간 집계. 원소 = {id,name,product,byDate,s,r,kind,tags,ckey}"""
+    table, _hl, sf, rf, _bf, _cur = ADV_SRC[region]
+    since = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=days - 1)).isoformat()
+    rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
+                     f"&select=date,adset_id,adset_name,product,{sf},{rf},"
+                     f"unique_clicks,results_mp,impressions,reach")
+    sets = {}
+    for r in rows:
+        aid = str(r.get("adset_id") or "")
+        d = r.get("date")
+        if not aid or not d:
+            continue
+        o = sets.get(aid)
+        if o is None:
+            prod = r.get("product") or "기타"
+            if region == "gl":
+                prod = ES_GL_CANON.get(str(prod).strip().lower(), prod)
+            o = sets[aid] = {"id": aid, "name": r.get("adset_name") or "",
+                             "product": prod, "byDate": {}, "s": 0.0, "r": 0.0}
+        if r.get("adset_name"):
+            o["name"] = r["adset_name"]
+        b = o["byDate"].get(d)
+        if b is None:
+            b = o["byDate"][d] = {"s": 0.0, "r": 0.0, "uc": 0, "mp": 0, "imp": 0, "rch": 0}
+        sp, rv = (r.get(sf) or 0), (r.get(rf) or 0)
+        b["s"] += sp
+        b["r"] += rv
+        b["uc"] += (r.get("unique_clicks") or 0)
+        b["mp"] += (r.get("results_mp") or 0)
+        b["imp"] += (r.get("impressions") or 0)
+        b["rch"] += (r.get("reach") or 0)
+        o["s"] += sp
+        o["r"] += rv
+    out = []
+    for o in sets.values():
+        c = _dv_classify(o["name"])
+        o["kind"], o["tags"], o["ckey"] = c["kind"], c["tags"], (c["key"] or o["id"])
+        out.append(o)
+    return out
+
+def es_families(sets):
+    """계보로 묶어 '파생이 있는' 가족만 남긴다(=실험이 걸린 원본)."""
+    fam = {}
+    for o in sets:
+        f = fam.get(o["ckey"])
+        if f is None:
+            f = fam[o["ckey"]] = {"key": o["ckey"], "product": o["product"],
+                                  "mem": [], "s": 0.0, "r": 0.0}
+        f["mem"].append(o)
+        f["s"] += o["s"]
+        f["r"] += o["r"]
+        if o["kind"] == "orig" and o["product"]:
+            f["product"] = o["product"]
+    return [f for f in fam.values()
+            if len(f["mem"]) > 1 and any(m["kind"] != "orig" for m in f["mem"])]
+
+# ── 변화 판정 ────────────────────────────────────────────────────────
+def _es_money(n, cur):
+    return usd(n) if cur == "$" else won(n)
+
+def _es_cum(m, upto):
+    """upto(포함)까지 누적 (지출, 매출)."""
+    s = r = 0.0
+    for d, o in m["byDate"].items():
+        if d <= upto:
+            s += o["s"]
+            r += o["r"]
+    return s, r
+
+def _es_roas(s, r):
+    return (r / s * 100) if s > 0 else None
+
+def _es_prior_days(m, dc, n=ES_PRIOR):
+    """dc 직전의 '지출 있는 날' 최대 n일."""
+    ds = sorted((d for d, o in m["byDate"].items() if d < dc and o["s"] > 0), reverse=True)
+    return [m["byDate"][d] for d in ds[:n]]
+
+def es_market(sets, dc):
+    """지역 전체의 '그날 분위기'. 주말 지출 램프·전사 매출 부진처럼 모든 세트에 똑같이 걸리는
+    움직임은 실험의 변화가 아니므로, 급변 판정에서 이만큼을 빼고 본다.
+      spend: dc 총지출 / 직전 ES_PRIOR일 하루평균 총지출   (1.0=평소)
+      roas : dc ROAS - 직전 ES_PRIOR일 ROAS (%p)          (0=평소)"""
+    ds = sorted({d for m in sets for d in m["byDate"]})
+    prior = [d for d in ds if d < dc][-ES_PRIOR:]
+    ts = tr = ps = pr = 0.0
+    for m in sets:
+        o = m["byDate"].get(dc)
+        if o:
+            ts += o["s"]
+            tr += o["r"]
+        for d in prior:
+            o = m["byDate"].get(d)
+            if o:
+                ps += o["s"]
+                pr += o["r"]
+    pm = ps / len(prior) if prior else 0
+    return {"spend": (ts / pm) if pm > 0 else 1.0,
+            "roas": ((_es_roas(ts, tr) or 0) - (_es_roas(ps, pr) or 0)) if (ts > 0 and ps > 0) else 0.0}
+
+def es_changes(fam, dc, th, mkt=None):
+    """가족 하나에서 기준일 dc 에 생긴 변화 목록(문자열). 비었으면 '변화 없음'.
+    mkt = es_market() 결과 — 전 지역 공통 움직임을 뺀 '이 세트만의 변화'로 판정한다."""
+    dp = (datetime.date.fromisoformat(dc) - datetime.timedelta(days=1)).isoformat()
+    mkt = mkt or {"spend": 1.0, "roas": 0.0}
+    cur = th["cur"]
+    out = []
+    mem = fam["mem"]
+    orig = next((m for m in mem if m["kind"] == "orig"), None)
+    for m in mem:
+        L = m.get("_lab", "")
+        today = m["byDate"].get(dc)
+        ts = today["s"] if today else 0.0
+        spend_days = sorted(d for d, o in m["byDate"].items() if o["s"] > 0)
+        # 🆕 새 변형 시작
+        if m["kind"] != "orig" and spend_days and spend_days[0] == dc and ts >= th["day"]:
+            out.append(f"🆕 {L} 새 변형 시작 (첫 지출 {_es_money(ts, cur)})")
+        # ⏹️ 지출 중단
+        prev = m["byDate"].get(dp)
+        if prev and prev["s"] >= th["day"] and ts <= 0 and len(spend_days) >= 3:
+            out.append(f"⏹️ {L} 지출 중단 (어제 {_es_money(prev['s'], cur)} → 0)")
+        prior = _es_prior_days(m, dc)
+        if today and ts >= th["day"] and len(prior) >= 3:
+            ps = sum(o["s"] for o in prior)
+            pr = sum(o["r"] for o in prior)
+            base = _es_roas(ps, pr)
+            now = _es_roas(ts, today["r"])
+            # 구매 몇 건으로 하루 ROAS 가 100%p 씩 튀는 소액 세트는 급변 판정에서 제외한다.
+            # '평소 구매당비용으로 오늘 지출을 돌렸다면 몇 건이 나왔어야 하는가' = 기대 구매수.
+            pmp = sum(o["mp"] for o in prior)
+            exp_buy = (ts / (ps / pmp)) if pmp > 0 else 0
+            if base is not None and now is not None and pmp >= ES_MIN_BUY_PRIOR and exp_buy >= ES_MIN_BUY_DAY:
+                exc = (now - base) - mkt["roas"]
+                if abs(exc) >= ES_SPIKE and (now >= base * 2 or now <= base * 0.5):
+                    arrow = "📈" if exc > 0 else "📉"
+                    out.append(f"{arrow} {L} ROAS {base:.0f}% → {now:.0f}%"
+                               f" (직전 {len(prior)}일 대비 {now - base:+.0f}%p"
+                               f" · 전체흐름 보정 {exc:+.0f}%p)")
+            # 💰 지출 급변 — 마찬가지로 지역 전체 증감 배수로 나눠 '이 세트만의 조정'만 잡는다
+            pm = ps / len(prior)
+            if pm >= th["day"]:
+                rt = (ts / pm) / (mkt["spend"] or 1.0)
+                if rt >= ES_SPEND_UP or rt <= ES_SPEND_DN:
+                    out.append(f"💰 {L} 지출 {_es_money(pm, cur)} → {_es_money(ts, cur)}"
+                               f" (전체흐름 보정 {(rt - 1) * 100:+.0f}%)")
+    # 🔄 우열 역전 / 🏁 격차 확정 — 원본 대비 누적 ROAS 격차의 어제→오늘 변화
+    if orig:
+        bR_c = _es_roas(*_es_cum(orig, dc))
+        bR_p = _es_roas(*_es_cum(orig, dp))
+        for m in mem:
+            if m is orig:
+                continue
+            L = m.get("_lab", "")
+            vs_c, vr_c = _es_cum(m, dc)
+            vR_c = _es_roas(vs_c, vr_c)
+            vR_p = _es_roas(*_es_cum(m, dp))
+            if None in (bR_c, bR_p, vR_c, vR_p) or vs_c < th["day"]:
+                continue
+            gc, gp = vR_c - bR_c, vR_p - bR_p
+            if gc * gp < 0 and abs(gc) >= ES_FLIP_MIN:
+                who = "원본을 앞섬" if gc > 0 else "원본에 뒤집힘"
+                out.append(f"🔄 {L} 우열 역전 — {who} ({gp:+.0f}%p → {gc:+.0f}%p)")
+            elif abs(gp) < ES_GAP <= abs(gc):
+                who = "변형 우세" if gc > 0 else "원본 우세"
+                out.append(f"🏁 {L} 격차 확정 — {who} ({gc:+.0f}%p)")
+    return out
+
+# ── 표시: 실험현황 카드의 헤더 + 기간 평균 ────────────────────────────
+def _es_side(m, i, cur):
+    """세트 하나 → 기간 평균 한 줄에 필요한 값(app.js _esSide/_esAvgTable 과 동일 계산)."""
+    tot = {"s": 0.0, "r": 0.0, "uc": 0, "mp": 0, "imp": 0, "rch": 0}
+    ks = sorted(m["byDate"])
+    for d in ks:
+        o = m["byDate"][d]
+        for k in tot:
+            tot[k] += o[k]
+    cal = ((datetime.date.fromisoformat(ks[-1]) - datetime.date.fromisoformat(ks[0])).days + 1) if ks else 0
+    if cal < 1:
+        cal = len(ks)
+    role = "원본" if m["kind"] == "orig" else ("/".join(m["tags"]) if m["tags"] else "변형")
+    # 일별 ROAS 표준편차(지출 있는 날) — 변동성
+    rd = [o["r"] / o["s"] * 100 for o in m["byDate"].values() if o["s"] > 0]
+    sd = None
+    if len(rd) >= 2:
+        mn = sum(rd) / len(rd)
+        sd = (sum((x - mn) ** 2 for x in rd) / len(rd)) ** 0.5
+    elif len(rd) == 1:
+        sd = 0.0
+    return {"lab": chr(65 + i), "role": role, "name": m["name"] or "-",
+            "days": cal, "tot": tot, "sd": sd}
+
+def fmt_exp_card(fam, sides, reasons, cur):
+    """카드 1개 = 헤더(상품·원본이름·가족 지출/매출/ROAS) + 변화 사유 + 세트별 기간 평균."""
+    fr = _es_roas(fam["s"], fam["r"]) or 0
+    orig = sides[0]
+    varn = sum(1 for s in sides if s["role"] != "원본")
+    head = (f"*[{fam['product']}] {orig['name']}*\n"
+            f"　실험 {varn}개 · 가족 지출 {_es_money(fam['s'], cur)}"
+            f" · 매출 {_es_money(fam['r'], cur)} · ROAS {fr:.0f}%")
+    why = "\n".join("　" + r for r in reasons)
+    base = sides[0]
+    bR = _es_roas(base["tot"]["s"], base["tot"]["r"])
+    body = []
+    for S in sides:
+        t, days = S["tot"], S["days"]
+        body.append(f"{S['lab']} [{S['role']}] {S['name']}")
+        if not days or t["s"] <= 0:
+            body.append("   데이터 없음")
+            continue
+        R = _es_roas(t["s"], t["r"]) or 0
+        dlt = (R - bR) if (S is not base and bR) else None
+        cvr = (t["mp"] / t["uc"] * 100) if (t["uc"] > 0 and t["mp"] > 0) else 0
+        ctr = (t["uc"] / t["imp"] * 100) if t["imp"] > 0 else 0
+        cpm = (t["s"] / t["imp"] * 1000) if t["imp"] > 0 else 0
+        freq = (t["imp"] / t["rch"]) if t["rch"] > 0 else 0
+        cpa = (t["s"] / t["mp"]) if t["mp"] > 0 else 0
+        prof = (t["r"] - t["s"]) / days
+        rs = (f"ROAS {R:.0f}%" + (f"({dlt:+.0f}p)" if dlt is not None else "")
+              + (f" ±{S['sd']:.0f}" if S["sd"] is not None else ""))
+        body.append(f"   {days}일 · {ljust(rs + ' ', 23)}· 순이익/일 {_es_money(prof, cur)}"
+                    f" · 지출/일 {_es_money(t['s'] / days, cur)}"
+                    f" · 매출/일 {_es_money(t['r'] / days, cur)}")
+        body.append(f"        · CVR {cvr:.1f}% · CTR {ctr:.1f}% · 빈도 {freq:.2f}"
+                    f" · 구매당 {_es_money(cpa, cur) if cpa else '-'} · CPM {_es_money(cpm, cur)}")
+    return head + "\n" + why + "\n```\n" + "\n".join(body) + "\n```"
+
+def build_exp_message(label, region, dc):
+    """기준일에 변화가 있는 실험 가족만 골라 메시지 문자열 반환. 없으면 None."""
+    cur = ADV_SRC[region][-1]
+    th = dict(ES_TH[region])
+    th["cur"] = cur
+    sets = es_collect(region, dc)
+    mkt = es_market(sets, dc)      # 지역 전체의 그날 분위기 — 급변 판정에서 이만큼 뺀다
+    fams = es_families(sets)
+    total = len(fams)
+    hits = []
+    for f in fams:
+        if f["s"] < th["fam"]:
+            continue
+        # 원본 먼저, 그다음 매출 큰 순(실험현황 탭과 동일) → 라벨 A,B,C…
+        mem = sorted(f["mem"], key=lambda m: (0 if m["kind"] == "orig" else 1, -m["r"], -m["s"]))
+        f["mem"] = mem
+        sides = [_es_side(m, i, cur) for i, m in enumerate(mem)]
+        for m, S in zip(mem, sides):
+            m["_lab"] = S["lab"]
+        rs = es_changes(f, dc, th, mkt)
+        if rs:
+            hits.append((f, sides, rs))
+    print(f"  [실험] 실험 {total}건 중 변화 {len(hits)}건"
+          f"  (전체흐름: 지출 {mkt['spend']:.2f}배 · ROAS {mkt['roas']:+.0f}%p)")
+    if not hits:
+        return None
+    hits.sort(key=lambda x: -x[0]["s"])
+    shown = hits[:ES_MAX_CARDS]
+    head = (f"🧪 *{label} 실험 현황 · 오늘의 변화*   {md(dc)}({wd(dc)}) 기준"
+            f"   ·  실험 {total}건 중 변화 {len(hits)}건")
+    if len(hits) > len(shown):
+        head += f" (지출 상위 {len(shown)}건만 표시)"
+    return head + "\n\n" + "\n\n".join(fmt_exp_card(f, s, r, cur) for f, s, r in shown)
+
+
+# =====================================================================
 # main
 # =====================================================================
 def main():
@@ -934,20 +1301,35 @@ def main():
 
     jobs = []
     if not GL_ONLY:
-        kp, kc = calc_kr(dp), calc_kr(dc)
-        jobs.append(("국내", "kr", CH_KR, fmt_kr(dp, dc, kp, kc), kp, kc))
+        if EXP_ONLY:
+            jobs.append(("국내", "kr", CH_KR, None, None, None))
+        else:
+            kp, kc = calc_kr(dp), calc_kr(dc)
+            jobs.append(("국내", "kr", CH_KR, fmt_kr(dp, dc, kp, kc), kp, kc))
     if not KR_ONLY:
-        gp, gc = calc_gl(dp), calc_gl(dc)
-        jobs.append(("글로벌", "gl", CH_GL, fmt_gl(dp, dc, gp, gc), gp, gc))
+        if EXP_ONLY:
+            jobs.append(("글로벌", "gl", CH_GL, None, None, None))
+        else:
+            gp, gc = calc_gl(dp), calc_gl(dc)
+            jobs.append(("글로벌", "gl", CH_GL, fmt_gl(dp, dc, gp, gc), gp, gc))
 
     playbook, src = ("", "off")
-    if not NO_ADVICE:
+    if not NO_ADVICE and not EXP_ONLY:
         playbook, src = fetch_playbook()
         print(f"[조언] 플레이북 로드: {src} ({len(playbook):,}자)")
 
     for label, region, ch, msg, p, c in jobs:
         print("\n" + "=" * 60 + f"\n■ {label} 메시지" + (f" → {ch or '(채널ID 미설정)'}" if not DRY else "") + "\n" + "=" * 60)
-        print(msg)
+        if msg:
+            print(msg)
+
+        # 🧪 실험 현황 · 오늘의 변화 (별도 메시지). 변화가 없는 날은 아예 보내지 않는다.
+        exp_msg = None
+        if not NO_EXP:
+            try:
+                exp_msg = build_exp_message(label, region, dc)
+            except Exception as e:
+                print(f"  [실험] 생성 실패: {e}")
 
         # 조언 생성 (플레이북 + 세트/메모/증감액표시 → Claude). marks=조언에서 뽑은 추이차트 하이라이트
         advice, adv_marks = None, []
@@ -989,9 +1371,12 @@ def main():
                 print(f"  [조언] 생성 실패: {e}")
 
         if DRY:
-            print("\n  ── 구성요소 (전체 종합 보정용) ──")
-            for tag, d in [(dp, p), (dc, c)]:
-                print(f"  · {tag}: " + "  ".join(f"{k}={v:,.0f}" for k, v in d["comp"].items()))
+            if exp_msg:
+                print("\n  ── 🧪 실험 현황 알림 미리보기 ──\n" + exp_msg)
+            if p and c:
+                print("\n  ── 구성요소 (전체 종합 보정용) ──")
+                for tag, d in [(dp, p), (dc, c)]:
+                    print(f"  · {tag}: " + "  ".join(f"{k}={v:,.0f}" for k, v in d["comp"].items()))
             if advice:
                 print("\n  ── 스레드 댓글(조언) 미리보기 ──\n" + advice)
             if adv_marks and not NO_HL:
@@ -1008,11 +1393,19 @@ def main():
         if not ch:
             print(f"  [SKIP] 채널 ID 미설정 ({label})")
             continue
-        ok, ts = slack_post(ch, msg)
-        print(f"  전송: {'성공' if ok else '실패(' + str(ts) + ')'}")
-        if ok and advice:
-            ok2, info2 = slack_post(ch, advice, thread_ts=ts)
-            print(f"  조언 댓글: {'성공' if ok2 else '실패(' + str(info2) + ')'}")
+        ts = None
+        if msg:
+            ok, ts = slack_post(ch, msg)
+            print(f"  전송: {'성공' if ok else '실패(' + str(ts) + ')'}")
+            if not ok:
+                ts = None
+            if ok and advice:
+                ok2, info2 = slack_post(ch, advice, thread_ts=ts)
+                print(f"  조언 댓글: {'성공' if ok2 else '실패(' + str(info2) + ')'}")
+        # 🧪 실험 현황 — 퍼포먼스 표와 주제가 다르므로 별도 메시지로 게시
+        if exp_msg:
+            ok3, info3 = slack_post(ch, exp_msg)
+            print(f"  실험 현황 알림: {'성공' if ok3 else '실패(' + str(info3) + ')'}")
         # 조언의 증감액을 추이차트 하이라이트로 자동 표기 (adset_highlights류만, 영구 조치이력은 불변)
         if adv_marks and not NO_HL:
             try:
