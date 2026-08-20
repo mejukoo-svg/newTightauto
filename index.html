@@ -41,11 +41,13 @@ th.filterable.filtered::after{content:'✕';font-size:9px;opacity:1;color:#d00}
 .panel{display:none;padding:10px 8px}
 .panel.active{display:block}
 .sheet-wrap{overflow:auto;max-height:calc(100vh - 100px);margin-top:6px}
+/* --cw = 추이차트 날짜 열 너비. 열너비 컨트롤(app.js applyCW)이 바꾼다 — 재렌더 불필요. */
+:root{--cw:96px}
 table{border-collapse:collapse;font-size:11px;width:max-content}
 th,td{border:1px solid #d0d0d0;padding:3px 5px;text-align:center;vertical-align:middle}
 th{background:#efefef;font-weight:600;font-size:10px;white-space:nowrap;position:sticky;top:0;z-index:10}
 th.sun{background:#ffe0e0;color:#c00}
-td.mc{vertical-align:top;white-space:pre-line;line-height:1.35;font-size:10px;min-width:90px;padding:3px 4px}
+td.mc{vertical-align:top;white-space:pre-line;line-height:1.35;font-size:10px;min-width:var(--cw);padding:3px 4px}
 td.mc .r{font-weight:700;color:#000}
 td.mc .p{color:#1a6b1a}
 td.mc .p.neg{color:#d00}
@@ -195,6 +197,8 @@ td.memo-cell{min-width:140px;padding:3px 4px;vertical-align:top}
 .zoom-bar button{width:26px;height:22px;border:1px solid #ccc;border-radius:3px;background:#fff;cursor:pointer;font-size:13px;font-weight:700;color:#555;display:flex;align-items:center;justify-content:center;padding:0}
 .zoom-bar button:hover{background:#e8e8e8}
 .zoom-bar .zoom-pct{min-width:36px;text-align:center;font-weight:600;color:#333}
+.zoom-bar .cw-lbl{font-size:10px;color:#666;font-weight:600;cursor:default;white-space:nowrap}
+.zoom-bar .zoom-sep{width:1px;height:16px;background:#ccc;margin:0 4px}
 .search-box{display:flex;align-items:center;gap:4px;margin-right:auto}
 .search-box input{width:160px;padding:4px 8px;border:1px solid #ccc;border-radius:3px;font-size:11px;font-family:inherit}
 .search-box input:focus{outline:none;border-color:#4285f4}
@@ -280,7 +284,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="zoom-bar">
 <div class="search-box"><input type="text" id="searchInput" placeholder="🔍 검색" autocomplete="off"><span class="s-info" id="searchInfo"></span><button onclick="searchNav(-1)">▲</button><button onclick="searchNav(1)">▼</button><button onclick="searchClear()" style="font-size:10px">✕</button></div>
 <div class="csv-box"><span style="font-weight:600;color:#555">📥</span><input type="date" id="csvStart" title="시작일"><span class="csv-tilde">~</span><input type="date" id="csvEnd" title="종료일"><button onclick="csvDownloadRange()" title="현재 모드의 데이터를 선택한 기간으로 CSV 다운로드">CSV 다운로드</button></div>
-<button onclick="zoomChange(-10)">−</button><span class="zoom-pct" id="zoomPct">100%</span><button onclick="zoomChange(10)">+</button><button onclick="zoomReset()" style="width:auto;padding:0 6px;font-size:10px">초기화</button>
+<span class="cw-lbl" title="추이차트 날짜 열의 너비를 넓히거나 좁힙니다(라벨·합계 열은 고정)">↔ 열너비</span><button onclick="cwChange(-8)" title="열 좁게">−</button><span class="zoom-pct" id="cwPx">96px</span><button onclick="cwChange(8)" title="열 넓게">+</button><button onclick="cwReset()" style="width:auto;padding:0 6px;font-size:10px">초기화</button><span class="zoom-sep"></span><span class="cw-lbl" title="화면 전체 배율">🔍 배율</span><button onclick="zoomChange(-10)">−</button><span class="zoom-pct" id="zoomPct">100%</span><button onclick="zoomChange(10)">+</button><button onclick="zoomReset()" style="width:auto;padding:0 6px;font-size:10px">초기화</button>
 </div>
 <!-- Panels -->
 <div class="panel active" id="p-dashboard"><div id="dashContent"></div></div>
@@ -422,7 +426,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260820a"></script>
+<script src="app.js?v=20260820b"></script>
 </div>
 </body>
 </html>

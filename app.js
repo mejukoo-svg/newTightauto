@@ -270,7 +270,7 @@ function _esTrendTable(sides){
   let maxLen=0;per.forEach(a=>{if(a.length>maxLen)maxLen=a.length});
   if(!maxLen)return '';
   let ths='';
-  for(let i=0;i<maxLen;i++)ths+='<th style="min-width:96px;font-size:9px;color:#aaa;font-weight:400">'+(i===0?'◀최신':(i+1))+'</th>';
+  for(let i=0;i<maxLen;i++)ths+='<th style="min-width:var(--cw);font-size:9px;color:#aaa;font-weight:400">'+(i===0?'◀최신':(i+1))+'</th>';
   let h='<table><thead><tr><th style="min-width:230px;max-width:230px;text-align:left">세트'
     +'<div style="font-size:8px;font-weight:400;color:#999;line-height:1.3">셀: ROAS / 순이익 / 지출 / 매출 / 전환율(클릭률) / CPM</div></th>'
     +'<th style="min-width:112px;background:#eef3f9">전체</th>'+ths+'</tr></thead><tbody>';
@@ -553,7 +553,7 @@ function renderExperiment(){
   const aDates=Object.keys(A.range).sort().reverse();
   const bDates=Object.keys(B.range).sort().reverse();
   const maxLen=Math.max(aDates.length,bDates.length);
-  let ths='';for(let i=0;i<maxLen;i++)ths+='<th style="min-width:96px;font-size:9px;color:#aaa;font-weight:400">'+(i===0?'◀최신':(i+1))+'</th>';
+  let ths='';for(let i=0;i<maxLen;i++)ths+='<th style="min-width:var(--cw);font-size:9px;color:#aaa;font-weight:400">'+(i===0?'◀최신':(i+1))+'</th>';
   let h='<thead><tr><th class="fx fx0" style="min-width:230px;max-width:230px;text-align:left">세트'+
     '<div style="font-size:8px;font-weight:400;color:#999;line-height:1.3">셀: ROAS / 순이익 / 지출 / 매출 / 전환율(클릭률) / CPM</div></th>'+
     '<th style="min-width:112px;background:#eef3f9">전체</th>'+ths+'</tr></thead><tbody>';
@@ -2363,7 +2363,7 @@ function renderTrend(opts){
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';
     // 메타 기준으로 그린 날짜는 헤더에 표시 — 날짜탭(Mixpanel)과 숫자가 다른 이유를 바로 알 수 있게
     const mm=(MODE==='gl'&&isGlMetaDay(d))?'<span title="이 날짜는 Mixpanel 대신 Meta 보고값(매출=지출×메타ROAS, 구매수=results_meta) 기준입니다" style="color:#1a73e8;font-size:9px">ᴹ</span>':'';
-    return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')'+mm+'</th>'}).join('');
+    return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')'+mm+'</th>'}).join('');
   const colSpan=dd.length+4+(showChg?1:0)+(showAcc?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 메모 1칸(증감 컬럼 제거), showAcc시 광고계정 1칸
   // Summary
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks;imp+=(a.d[d].impressions||0)}});totD[d]={s,r,p,mp,uc,imp}});
@@ -2580,7 +2580,7 @@ function renderTrendAgg(gran){
   // 세트필터 (공용 #tFilter)
   const tKw=(document.getElementById('tFilter').value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
-  const ths=cols.map(ck=>'<th style="min-width:90px">'+colLabel(ck)+'</th>').join('');
+  const ths=cols.map(ck=>'<th style="min-width:var(--cw)">'+colLabel(ck)+'</th>').join('');
   // 광고 계정 컬럼(캠페인 왼쪽) — 일별 뷰(renderTrend)와 동일하게 국내·글로벌만
   const showAcc=MODE==='kr'||MODE==='gl';
   const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
@@ -2841,7 +2841,7 @@ function renderTrendProduct(){
     const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;
     return'<td class="mc '+RC(roas)+yd+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm,ctr)+'</td>'};
   // Headers
-  const ths=cols.map(ck=>{if(isWeek)return'<th style="min-width:90px">'+wkLabel(ck)+'</th>';const w=WD(ck);const yd=ck===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(ck)+'('+w+')</th>'}).join('');
+  const ths=cols.map(ck=>{if(isWeek)return'<th style="min-width:var(--cw)">'+wkLabel(ck)+'</th>';const w=WD(ck);const yd=ck===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(ck)+'('+w+')</th>'}).join('');
   const colSpan=cols.length+4;
   // Build table
   let h='<thead><tr><th style="min-width:200px;text-align:left">상품</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th style="min-width:130px">'+rowIdLabel()+'</th><th>'+sumLabel+'</th>'+ths+'</tr></thead><tbody>';
@@ -2892,7 +2892,7 @@ function renderChange(){
   // 컬럼(기간) — 최신순
   const limit=view==='day'?30:view==='week'?16:6;
   const cols=(view==='day'?DATES.slice():[...new Set(AD.map(r=>pkey(r.date)))].sort().reverse()).slice(0,limit);
-  const ths=cols.map(k=>{const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+yd+'" style="min-width:92px">'+colLabel(k)+'</th>'}).join('');
+  const ths=cols.map(k=>{const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+yd+'" style="min-width:var(--cw)">'+colLabel(k)+'</th>'}).join('');
   const totP={};cols.forEach(k=>{let s=0,r=0;list.forEach(a=>{const o=a.p[k];if(o){s+=o.s;r+=o.r}});totP[k]={s,r}});
   let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   const ts=list.reduce((a,x)=>a+x._s,0),tr=list.reduce((a,x)=>a+x._r,0);
@@ -3790,7 +3790,7 @@ function renderGlobalRevenue(){
   const isSunCol=k=>mode==='daily'&&new Date(k).getDay()===0;
   // 헤더
   let h='<thead><tr><th style="min-width:80px;text-align:left;background:#4476b8;color:#fff">국가</th>';
-  keys.forEach(k=>{h+='<th style="min-width:85px;'+(isSunCol(k)?'background:#ffe0e0;color:#c00':'background:#4476b8;color:#fff')+'">'+colLabel(k)+'</th>'});
+  keys.forEach(k=>{h+='<th style="min-width:var(--cw);'+(isSunCol(k)?'background:#ffe0e0;color:#c00':'background:#4476b8;color:#fff')+'">'+colLabel(k)+'</th>'});
   h+='<th style="background:#4476b8;color:#fff">합계</th></tr></thead><tbody>';
   // 국가별 행 (미포함 시 대만은 대만밴스드 귀속매출 차감 반영)
   //   국가를 하나 고르면 아래 '종합' 행이 곧 그 나라 매출이라 중복 행은 생략
@@ -4672,7 +4672,7 @@ function _chrevHourly(){
   else if(scope==='gl')rows=[sumAll,{name:'글로벌 종합',sum:true,get:(d,b)=>sumOf(d,b,GL)},...mkRows(GL)];
   else rows=[sumAll,...mkRows(DOM.concat(GL))];
   // 헤더 (버킷 20이 각 날짜 블록의 왼쪽 시작 → 구분선)
-  const ths=cols.map(col=>'<th style="min-width:92px;'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
+  const ths=cols.map(col=>'<th style="min-width:var(--cw);'+(col.dayStart?'border-left:2px solid #9bb5d4;':'')+'">'+col.label+'</th>').join('');
   let h='<thead><tr>'+CHR_TH_GRP+'<th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
   const grpCells=_chrGrpCells(rows);
   rows.forEach((row,ri)=>{
@@ -4919,7 +4919,7 @@ function _chrevDaily(channels,days){
     dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
   }
   channels=_chrevSortByRev(channels,dates.slice(0,7));  // 정렬 기준 = '7일 합계' 컬럼과 동일한 최근 7일 매출
-  const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
+  const ths=dates.map(d=>{const w=WD(d);return '<th class="'+(w==='일'?'sun':'')+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   let h='<thead><tr>'+CHR_TH_GRP+'<th style="min-width:100px;text-align:left">채널</th><th style="min-width:90px">7일 합계</th>'+ths+'</tr></thead><tbody>';
   const r7=dates.slice(0,7);
   const grpCells=_chrGrpCells(channels);
@@ -4967,7 +4967,7 @@ function _chrevPeriod(channels,view,count){
   }
   // 일별 뷰(_chrevDaily)와 동일한 행=채널 / 열=기간 매트릭스. 각 셀은 MC_CH(ROAS/순이익/매출/지출).
   channels=_chrevSortByRev(channels,periods.flatMap(p=>p.dates));
-  const ths=periods.map(per=>'<th style="min-width:100px">'+per.label+'</th>').join('');
+  const ths=periods.map(per=>'<th style="min-width:var(--cw)">'+per.label+'</th>').join('');
   let h='<thead><tr>'+CHR_TH_GRP+'<th style="min-width:100px;text-align:left">채널</th>'+ths+'</tr></thead><tbody>';
   const grpCells=_chrGrpCells(channels);
   channels.forEach((ch,ci)=>{
@@ -5227,7 +5227,7 @@ function renderNsaDaily(){
     if(sortBy==='profit')return b._p-a._p;
     return b._yS-a._yS; // recent
   });
-  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
+  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   // 종합
   const totD={};allDates.forEach(d=>{let s=0,r=0,conv=0,clk=0,imp=0;list.forEach(a=>{const x=a.d[d];if(x){s+=(x.cost_vat||0);r+=(x.revenue||0);conv+=(x.conversions||0);clk+=(x.clicks||0);imp+=(x.impressions||0)}});totD[d]={s,r,conv,clk,imp}});
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
@@ -5326,7 +5326,7 @@ function renderNsaKeywords(days){
   const tp=tr-ts,troas=ts>0?tr/ts*100:0;
   const tconv=d7.reduce((a,d)=>a+(totD[d]?.conv||0),0),tclk=d7.reduce((a,d)=>a+(totD[d]?.clk||0),0),timp=d7.reduce((a,d)=>a+(totD[d]?.imp||0),0);
   const tcvr=tclk>0?tconv/tclk*100:0,tctr=timp>0?tclk/timp*100:0;
-  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:100px">'+DK(d)+'('+w+')</th>'}).join('');
+  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   let h='<thead><tr><th style="min-width:240px;text-align:left">검색어</th><th style="min-width:160px;text-align:left">광고그룹</th><th style="min-width:130px">라벨</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   // 종합 행
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">📊 종합 Top'+top.length+'</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div></td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,null,tctr)+'</td>';
@@ -5394,7 +5394,7 @@ function renderNsaWeekly(){
     return a;
   }).filter(a=>a._s>=minSp);
   list.sort((a,b)=>b._recentS-a._recentS);
-  const ths=weekKeys.map(wk=>'<th style="min-width:100px">'+wkLabel(wk)+'</th>').join('');
+  const ths=weekKeys.map(wk=>'<th style="min-width:var(--cw)">'+wkLabel(wk)+'</th>').join('');
   const totW={};weekKeys.forEach(wk=>{let s=0,r=0,conv=0,clk=0,imp=0;list.forEach(a=>{const w=a.w[wk];if(w){s+=w.s;r+=w.r;conv+=w.conv;clk+=w.clk;imp+=w.imp||0}});totW[wk]={s,r,conv,clk,imp}});
   const ts=weekKeys.reduce((a,wk)=>a+(totW[wk]?.s||0),0),tr=weekKeys.reduce((a,wk)=>a+(totW[wk]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
   const tconv=weekKeys.reduce((a,wk)=>a+(totW[wk]?.conv||0),0),tclk=weekKeys.reduce((a,wk)=>a+(totW[wk]?.clk||0),0),timp=weekKeys.reduce((a,wk)=>a+(totW[wk]?.imp||0),0);
@@ -5473,7 +5473,7 @@ function renderGgdgContent(){
   const ctCountry={};
   GGDG_SP.forEach(r=>{const c=(r.country||'').toUpperCase();if(!c)return;if(c==='TW'||ctCountry[r.content]==='TW')ctCountry[r.content]='TW';else if(!ctCountry[r.content])ctCountry[r.content]=c});
   const countryOf=ct=>ctCountry[ct]||(_twName(ct)?'TW':'KR');
-  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:104px">'+DK(d)+'('+w+')</th>'}).join('');
+  const ths=allDates.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   // 셀: 지출 있으면 ROAS/순이익/지출/매출/건수, 없으면 매출/건수만
   const cell=(s,r,c)=>{
     if(!s&&!r&&!c)return'';
@@ -5603,7 +5603,7 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
   };
   // 7일 평균 셀 — 7일 합계를 일수로 나눠 표시. 건수는 소수 1자리(하루 평균 2.4건).
   const cellAvg=(s,r,c)=>cell(s/AVGN,r/AVGN,Math.round(c/AVGN*10)/10);
-  const ths=cols.map(k=>{const isSun=view==='day'&&WD(k)==='일';const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+(isSun?'sun':'')+yd+'" style="min-width:104px">'+colLabel(k)+'</th>'}).join('');
+  const ths=cols.map(k=>{const isSun=view==='day'&&WD(k)==='일';const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+(isSun?'sun':'')+yd+'" style="min-width:var(--cw)">'+colLabel(k)+'</th>'}).join('');
   const avgTitle='최근 '+AVGN+'일('+(avgDates[avgDates.length-1]||'')+'~'+(avgDates[0]||'')+') 일평균 · ROAS는 7일 합계 기준 · 당일(오늘)은 진행 중이라 부분값';
   let h='<thead><tr><th class="fx fx0" style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">세트</th><th style="min-width:110px;text-align:left">세트ID</th>'
     +'<th style="min-width:120px" title="'+avgTitle+'">7일 평균</th>'+ths+'</tr></thead><tbody>';
@@ -5891,7 +5891,7 @@ function renderTiktok(){
     a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
     a._yS=a.d[yDay]?a.d[yDay].spend:0;});
   list.sort((a,b)=>(b._yS-a._yS)||(b._s-a._s));
-  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:90px">'+DK(d)+'('+w+')</th>'}).join('');
+  const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4;  // 캠페인/ID/일예산/7일
   const agg=(items,d)=>{let s=0,r=0,o=0;items.forEach(a=>{const x=a.d[d];if(x){s+=x.spend;r+=x.revenue;o+=x.orders}});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
   const cellsOf=items=>dd.map(d=>{const t=agg(items,d);const yd=d===yDay?' col-yday':'';
@@ -5923,6 +5923,23 @@ function renderTiktok(){
   h+='</tbody>';tbl.innerHTML=h;
   requestAnimationFrame(()=>_fixSticky(tbl));
 }
+
+// ===== 열 너비 (추이차트 날짜 열) =====
+// 모든 추이차트의 날짜/기간 열은 min-width:var(--cw) 를 쓴다 → 변수 하나만 바꾸면
+// 재렌더 없이 전 탭이 같이 움직인다. 라벨·합계 열은 고정(가로 스크롤 기준점).
+const CW_DEF=96,CW_MIN=52,CW_MAX=200;
+let colWidth=CW_DEF;
+function applyCW(){
+  document.documentElement.style.setProperty('--cw',colWidth+'px');
+  const el=document.getElementById('cwPx');if(el)el.textContent=colWidth+'px';
+  try{localStorage.setItem('cw',colWidth)}catch(e){}
+}
+function cwChange(d){colWidth=Math.max(CW_MIN,Math.min(CW_MAX,colWidth+d));applyCW()}
+function cwReset(){colWidth=CW_DEF;applyCW()}
+(function(){try{const v=parseInt(localStorage.getItem('cw'));
+  if(v>=CW_MIN&&v<=CW_MAX)colWidth=v}catch(e){}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',applyCW);
+  else applyCW();})();
 
 // ===== ZOOM =====
 let zoomLevel=100;
