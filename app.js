@@ -2604,6 +2604,20 @@ function vnTwUsdRows(){
   });
 }
 // 추이차트(메인) 라우팅. 글로벌 모드도 타이트 글로벌(AD)만 표시 —
+// 대만 구글(밴스드 운영) 일자별 지출·귀속매출을 KRW→USD 로 환산해 돌려준다. {date:{s,r}}
+//   소스=google_campaign_daily(GCAMP, KRW). 대만(country='TW') 행은 검색광고·디멘드젠·기타 전부
+//   밴스드 운영이라(매출탭 채널별 G_TW_ALL 정의와 동일) country 필터만으로 충분하다.
+//   GCAMP 는 지연로드라 아직 없으면 빈 객체 — 호출부에서 ensureBigTable('gcamp') 후 재렌더한다.
+function gTwUsdByDate(){
+  const out={};
+  (GCAMP||[]).forEach(r=>{
+    if(String(r.country||'')!=='TW')return;
+    const rate=usdKrwRateAt(r.date)||1380;
+    const o=out[r.date]||(out[r.date]={s:0,r:0});
+    o.s+=(+r.spend||0)/rate;o.r+=(+r.revenue||0)/rate;
+  });
+  return out;
+}
 // 밴스드 대만(VN_TW_ACC)은 여기서 제외하고 별도 탭(🇹🇼 대만 추이차트)에서만 본다.
 function renderTrendMain(){
   const gran=(document.getElementById('tGran')||{}).value||'day';
@@ -3935,6 +3949,10 @@ function renderGlobalRevenue(){
 //   ★ 밴스드 차감(2026-08-21): 대만 밴스드 매출은 우리 Stripe 로 들어오지만 우리 몫이 아니라
 //     순수익에서 빼야 하고, 여기에 더해 밴스드 광고 지출의 12% 를 수수료로 또 뺀다.
 //     '밴스드 미포함' 보기에선 매출합·지출합에 밴스드가 아예 없으므로 중복 차감하지 않는다(0 표기).
+//   ★ 밴스드 범위 = 대만 메타(vanced_ad_performance_daily) + 대만 구글(google_campaign_daily 의
+//     TW 행 = 검색광고·디멘드젠·기타, 전부 밴스드 운영). 매출탭 채널별의 glVanR 정의와 같다.
+//     구글이 붙으면서 이 박스의 지출합에는 대만 구글 지출이 들어간다 → 위 국가별 표(메타만)보다
+//     그만큼 크다. 순수익·수수료를 맞추려면 밴스드 매체비를 빠짐없이 세야 하므로 의도된 차이다.
 // 밴스드 수수료율(%) — 밴스드 광고 지출에 곱해 순수익에서 뺀다.
 const GREV_VAN_FEE_PCT=12;
 function renderGlobalRevenuePeriod(){
@@ -3953,6 +3971,9 @@ function renderGlobalRevenuePeriod(){
     const d=new Date(last);d.setDate(d.getDate()-29);const lo=d.toISOString().slice(0,10);
     startSel.value=allDates.includes(lo)?lo:allDates[0];
   }
+  // 대만 구글(밴스드)은 GCAMP(지연로드 테이블)에 있다 — 아직이면 불러온 뒤 이 박스만 다시 그린다.
+  const gcampReady=(GCAMP||[]).length>0;
+  if(!gcampReady)ensureBigTable('gcamp').then(()=>{if((GCAMP||[]).length)renderGlobalRevenuePeriod()});
   let sd=startSel.value||allDates[0],ed=endSel.value||allDates[allDates.length-1];
   if(sd>ed){[sd,ed]=[ed,sd];startSel.value=sd;endSel.value=ed}  // 뒤집혀 있으면 자동 swap
   const incVan=(document.getElementById('grevVanced')?.value||'inc')==='inc';
@@ -3963,7 +3984,18 @@ function renderGlobalRevenuePeriod(){
   const twOK=(cSel==='ALL'||cSel==='TW');
   const shownC=countries.filter(c=>cSel==='ALL'||GREV_CC[c]===cSel);
   GL_AD.forEach(r=>{if(cSel!=='ALL'&&canonCountry(r.country)!==cSel)return;glSpend[r.date]=(glSpend[r.date]||0)+(+r.spend_usd||0)});
-  if(twOK)vnTwUsdRows().forEach(r=>{vanSpend[r.date]=(vanSpend[r.date]||0)+(+r.spend||0);vanRev[r.date]=(vanRev[r.date]||0)+(+r.revenue||0)});
+  // 밴스드 = 대만 메타(vanced_ad_performance_daily) + 대만 구글(검색광고·디멘드젠·기타).
+  //   메타/구글을 따로 담아 두는 건 결과 줄에 내역을 쪼개 보여주기 위해서다.
+  const vanSpendM_={},vanRevM_={},vanSpendG_={},vanRevG_={};
+  if(twOK){
+    vnTwUsdRows().forEach(r=>{vanSpendM_[r.date]=(vanSpendM_[r.date]||0)+(+r.spend||0);vanRevM_[r.date]=(vanRevM_[r.date]||0)+(+r.revenue||0)});
+    const g=gTwUsdByDate();
+    Object.keys(g).forEach(d=>{vanSpendG_[d]=(vanSpendG_[d]||0)+g[d].s;vanRevG_[d]=(vanRevG_[d]||0)+g[d].r});
+  }
+  [...new Set([...Object.keys(vanSpendM_),...Object.keys(vanRevM_),...Object.keys(vanSpendG_),...Object.keys(vanRevG_)])].forEach(d=>{
+    vanSpend[d]=(vanSpendM_[d]||0)+(vanSpendG_[d]||0);
+    vanRev[d]=(vanRevM_[d]||0)+(vanRevG_[d]||0);
+  });
   let revSum=0,spendSum=0,dayN=0;
   allDates.forEach(dt=>{if(dt<sd||dt>ed)return;dayN++;
     const bd=byDate[dt]||{};let rev=0;shownC.forEach(c=>{rev+=bd[c]?.revenue_usd||0});
@@ -3972,8 +4004,10 @@ function renderGlobalRevenuePeriod(){
     revSum+=rev;spendSum+=sp});
   const infl=Math.max(0,parseFloat(document.getElementById('grevPInfl')?.value)||0);  // 인플루언서 비용(수동 입력 $)
   // 밴스드(대만) 기간 합 — vanRev/vanSpend 는 국가 선택이 ALL·TW 일 때만 채워진다(그 외엔 0).
-  let vanRevSum=0,vanSpendSum=0;
-  allDates.forEach(dt=>{if(dt<sd||dt>ed)return;vanRevSum+=(vanRev[dt]||0);vanSpendSum+=(vanSpend[dt]||0)});
+  let vanRevSum=0,vanSpendSum=0,vanRevM=0,vanRevG=0,vanSpM=0,vanSpG=0;
+  allDates.forEach(dt=>{if(dt<sd||dt>ed)return;
+    vanRevSum+=(vanRev[dt]||0);vanSpendSum+=(vanSpend[dt]||0);
+    vanRevM+=(vanRevM_[dt]||0);vanRevG+=(vanRevG_[dt]||0);vanSpM+=(vanSpendM_[dt]||0);vanSpG+=(vanSpendG_[dt]||0)});
   const vanFeeAll=vanSpendSum*GREV_VAN_FEE_PCT/100;
   // 미포함 보기면 매출합·지출합에 밴스드가 없으니 차감액도 0 (숫자는 참고용으로 계속 보여준다).
   const vanRevCut=incVan?vanRevSum:0, vanFee=incVan?vanFeeAll:0;
@@ -3990,8 +4024,10 @@ function renderGlobalRevenuePeriod(){
     +' &nbsp;<span style="color:#888">(ROAS '+(spendSum>0?roas.toFixed(0)+'%':'-')+')</span>'
     // 밴스드 원자료 한 줄 — 차감액이 어디서 나온 값인지 바로 대조할 수 있게
     +'<div style="color:#888;font-size:10px;margin-top:2px">'
-    +'🇹🇼 밴스드 매출 $'+F(vanRevSum)+' · 지출 $'+F(vanSpendSum)
+    +'🇹🇼 밴스드 매출 $'+F(vanRevSum)+'<span style="color:#aaa">(메타 $'+F(vanRevM)+' + 구글 $'+F(vanRevG)+')</span>'
+    +' · 지출 $'+F(vanSpendSum)+'<span style="color:#aaa">(메타 $'+F(vanSpM)+' + 구글 $'+F(vanSpG)+')</span>'
     +' → 수수료 '+GREV_VAN_FEE_PCT+'% $'+F(vanFeeAll)
+    +(gcampReady?'':' <span style="color:#a15c00">— 구글(google_campaign_daily) 로딩 중…</span>')
     +(incVan?'':' <span style="color:#a15c00">— 밴스드 미포함 보기라 매출합·지출합에서 이미 빠져 있어 차감하지 않음</span>')
     +(twOK?'':' <span style="color:#a15c00">— 대만 외 국가 선택이라 밴스드 없음</span>')
     +'</div>';
