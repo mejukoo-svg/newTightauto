@@ -3946,13 +3946,12 @@ function renderGlobalRevenue(){
 // 글로벌 매출탭 하단 — 시작~종료 기간의 매출합 − 지출합 − 인플 − 밴스드 몫 = 순수익.
 //   매출합=Stripe 국가별 실결제 USD 합(밴스드 미포함 시 대만밴스드 귀속매출 차감),
 //   지출합=GL_AD 지출(+밴스드 포함 시 대만밴스드 지출). 상단 밴스드 토글·국가 드롭다운을 그대로 반영.
-//   ★ 밴스드 차감(2026-08-21): 대만 밴스드 매출은 우리 Stripe 로 들어오지만 우리 몫이 아니라
-//     순수익에서 빼야 하고, 여기에 더해 밴스드 광고 지출의 12% 를 수수료로 또 뺀다.
-//     '밴스드 미포함' 보기에선 매출합·지출합에 밴스드가 아예 없으므로 중복 차감하지 않는다(0 표기).
+//   ★ 밴스드 차감(2026-08-21): 밴스드 매출은 우리 몫이라 매출합에 그대로 두고, 대신 비용 두 개를 뺀다.
+//     ① 밴스드 지출(매체비)  ② 밴스드 지출 × 12% (수수료). 인플루언서 비용과 같은 성격의 항목.
+//     지출합은 '글로벌(타이트) 지출'만 — 밴스드 지출은 지출합에서 빼고 별도 항목으로 세운다.
+//     '밴스드 미포함' 보기에선 매출합에서 밴스드 귀속매출이 빠지므로 비용 차감도 하지 않는다(0 표기).
 //   ★ 밴스드 범위 = 대만 메타(vanced_ad_performance_daily) + 대만 구글(google_campaign_daily 의
 //     TW 행 = 검색광고·디멘드젠·기타, 전부 밴스드 운영). 매출탭 채널별의 glVanR 정의와 같다.
-//     구글이 붙으면서 이 박스의 지출합에는 대만 구글 지출이 들어간다 → 위 국가별 표(메타만)보다
-//     그만큼 크다. 순수익·수수료를 맞추려면 밴스드 매체비를 빠짐없이 세야 하므로 의도된 차이다.
 // 밴스드 수수료율(%) — 밴스드 광고 지출에 곱해 순수익에서 뺀다.
 const GREV_VAN_FEE_PCT=12;
 function renderGlobalRevenuePeriod(){
@@ -4000,8 +3999,8 @@ function renderGlobalRevenuePeriod(){
   allDates.forEach(dt=>{if(dt<sd||dt>ed)return;dayN++;
     const bd=byDate[dt]||{};let rev=0;shownC.forEach(c=>{rev+=bd[c]?.revenue_usd||0});
     if(!incVan)rev-=(vanRev[dt]||0);
-    let sp=glSpend[dt]||0;if(incVan)sp+=(vanSpend[dt]||0);
-    revSum+=rev;spendSum+=sp});
+    // 지출합 = 글로벌(타이트) 지출만. 밴스드 지출은 아래에서 별도 항목으로 뺀다.
+    revSum+=rev;spendSum+=(glSpend[dt]||0)});
   const infl=Math.max(0,parseFloat(document.getElementById('grevPInfl')?.value)||0);  // 인플루언서 비용(수동 입력 $)
   // 밴스드(대만) 기간 합 — vanRev/vanSpend 는 국가 선택이 ALL·TW 일 때만 채워진다(그 외엔 0).
   let vanRevSum=0,vanSpendSum=0,vanRevM=0,vanRevG=0,vanSpM=0,vanSpG=0;
@@ -4009,26 +4008,29 @@ function renderGlobalRevenuePeriod(){
     vanRevSum+=(vanRev[dt]||0);vanSpendSum+=(vanSpend[dt]||0);
     vanRevM+=(vanRevM_[dt]||0);vanRevG+=(vanRevG_[dt]||0);vanSpM+=(vanSpendM_[dt]||0);vanSpG+=(vanSpendG_[dt]||0)});
   const vanFeeAll=vanSpendSum*GREV_VAN_FEE_PCT/100;
-  // 미포함 보기면 매출합·지출합에 밴스드가 없으니 차감액도 0 (숫자는 참고용으로 계속 보여준다).
-  const vanRevCut=incVan?vanRevSum:0, vanFee=incVan?vanFeeAll:0;
-  const net=revSum-spendSum-infl-vanRevCut-vanFee;const roas=spendSum>0?revSum/spendSum*100:0;
+  // 미포함 보기면 매출합에서 밴스드 귀속매출이 빠져 있으니 비용도 빼지 않는다(숫자는 참고용으로 표시).
+  const vanSpendCut=incVan?vanSpendSum:0, vanFee=incVan?vanFeeAll:0;
+  const net=revSum-spendSum-infl-vanSpendCut-vanFee;
+  // ROAS 는 총 매체비(글로벌 + 밴스드) 기준 — 매출합에 밴스드 매출이 들어 있으므로 분모도 맞춘다.
+  const spendTot=spendSum+vanSpendCut;const roas=spendTot>0?revSum/spendTot*100:0;
   const cNm=cSel==='ALL'?'':(Object.keys(GREV_CC).find(k=>GREV_CC[k]===cSel)||cSel);
   resEl.innerHTML=
     '<span style="color:#888">'+dayN+'일'+(cNm?' · '+cNm:'')+'</span> &nbsp; '
     +'매출합 <b style="color:#00d">$'+F(revSum)+'</b> &nbsp;−&nbsp; '
     +'지출합 <b style="color:#d00">$'+F(spendSum)+'</b> &nbsp;−&nbsp; '
     +'인플 <b style="color:#d00">$'+F(infl)+'</b> &nbsp;−&nbsp; '
-    +'밴스드매출 <b style="color:#d00">$'+F(vanRevCut)+'</b> &nbsp;−&nbsp; '
+    +'밴스드지출 <b style="color:#d00">$'+F(vanSpendCut)+'</b> &nbsp;−&nbsp; '
     +'밴스드수수료 <b style="color:#d00">$'+F(vanFee)+'</b> &nbsp;=&nbsp; '
     +'순수익 <b style="color:'+(net>=0?'green':'red')+'">'+(net<0?'-$':'$')+F(Math.abs(net))+'</b>'
-    +' &nbsp;<span style="color:#888">(ROAS '+(spendSum>0?roas.toFixed(0)+'%':'-')+')</span>'
+    +' &nbsp;<span style="color:#888" title="총 매체비(글로벌 지출 + 밴스드 지출) 기준">(ROAS '+(spendTot>0?roas.toFixed(0)+'%':'-')+')</span>'
     // 밴스드 원자료 한 줄 — 차감액이 어디서 나온 값인지 바로 대조할 수 있게
     +'<div style="color:#888;font-size:10px;margin-top:2px">'
     +'🇹🇼 밴스드 매출 $'+F(vanRevSum)+'<span style="color:#aaa">(메타 $'+F(vanRevM)+' + 구글 $'+F(vanRevG)+')</span>'
     +' · 지출 $'+F(vanSpendSum)+'<span style="color:#aaa">(메타 $'+F(vanSpM)+' + 구글 $'+F(vanSpG)+')</span>'
     +' → 수수료 '+GREV_VAN_FEE_PCT+'% $'+F(vanFeeAll)
     +(gcampReady?'':' <span style="color:#a15c00">— 구글(google_campaign_daily) 로딩 중…</span>')
-    +(incVan?'':' <span style="color:#a15c00">— 밴스드 미포함 보기라 매출합·지출합에서 이미 빠져 있어 차감하지 않음</span>')
+    +'<span style="color:#aaa"> · 매출은 우리 몫이라 매출합에 그대로 둡니다</span>'
+    +(incVan?'':' <span style="color:#a15c00">— 밴스드 미포함 보기라 매출합에서 밴스드 매출이 빠져 있어 비용도 차감하지 않음</span>')
     +(twOK?'':' <span style="color:#a15c00">— 대만 외 국가 선택이라 밴스드 없음</span>')
     +'</div>';
 }

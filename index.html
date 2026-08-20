@@ -300,7 +300,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-stripe"><div class="filter"><label>보기</label><select id="sMode" onchange="renderStripe()"><option value="daily" selected>일간</option><option value="weekly">주간</option><option value="monthly">월간</option></select><span style="color:#888;margin-left:12px;font-size:10px">💳 Stripe 국가별 매출 (USD)</span></div><div class="sheet-wrap"><table id="sTbl"></table></div></div>
 <div class="panel" id="p-grev"><div class="filter"><label>보기</label><select id="grevMode" onchange="renderGlobalRevenue()"><option value="daily" selected>일별</option><option value="weekly">주간</option><option value="monthly">월간</option></select><label style="margin-left:10px">밴스드</label><select id="grevVanced" onchange="renderGlobalRevenue()"><option value="inc" selected>밴스드 포함</option><option value="exc">밴스드 미포함</option></select><label style="margin-left:10px">국가</label><select id="grevCountry" onchange="renderGlobalRevenue()"><option value="ALL" selected>🌐 전체</option><option value="TW">대만</option><option value="HK">홍콩</option><option value="JP">일본</option><option value="TH">태국</option><option value="SG">싱가포르</option></select><span style="color:#888;margin-left:12px;font-size:10px">💰 글로벌 국가별 매출·메타지출·순이익·ROAS (USD) · 대만밴스드 포함/미포함 · 오가닉비율=광고 미귀속 매출 비중<br>🌐 국가 선택 시 매출·지출·순이익·ROAS·오가닉이 그 나라만으로 계산 — ⚠ 매출=Stripe 순매출(캡처액−환불액 = 미청구·환불 제외) · <b>국가=결제통화 기준</b>(2026-08-01~ 전 국가 통화 단독 / 그 이전은 홍콩만 통화 기준이고 대만·태국은 빌링주소 우선) — 홍콩 고객이 -tw 스토어에서 TWD로 결제한 건은 <b>대만 매출</b>로 잡힙니다. 반면 지출·귀속매출은 세트 country(캠페인명 tw/hk 태그) 기준이라 홍콩 광고비는 홍콩에 남습니다 → <b>국가별 ROAS·순이익은 홍콩이 실제보다 낮게, 대만이 높게 보이는 근사치</b>(2026-07 홍콩 ROAS 2.17→0.20). country 태그 없는 세트 지출은 제외됩니다(전체 합과 불일치 가능).</span></div><div class="sheet-wrap"><table id="grevTbl"></table></div>
 <div id="grevPeriodBox" style="margin-top:16px;padding:12px 14px;border:1px solid #cfe2f3;border-radius:6px;background:#f7fbff;max-width:820px">
-  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 − 인플루언서 비용 − <b>밴스드 매출</b> − <b>밴스드 지출×12%</b> = 순수익 (USD · 상단 밴스드 포함/미포함 · 국가 선택 반영) · 🇹🇼 대만 밴스드(<b>메타 + 구글 검색광고·디멘드젠·기타</b>) 매출은 우리 Stripe 로 들어오지만 밴스드 몫이라 빼고, 밴스드 광고 지출의 12% 를 수수료로 더 뺍니다 · ⚠ 이 박스의 <b>지출합에는 대만 구글 지출이 포함</b>돼 위 국가별 표(메타만)보다 그만큼 큽니다(상단이 <b>밴스드 미포함</b>이면 매출합·지출합에 이미 없어 차감하지 않고 참고값만 표시)</span></div>
+  <div style="font-weight:700;font-size:12px;margin-bottom:8px">🧮 기간별 순수익 계산 <span style="color:#888;font-weight:400;font-size:10px">— 선택 기간의 매출합 − 지출합 − 인플루언서 비용 − <b>밴스드 지출</b> − <b>밴스드 지출×12%</b> = 순수익 (USD · 상단 밴스드 포함/미포함 · 국가 선택 반영) · 🇹🇼 대만 밴스드(<b>메타 + 구글 검색광고·디멘드젠·기타</b>)는 <b>매출은 우리 몫이라 매출합에 그대로 두고</b>, 비용만 뺍니다 — 밴스드 매체비 + 그 12% 수수료. <b>지출합은 글로벌(타이트) 지출만</b>이고 밴스드 지출은 별도 항목입니다(ROAS는 둘을 합친 총 매체비 기준)(상단이 <b>밴스드 미포함</b>이면 매출합·지출합에 이미 없어 차감하지 않고 참고값만 표시)</span></div>
   <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <label style="font-size:11px">시작</label><select id="grevPStart" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
     <label style="font-size:11px;margin-left:6px">종료</label><select id="grevPEnd" onchange="renderGlobalRevenuePeriod()" style="font-size:11px;padding:2px 4px"></select>
@@ -426,7 +426,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260821b"></script>
+<script src="app.js?v=20260821c"></script>
 </div>
 </body>
 </html>
