@@ -43,6 +43,9 @@ ENV = r"C:\Users\gram\newTightauto\.env"
 
 # (이름, 광고그룹 ID, 캠페인 ID). 행 순서 = 시트 5행부터.
 # 시트에 아직 없는 광고그룹은 실행 시 자동으로 행이 삽입된다(목록 맨 뒤에 추가만 하면 된다).
+# 순서는 캠페인 ID 오름차순(생성순) → 그 안에서 광고그룹 ID 오름차순 = 캠페인별로 묶인 상태다.
+# 새 광고그룹은 맨 뒤에 붙으므로 묶음이 깨진다. 정렬을 되살리려면 _regroup_tiktok.py 를
+# 돌린 뒤 이 목록도 같은 순서로 다시 맞출 것(시트 행 순서와 ROWS 순서가 다르면 실행이 중단된다).
 ROWS = [
     ("전체", None, None),
     ("무녀_헤드뱅잉_headbang_2600714", "1870671711953025", "1870671597111538"),
@@ -52,16 +55,18 @@ ROWS = [
     ("무당_애니메이션모음_ASC(2)", "1872955572107265", "1872955572106417"),
     ("무녀_피안애니메이션모음_ASC", "1873119493389858", "1873119493389842"),
     ("무당_aiUGC_ASC(2-1)", "1873303138939010", "1873303138937266"),
-    ("무당_애니메이션모음_ASC(2-2)", "1873303422916706", "1873303422916690"),
+    ("무당_aiUGC_ASC(2-2)", "1873574070480033", "1873303138937266"),
+    ("무당_aiUGC_ASC(2-3)", "1873845018996865", "1873303138937266"),
+    ("무당_애니메이션모음_ASC(3-2)", "1873303422916706", "1873303422916690"),
+    ("무당_애니메이션모음_ASC(3-1)", "1873650543987842", "1873303422916690"),
     ("1%_0812_1%전환소재들", "1873308114121729", "1873308019491889"),
     ("무녀_피안애니메이션모음_ASC(1-1)", "1873573699433905", "1873573699433889"),
-    ("무당_aiUGC_ASC(2-2)", "1873574070480033", "1873303138937266"),
-    ("무당_애니메이션모음_ASC(2-1)", "1873650543987842", "1873303422916690"),
+    ("무녀_피안애니메이션모음_ASC(1-2)", "1873935803512994", "1873573699433889"),
 ]
 
 # 캠페인 ID -> 캠페인 이름. 시트 A열은 캠페인명과 광고그룹명이 다를 때 두 줄로 병기한다
 # (광고그룹을 복사하면 이름이 (2-1)/(2-2) 로 갈려 그룹명만으론 소속 캠페인을 알 수 없다).
-# 이름은 광고관리자 리포트 기준 2026-08-18 실측값 — 틱톡에서 이름을 바꾸면 여기도 갱신할 것.
+# 이름은 광고관리자 리포트 기준 2026-08-19 실측값 — 틱톡에서 이름을 바꾸면 여기도 갱신할 것.
 CAMP_NAME = {
     "1870671597111538": "무녀_헤드뱅잉_2600714",
     "1870672615781810": "무당_빙수범산_260714",
@@ -70,16 +75,21 @@ CAMP_NAME = {
     "1872955572106417": "무당_애니메이션모음_ASC(2)",
     "1873119493389842": "무녀_피안애니메이션모음_ASC",
     "1873303138937266": "무당_aiUGC_ASC(2)",
-    "1873303422916690": "무당_애니메이션모음_ASC(2-1)",
+    "1873303422916690": "무당_애니메이션모음_ASC(3)",
     "1873308019491889": "1%_0812_1%전환소재들",
     "1873573699433889": "무녀_피안애니메이션모음_ASC(1-1)",
 }
 
 
 def sheet_label(name, cid):
-    """시트 A열 라벨: 캠페인명(1줄) + 광고그룹명(2줄, 캠페인명과 다를 때만)."""
-    camp = CAMP_NAME.get(cid, name)
-    return camp if camp == name else camp + "\n └ " + name
+    """시트 A열 라벨 = **광고그룹명 단독**(2026-08-20~, 사용자 요청).
+
+    시트 그레인이 광고그룹이고 B열이 광고그룹 ID 라 캠페인은 시트에서 뺐다.
+    광고그룹명 자체가 (2-1)/(3-2) 식으로 계보를 담고 있어 이름만으로 서로 구분된다
+    (14개 전수 확인 · 중복 없음). CAMP_NAME 은 CBO 예산을 캠페인명으로 찾을 때
+    계속 쓰이므로 지우지 말 것 — 시트 표시에서만 빠진 것이다.
+    """
+    return name
 # 시트 컬럼(0-based). 2026-08-18 예산 컬럼을 C 에 끼워 넣으며 합계·날짜가 한 칸씩 밀렸다.
 COL_ID = 1                # B: 광고그룹 ID
 COL_BUD = 2               # C: 예산(설정 스냅샷)
@@ -418,6 +428,7 @@ def load_revenue(dates, spend):
     lo = (datetime.date.fromisoformat(d0) - datetime.timedelta(days=2)).isoformat()  # KST 경계 버퍼
     hi = max(dates)
     seen_ins, seen_ord = set(), set()
+    direct = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0]))
     by_cid = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0]))
     by_ad = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0]))
     dropped = []
@@ -428,8 +439,13 @@ def load_revenue(dates, spend):
             if ins in seen_ins:
                 continue
             seen_ins.add(ins)
-        cid = str(p.get("utm_id") or "")
-        if cid not in CIDS:
+        # utm_id 는 2026-08-17 부터 **캠페인 ID 와 광고그룹 ID 가 섞여** 온다(틱톡 태깅 변경).
+        # 광고그룹 ID 로 오면 소재 추정 없이 그대로 귀속하고, 캠페인 ID 면 종전대로 배분한다.
+        # 캠페인 ID 만 대조하면 갈라진 캠페인 매출이 통째로 사라진다(08/18 447,600원 11건 실측).
+        uid = str(p.get("utm_id") or "")
+        aid_direct = uid if uid in AIDS else None
+        cid = CAMP_BY_AID[uid] if aid_direct else uid
+        if not aid_direct and cid not in CIDS:
             continue
         # utm_id 는 틱톡 캠페인인데 utm_source 가 다른 결제가 있다(크로스셀·라스트터치 오귀속).
         # 과거에도 utm_source=google 건을 손으로 제외해 왔으므로 여기서 일괄 차단하고, 무엇이
@@ -451,6 +467,10 @@ def load_revenue(dates, spend):
         if d not in dates:
             continue
         amt = int(float(p.get("amount") or 0))       # 매출 = MP amount
+        if aid_direct:
+            t = direct[d][aid_direct]
+            t[0] += amt; t[1] += 1
+            continue
         a = by_cid[d][cid]
         a[0] += amt; a[1] += 1
         b = by_ad[d][(cid, str(p.get("utm_content") or "(없음)"))]
@@ -464,6 +484,12 @@ def load_revenue(dates, spend):
     # 캠페인 매출 → 광고그룹 배분
     out = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0]))
     for d in dates:
+        if direct[d]:
+            print(f"\n   [{d}] utm_id 가 광고그룹 ID 로 온 매출(추정 없이 직접 귀속):")
+            for aid, (rv, cn) in sorted(direct[d].items(), key=lambda x: -x[1][0]):
+                print(f"      광고그룹 {aid} {NAME_BY_AID[aid]:26} {rv:>9,}원 {cn}건")
+                t = out[d][aid]
+                t[0] += rv; t[1] += cn
         print(f"\n   [{d}] 소재(utm_content)별 매출:")
         for (cid, ad), (rv, cn) in sorted(by_ad[d].items(), key=lambda x: -x[1][0]):
             print(f"      소재 {ad:<20} {rv:>9,}원 {cn}건 (캠페인 {cid})")
@@ -624,12 +650,12 @@ def main():
             "rows": [{"values": [{"userEnteredValue": {"stringValue": aid}}]} for aid in migrate],
             "fields": "userEnteredValue"}})
         # 4행 헤더 라벨도 같이 바꾼다(안 바꾸면 '캠페인 ID' 아래 광고그룹 ID 가 들어가 오해를 부른다).
-        # ⚠️ A4 는 반드시 '캠페인' 으로 시작해야 한다 — 대시보드 _ttParseSheet 가
-        #    rows.findIndex(r => r[0].indexOf('캠페인')===0) 로 헤더 행을 찾는다.
+        # ⚠️ A4 는 '광고그룹' 또는 '캠페인' 으로 시작해야 한다 — 대시보드 _ttParseSheet 가
+        #    /^(광고그룹|캠페인)/ 로 헤더 행을 찾는다(2026-08-20 이전엔 '캠페인' 만 인식했다).
         #    안 지키면 시트 파싱이 null 이 되어 하드코딩 스냅샷(08/09까지)으로 조용히 폴백한다.
         reqs.append({"updateCells": {
             "start": {"sheetId": GID, "rowIndex": 3, "columnIndex": 0},
-            "rows": [{"values": [hdr_cell("캠페인·광고그룹 ＼ 날짜"), hdr_cell("광고그룹 ID")]}],
+            "rows": [{"values": [hdr_cell("광고그룹 ＼ 날짜"), hdr_cell("광고그룹 ID")]}],
             "fields": "userEnteredValue,userEnteredFormat.backgroundColorStyle,"
                       "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,"
                       "userEnteredFormat.textFormat"}})

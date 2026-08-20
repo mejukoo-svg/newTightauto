@@ -4713,7 +4713,7 @@ function _chrevChannels(){
   //   구 소스 GOOGLE_DG(google_demandgen_daily, 시트 지출·구글전환값)는 매출 기준이 달라 폐기.
   GGDG_TIGHT.forEach(r=>{if(!byDateGGDG[r.date])byDateGGDG[r.date]={s:0,r:0};byDateGGDG[r.date].s+=(+r.spend||0);byDateGGDG[r.date].r+=(+r.revenue||0)});
   // 틱톡(국내) = 🎵 틱톡 탭과 동일 소스(구글시트 '틱톡 캠페인 추이차트' → TIKTOK, 미로드 시 스냅샷).
-  //   지출=틱톡 광고관리자 실지출, 매출=MP 결제완료(utm_id=캠페인ID 귀속). 국내 집행만 있어 국내 채널로 둔다.
+  //   지출=틱톡 광고관리자 실지출, 매출=MP 결제완료(utm_id 귀속 — 광고그룹ID/캠페인ID 혼재). 국내 집행만 있어 국내 채널로 둔다.
   const byDateTT={};
   (typeof TIKTOK!=='undefined'?TIKTOK:[]).forEach(r=>{if(!byDateTT[r.date])byDateTT[r.date]={s:0,r:0};byDateTT[r.date].s+=(+r.spend||0);byDateTT[r.date].r+=(+r.revenue||0)});
   // 구글(전 캠페인) = google_campaign_daily → (국가 × 유형 × 소유) 버킷.
@@ -5799,7 +5799,7 @@ function _ttNum(s){s=String(s).replace(/[,원건%+\s]/g,'');if(!s||s==='-')retur
 //   '전체' 행은 화면에서 다시 합산하므로 버린다(캠페인 합 = 전체 행과 일치함을 확인).
 function _ttParseSheet(txt){
   const rows=_ttCSV(txt);
-  const hi=rows.findIndex(r=>r&&String(r[0]||'').trim().indexOf('캠페인')===0);
+  const hi=rows.findIndex(r=>r&&/^(광고그룹|캠페인)/.test(String(r[0]||'').trim()));
   if(hi<0)return null;
   const head=rows[hi];
   let year=new Date().getFullYear();
@@ -5819,7 +5819,7 @@ function _ttParseSheet(txt){
     const nm=raw.split('\n').map(s=>s.trim()).filter(Boolean);
     const cname=nm[0];
     if(!cname||cname==='전체')continue;
-    // A열 라벨 = 캠페인명 / (다르면) '└ 광고그룹명' / 예산 메모.
+    // A열 라벨 = 광고그룹명(2026-08-20~ 단독). 구 형식은 캠페인명 / '└ 광고그룹명' / 예산 메모.
     // 광고그룹을 복사하면 그룹명이 (2-1)·(2-2) 로 갈려 캠페인명만으론 행을 구분할 수 없다.
     const gl=nm.slice(1).filter(x=>x.indexOf('└')===0);
     const gname=gl.length?gl[0].replace(/^└\s*/,''):cname;
@@ -5897,7 +5897,7 @@ function renderTiktok(){
   const cellsOf=items=>dd.map(d=>{const t=agg(items,d);const yd=d===yDay?' col-yday':'';
     return (t.s||t.r)?'<td class="mc '+RC(t.roas)+yd+'">'+TTC(t.roas,t.p,t.s,t.r,t.o,t.cpa)+'</td>':'<td class="'+yd+'"></td>'}).join('');
   const sum7=items=>{let s=0,r=0,o=0;d7.forEach(d=>{const t=agg(items,d);s+=t.s;r+=t.r;o+=t.o});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
-  let h='<thead><tr><th style="text-align:left;white-space:nowrap">캠페인</th><th style="min-width:130px">캠페인 ID</th><th style="min-width:70px">일예산</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th style="text-align:left;white-space:nowrap">광고그룹</th><th style="min-width:130px">광고그룹 ID</th><th style="min-width:70px">일예산</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   // 종합
   const T=sum7(list);
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+list.length+'개)</td><td class="fx fx1" style="background:#e8e8e8"></td>'
