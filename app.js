@@ -4208,10 +4208,14 @@ const DV_DUP=[
 const DV_VAR=[
   {rx:/[_\-\s]+troas(실험)?$/i,tag:'tROAS'},
   {rx:/[_\-\s]+구매당(비용)?(변경|전환)?$/,tag:'구매당비용'},
-  {rx:/[_\-\s]+결과당비용(전환|변경)?$/,tag:'결과당비용'},
+  {rx:/[_\-\s]+결과당비용(전환|변경|목표)?$/,tag:'결과당비용'},
   {rx:/[_\-\s]+(기존)?구매자\s*제외(실험)?$/,tag:'구매자제외'},
   {rx:/[_\-\s]+(테스트|test)$/i,tag:'테스트'},
   {rx:/[_\-\s]+전세계중국어$/,tag:'전세계중국어'},
+  // 전세계한국어 = 국내 위닝 세트를 해외 한국어 인벤토리로 넓힌 변형(2026-07-21~). 한국제외는 성과가
+  // 크게 달라서(CPM은 더 싸지만 CPA 악화) 태그를 따로 둔다 — 같은 계보 안에서 A/B로 비교되게.
+  {rx:/[_\-\s]+전세계한국어[_\-\s(（]*한국\s*제외[)）]*$/,tag:'전세계한국어(한국제외)'},
+  {rx:/[_\-\s]+전세계한국어$/,tag:'전세계한국어'},
 ];
 const DV_EMOJI=/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu;
 const DV_DATE=/^\d{4}(\d{2})?(\d{2})?$/;   // 0421 · 260418 · 19930920
@@ -4260,7 +4264,7 @@ function dvMemberHtml(m,th){
     ?'<span style="'+(pass?'font-weight:700;color:#b45309':'color:#888')+'">예산 '+money(m.budget)+'</span>'
     :'<span style="color:#bbb">예산 -</span>';
   return '<div style="padding:3px 0;border-top:1px dotted #ddd">'
-    +'<div style="font-weight:600;line-height:1.3">'+abEsc(m.adset_name)+dvBadge(m.tags)+'</div>'
+    +'<div style="font-weight:600;line-height:1.3;overflow-wrap:anywhere">'+abEsc(m.adset_name)+dvBadge(m.tags)+'</div>'
     +'<div style="font-size:9px;color:#888;font-family:Consolas,monospace">'+abEsc(m.adset_id)+'</div>'
     +'<div style="font-size:9px;color:#555">'+bud+' · 지출 '+money(m.spend)+' · 매출 '+money(m.revenue)
     +' · <span class="'+RC(m.roas)+'" style="padding:0 3px;border-radius:2px">ROAS '+m.roas.toFixed(0)+'%</span></div>'
@@ -4289,7 +4293,7 @@ function dvCurve(x1,y1,x2,y2,col,w){
 function dvBubble(m,cx,cy,r,branchCol,th,money){
   const pass=th>0&&m.budget>=th;
   const fill=dvRoasColor(m.roas);
-  const nm=(m.adset_name||'').length>44?(m.adset_name||'').slice(0,43)+'…':(m.adset_name||'');
+  const nm=(m.adset_name||'');   // 이름은 자르지 않는다 — SVG 폭을 dvFamilyCard 에서 이름 길이에 맞춰 늘린다
   const tip=(m.adset_name||'')+'\n'+m.adset_id+'\n예산 '+(m.budget>0?money(m.budget):'-')
     +' · 지출 '+money(m.spend)+' · 매출 '+money(m.revenue)+' · ROAS '+m.roas.toFixed(0)+'%';
   let s='<g><title>'+abEsc(tip)+'</title>';
@@ -4312,16 +4316,59 @@ function dvHub(x,y,label,n,col){
     +'<text x="'+x+'" y="'+(y+4)+'" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">'+label+' '+n+'</text></g>';
 }
 
+// 세트 이름은 중간에서 끊지 않는다 — 글로벌 세트명이 길어 '…' 로 잘리면 어느 세트인지 구분이 안 된다.
+// 잎 라벨은 SVG 폭을 이름에 맞춰 늘려서(카드가 overflow-x:auto) 전부 보이게 하고,
+// 가운데 정렬인 원본 캡션은 카드 왼쪽을 넘지 않도록 여러 줄로 접는다.
+function dvTextW(s,fs){   // 문자폭 추정: 한글·CJK 1em, 그 외 0.55em
+  let w=0;
+  for(const ch of String(s||'')){const c=ch.codePointAt(0);w+=(c>0x1100&&!(c>=0x2000&&c<0x2600))?1:0.55}
+  return w*fs;
+}
+function dvWrapText(s,maxW,fs){   // 토큰(공백·_·|·[]·/) 경계 우선, 그래도 길면 문자 단위로 접는다
+  s=String(s||'');
+  if(!s)return[];
+  const toks=s.match(/[^\s_|\[\]\/]+|[\s_|\[\]\/]+/g)||[s];
+  const lines=[];let cur='';
+  const flush=()=>{if(cur)lines.push(cur);cur=''};
+  toks.forEach(t=>{
+    if(dvTextW(cur+t,fs)<=maxW){cur+=t;return}
+    flush();
+    let rest=t;
+    while(dvTextW(rest,fs)>maxW&&rest.length>1){
+      let i=1;while(i<rest.length&&dvTextW(rest.slice(0,i+1),fs)<=maxW)i++;
+      lines.push(rest.slice(0,i));rest=rest.slice(i);
+    }
+    cur=rest;
+  });
+  flush();
+  return lines.map(l=>l.replace(/^\s+|\s+$/g,'')).filter(l=>l.length);
+}
+
 function dvFamilyCard(f,budOn,budMin,money){
   const dup=f.dup,vr=f.var,leaves=dup.length+vr.length;
-  const H=Math.max(DV_MAP.minH,26+leaves*DV_MAP.rowH);
   const maxSp=Math.max.apply(null,[].concat(f.orig,dup,vr).map(m=>m.spend).concat([1]));
+  const oR=f.orig.length?dvR(f.orig[0].spend,maxSp,20,34):22;
+  // 원본 캡션(버블 아래·가운데 정렬)은 카드 왼쪽을 넘을 수 없으니 폭에 맞춰 줄바꿈한다.
+  const capW=(DV_MAP.origX-6)*2;
+  const capLines=f.orig.length?dvWrapText(f.orig[0].adset_name||'',capW,9.5)
+                              :dvWrapText(f.label||'',capW,8.5);
+  const capH=f.orig.length?(13+capLines.length*11+(f.orig.length>1?11:0)+6)
+                          :(15+capLines.length*10+6);
+  // 캡션 줄수만큼 카드 높이를 늘려 아래로 잘리지 않게 한다.
+  const H=Math.max(DV_MAP.minH,26+leaves*DV_MAP.rowH,2*(oR+capH+4));
   const oy=H/2;
-  let s='<svg width="'+DV_MAP.width+'" height="'+H+'" style="display:block">';
+  // 잎 라벨(전체 이름)이 들어갈 만큼 가로폭 확보 — 넘치면 카드가 가로 스크롤된다.
+  let W=DV_MAP.width;
+  [].concat(dup,vr).forEach(m=>{
+    const w=DV_MAP.textX+dvTextW(m.adset_name||'',10.5)
+      +((m.tags&&m.tags.length)?dvTextW('  '+m.tags.join('/'),9):0)+18;
+    if(w>W)W=w;
+  });
+  W=Math.ceil(W);
+  let s='<svg width="'+W+'" height="'+H+'" style="display:block">';
   // 가지별 y 배치: 복제 위, 변형 아래
   const ys=[];for(let i=0;i<leaves;i++)ys.push(26+i*DV_MAP.rowH+DV_MAP.rowH/2-8);
   const dupYs=ys.slice(0,dup.length),varYs=ys.slice(dup.length);
-  const oR=f.orig.length?dvR(f.orig[0].spend,maxSp,20,34):22;
   // 원본 → 허브 → 잎
   [[dup,dupYs,'#1a73e8','🧬 복제'],[vr,varYs,'#7c3aed','🔀 변형']].forEach(([arr,yy,col,lab])=>{
     if(!arr.length)return;
@@ -4336,22 +4383,25 @@ function dvFamilyCard(f,budOn,budMin,money){
   });
   // 원본 버블
   if(f.orig.length){
-    // 캡션은 버블 중심 기준 가운데 정렬이라 길면 카드 왼쪽 밖으로 잘린다 → 짧게 자르고
-    // 전체 이름은 카드 헤더와 <title> 툴팁이 책임진다.
-    const o=f.orig[0],nm=(o.adset_name||'').length>16?(o.adset_name||'').slice(0,15)+'…':(o.adset_name||'');
+    // 캡션은 버블 중심 기준 가운데 정렬 — 길면 자르지 말고 여러 줄로 접어 이름 전체를 보여준다.
+    const o=f.orig[0];
     s+='<g><title>'+abEsc((o.adset_name||'')+'\n'+o.adset_id+'\n예산 '+(o.budget>0?money(o.budget):'-')+' · 지출 '+money(o.spend)+' · ROAS '+o.roas.toFixed(0)+'%')+'</title>';
     s+='<circle cx="'+DV_MAP.origX+'" cy="'+oy+'" r="'+oR.toFixed(1)+'" fill="'+dvRoasColor(o.roas)+'" fill-opacity="0.95" stroke="#0f172a" stroke-width="2"/>';
     s+='<text x="'+DV_MAP.origX+'" y="'+(oy+4)+'" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">'+o.roas.toFixed(0)+'</text>';
-    s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+13)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1f2937">'+abEsc(nm)+'</text>';
-    s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+24)+'" text-anchor="middle" font-size="8.5" fill="#6b7280">'+abEsc(o.budget>0?'예산 '+money(o.budget):'예산 -')+'</text>';
-    if(f.orig.length>1)s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+35)+'" text-anchor="middle" font-size="8.5" fill="#b91c1c">동명 원본 +'+(f.orig.length-1)+'</text>';
+    capLines.forEach((ln,i)=>{
+      s+='<text x="'+DV_MAP.origX+'" y="'+(oy+oR+13+i*11)+'" text-anchor="middle" font-size="9.5" font-weight="700" fill="#1f2937">'+abEsc(ln)+'</text>';
+    });
+    const by=oy+oR+13+capLines.length*11;
+    s+='<text x="'+DV_MAP.origX+'" y="'+by+'" text-anchor="middle" font-size="8.5" fill="#6b7280">'+abEsc(o.budget>0?'예산 '+money(o.budget):'예산 -')+'</text>';
+    if(f.orig.length>1)s+='<text x="'+DV_MAP.origX+'" y="'+(by+11)+'" text-anchor="middle" font-size="8.5" fill="#b91c1c">동명 원본 +'+(f.orig.length-1)+'</text>';
     s+='</g>';
   }else{
     s+='<g><title>'+abEsc('원본 미확인 — 추정 계보명 '+f.label)+'</title>'
       +'<circle cx="'+DV_MAP.origX+'" cy="'+oy+'" r="22" fill="#f8fafc" stroke="#c60" stroke-width="2" stroke-dasharray="4 3"/>'
       +'<text x="'+DV_MAP.origX+'" y="'+(oy+4)+'" text-anchor="middle" font-size="14" fill="#c60">?</text>'
       +'<text x="'+DV_MAP.origX+'" y="'+(oy+37)+'" text-anchor="middle" font-size="9" font-weight="700" fill="#c60">원본 미확인</text>'
-      +'<text x="'+DV_MAP.origX+'" y="'+(oy+48)+'" text-anchor="middle" font-size="8.5" fill="#94a3b8">'+abEsc(f.label.length>26?f.label.slice(0,25)+'…':f.label)+'</text></g>';
+      +capLines.map((ln,i)=>'<text x="'+DV_MAP.origX+'" y="'+(oy+48+i*10)+'" text-anchor="middle" font-size="8.5" fill="#94a3b8">'+abEsc(ln)+'</text>').join('')
+      +'</g>';
   }
   s+='</svg>';
   const oo=f.orig[0];
@@ -4483,7 +4533,7 @@ function renderDupVar(){
     +'<td style="text-align:right">'+money(list.reduce((s,f)=>s+f.spend,0))+'</td></tr>';
 
   list.forEach(f=>{
-    const cellSty='font-size:10px;text-align:left;vertical-align:top;max-width:330px';
+    const cellSty='font-size:10px;text-align:left;vertical-align:top;max-width:330px;overflow-wrap:anywhere';
     h+='<tr style="vertical-align:top">';
     h+='<td style="font-size:10px;font-weight:600;text-align:left;vertical-align:top">'+abEsc(f.product||'-')+'</td>';
     // 원본
