@@ -2249,6 +2249,58 @@ function drawMetaDailyTable(){
   wrap.innerHTML=h;
 }
 
+// 추이차트 정렬 기준 = '현재 일예산' — 세트별로 budget 이 잡힌 가장 최근 날짜의 값.
+//   메타 예산은 수동 설정값이라 최신일 값이 곧 지금 Ads Manager 의 일예산이다.
+//   표시 기간(dd) 밖 날짜도 훑어야 오래 쉰 세트도 마지막 예산으로 줄을 세운다.
+//   budget 이 없는 소스(국내소재 cr·구글·네이버)는 0 이 되어 기존 기준(지출)으로 자연히 떨어진다.
+//   ※ 2026-08-20: 기본 정렬을 '전날 지출순' → '예산순'으로 바꾸고, 변형(복제·tROAS 등) 세트를
+//     원본 밑에 계보로 묶던 규칙(dvTreeOrder)은 기본에서 뺐다. 예전처럼 보고 싶으면 상단
+//     '정렬' 드롭다운에서 카테고리를 고르면 된다(TSORT).
+function curBudMap(rows,accFilter){
+  const last={};
+  rows.forEach(r=>{
+    if(accFilter&&!accFilter(r))return;
+    const b=+(r.budget)||0;if(!(b>0))return;
+    const rid=rowId(r);if(!rid)return;
+    const p=last[rid];if(!p||r.date>p.d)last[rid]={d:r.date,b:b};
+  });
+  const out={};Object.keys(last).forEach(k=>{out[k]=last[k].b});return out;
+}
+// 세트 정렬 비교자 — 예산↓ → (동률·예산없음) 전날 지출↓ → 7일 지출↓
+function budCmp(a,b){return (( b._bud||0)-(a._bud||0))||((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))}
+
+// ===== 추이차트 정렬 모드 =====
+//   모든 추이차트(일별·주월·보조지표·대만·상품별·틱톡)가 이 값 하나를 공유한다.
+//   budget   = 💸 예산순(기본) — 현재 일예산 큰 순
+//   spend    = 지출순 — 전날(주월은 최근 기간) 지출 큰 순 (예전 기본값)
+//   category = 카테고리 — 원본 밑에 변형(복제·tROAS 등)을 계보로 묶어 붙임(dvTreeOrder)
+let TSORT=(function(){try{return localStorage.getItem('tsort')||'budget'}catch(e){return 'budget'}})();
+function tSortMode(){return TSORT}
+function setTSort(v){
+  TSORT=v||'budget';
+  try{localStorage.setItem('tsort',TSORT)}catch(e){}
+  _syncTSortSel();                                  // 탭마다 있는 드롭다운 동기화
+  const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t);
+}
+// 시작 시 각 탭 드롭다운을 저장값으로 맞춘다(스크립트가 body 끝에서 실행 → 즉시 + DOMContentLoaded 양쪽).
+function _syncTSortSel(){document.querySelectorAll('.tsort-sel').forEach(el=>{el.value=TSORT})}
+_syncTSortSel();document.addEventListener('DOMContentLoaded',_syncTSortSel);
+// 상품(📦) 그룹 정렬 — 예산순일 때만 예산 합 기준, 나머지는 기존대로 최근 지출 기준.
+//   byProd[k] = {yS:최근 지출 합, bud:예산 합}
+function orderProdKeys(byProd){
+  const m=tSortMode();
+  return Object.keys(byProd).sort((a,b)=>m==='budget'
+    ?((byProd[b].bud-byProd[a].bud)||(byProd[b].yS-byProd[a].yS))
+    :(byProd[b].yS-byProd[a].yS));
+}
+// 상품 안의 세트 정렬 — 카테고리 모드에서만 계보(원본+변형) 배치를 쓴다.
+function orderSets(arr){
+  const m=tSortMode();
+  if(m==='category')return dvTreeOrder(arr,MODE==='kr'||MODE==='gl');
+  dvTreeOrder(arr,false);          // 계보 플래그 초기화(└ 들여쓰기·🧬 토글 제거)
+  return m==='spend'?arr.sort((a,b)=>((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))):arr.sort(budCmp);
+}
+
 // 추이차트 세트 계보 정렬 — 오리지널 세트를 맨 위, 그 아래에 troas·구매당비용·복제 등
 //   실험(파생) 세트를 들여쓰기로 붙여 '하위 세트'처럼 보이게 한다(실제 트리는 아니고 배치만).
 //   토글 2단: 오리지널 행의 🧬N = 실험세트 접기/펼치기(기본 펼침), ▶ = 소재 펼치기(기존 그대로).
@@ -2347,7 +2399,9 @@ function renderTrend(opts){
   //   dd 로만 비교하면 표시구간 첫 열은 비교 대상(직전일)이 없어 항상 테두리가 안 떴음.
   const budHist={};
   ROWS.forEach(r=>{if(accFilter&&!accFilter(r))return;const b=+(r.budget)||0;if(b>0){const rid=rowId(r);(budHist[rid]||(budHist[rid]={}))[r.date]=b}});
-  let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;return a});
+  // 정렬 기준용 '현재 일예산' 맵 (표시기간 밖 날짜까지 포함한 최신 예산)
+  const BUD=curBudMap(ROWS,accFilter);
+  let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;a._bud=BUD[a.id]||0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
   const tKw=(document.getElementById(filterElId).value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
@@ -2380,9 +2434,10 @@ function renderTrend(opts){
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+(AUX?MCAUX(x.s,x.r,x.uc,x.mp,x.imp):MC(roas,x.p,x.s,x.r,cvr,cpm,ctr,x.mp>0?x.s/x.mp:0))+'</td>'});
   h+='</tr>';
   // Group by product
-  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0};byProd[p].adsets.push(a);byProd[p].yS+=a._yS});
-  Object.keys(byProd).sort((a,b)=>byProd[b].yS-byProd[a].yS).forEach(prod=>{
-    const g=byProd[prod];g.adsets.sort((a,b)=>b._yS-a._yS);
+  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0};byProd[p].adsets.push(a);byProd[p].yS+=a._yS;byProd[p].bud+=(a._bud||0)});
+  // 정렬은 상단 드롭다운(💸예산순 / 지출순 / 카테고리)이 결정 — orderProdKeys·orderSets 참고.
+  orderProdKeys(byProd).forEach(prod=>{
+    const g=byProd[prod];
     const pS=g.adsets.reduce((a,x)=>a+x._s,0),pR=g.adsets.reduce((a,x)=>a+x._r,0),pRoas=pS>0?pR/pS*100:0;
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.adsets.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+pRoas.toFixed(0)+'%</td></tr>';
     // Product subtotal row
@@ -2393,8 +2448,8 @@ function renderTrend(opts){
     const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+(AUX?MCAUX(t.s,t.r,t.uc,t.mp,t.imp):MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm,t.ctr,t.mp>0?t.s/t.mp:0))+'</td>':'<td class="'+yd+'"></td>'}).join('');
     h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm,null,pMp>0?pS/pMp:0))+'</td>'+pCells+'</tr>';
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
-    //   국내·글로벌은 계보 정렬(오리지널 위 / 파생 들여쓰기). 나머지 모드는 기존 순서 유지.
-    dvTreeOrder(g.adsets.filter(a=>!isHidden(a)),MODE==='kr'||MODE==='gl').forEach(a=>{
+    //   '카테고리' 모드에서만 원본 밑에 변형을 계보로 붙인다(그 외엔 예산·지출 순 한 줄 나열).
+    orderSets(g.adsets.filter(a=>!isHidden(a))).forEach(a=>{
       // 세트별 예산 변화 테두리 색 맵: 전체 히스토리(budHist)를 오름차순으로 전일(직전 보유일) 대비 비교.
       //   테두리는 표시기간(dd) 내 날짜에만 그리되, 비교 기준일은 dd 밖(직전일)도 허용 → 첫 열 증감도 표시.
       const budBc={};{const bh=budHist[a.id]||{};let pv=null;Object.keys(bh).sort().forEach(d=>{const b=bh[d];if(pv>0&&b!==pv){const k=budBorderKey((b-pv)/pv*100);if(k&&dd.includes(d))budBc[d]=HL_CONFIG[k].bg}pv=b})}
@@ -2574,9 +2629,10 @@ function renderTrendAgg(gran){
     if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',b:{}};
     const b=byA[rid].b;if(!b[ck])b[ck]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
     b[ck].s+=r.spend;b[ck].r+=r.revenue;b[ck].p+=r.profit;b[ck].mp+=r.results_mp;b[ck].uc+=r.unique_clicks;b[ck].imp+=(r.impressions||0)});
+  const BUD=curBudMap(AD);   // 정렬 기준용 현재 일예산
   let list=Object.values(byA).map(a=>{let s=0,r=0,p=0,uc=0,mp=0,imp=0;cols.forEach(ck=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;uc+=b.uc;mp+=b.mp;imp+=b.imp}});
     a._s=s;a._r=r;a._p=p;a._roas=s>0?r/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;
-    a._recentS=a.b[recentCol]?a.b[recentCol].s:0;return a});
+    a._recentS=a.b[recentCol]?a.b[recentCol].s:0;a._bud=BUD[a.id]||0;a._yS=a._recentS;return a});
   // 세트필터 (공용 #tFilter)
   const tKw=(document.getElementById('tFilter').value||'').trim().toLowerCase();
   if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
@@ -2598,9 +2654,10 @@ function renderTrendAgg(gran){
   cols.forEach(ck=>{h+=cell(totC[ck])});
   h+='</tr>';
   // 상품별 그룹
-  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],recentS:0};byProd[p].adsets.push(a);byProd[p].recentS+=a._recentS});
-  Object.keys(byProd).sort((a,b)=>byProd[b].recentS-byProd[a].recentS).forEach(prod=>{
-    const g=byProd[prod];g.adsets.sort((a,b)=>b._recentS-a._recentS);
+  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0};byProd[p].adsets.push(a);byProd[p].yS+=a._recentS;byProd[p].bud+=(a._bud||0)});
+  // 정렬은 일별 뷰와 같은 드롭다운(💸예산순 / 지출순 / 카테고리)을 따른다. 여기선 '지출'=최근 기간 지출.
+  orderProdKeys(byProd).forEach(prod=>{
+    const g=byProd[prod];
     const pS=g.adsets.reduce((a,x)=>a+x._s,0),pR=g.adsets.reduce((a,x)=>a+x._r,0),pRoas=pS>0?pR/pS*100:0;
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.adsets.length+'개) · '+(isWeek?'전체주':'전체월')+' ROAS '+pRoas.toFixed(0)+'%</td></tr>';
     const pByCol={};cols.forEach(ck=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;g.adsets.forEach(a=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;mp+=b.mp;uc+=b.uc;imp+=b.imp}});pByCol[ck]={s,r,p,mp,uc,imp}});
@@ -2608,7 +2665,7 @@ function renderTrendAgg(gran){
     const pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0),pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pCvr=pUc>0&&pMp>0?pMp/pUc*100:0,pCtr=pImp>0?pUc/pImp*100:0;
     const pCells=cols.map(ck=>cell(pByCol[ck])).join('');
     h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
-    dvTreeOrder(g.adsets.slice(),MODE==='kr'||MODE==='gl').forEach(a=>{
+    orderSets(g.adsets.slice()).forEach(a=>{
       const cells=cols.map(ck=>cell(a.b[ck])).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -2831,8 +2888,12 @@ function renderTrendProduct(){
     b.s+=r.spend;b.r+=r.revenue;b.p+=r.profit;b.mp+=r.results_mp;b.uc+=r.unique_clicks;b.imp+=(r.impressions||0);
   });
   const aggCols=src=>{const o={s:0,r:0,p:0,mp:0,uc:0,imp:0};sumCols.forEach(ck=>{const t=src[ck];if(t){o.s+=t.s;o.r+=t.r;o.p+=t.p;o.mp+=t.mp;o.uc+=t.uc;o.imp+=t.imp}});return o};
-  // Sort products by recent spend (전날 / 최근주)
-  const sortedProds=Object.keys(prodCol).sort((a,b)=>(prodSort[b]||0)-(prodSort[a]||0));
+  // 정렬 기준용 현재 일예산 (2026-08-20: 지출 순 → 예산 순으로 변경)
+  const BUD=curBudMap(AD);
+  const prodBud={};Object.values(byA).forEach(a=>{a._bud=BUD[a.id]||0;prodBud[a.product]=(prodBud[a.product]||0)+a._bud});
+  // 상품 정렬 — 예산순이면 예산 합↓, 그 외(지출순·카테고리)는 기존대로 전날/최근주 지출↓
+  const _byP={};Object.keys(prodCol).forEach(k=>{_byP[k]={bud:prodBud[k]||0,yS:prodSort[k]||0}});
+  const sortedProds=orderProdKeys(_byP);
   // Detail items + summary metrics
   const allItems=Object.values(byA).map(a=>{const sm=aggCols(a.d);a._sm=sm;a._roas=sm.s>0?sm.r/sm.s*100:0;a._cvr=sm.uc>0&&sm.mp>0?sm.mp/sm.uc*100:0;a._ctr=sm.imp>0?sm.uc/sm.imp*100:0;a._cpm=sm.imp>0?sm.s/sm.imp*1000:0;a._sortV=isWeek?((a.d[recentCol]&&a.d[recentCol].s)||0):((a.d[yDay]&&a.d[yDay].s)||0);return a});
   // Cell renderer (aggregated bucket)
@@ -2856,7 +2917,9 @@ function renderTrendProduct(){
   h+='<tr><td colspan="'+colSpan+'" style="height:12px"></td></tr>';
   // ── 하단: 상품별 상세 ──
   sortedProds.forEach(prod=>{
-    const items=allItems.filter(a=>a.product===prod).sort((a,b)=>b._sortV-a._sortV);
+    const items=allItems.filter(a=>a.product===prod).sort((a,b)=>tSortMode()==='budget'
+      ?(((b._bud||0)-(a._bud||0))||(b._sortV-a._sortV))
+      :(b._sortV-a._sortV));
     if(!items.length)return;
     const sm=aggCols(prodCol[prod]);const roasS=sm.s>0?sm.r/sm.s*100:0;const cpmS=sm.imp>0?sm.s/sm.imp*1000:0;
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+items.length+'개) '+(isWeek?'최근주':'전날')+' '+money(prodSort[prod]||0)+' · '+sumLabel+' ROAS '+roasS.toFixed(0)+'%</td></tr>';
@@ -5939,8 +6002,10 @@ function renderTiktok(){
   if(kw)list=list.filter(a=>((a.cn||'')+' '+(a.gn||'')+' '+(a.id||'')).toLowerCase().indexOf(kw)>=0);
   list.forEach(a=>{let s=0,rv=0,o=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders}});
     a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
-    a._yS=a.d[yDay]?a.d[yDay].spend:0;});
-  list.sort((a,b)=>(b._yS-a._yS)||(b._s-a._s));
+    a._yS=a.d[yDay]?a.d[yDay].spend:0;
+    // 일예산: 시트 값이 '-100,000' 같은 문자열이라 숫자만 뽑아 정렬 기준으로 쓴다.
+    a._bud=Math.abs(parseFloat(String(a.bud||'').replace(/[^0-9.\-]/g,''))||0);});
+  list.sort((a,b)=>tSortMode()==='budget'?((b._bud-a._bud)||(b._yS-a._yS)||(b._s-a._s)):((b._yS-a._yS)||(b._s-a._s)));
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4;  // 캠페인/ID/일예산/7일
   const agg=(items,d)=>{let s=0,r=0,o=0;items.forEach(a=>{const x=a.d[d];if(x){s+=x.spend;r+=x.revenue;o+=x.orders}});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
@@ -5954,8 +6019,8 @@ function renderTiktok(){
     +'<td style="background:#e8e8e8"></td>'   // 일예산 칸은 색 없이 비워둔다
     +'<td class="mc '+RC(T.roas)+'">'+TTC(T.roas,T.p,T.s,T.r,T.o,T.cpa)+'</td>'+cellsOf(list)+'</tr>';
   // 📦 상품별
-  const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s});
-  Object.keys(byProd).sort((a,b)=>(byProd[b].yS-byProd[a].yS)||(byProd[b].s-byProd[a].s)).forEach(prod=>{
+  const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0,bud:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s;byProd[p].bud+=a._bud});
+  orderProdKeys(byProd).forEach(prod=>{
     const g=byProd[prod];const P7=sum7(g.items);
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.items.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+P7.roas.toFixed(0)+'%</td></tr>';
     h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'
