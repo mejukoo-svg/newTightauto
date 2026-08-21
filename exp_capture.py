@@ -32,11 +32,15 @@ class ExpShooter:
         self._pw = self._br = self._pg = self._srv = None
         self._n = 0
         self._cut = None      # 화면을 잘라 맞춘 기준일(중복 적용 방지)
+        self._ready = False   # 데이터 로딩까지 끝났는가(실패한 페이지로 계속 찍지 않도록)
+        self._console = []    # 브라우저 콘솔 오류 — 로딩이 안 될 때 원인이 여기 있다
 
     # ── 준비: 로컬 서버 + 브라우저 + 인증 주입 + 데이터 로딩 대기 ──
     def _start(self):
-        if self._pg:
+        if self._ready:
             return
+        if self._pg:                     # 지난 시도가 로딩에서 죽었다 — 새 페이지로 다시
+            self.close()
         from playwright.sync_api import sync_playwright
         self.out.mkdir(exist_ok=True)
         handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(BASE))
@@ -46,17 +50,39 @@ class ExpShooter:
         self._pw = sync_playwright().start()
         self._br = self._pw.chromium.launch()
         self._pg = self._br.new_page(viewport={"width": 1500, "height": 1200}, device_scale_factor=2)
+        self._pg.on("console", lambda m: self._console.append(f"{m.type}: {m.text[:200]}")
+                    if m.type in ("error", "warning") else None)
+        self._pg.on("pageerror", lambda e: self._console.append(f"pageerror: {str(e)[:200]}"))
+        self._pg.on("requestfailed", lambda r: self._console.append(
+            f"requestfailed: {r.url[:120]} {(r.failure or '')}"))
         self._pg.goto(f"http://127.0.0.1:{self.port}/index.html", wait_until="networkidle")
         # 로그인 대신 읽기 인증만 주입 (service_role → RLS 우회, 읽기만 사용)
         self._pg.evaluate("""(key)=>{ SBH.apikey=key; SBH.Authorization='Bearer '+key; showApp(); }""", self.key)
         # 국내·글로벌 배열이 모두 찬 뒤에 찍는다(한 번 띄운 브라우저로 양쪽을 다 캡처하므로)
-        self._pg.wait_for_function("typeof KR_AD!=='undefined' && KR_AD.length>0 && "
-                                   "typeof GL_AD!=='undefined' && GL_AD.length>0", timeout=LOAD_TIMEOUT)
+        try:
+            self._pg.wait_for_function("typeof KR_AD!=='undefined' && KR_AD.length>0 && "
+                                       "typeof GL_AD!=='undefined' && GL_AD.length>0", timeout=LOAD_TIMEOUT)
+        except Exception:
+            # 왜 안 들어왔는지 남기고 죽는다 — 로그에 콘솔 오류가 없으면 원인 추적이 불가능하다
+            try:
+                st = self._pg.evaluate("()=>({kr:(typeof KR_AD==='undefined'?-1:KR_AD.length),"
+                                       "gl:(typeof GL_AD==='undefined'?-1:GL_AD.length),"
+                                       "dates:(typeof DATES==='undefined'?-1:DATES.length),"
+                                       "login:(document.getElementById('loginScreen')||{style:{}}).style.display,"
+                                       "sbc:(typeof SBC==='undefined'?'없음':'있음'),"
+                                       "chart:(typeof Chart==='undefined'?'없음':'있음')})")
+            except Exception as e:
+                st = f"(상태 조회 실패: {e})"
+            self.log(f"  [캡처] 데이터 로딩 실패 — 상태 {st}")
+            for c in self._console[-12:]:
+                self.log("    " + c)
+            raise
         self._pg.wait_for_timeout(3000)
         self._pg.evaluate("switchMode('exp')")   # 실험현황 탭은 '🧪 실험' 모드에서만 보인다
         self._pg.wait_for_timeout(800)
         self._pg.click('.tab[data-t="expstat"]')
         self._pg.wait_for_timeout(1500)
+        self._ready = True
         self.log("  [캡처] 대시보드 로딩 완료")
 
     # ── 캡처 창을 봇의 기준일(dc)에 맞춘다 ──
@@ -146,6 +172,7 @@ class ExpShooter:
             except Exception:
                 pass
         self._pw = self._br = self._pg = self._srv = None
+        self._ready, self._cut = False, None
 
 
 if __name__ == "__main__":
