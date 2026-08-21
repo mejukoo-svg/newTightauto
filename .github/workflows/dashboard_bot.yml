@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: '10 21 * * *'   # 21:10 UTC = 06:10 KST. 오프아워 분(:10)로 GitHub cron 드롭 완화 (GitHub 스케줄은 수시간 지연될 수 있음)
   workflow_dispatch:        # 수동 실행 버튼
+    inputs:
+      dry_run:
+        description: '전송 없이 점검만 (캡처까지 만들고 슬랙에는 안 올림)'
+        type: boolean
+        default: false
 
 concurrency:
   group: dashboard-bot
@@ -42,4 +47,14 @@ jobs:
           META_TOKEN_4: ${{ secrets.META_TOKEN_4 }}
           META_TOKEN_GlobalTT: ${{ secrets.META_TOKEN_GlobalTT }}
           META_TOKEN_ACT_9937: ${{ secrets.META_TOKEN_ACT_9937 }}
-        run: python dashboard_bot.py
+        # 점검(dry_run)일 때는 실험 현황 경로만 돌린다 — 캡처가 CI 에서 되는지 보는 게 목적
+        run: python dashboard_bot.py ${{ inputs.dry_run && '--dry-run --exp-only' || '' }}
+
+      # 점검 실행일 때만 캡처 결과를 내려받아 눈으로 확인할 수 있게 남긴다
+      - name: Upload capture artifacts
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: expstat-shots
+          path: _expstat_shots/*.png
+          if-no-files-found: warn
