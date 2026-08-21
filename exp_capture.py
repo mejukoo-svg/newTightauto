@@ -6,7 +6,10 @@
 텍스트 요약은 없애지 않고 캡처의 initial_comment 로 함께 보낸다(모바일 알림·검색용).
 
 동작
-  · 로컬에 index.html 을 띄우고(대시보드 코드 그대로) 서비스 키로 읽기 인증만 주입 → 로그인 화면 우회.
+  · 로컬에 index.html 을 띄우고(대시보드 코드 그대로) 로그인 화면만 건너뛴다.
+  · 화면이 보내는 Supabase 조회(/rest/v1/*)는 파이썬이 가로채 대신 호출하고 응답만 돌려준다.
+    새 형식 서비스 키(sb_secret_…)는 브라우저에서 쓰면 Supabase 가 401 로 막는다
+    ("Forbidden use of secret API key in browser") — 그래서 키는 페이지에 넣지 않는다.
   · '🧪 실험' 모드 → '실험 현황' 탭 → 세트 ID 로 필터(#esFilter 는 이름+ID 부분일치) → 카드 1장 캡처.
   · 카드에서 아래쪽 블록(추이표·퍼널·그래프)은 잠시 숨긴다. 슬랙에 붙는 그림은
     SECTIONS 개의 .es-wrap 까지(기본 1 = 📊 기간 평균)만 남긴다.
@@ -14,7 +17,7 @@
 브라우저는 한 번만 띄우고(데이터 로딩이 느리다) 국내·글로벌 캡처를 이어서 찍는다.
 자체 실행도 가능: py exp_capture.py kr 6712345,6712346 14 2026-08-20
 """
-import functools, http.server, socketserver, sys, threading
+import functools, http.server, socketserver, sys, threading, urllib.error, urllib.request
 from pathlib import Path
 
 BASE = Path(__file__).parent
@@ -27,8 +30,12 @@ LOAD_TIMEOUT = 300_000  # 대시보드 데이터 로딩 대기(ms) — 코어 fe
 class ExpShooter:
     """대시보드를 한 번 띄워두고 가족 카드를 여러 장 찍는다. 반드시 close() 로 정리."""
 
-    def __init__(self, key, sections=SECTIONS, out=OUT, port=PORT, log=print):
+    def __init__(self, key, sections=SECTIONS, out=OUT, port=PORT, log=print,
+                 sb_url=None, sb_headers=None):
         self.key, self.sections, self.out, self.port, self.log = key, sections, Path(out), port, log
+        # 화면 대신 파이썬이 부를 Supabase 주소·헤더(스키마 프로파일 포함)
+        self.sb_url = (sb_url or "").rstrip("/")
+        self.sbh = dict(sb_headers or {"apikey": key, "Authorization": "Bearer " + key})
         self._pw = self._br = self._pg = self._srv = None
         self._n = 0
         self._cut = None      # 화면을 잘라 맞춘 기준일(중복 적용 방지)
@@ -50,14 +57,18 @@ class ExpShooter:
         self._pw = sync_playwright().start()
         self._br = self._pw.chromium.launch()
         self._pg = self._br.new_page(viewport={"width": 1500, "height": 1200}, device_scale_factor=2)
+        if self.sb_url:
+            self._pg.route(self.sb_url + "/rest/v1/**", self._proxy)
         self._pg.on("console", lambda m: self._console.append(f"{m.type}: {m.text[:200]}")
                     if m.type in ("error", "warning") else None)
         self._pg.on("pageerror", lambda e: self._console.append(f"pageerror: {str(e)[:200]}"))
         self._pg.on("requestfailed", lambda r: self._console.append(
             f"requestfailed: {r.url[:120]} {(r.failure or '')}"))
         self._pg.goto(f"http://127.0.0.1:{self.port}/index.html", wait_until="networkidle")
-        # 로그인 대신 읽기 인증만 주입 (service_role → RLS 우회, 읽기만 사용)
-        self._pg.evaluate("""(key)=>{ SBH.apikey=key; SBH.Authorization='Bearer '+key; showApp(); }""", self.key)
+        # 로그인 화면만 건너뛴다. 조회 헤더는 프록시(_proxy)가 파이썬 것으로 갈아끼우므로
+        # 키가 없어도 되지만, 프록시를 안 쓰는 경우(sb_url 미지정)엔 주입한 키가 그대로 쓰인다.
+        self._pg.evaluate("""(key)=>{ SBH.apikey=key; SBH.Authorization='Bearer '+key; showApp(); }""",
+                          "proxied" if self.sb_url else self.key)
         # 국내·글로벌 배열이 모두 찬 뒤에 찍는다(한 번 띄운 브라우저로 양쪽을 다 캡처하므로)
         try:
             self._pg.wait_for_function("typeof KR_AD!=='undefined' && KR_AD.length>0 && "
@@ -84,6 +95,37 @@ class ExpShooter:
         self._pg.wait_for_timeout(1500)
         self._ready = True
         self.log("  [캡처] 대시보드 로딩 완료")
+
+    # ── Supabase 조회 대행 ──
+    def _proxy(self, route):
+        """화면의 /rest/v1 요청을 파이썬이 대신 호출한다.
+
+        키를 페이지에 두지 않으므로 (a) 새 형식 서비스 키의 브라우저 차단을 피하고
+        (b) 키가 브라우저 메모리·네트워크 로그에 남지 않는다. 응답은 그대로 돌려준다."""
+        req = route.request
+        if req.method == "OPTIONS":     # 프리플라이트는 우리가 바로 통과시킨다
+            route.fulfill(status=204, headers={"access-control-allow-origin": "*",
+                                               "access-control-allow-headers": "*",
+                                               "access-control-allow-methods": "*"})
+            return
+        keep = ("content-type", "prefer", "accept", "range", "accept-profile", "content-profile")
+        hdrs = {k: v for k, v in req.headers.items() if k.lower() in keep}
+        hdrs.update(self.sbh)           # apikey·Authorization·스키마 프로파일은 파이썬 것으로
+        body, status, rh = b"", 500, {"content-type": "application/json"}
+        try:
+            r = urllib.request.urlopen(
+                urllib.request.Request(req.url, data=req.post_data_buffer,
+                                       headers=hdrs, method=req.method), timeout=60)
+            body, status = r.read(), r.status
+            rh = {k.lower(): v for k, v in r.headers.items()
+                  if k.lower() in ("content-type", "content-range")}
+        except urllib.error.HTTPError as e:
+            body, status = e.read(), e.code
+        except Exception as e:
+            body = ('{"message":"proxy error: ' + str(e).replace('"', "'") + '"}').encode()
+        route.fulfill(status=status, body=body,
+                      headers={**rh, "access-control-allow-origin": "*",
+                               "access-control-expose-headers": "content-range"})
 
     # ── 캡처 창을 봇의 기준일(dc)에 맞춘다 ──
     def align(self, dc):
@@ -166,6 +208,11 @@ class ExpShooter:
         return out
 
     def close(self):
+        # 진행 중인 프록시 요청을 먼저 정리한다(안 그러면 종료 시 취소 예외가 시끄럽다)
+        try:
+            self._pg.unroute_all(behavior="ignoreErrors")
+        except Exception:
+            pass
         for fn in (lambda: self._br.close(), lambda: self._pw.stop(), lambda: self._srv.shutdown()):
             try:
                 fn()
@@ -186,7 +233,14 @@ if __name__ == "__main__":
     ids = (sys.argv[2] if len(sys.argv) > 2 else "").split(",")
     days = int(sys.argv[3]) if len(sys.argv) > 3 else 14
     cutoff = sys.argv[4] if len(sys.argv) > 4 else None
-    sh = ExpShooter(env["SUPABASE_SERVICE_KEY"], log=lambda s: print(s, file=sys.stderr))
+    key = env["SUPABASE_SERVICE_KEY"]
+    hdrs = {"apikey": key, "Authorization": "Bearer " + key}
+    sc = env.get("SUPABASE_DB_SCHEMA", "").strip()
+    if sc:
+        hdrs["Accept-Profile"] = sc
+        hdrs["Content-Profile"] = sc
+    sh = ExpShooter(key, log=lambda s: print(s, file=sys.stderr),
+                    sb_url=env["SUPABASE_URL"], sb_headers=hdrs)
     try:
         for f, t in sh.shots(region, [{"id": i} for i in ids if i], days, cutoff):
             print(f)

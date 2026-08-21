@@ -1506,7 +1506,8 @@ def exp_shots(region, targets, dc):
         if _SHOOTER[0] is None:
             import atexit
             from exp_capture import ExpShooter
-            _SHOOTER[0] = ExpShooter(SB_KEY)
+            # 화면의 Supabase 조회는 파이썬이 대행한다(브라우저에 키를 두지 않기 위해)
+            _SHOOTER[0] = ExpShooter(SB_KEY, sb_url=SB_URL, sb_headers=SBH)
             atexit.register(exp_shots_close)   # 중간에 죽어도 chromium 이 남지 않게
         return _SHOOTER[0].shots(region, targets, ES_WINDOW, dc)
     except Exception as e:
