@@ -74,6 +74,10 @@ td.fxa{left:0;max-width:120px;color:#555}
 #p-trend th.hmemo,#p-auxmetric th.hmemo,#p-vntwtrend th.hmemo{width:var(--fit-memo,130px);min-width:0}
 #p-trend td.idc,#p-auxmetric td.idc,#p-vntwtrend td.idc{max-width:var(--fit-id,none);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #p-trend td.memo-cell,#p-auxmetric td.memo-cell,#p-vntwtrend td.memo-cell{min-width:0;max-width:var(--fit-memo,none)}
+/* 예산 컬럼 — 세트ID 와 메모 사이(추이차트·보조지표) / 세트ID 오른쪽(구글 디멘드젠).
+   값은 '현재 일예산' 스냅샷이라 날짜 셀처럼 여러 줄이 아니고 한 줄 우측정렬이다. */
+th.hbud{min-width:86px;white-space:nowrap}
+td.budc{font-size:10px;text-align:right;white-space:nowrap;color:#444;padding:2px 6px}
 #p-trend .memo-input,#p-auxmetric .memo-input,#p-vntwtrend .memo-input{min-width:0}
 .col-rz{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;z-index:12}
 .es-card{border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px;margin-bottom:14px;background:#fff}
@@ -426,7 +430,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260821c"></script>
+<script src="app.js?v=20260821d"></script>
 </div>
 </body>
 </html>

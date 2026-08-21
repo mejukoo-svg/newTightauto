@@ -2418,7 +2418,7 @@ function renderTrend(opts){
     // 메타 기준으로 그린 날짜는 헤더에 표시 — 날짜탭(Mixpanel)과 숫자가 다른 이유를 바로 알 수 있게
     const mm=(MODE==='gl'&&isGlMetaDay(d))?'<span title="이 날짜는 Mixpanel 대신 Meta 보고값(매출=지출×메타ROAS, 구매수=results_meta) 기준입니다" style="color:#1a73e8;font-size:9px">ᴹ</span>':'';
     return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')'+mm+'</th>'}).join('');
-  const colSpan=dd.length+4+(showChg?1:0)+(showAcc?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 메모 1칸(증감 컬럼 제거), showAcc시 광고계정 1칸
+  const colSpan=dd.length+4+(showChg?2:0)+(showAcc?1:0);  // 4=캠페인/이름/ID/7일, showChg(kr·gl)시 예산+메모 2칸(증감 컬럼 제거), showAcc시 광고계정 1칸
   // Summary
   const totD={};dd.forEach(d=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{if(a.d[d]){s+=a.d[d].spend;r+=a.d[d].revenue;p+=a.d[d].profit;mp+=a.d[d].results_mp;uc+=a.d[d].unique_clicks;imp+=(a.d[d].impressions||0)}});totD[d]={s,r,p,mp,uc,imp}});
   const ts=d7.reduce((a,d)=>a+(totD[d]?.s||0),0),tr=d7.reduce((a,d)=>a+(totD[d]?.r||0),0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
@@ -2426,11 +2426,15 @@ function renderTrend(opts){
   const timp=d7.reduce((a,d)=>a+(totD[d]?.imp||0),0),tcpm=timp>0?ts/timp*1000:0,tctr=timp>0?tuc/timp*100:0;
   const chgTh='';  // 증감 컬럼 제거(국내·글로벌 추이차트)
   const memoTh=showChg?'<th class="h-memo hmemo">메모</th>':'';
+  // 예산 컬럼(세트ID ↔ 메모 사이) — 값은 정렬(💸 예산순)·증감 테두리가 쓰는 것과 같은
+  //   '현재 예산' 스냅샷(curBudMap = 세트별 최신 보유일의 budget). 날짜별 값이 아니다.
+  //   종합·소계 칸은 비워둔다: CBO 캠페인은 같은 예산이 소속 세트마다 반복돼 세로합이 뻥튀기된다.
+  const budTh=showChg?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것">예산</th>':'';
   const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';  // 종합·소계 행의 빈 계정칸
-  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
   const legend=AUX?'<div class="r">CTR</div><div class="cv">CVR</div><div class="cm">CPM</div><div class="s">구매당비용</div>':'<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
-  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+(showChg?'<td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+(AUX?MCAUX(ts,tr,tuc,tmp,timp):MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0))+'</td>';
+  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+(showChg?'<td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td>':'')+'<td class="mc '+RC(troas)+'">'+(AUX?MCAUX(ts,tr,tuc,tmp,timp):MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0))+'</td>';
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;h+='<td class="mc '+RC(roas)+yd+'">'+(AUX?MCAUX(x.s,x.r,x.uc,x.mp,x.imp):MC(roas,x.p,x.s,x.r,cvr,cpm,ctr,x.mp>0?x.s/x.mp:0))+'</td>'});
   h+='</tr>';
   // Group by product
@@ -2446,7 +2450,7 @@ function renderTrend(opts){
     const pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0);
     const pCpm=pImp>0?pS/pImp*1000:0;
     const pCells=dd.map(d=>{const t=pDaily[d];const yd=d===yDay?' col-yday':'';return t&&t.s?'<td class="mc '+RC(t.roas)+yd+'">'+(AUX?MCAUX(t.s,t.r,t.uc,t.mp,t.imp):MC(t.roas,t.p,t.s,t.r,t.cvr,t.cpm,t.ctr,t.mp>0?t.s/t.mp:0))+'</td>':'<td class="'+yd+'"></td>'}).join('');
-    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm,null,pMp>0?pS/pMp:0))+'</td>'+pCells+'</tr>';
+    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+(showChg?'<td></td><td></td>':'')+'<td class="mc '+RC(pRoas)+'">'+(AUX?MCAUX(pS,pR,pUc,pMp,pImp):MC(pRoas,pR-pS,pS,pR,0,pCpm,null,pMp>0?pS/pMp:0))+'</td>'+pCells+'</tr>';
     // Individual adsets (비활성 세트는 행만 생략 — 위 소계/종합엔 이미 포함됨)
     //   '카테고리' 모드에서만 원본 밑에 변형을 계보로 붙인다(그 외엔 예산·지출 순 한 줄 나열).
     orderSets(g.adsets.filter(a=>!isHidden(a))).forEach(a=>{
@@ -2456,6 +2460,7 @@ function renderTrend(opts){
       const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const mk=d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight);let bcol=budBc[d];if(!bcol&&mk==='off')bcol=HL_CONFIG.off.bg;const cb=(showChg&&bcol)?' style="box-shadow:inset 0 0 0 3px '+bcol+'"':'';if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr,r.results_mp>0?r.spend/r.results_mp:0))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const chgTd='';  // 증감 컬럼 제거(국내·글로벌 추이차트)
+      const budTd=showChg?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'';
       // 메모(추이차트): '오늘' 칸에 쓰면 오늘 날짜로 durable(daily_memos) 저장 → 0시가 지나도 남는다.
       //  하루가 지나면 그 메모는 아래 이력으로 내려가고 앞에 날짜(MM/DD)가 붙는다.
       //  날짜탭 perfTbl.memo·하이라이트 테이블에도 함께 써서 기존 리더(봇 등)와 호환.
@@ -2473,7 +2478,7 @@ function renderTrend(opts){
       // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
       const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr data-adset-row="'+a.id+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+budTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -2655,7 +2660,11 @@ function renderTrendAgg(gran){
   const showAcc=MODE==='kr'||MODE==='gl';
   const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';
-  const colSpan=cols.length+4+(showAcc?1:0);
+  // 예산 컬럼 — 일별 뷰(renderTrend)와 같은 자리(세트ID 오른쪽). 주/월엔 메모가 없어 그 다음이 '전체'.
+  const showBud=MODE==='kr'||MODE==='gl';
+  const budTh=showBud?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것">예산</th>':'';
+  const budTdSr=showBud?'<td style="background:#e8e8e8"></td>':'';   // 종합·소계는 합산 금지라 빈칸
+  const colSpan=cols.length+4+(showAcc?1:0)+(showBud?1:0);
   const cell=t=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm,ctr,t.mp>0?t.s/t.mp:0)+'</td>'};
   // 컬럼별 종합
   const totC={};cols.forEach(ck=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;mp+=b.mp;uc+=b.uc;imp+=b.imp}});totC[ck]={s,r,p,mp,uc,imp}});
@@ -2663,8 +2672,8 @@ function renderTrendAgg(gran){
   const timp=cols.reduce((a,ck)=>a+totC[ck].imp,0),tcpm=timp>0?ts/timp*1000:0;
   const tmp=cols.reduce((a,ck)=>a+totC[ck].mp,0),tuc=cols.reduce((a,ck)=>a+totC[ck].uc,0),tcvr=tuc>0&&tmp>0?tmp/tuc*100:0,tctr=timp>0?tuc/timp*100:0;
   const legend='<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
-  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th><th>전체</th>'+ths+'</tr></thead><tbody>';
-  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td><td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
+  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+'<th>전체</th>'+ths+'</tr></thead><tbody>';
+  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+budTdSr+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
   cols.forEach(ck=>{h+=cell(totC[ck])});
   h+='</tr>';
   // 상품별 그룹
@@ -2678,7 +2687,7 @@ function renderTrendAgg(gran){
     const pImp=cols.reduce((a,ck)=>a+pByCol[ck].imp,0),pCpm=pImp>0?pS/pImp*1000:0;
     const pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0),pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pCvr=pUc>0&&pMp>0?pMp/pUc*100:0,pCtr=pImp>0?pUc/pImp*100:0;
     const pCells=cols.map(ck=>cell(pByCol[ck])).join('');
-    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td><td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
+    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+budTdSr+'<td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
     orderSets(g.adsets.slice()).forEach(a=>{
       const cells=cols.map(ck=>cell(a.b[ck])).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
@@ -2686,7 +2695,7 @@ function renderTrendAgg(gran){
       // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
       const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td><td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+(showBud?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'')+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -2827,7 +2836,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       +'<td class="fx fx0" style="background:#fff3cd;font-size:10px"><b>'+subLabel+'</b></td>'
       +'<td class="fx fx1" style="background:#fff3cd"></td>'
       +'<td style="background:#fff3cd"></td>'
-      +(showChg?'<td style="background:#fff3cd"></td>':'')
+      +(showChg?'<td style="background:#fff3cd"></td><td style="background:#fff3cd"></td>':'')
       +'<td class="mc '+RC(tRoas)+'" style="background:#fff3cd">'+MC(tRoas,tP,tS,tR,tCvr,null,tCtr,tMp>0?tS/tMp:0)+'</td>'
       +subCells;
     trs.push(tr);
@@ -2847,7 +2856,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       +'<td class="fx fx0" style="background:#fff8e1"></td>'
       +'<td class="fx fx1" style="background:#fff8e1;padding-left:24px" title="'+anEsc+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
       +'<td class="idc" style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
-      +(showChg?'<td style="background:#fff8e1"></td>':'')
+      +(showChg?'<td style="background:#fff8e1"></td><td style="background:#fff8e1"></td>':'')
       +'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr,null,c._ctr,c._mp>0?c._s/c._mp:0)+'</td>'
       +cells;
     trs.push(tr);
@@ -5738,6 +5747,12 @@ function renderGgdgTight(){
   const avgDates=allDates.slice(0,7), AVGN=avgDates.length||1;
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  // 예산 — 구글 디멘드젠은 예산이 **캠페인 단위**라 파이프라인이 광고그룹별 최신 날짜 행에만
+    //   현재 캠페인 예산을 적는다(구글_디멘드젠_캠페인_supabase.py). 여기서는 세트별로
+    //   '예산이 들어있는 가장 최근 행'을 집는다 — 표시 기간(dateSet) 밖도 허용해야
+    //   기간을 14일로 좁혔을 때 값이 사라지지 않는다.
+  const GBUD={};
+  GGDG_TIGHT.forEach(r=>{const b=+r.budget||0;if(!(b>0))return;const id=r.ad_group_id;const p=GBUD[id];if(!p||r.date>p.d)GBUD[id]={d:r.date,b:b}});
   // 그룹화 — 행=세트(ad_group_id), 상품(prod)은 표시용 묶음 키. d[date]={s,r,c}
   const byC={};
   GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.ad_group_id;if(!byC[id])byC[id]={id,camp:r.campaign_name||'',name:r.ad_group_name||id,prod:_dgProduct(r.ad_group_name||r.campaign_name),d:{}};/* 이름은 ★선택 기간 내 최신 날짜 행★ 기준 (2026-08-12). 구글에서 캠페인/광고그룹 이름을 바꾸면
@@ -5758,7 +5773,8 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
   // 기간합계(_s/_r/_c, 정렬·소계용) + 최근 7일 합계(_a*, 첫 컬럼 표시용) + 검색필터
   //   정렬은 그대로 어제 지출↓ → 기간 지출↓.
   let list=Object.values(byC).map(o=>{let s=0,r=0,c=0;allDates.forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});o._s=s;o._r=r;o._c=c;o._roas=s>0?r/s*100:0;o._sy=o.d[yDay]?.s||0;
-    let as=0,ar=0,ac=0;avgDates.forEach(d=>{const x=o.d[d];if(x){as+=x.s;ar+=x.r;ac+=x.c}});o._as=as;o._ar=ar;o._ac=ac;return o});
+    let as=0,ar=0,ac=0;avgDates.forEach(d=>{const x=o.d[d];if(x){as+=x.s;ar+=x.r;ac+=x.c}});o._as=as;o._ar=ar;o._ac=ac;
+    o._bud=(GBUD[o.id]||{}).b||0;return o});
   list=list.filter(o=>o._s>0||o._r>0);
   if(kw)list=list.filter(o=>((o.camp||'')+' '+(o.name||'')+' '+(o.id||'')).toLowerCase().includes(kw));
   list.sort((a,b)=>(b._sy-a._sy)||(b._s-a._s));
@@ -5777,11 +5793,12 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
   const ths=cols.map(k=>{const isSun=view==='day'&&WD(k)==='일';const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+(isSun?'sun':'')+yd+'" style="min-width:var(--cw)">'+colLabel(k)+'</th>'}).join('');
   const avgTitle='최근 '+AVGN+'일('+(avgDates[avgDates.length-1]||'')+'~'+(avgDates[0]||'')+') 일평균 · ROAS는 7일 합계 기준 · 당일(오늘)은 진행 중이라 부분값';
   let h='<thead><tr><th class="fx fx0" style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">세트</th><th style="min-width:110px;text-align:left">세트ID</th>'
+    +'<th class="hbud" title="현재 일예산 — 디멘드젠은 예산이 캠페인 단위라 같은 캠페인의 세트마다 같은 값이 반복된다(세로로 더하지 말 것). 날짜별 이력이 아니라 지금 설정값의 스냅샷">예산</th>'
     +'<th style="min-width:120px" title="'+avgTitle+'">7일 평균</th>'+ths+'</tr></thead><tbody>';
   // 종합행
   const totCol={};cols.forEach(k=>{let s=0,r=0,c=0;list.forEach(o=>{const x=setCol(o,k);s+=x.s;r+=x.r;c+=x.c});totCol[k]={s,r,c}});
   const gS=list.reduce((a,o)=>a+o._as,0),gR=list.reduce((a,o)=>a+o._ar,0),gC=list.reduce((a,o)=>a+o._ac,0),gRoas=gS>0?gR/gS*100:0;
-  h+='<tr class="sr"><td colspan="3" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'세트'+(kw?' · 검색결과':'')+')</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(gS,gR,gC)+'</td>';
+  h+='<tr class="sr"><td colspan="4" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'세트'+(kw?' · 검색결과':'')+')</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(gS,gR,gC)+'</td>';
   cols.forEach(k=>{const x=totCol[k];const yd=(view==='day'&&k===yDay)?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
   h+='</tr>';
   // 증감액 테두리 — '⚡ 구글에 예산 적용'으로 실제 반영된 날짜 셀에 색 링(메타 추이차트와 동일한 표현).
@@ -5805,7 +5822,8 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
     // 캠페인 칸의 ▶ 캐럿 = 그 캠페인(=세트) 하위 소재 목록 펼치기/접기.
     //   '(세트미상)' 합성 행(camp_<id>)은 실제 광고가 없으므로 캐럿 없음.
     const caret=/^camp_/.test(o.id)?'':'<span class="ex-caret" onclick="event.stopPropagation();toggleGgdgCreatives(\''+o.id+'\',this.closest(\'tr\'))" title="소재 목록 펼치기/접기">▶</span>';
-    const head='<td class="fx fx0 '+hl+ck+' style="text-align:left;font-size:11px">'+caret+(o.camp||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:11px">'+(o.name||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:9px;color:#888">'+o.id+'</td>';
+    const head='<td class="fx fx0 '+hl+ck+' style="text-align:left;font-size:11px">'+caret+(o.camp||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:11px">'+(o.name||'')+'</td><td class="'+hl+ck+' style="text-align:left;font-size:9px;color:#888">'+o.id+'</td>'
+      +'<td class="budc">'+(o._bud>0?moneyKRW(o._bud)+'<span style="color:#aaa;font-size:9px"> (캠)</span>':'')+'</td>';
     const aRoas=o._as>0?o._ar/o._as*100:0;
     return'<tr data-ggdg-row="'+o.id+'">'+head+'<td class="mc '+(o._as>0?RC(aRoas):'')+'" style="font-weight:700" title="'+avgTitle+'">'+cellAvg(o._as,o._ar,o._ac)+'</td>'+cells+'</tr>';
   };
@@ -5815,7 +5833,7 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
   {
     const byProd={};
     list.forEach(o=>{const p=o.prod||'기타';if(!byProd[p])byProd[p]={sets:[],sy:0};byProd[p].sets.push(o);byProd[p].sy+=(o._sy||0)});
-    const colSpanAll=4+cols.length;   // 캠페인/세트/세트ID/7일 평균 + 기간 컬럼
+    const colSpanAll=5+cols.length;   // 캠페인/세트/세트ID/예산/7일 평균 + 기간 컬럼
     Object.keys(byProd).sort((a,b)=>byProd[b].sy-byProd[a].sy).forEach(p=>{
       const g=byProd[p];
       const pS=g.sets.reduce((a,o)=>a+o._s,0),pR=g.sets.reduce((a,o)=>a+o._r,0);
@@ -5825,7 +5843,7 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
       const paRoas=paS>0?paR/paS*100:0;
       h+='<tr><td colspan="'+colSpanAll+'" class="prod-header">📦 '+p+' ('+g.sets.length+'개) 전날 '+(moneyKRW(g.sy)||'₩0')+' · 기간 ROAS '+pRoas.toFixed(0)+'%</td></tr>';
       const pCells=cols.map(k=>{let s=0,r=0,c=0;g.sets.forEach(o=>{const x=setCol(o,k);s+=x.s;r+=x.r;c+=x.c});const yd=(view==='day'&&k===yDay)?' col-yday':'';if(!s&&!r&&!c)return'<td class="'+yd+'" style="background:#e8e8e8"></td>';const roas=s>0?r/s*100:0;return'<td class="mc '+(s>0?RC(roas):'')+yd+'" style="background:#e8e8e8">'+cell(s,r,c)+'</td>'}).join('');
-      h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;text-align:left;font-weight:700">'+p+' 소계</td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td class="mc '+(paS>0?RC(paRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(paS,paR,paC)+'</td>'+pCells+'</tr>';
+      h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;text-align:left;font-weight:700">'+p+' 소계</td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td class="mc '+(paS>0?RC(paRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(paS,paR,paC)+'</td>'+pCells+'</tr>';
       g.sets.forEach(o=>{h+=rowHtml(o)});
     });
   }
@@ -5904,7 +5922,7 @@ async function toggleGgdgCreatives(adGroupId,anchorRow){
       const roas=s>0?r/s*100:0;return'<td class="mc '+(s>0?RC(roas):'')+yd+'">'+cell(s,r,c)+'</td>'}).join('');
     const tr=document.createElement('tr');
     tr.className='creative-expanded cr-subtotal';tr.setAttribute('data-parent',adGroupId);
-    tr.innerHTML='<td class="fx fx0 cr-name">↳ 소재 소계 ('+list.length+'개)</td><td class="cr-name2"></td><td class="cr-id"></td>'
+    tr.innerHTML='<td class="fx fx0 cr-name">↳ 소재 소계 ('+list.length+'개)</td><td class="cr-name2"></td><td class="cr-id"></td><td></td>'
       +'<td class="mc '+(tS>0?RC(tRoas):'')+'" style="font-weight:700" title="최근 '+AVGN+'일 일평균">'+cellAvg(tS,tR,tC)+'</td>'+cells;
     trs.push(tr);
   }
@@ -5918,7 +5936,7 @@ async function toggleGgdgCreatives(adGroupId,anchorRow){
     const tr=document.createElement('tr');
     tr.className='creative-expanded';tr.setAttribute('data-parent',adGroupId);
     tr.innerHTML='<td class="fx fx0 cr-name"></td><td class="cr-name2" title="'+ttl.replace(/"/g,'&quot;')+'"><span style="color:#888">┗</span> '+nm+'</td>'
-      +'<td class="cr-id" style="color:#888">'+a.id+'</td>'
+      +'<td class="cr-id" style="color:#888">'+a.id+'</td><td></td>'
       +'<td class="mc '+(a._as>0?RC(a._aroas):'')+'" style="font-weight:700" title="최근 '+AVGN+'일 일평균">'+cellAvg(a._as,a._ar,a._ac)+'</td>'+cells;
     trs.push(tr);
   });

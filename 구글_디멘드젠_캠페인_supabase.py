@@ -7,6 +7,9 @@ google_demandgen_campaign_daily 테이블에 upsert.
 
   · 지출/클릭/노출 = 구글 Ads API (campaign, advertising_channel_type=DEMAND_GEN,
            campaign.name 에 '[Tight]' 포함) → campaign.id × segments.date × cost/clicks/impressions
+  · 예산 = 구글 Ads API campaign_budget.amount_micros (캠페인 단위 일예산, KRW).
+           디멘드젠은 광고그룹 예산이 없어 캠페인 값이 소속 광고그룹 행에 반복된다 → 세로합 금지.
+           날짜별 이력이 아닌 '현재' 스냅샷이라 **광고그룹별 최신 날짜 행에만** 적재한다.
   · 매출 = Mixpanel export (payment_complete) properties.utm_campaign(=구글 campaign.id)
            매칭 → $insert_id + order_id dedup 후 (date_KST, campaign_id) 별 매출/건수
   ※ Mixpanel 결제 이벤트의 utm_campaign 값이 구글 캠페인 숫자 id 와 동일.
@@ -194,6 +197,42 @@ def fetch_groups_and_ads(client, cids):
                 log.error(f"     · {err.message}")
             raise
     return group_meta, ad_to_group, ad_meta
+
+
+def fetch_camp_budgets(client, cids):
+    """[Tight] 디멘드젠 캠페인의 **현재** 예산 → {campaign_id: 원화 금액}.
+
+    디멘드젠은 예산이 캠페인 단위다(광고그룹엔 예산이 없다) → 같은 캠페인의 광고그룹 행에
+    같은 값이 반복된다. 세로로 더하면 캠페인 수만큼 뻥튀기되므로 대시보드도 합산하지 않는다.
+    날짜별 이력이 아니라 '지금 이렇게 설정돼 있다'는 스냅샷이라, 적재는 광고그룹별
+    **가장 최근 날짜 행에만** 한다(과거 행에 넣으면 예산 이력으로 오해된다).
+    period 가 DAILY 가 아니면(총예산) 일예산으로 표시하면 틀리므로 제외하고 경고한다.
+    """
+    ga = client.get_service("GoogleAdsService")
+    out = {}
+    q = ("SELECT campaign.id, campaign.name, campaign_budget.amount_micros, "
+         "campaign_budget.period FROM campaign "
+         "WHERE campaign.advertising_channel_type = 'DEMAND_GEN'")
+    for cid in cids:
+        try:
+            for b in ga.search_stream(customer_id=cid, query=q):
+                for r in b.results:
+                    if TIGHT_KEY not in r.campaign.name.lower():
+                        continue
+                    per = r.campaign_budget.period
+                    if getattr(per, "name", str(per)) != "DAILY":
+                        log.warning(f"  ⚠️ 캠페인 {r.campaign.id} '{r.campaign.name}' 예산 period="
+                                    f"{getattr(per, 'name', per)} — 일예산이 아니라 예산 표시에서 제외")
+                        continue
+                    amt = r.campaign_budget.amount_micros / 1_000_000.0
+                    if amt > 0:
+                        out[str(r.campaign.id)] = round(amt, 2)
+        except GoogleAdsException as e:
+            log.error(f"  ❌ 캠페인 예산 조회 CID={cid}")
+            for err in getattr(e.failure, "errors", []):
+                log.error(f"     · {err.message}")
+            raise
+    return out
 
 
 def fetch_tight_spend(client, cids, tight_group_ids):
@@ -400,6 +439,9 @@ def main():
     for gid, m in group_meta.items():
         log.info(f"     · 세트 {gid}  '{m['ad_group_name']}'  ← {m['campaign_name']}")
 
+    camp_bud = fetch_camp_budgets(client, cids)
+    log.info(f"  💰 캠페인 일예산 {len(camp_bud)}개: "
+             + ", ".join(f"{c}=₩{v:,.0f}" for c, v in sorted(camp_bud.items())))
     spend, clicks, imps = fetch_tight_spend(client, cids, tight_group_ids)
     a_spend, a_clicks, a_imps = fetch_tight_ad_spend(client, cids, tight_group_ids)
     rev, cnt, rev_ad, cnt_ad = fetch_mp(tight_camp_ids, ad_to_group, group_meta)
@@ -425,7 +467,28 @@ def main():
             "purchase_count": c,
             "clicks": int(clicks.get((gid, d), 0)),
             "impressions": int(imps.get((gid, d), 0)),
+            # 아래에서 광고그룹별 최신 날짜 행만 실제 값으로 채운다. 키 자체는 모든 행에 있어야 한다
+            # (PostgREST 벌크 upsert 는 객체 키가 전부 같아야 한다 — 'All object keys must match').
+            # 최신이 아닌 행은 None → 어제 최신이었던 행의 예산이 오늘 실행에서 자동으로 비워진다.
+            "budget": None,
         })
+
+    # 예산 = 광고그룹별 '이번 실행에서 가장 최근 날짜' 행에만 현재 캠페인 예산을 쓴다.
+    #   나머지 날짜는 NULL 로 남는다 — 스냅샷을 과거에 뿌리면 예산 이력처럼 보이기 때문이다.
+    #   대시보드(renderGgdgTight)는 세트별 '예산이 들어있는 가장 최근 행'을 읽는다.
+    last_date = {}
+    for r in records:
+        g = r["ad_group_id"]
+        if r["date"] > last_date.get(g, ""):
+            last_date[g] = r["date"]
+    n_bud = 0
+    for r in records:
+        if r["date"] == last_date.get(r["ad_group_id"]):
+            b = camp_bud.get(r["campaign_id"])
+            if b:
+                r["budget"] = b
+                n_bud += 1
+    log.info(f"  💰 예산 기록: 광고그룹 {n_bud}개(각 최신일 행)")
 
     # (ad_group_id, ad_id, date) — 소재별 행
     ad_keys = set(a_spend) | set(rev_ad) | set(cnt_ad)
