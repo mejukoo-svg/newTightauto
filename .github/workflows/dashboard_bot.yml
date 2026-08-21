@@ -14,13 +14,18 @@ jobs:
   post:
     name: 퍼포먼스봇 게시
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25   # 실험 현황 카드 캡처(대시보드 로딩 + 브라우저) 몫 포함
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install anthropic
+      - run: pip install anthropic playwright
+      # 🧪 실험 현황은 대시보드 카드를 캡처해 올린다 → 헤드리스 크로미움 필요.
+      # 설치가 실패해도 봇은 텍스트 폴백으로 계속 돈다(캡처만 포기).
+      - name: Install chromium (실험 현황 캡처용)
+        run: python -m playwright install --with-deps chromium
+        continue-on-error: true
       - name: Run dashboard_bot
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

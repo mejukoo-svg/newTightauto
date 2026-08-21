@@ -22,11 +22,15 @@ dashboard_bot.py — 대시보드(Supabase) 지표를 가공해 마케팅 채널
   py dashboard_bot.py --kr-only | --gl-only
   py dashboard_bot.py --dry-run --exp-only   # 🧪 실험 현황 알림만 미리보기
   py dashboard_bot.py --no-exp               # 실험 현황 알림 끄기
+  py dashboard_bot.py --no-shot              # 실험 현황을 캡처 없이 텍스트로 게시
 
 ※ '전체 종합' 공식은 calc_kr_total / calc_gl_total 에 분리해 두었다(아래 주석 참고).
    예시 숫자와 대조해 이 두 함수만 조정하면 된다.
 ※ 채널에 나가는 메시지는 3개다: ①퍼포먼스 표 ②그 스레드 댓글(증감액 조언)
    ③🧪 실험 현황 · 오늘의 변화(별도 메시지, 변화 있는 날만).
+   ③은 대시보드 실험현황 카드를 그대로 캡처한 그림 + 짧은 텍스트 요약으로 나간다
+   (표를 슬랙 코드블록으로 옮기면 정렬·색이 깨진다). 캡처가 안 되면 종전 전문 텍스트로 폴백.
+   캡처에는 playwright(chromium)가 필요하다 — 워크플로에서 설치한다.
 """
 import os, sys, json, re, datetime, urllib.request, urllib.parse
 from pathlib import Path
@@ -37,6 +41,7 @@ KR_ONLY = "--kr-only" in sys.argv
 GL_ONLY = "--gl-only" in sys.argv
 NO_EXP = "--no-exp" in sys.argv    # 🧪 실험 현황 알림 끄기
 EXP_ONLY = "--exp-only" in sys.argv  # 실험 현황 알림만 (퍼포먼스 표·조언 생략)
+NO_SHOT = "--no-shot" in sys.argv  # 실험 현황 캡처 끄기(텍스트 전문으로 게시)
 DAYS_BACK = 1  # 0=어제vs오늘, 1=그제vs어제(완결일) ← 11시 전송은 완결일 비교 권장
 
 # 특정 날짜 강제 (검증용): --dates D_PREV,D_CUR
@@ -67,7 +72,8 @@ SB_URL = ENV["SUPABASE_URL"].rstrip("/")
 SB_KEY = ENV["SUPABASE_SERVICE_KEY"]
 SBH = {"apikey": SB_KEY, "Authorization": "Bearer " + SB_KEY}
 # new-tightauto: SUPABASE_DB_SCHEMA 설정 시 스키마 프로파일 헤더 (미설정=기존 public)
-_sc = os.environ.get('SUPABASE_DB_SCHEMA', '').strip()
+# 스키마는 환경변수(Actions secret) 우선, 없으면 .env — 로컬 실행이 프로덕션과 같은 스키마를 보도록
+_sc = (os.environ.get('SUPABASE_DB_SCHEMA') or ENV.get('SUPABASE_DB_SCHEMA') or '').strip()
 if _sc:
     SBH['Accept-Profile'] = _sc
     SBH['Content-Profile'] = _sc
@@ -271,6 +277,51 @@ def slack_post(channel, text, thread_ts=None):
                                           "Content-Type": "application/json; charset=utf-8"}, method="POST")
     r = json.loads(urllib.request.urlopen(req, timeout=30).read().decode("utf-8"))
     return r.get("ok", False), (r.get("ts") if r.get("ok") else r.get("error"))
+
+# ── 파일 업로드(캡처 게시) ─────────────────────────────────────────
+#   Slack 신 업로드 3단계: getUploadURLExternal → 그 URL 로 POST → completeUploadExternal.
+#   completeUploadExternal 에 files 를 한꺼번에 넘기면 '이미지 여러 장 + 코멘트 1개'인
+#   메시지 하나로 붙는다(장마다 따로 올라가면 채널이 지저분해진다).
+def _multipart(filename, data, ctype="image/png"):
+    """requests 없이 multipart/form-data 본문을 만든다(봇 의존성은 표준 라이브러리만)."""
+    nl = chr(13) + chr(10)            # CRLF — multipart 규격이 요구하는 줄바꿈
+    b = "----dbbot" + os.urandom(8).hex()
+    head = ("--" + b + nl +
+            'Content-Disposition: form-data; name="file"; filename="' + filename + '"' + nl +
+            "Content-Type: " + ctype + nl + nl).encode("utf-8")
+    tail = (nl + "--" + b + "--" + nl).encode("utf-8")
+    return head + data + tail, "multipart/form-data; boundary=" + b
+
+def slack_upload(channel, files, comment=""):
+    """files=[(경로, 캡션)] 을 한 메시지로 게시. 반환 (ok, ts 또는 오류)."""
+    up = []
+    for path, title in files:
+        data = Path(path).read_bytes()
+        r = slack_get("files.getUploadURLExternal", {"filename": Path(path).name, "length": len(data)})
+        if not r.get("ok"):
+            return False, "getUploadURL: " + str(r.get("error"))
+        body, ctype = _multipart(Path(path).name, data)
+        req = urllib.request.Request(r["upload_url"], data=body,
+                                     headers={"Content-Type": ctype}, method="POST")
+        resp = urllib.request.urlopen(req, timeout=180)
+        if resp.status != 200:
+            return False, f"upload HTTP {resp.status}"
+        up.append({"id": r["file_id"], "title": title})
+    # channel 이 비면 채널 공유 없이 업로드만 한다(업로드 경로 점검용).
+    payload = {"files": up}
+    if channel:
+        payload["channel_id"] = channel
+    if comment:
+        payload["initial_comment"] = comment
+    req = urllib.request.Request("https://slack.com/api/files.completeUploadExternal",
+                                 data=json.dumps(payload).encode("utf-8"),
+                                 headers={"Authorization": f"Bearer {BOT}",
+                                          "Content-Type": "application/json; charset=utf-8"}, method="POST")
+    r = json.loads(urllib.request.urlopen(req, timeout=120).read().decode("utf-8"))
+    if not r.get("ok"):
+        return False, str(r.get("error"))
+    fs = r.get("files") or [{}]
+    return True, (fs[0].get("timestamp") or "")
 
 def slack_get(method, params):
     qs = urllib.parse.urlencode(params)
@@ -1370,8 +1421,39 @@ def fmt_exp_card(fam, sides, reasons, cur, dc):
     hyp = fmt_exp_hyp(fam, sides, dc, cur)
     return head + "\n" + why + ("\n" + hyp if hyp else "") + "\n```\n" + "\n".join(body) + "\n```"
 
-def build_exp_message(label, region, dc):
-    """기준일에 변화가 있는 실험 가족만 골라 메시지 문자열 반환. 없으면 None."""
+def _exp_brief(head, shown, cur, dc, nshot):
+    """캡처와 함께 올리는 짧은 텍스트.
+
+    표(📊 기간 평균)는 그림이 대신하므로 여기서는 '무엇이 달라졌나 / 지금 이 실험의 답은
+    무엇인가'만 남긴다. 그림만 올리면 슬랙 모바일 알림 미리보기와 검색에 아무것도 안 걸려서,
+    나중에 '그 실험 언제 뒤집혔지'를 찾을 수가 없다 — 요약 텍스트는 그 검색 색인 역할도 한다."""
+    out = [head + (f"\n(카드 캡처 {nshot}장 · 표는 그림)" if nshot else "")]
+    for f, sides, reasons in shown:
+        fr = _es_roas(f["s"], f["r"]) or 0
+        out.append(f"\n*[{f['product']}] {sides[0]['name']}*"
+                   f"  ·  지출 {_es_money(f['s'], cur)} · ROAS {fr:.0f}%")
+        out += ["　" + r for r in reasons]
+        base = f["mem"][0]
+        vs = []
+        for m, S in zip(f["mem"], sides):
+            if m is base or m["kind"] == "orig":
+                continue
+            h = es_hypothesis(m, base, dc)
+            vs.append(f"{S['lab']}[{S['role']}] {ES_VERDICT_ICON.get(h['verdict'], '⏳')}{h['verdict']}"
+                      f"(구매 {h['k']}/기대 {h['lam']:.1f})")
+        if vs:
+            out.append("　현재 판정: " + " · ".join(vs))
+    t = "\n".join(out)
+    return t if len(t) <= 2800 else t[:2790] + "\n…(생략)"
+
+def build_exp(label, region, dc):
+    """기준일에 변화가 있는 실험 가족만 골라 '게시 재료'를 만든다. 변화가 없으면 None.
+
+    반환 {head, full, shown, cur, targets}
+      full    = 캡처 실패 시 대신 올리는 전문(종전 텍스트 알림 그대로)
+      shown   = [(가족, sides, 변화사유)] — 짧은 요약(_exp_brief)의 재료
+      targets = 캡처 대상 [{id: 원본 세트ID, title: 캡션}]. 대시보드 실험현황 탭의
+                검색창(#esFilter)은 이름+ID 부분일치라, 원본 세트 ID 로 그 가족만 띄운다."""
     cur = ADV_SRC[region][-1]
     th = dict(ES_TH[region])
     th["cur"] = cur
@@ -1402,7 +1484,40 @@ def build_exp_message(label, region, dc):
             f"   ·  실험 {total}건 중 변화 {len(hits)}건")
     if len(hits) > len(shown):
         head += f" (지출 상위 {len(shown)}건만 표시)"
-    return head + "\n\n" + "\n\n".join(fmt_exp_card(f, s, r, cur, dc) for f, s, r in shown)
+    return {"head": head, "cur": cur, "shown": shown,
+            "full": head + "\n\n" + "\n\n".join(fmt_exp_card(f, s, r, cur, dc) for f, s, r in shown),
+            "targets": [{"id": f["mem"][0]["id"],
+                         "title": f"[{f['product']}] {s[0]['name']}"} for f, s, _ in shown]}
+
+def build_exp_message(label, region, dc):
+    """종전 인터페이스(전문 텍스트만). 캡처를 못 쓰는 경로에서 쓴다."""
+    e = build_exp(label, region, dc)
+    return e["full"] if e else None
+
+# ── 캡처: 브라우저는 한 번만 띄우고 국내·글로벌을 이어서 찍는다 ────────
+_SHOOTER = [None]
+
+def exp_shots(region, targets, dc):
+    """대시보드 실험현황 카드를 PNG 로 캡처. 실패하면 [] (호출부는 텍스트로 폴백).
+    dc=기준일 — 그림과 텍스트가 같은 기간을 보도록 화면 데이터를 그날까지로 자른다."""
+    if NO_SHOT or not targets:
+        return []
+    try:
+        if _SHOOTER[0] is None:
+            import atexit
+            from exp_capture import ExpShooter
+            _SHOOTER[0] = ExpShooter(SB_KEY)
+            atexit.register(exp_shots_close)   # 중간에 죽어도 chromium 이 남지 않게
+        return _SHOOTER[0].shots(region, targets, ES_WINDOW, dc)
+    except Exception as e:
+        print(f"  [캡처] 실패 — 텍스트로 대체합니다: {e}")
+        return []
+
+def exp_shots_close():
+    if _SHOOTER[0] is not None:
+        _SHOOTER[0].close()
+        _SHOOTER[0] = None
+
 
 
 # =====================================================================
@@ -1447,12 +1562,16 @@ def main():
             print(msg)
 
         # 🧪 실험 현황 · 오늘의 변화 (별도 메시지). 변화가 없는 날은 아예 보내지 않는다.
-        exp_msg = None
+        #   기본은 '카드 캡처 + 짧은 요약', 캡처가 하나도 안 나오면 종전 전문 텍스트.
+        exp, exp_files, exp_brief = None, [], None
         if not NO_EXP:
             try:
-                exp_msg = build_exp_message(label, region, dc)
+                exp = build_exp(label, region, dc)
             except Exception as e:
                 print(f"  [실험] 생성 실패: {e}")
+        if exp:
+            exp_files = exp_shots(region, exp["targets"], dc)
+            exp_brief = _exp_brief(exp["head"], exp["shown"], exp["cur"], dc, len(exp_files))
 
         # 조언 생성 (플레이북 + 세트/메모/증감액표시 → Claude). marks=조언에서 뽑은 추이차트 하이라이트
         advice, adv_marks = None, []
@@ -1494,8 +1613,13 @@ def main():
                 print(f"  [조언] 생성 실패: {e}")
 
         if DRY:
-            if exp_msg:
-                print("\n  ── 🧪 실험 현황 알림 미리보기 ──\n" + exp_msg)
+            if exp and exp_files:
+                print(f"\n  ── 🧪 실험 캡처 {len(exp_files)}장 (미전송) ──")
+                for fp, tt in exp_files:
+                    print(f"    {fp}  {tt}")
+                print("\n  ── 캡처와 함께 올라갈 요약 ──\n" + exp_brief)
+            elif exp:
+                print("\n  ── 🧪 실험 현황 알림(텍스트 폴백) 미리보기 ──\n" + exp["full"])
             if p and c:
                 print("\n  ── 구성요소 (전체 종합 보정용) ──")
                 for tag, d in [(dp, p), (dc, c)]:
@@ -1525,10 +1649,16 @@ def main():
             if ok and advice:
                 ok2, info2 = slack_post(ch, advice, thread_ts=ts)
                 print(f"  조언 댓글: {'성공' if ok2 else '실패(' + str(info2) + ')'}")
-        # 🧪 실험 현황 — 퍼포먼스 표와 주제가 다르므로 별도 메시지로 게시
-        if exp_msg:
-            ok3, info3 = slack_post(ch, exp_msg)
-            print(f"  실험 현황 알림: {'성공' if ok3 else '실패(' + str(info3) + ')'}")
+        # 🧪 실험 현황 — 퍼포먼스 표와 주제가 다르므로 별도 메시지로 게시.
+        #   캡처(카드 그림 여러 장) + 짧은 요약 한 덩어리로 올린다.
+        if exp:
+            if exp_files:
+                ok3, info3 = slack_upload(ch, exp_files, exp_brief)
+                how = f"캡처 {len(exp_files)}장"
+            else:
+                ok3, info3 = slack_post(ch, exp["full"])
+                how = "텍스트"
+            print(f"  실험 현황 알림({how}): {'성공' if ok3 else '실패(' + str(info3) + ')'}")
         # 조언의 증감액을 추이차트 하이라이트로 자동 표기 (adset_highlights류만, 영구 조치이력은 불변)
         if adv_marks and not NO_HL:
             try:
@@ -1541,6 +1671,8 @@ def main():
             nr = record_ai_marks(region, adv_marks, mark_date)
             if nr:
                 print(f"  AI권고 기록: {nr}건 → ai_advice_marks(date={mark_date})")
+
+    exp_shots_close()   # 캡처용 브라우저·로컬 서버 정리(안 띄웠으면 무해)
 
 if __name__ == "__main__":
     main()
