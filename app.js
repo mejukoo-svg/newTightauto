@@ -9,6 +9,29 @@ const SBC=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRef
 // 로그인 세션의 access token으로 모든 읽기/쓰기를 인증 → 공개 anon 키만으론 RLS가 차단.
 // onAuthStateChange는 로그인/토큰자동갱신/로그아웃 시 SBH 헤더를 항상 최신으로 유지.
 SBC.auth.onAuthStateChange((_e,session)=>{SBH.Authorization='Bearer '+(session?session.access_token:SB_KEY);});
+// 세션이 죽으면(만료·갱신실패) 헤더가 공개키로 폴백되고, 공개키엔 RLS 권한이 없어 '코어 테이블 전부 401' 이 된다.
+//   그동안은 아무 조치 없이 빨간 배너만 떠서 새로고침을 몇 번 해도 같은 화면이 반복됐다(2026-08-23 실제 사고).
+//   · authRefresh(): 401 시점에 토큰 갱신 1회 시도 (동시 401 이 9개여도 갱신 요청은 한 번만)
+//   · authLost():    갱신마저 실패하면 조용히 두지 말고 로그인 화면으로 되돌린다
+let _authRefreshP=null,_AUTH_LOST=false;
+function authRefresh(){
+  if(!_authRefreshP)_authRefreshP=SBC.auth.refreshSession().then(({data,error})=>{
+    _authRefreshP=null;
+    if(error||!data||!data.session)return false;
+    SBH.Authorization='Bearer '+data.session.access_token;return true;
+  }).catch(()=>{_authRefreshP=null;return false});
+  return _authRefreshP;
+}
+function authLost(msg){
+  if(_AUTH_LOST)return;_AUTH_LOST=true;
+  SBH.Authorization='Bearer '+SB_KEY;
+  try{SBC.auth.signOut()}catch(e){}
+  const ac=document.getElementById('appContent');if(ac)ac.classList.remove('ready');
+  const ls=document.getElementById('loginScreen');if(ls)ls.style.display='flex';
+  const er=document.getElementById('loginErr');if(er)er.textContent=msg||'세션이 만료되었습니다. 다시 로그인해 주세요.';
+  const pw=document.getElementById('loginPw');if(pw){pw.value='';pw.focus()}
+  const w=document.getElementById('coreWarn');if(w)w.remove();
+}
 
 // ===== 매월 매출 목표 (대시보드 배너용) — 매달 새로 추가/수정 =====
 //   국내(kr) = KRW,  글로벌(gl) = USD. 글로벌 탭은 지표가 전부 달러라 목표도 달러로 둔다.
@@ -77,6 +100,13 @@ async function sbQ(t,q='',_try=0){
   catch(e){ if(_try<2){await _sbWait(_try);return sbQ(t,q,_try+1)} throw new Error(t+' 네트워크 실패: '+(e&&e.message||e)) }
   if(!r.ok){
     if((r.status>=500||r.status===429)&&_try<2){await _sbWait(_try);return sbQ(t,q,_try+1)}
+    // 401 = 토큰 만료(JWT expired) 또는 세션 폴백(permission denied). 부팅 직후엔 supabase-js 의
+    //   백그라운드 갱신과 첫 fetch 가 경합해 '만료 토큰으로 전 테이블 401' 이 되기 쉽다.
+    //   → 갱신 1회 후 재시도, 그래도 안 되면 로그인 화면으로. (조용히 0 으로 그리지 않는다)
+    if(r.status===401&&_try<2){
+      if(await authRefresh())return sbQ(t,q,_try+1);
+      authLost('세션이 만료되었습니다. 비밀번호를 다시 입력해 주세요.');
+    }
     let m='';try{m=(await r.json()).message||''}catch(e){}
     throw new Error(t+' HTTP '+r.status+(m?' — '+m:''));
   }
@@ -1070,13 +1100,21 @@ function renderCoreWarn(staleOnly){
   el.style.cssText='position:fixed;left:0;right:0;top:0;z-index:9999;background:#b91c1c;color:#fff;'
     +'font-size:12px;line-height:1.5;padding:7px 12px;box-shadow:0 2px 6px rgba(0,0,0,.3);font-family:inherit';
   const btn='style="margin-left:8px;padding:2px 8px;border:1px solid #fff;border-radius:3px;background:transparent;color:#fff;font-size:11px;cursor:pointer;font-family:inherit"';
+  // 사유(CORE_FAIL 값)까지 띄운다 — 테이블 이름만 보면 '세션 만료' 인지 '네트워크 차단' 인지
+  //   구분이 안 돼서, 콘솔을 열지 않으면 원인을 못 찾았다(2026-08-23). 테이블명 접두어는 떼고 중복 제거.
+  const esc=s=>String(s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  const reasons=staleOnly?[]:[...new Set(Object.values(CORE_FAIL||{}).map(v=>String(v).replace(/^\S+\s+/,'')))].slice(0,3);
+  const isAuth=reasons.some(r=>/401|JWT|permission denied/i.test(r));
   const head=(fails.length||empty.length)
     ? '⚠️ <b>데이터 로드 실패</b> — 아래 지표는 0 으로 그려질 수 있습니다(실제 0 이 아님). '
     : '⚠️ <b>옛날 데이터를 보고 있습니다</b> — 최신 적재분이 반영되지 않았습니다. ';
   el.innerHTML=head
     +(fails.length?'<b>실패:</b> '+fails.join(' · ')+'. ':'')
+    +(reasons.length?'<b>사유:</b> '+esc(reasons.join(' / '))+'. ':'')
+    +(isAuth?'<b>→ 로그인 세션 문제입니다. [🔑 다시 로그인] 을 누르세요.</b> ':'')
     +(empty.length?'<b>0건:</b> '+empty.join(' · ')+'. ':'')
     +(stale.length?'<b>낡음:</b> '+stale.join(' · ')+'. ':'')
+    +(isAuth?'<button onclick="authLost(\'다시 로그인해 주세요.\')" '+btn+'>🔑 다시 로그인</button>':'')
     +'<button onclick="location.reload()" '+btn+'>🔄 다시 불러오기</button>'
     +'<button onclick="purgeCacheAndReload()" '+btn+'>🧹 캐시 비우고 다시 불러오기</button>'
     +'<span onclick="document.getElementById(\'coreWarn\').remove()" style="float:right;cursor:pointer;padding:0 4px">✕</span>';
@@ -6153,9 +6191,22 @@ function showApp(){document.getElementById('loginScreen').style.display='none';d
 async function logout(){try{await SBC.auth.signOut()}catch(e){}location.reload()}
 document.getElementById('loginPw').addEventListener('keydown',e=>{if(e.key==='Enter')tryLogin()});
 // 기존 세션이 있으면 자동 로그인 (supabase-js가 세션을 localStorage에 보존·자동갱신)
-(async()=>{try{const {data:{session}}=await SBC.auth.getSession();
-  if(session){SBH.Authorization='Bearer '+session.access_token;showApp()}
-  else{document.getElementById('loginPw').focus()}
+// ★ getSession() 은 저장된 세션을 '만료 여부와 무관하게 그대로' 돌려준다.
+//   그 토큰으로 initData 가 출발하면 코어 fetch 가 전부 401(JWT expired) 이 되고,
+//   새로고침해도 localStorage 의 같은 만료 토큰을 다시 집어 무한 반복된다(2026-08-23 실제 사고).
+//   → 만료 60초 전이면 여기서 먼저 갱신하고, 갱신이 실패하면 로그인 화면을 띄운다.
+(async()=>{try{
+  let {data:{session}}=await SBC.auth.getSession();
+  if(!session){document.getElementById('loginPw').focus();return}
+  if(((session.expires_at||0)*1000)-Date.now()<60000){
+    const {data,error}=await SBC.auth.refreshSession();
+    if(error||!data||!data.session){
+      document.getElementById('loginErr').textContent='세션이 만료되었습니다. 다시 로그인해 주세요.';
+      document.getElementById('loginPw').focus();return;
+    }
+    session=data.session;
+  }
+  SBH.Authorization='Bearer '+session.access_token;showApp();
 }catch(e){document.getElementById('loginPw').focus()}})();
 
 // ===== 🏢 경쟁사분석 (국내 전용) =====
