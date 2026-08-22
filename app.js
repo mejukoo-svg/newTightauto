@@ -56,6 +56,8 @@ const MONTHLY_REVENUE_GOAL={
 const HL_CONFIG={
   up20:{cls:'hl-up20',pct:20,label:'+20%',bg:'#66eecc'},up10:{cls:'hl-up10',pct:10,label:'+10%',bg:'#88dd88'},
   down10:{cls:'hl-down10',pct:-10,label:'-10%',bg:'#ffcccc'},down20:{cls:'hl-down20',pct:-20,label:'-20%',bg:'#ff7777'},
+  // 연한 회색 = 예산 -50% (감액 중 가장 강한 단계 — OFF 직전). 2026-08-23 추가.
+  down50:{cls:'hl-down50',pct:-50,label:'-50%',bg:'#d0d0d0'},
   off:{cls:'hl-off',pct:null,label:'OFF',bg:'#000000'},watch:{cls:'hl-watch',pct:0,label:'복증',bg:'#ff9900'},
 };
 
@@ -2416,20 +2418,21 @@ function renderTrend(opts){
   const _td=new Date();const today=_td.getFullYear()+'-'+String(_td.getMonth()+1).padStart(2,'0')+'-'+String(_td.getDate()).padStart(2,'0');
   // 이틀 전(D-2): 어제 데이터의 하루 전날에 증감액(증액/감액)을 했는지 표시 (KR/GL 모드)
   const _d2=new Date();_d2.setDate(_d2.getDate()-2);const d2Day=_d2.getFullYear()+'-'+String(_d2.getMonth()+1).padStart(2,'0')+'-'+String(_d2.getDate()).padStart(2,'0');
-  const CHG_HL=new Set(['up20','up10','down10','down20','watch']);
+  const CHG_HL=new Set(['up20','up10','down10','down20','down50','watch']);
   const chgD2={};ROWS.forEach(r=>{if(r.date===d2Day&&CHG_HL.has(r.highlight))chgD2[rowId(r)]=r.highlight});
   const showChg=MODE==='kr'||MODE==='gl';
   // 광고 계정 컬럼: 국내·글로벌 추이차트에서만 캠페인 왼쪽에 계정 '이름' 표시 (ID는 미표시)
   const showAcc=MODE==='kr'||MODE==='gl';
   // 증감액(증액/감액) 테두리: 실제 메타 예산(budget)의 전일 대비 변화로 자동 판정.
   //   예산은 수동 설정값이라 값이 바뀌면 = 사람이 증액/감액한 것. 과거 보유한 모든 날짜 셀에 퍼센트별 색 링 표시.
-  //   색: +20%↑=up20, +변화=up10, -변화=down10, -20%↓=down20. |변화율|<BUD_MIN_PCT% 는 노이즈로 무시.
+  //   색: +20%↑=up20, +변화=up10, -변화=down10, -20%↓=down20, -50%↓=down50(연한 회색).
+  //   |변화율|<BUD_MIN_PCT% 는 노이즈로 무시.
   //   BUD_MIN_PCT: KR·GL전체는 예산이 정확값(정수 KRW / country분할 합=원예산)이라 소액 변화도 실제 → 0.5%.
   //     GL 특정국가 선택 시엔 예산이 '지출비중 분할'이라 지출흔들림 노이즈가 크므로 3% 유지.
   //   off(세트 OFF)는 예산 값이 그대로 남아 예산비교로 감지 불가 → 기존 수동 마킹(highlight==='off')으로 검은 링 유지.
   const budExact=(MODE==='kr')||(MODE==='gl'&&COUNTRY==='ALL');
   const BUD_MIN_PCT=budExact?0.5:3;
-  const budBorderKey=(pct)=>pct>=20?'up20':pct>=BUD_MIN_PCT?'up10':pct<=-20?'down20':pct<=-BUD_MIN_PCT?'down10':null;
+  const budBorderKey=(pct)=>pct>=20?'up20':pct>=BUD_MIN_PCT?'up10':pct<=-50?'down50':pct<=-20?'down20':pct<=-BUD_MIN_PCT?'down10':null;
   const AUX=opts.metric==='aux';  // 보조지표 모드: 셀에 CTR/CVR/CPM/CPP/구매당단가 표시
   const byA={};
   ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});

@@ -12,7 +12,9 @@
 //
 // 배포: README.md 참고.
 
-const API = "v21";
+// v21 은 2026-08 현재 sunset 진행 중 — 요청의 절반쯤이 "Version v21 is deprecated" 로 막힌다.
+// v24 는 파이프라인의 google-ads 파이썬 라이브러리 상한과 같은 버전이다(스택 전체가 한 버전을 본다).
+const API = "v24";
 const ADS = `https://googleads.googleapis.com/${API}`;
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -32,12 +34,12 @@ const MAX_ITEMS = 200;
 
 // index.html HL_CONFIG 와 같은 값. null = 예산 변경 없음.
 const TAG_PCT: Record<string, number | null> = {
-  up20: 20, up10: 10, down10: -10, down20: -20,
+  up20: 20, up10: 10, down10: -10, down20: -20, down50: -50,
   off: null, // 광고그룹을 PAUSED 로
   watch: null, // '복증' — 아무것도 하지 않음
 };
 const TAG_LABEL: Record<string, string> = {
-  up20: "+20%", up10: "+10%", down10: "-10%", down20: "-20%", off: "OFF", watch: "복증",
+  up20: "+20%", up10: "+10%", down10: "-10%", down20: "-20%", down50: "-50%", off: "OFF", watch: "복증",
 };
 
 const CORS = {

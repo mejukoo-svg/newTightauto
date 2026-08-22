@@ -565,17 +565,17 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
     return items[:40], cur
 
 HL_KO = {"up10": "증액10%", "up20": "증액20%", "up": "증액", "down10": "감액10%",
-         "down20": "감액20%", "down": "감액", "off": "OFF", "watch": "관찰"}
+         "down20": "감액20%", "down50": "감액50%", "down": "감액", "off": "OFF", "watch": "관찰"}
 # 이력용 축약 라벨 (14일 액션 타임라인, 짧게)
 HL_SHORT = {"up10": "증10", "up20": "증20", "up": "증", "down10": "감10",
-            "down20": "감20", "down": "감", "off": "OFF", "watch": "관찰"}
+            "down20": "감20", "down50": "감50", "down": "감", "off": "OFF", "watch": "관찰"}
 
 # 조언→추이차트 하이라이트로 자동 표기할 태그 (관찰=watch은 제외, 사용자 결정 2026-07-03)
 HL_TAGS_OK = {"up10", "up20", "down10", "down20", "off"}
 # 예산 '조정' 액션 (증액·감액) — 이틀 연속 금지 대상. OFF는 조정이 아니므로 제외(적자 방어는 언제든 가능)
-ADJ_TAGS = {"up10", "up20", "up", "down10", "down20", "down"}
+ADJ_TAGS = {"up10", "up20", "up", "down10", "down20", "down50", "down"}
 # 하방 액션(감액·OFF) — ROAS 보호선 가드 대상
-CUT_TAGS = {"down10", "down20", "down", "off"}
+CUT_TAGS = {"down10", "down20", "down50", "down", "off"}
 # ROAS 보호선(사용자 결정 2026-08-03): 기준일(dc=어제) 일간 ROAS가 이 값 이상이면
 # 하락이 아무리 가팔라도 감액·OFF 금지 — 여전히 남는 장사라 끄면 매출만 깎인다.
 KEEP_ROAS_FLOOR = 120
@@ -711,7 +711,7 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
 # =====================================================================
 CALIB_DAYS = 30  # 보정 집계 창(14일 조언창보다 길게 봐야 AI↔인간 표본 확보)
 # aggressiveness 스케일: OFF(끄기)=가장 보수적 … 증20=가장 공격적. 인간vs AI 강도 비교용.
-CALIB_VAL = {"off": -3, "down20": -2, "down10": -1, "watch": 0, "up10": 1, "up20": 2}
+CALIB_VAL = {"off": -3, "down50": -2.5, "down20": -2, "down10": -1, "watch": 0, "up10": 1, "up20": 2}
 
 def compute_calibration(region, dc, window_days=CALIB_DAYS):
     """최근 window_days에서 'AI 권고 vs 인간 실제선택'의 차이와 그 직후 3일 ROAS 결과를

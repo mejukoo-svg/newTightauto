@@ -60,13 +60,14 @@ const TAG_PCT: Record<string, number | null> = {
   up10: 10,
   down10: -10,
   down20: -20,
+  down50: -50, // 연한 회색 — 감액 중 가장 강한 단계(OFF 직전)
   off: null, // 세트를 PAUSED 로
   watch: null, // '복증' — 지켜보기, 아무것도 하지 않음
 };
 
 // index.html HL_CONFIG 의 label 과 같은 값 (재적용 안내 문구용)
 const TAG_LABEL: Record<string, string> = {
-  up20: "+20%", up10: "+10%", down10: "-10%", down20: "-20%", off: "OFF", watch: "복증",
+  up20: "+20%", up10: "+10%", down10: "-10%", down20: "-20%", down50: "-50%", off: "OFF", watch: "복증",
 };
 
 // 마킹이 저장된 하이라이트 테이블 (index.html hlTbl() 과 동일)
