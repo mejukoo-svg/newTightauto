@@ -143,8 +143,12 @@ function makeConv(rt: Record<string, number>) {
   };
 }
 
-// ── Meta: 세트 × 하루 × 1시간 지출 ────────────────────────────
+// ── Meta: 세트(들) × 하루 × 1시간 지출 ────────────────────────
 type Hourly = { spend: number; impressions: number; clicks: number };
+type SetRef = { id: string; acc: string };
+// 종합 행은 그 모드의 모든 세트를 보낸다. 국내·글로벌이 각각 수백 개라 넉넉히 두되,
+// 실수로 만 단위가 오면 거절한다(계정별 filtering IN 호출 수가 그만큼 늘어난다).
+const MAX_SETS = 1200;
 
 function tokensFor(acc: string): string[] {
   const names = ACC[acc]?.env ?? TOKEN_ENVS;
@@ -163,52 +167,110 @@ function tokensFor(acc: string): string[] {
   return out;
 }
 
-async function metaHourly(adsetId: string, acc: string, date: string) {
+// insights 응답(시간대 브레이크다운) → 시각별 누계. mul = 계정통화→표시통화 배수.
+function accumHourly(rows: any[], hours: Record<number, Hourly>, mul: number) {
+  for (const row of rows) {
+    const m = /^(\d{1,2})/.exec(String(row["hourly_stats_aggregated_by_advertiser_time_zone"] ?? ""));
+    if (!m) continue;
+    const h = Number(m[1]);
+    if (!(h >= 0 && h <= 23)) continue;
+    const cur = hours[h] ?? (hours[h] = { spend: 0, impressions: 0, clicks: 0 });
+    cur.spend += Number(row.spend || 0) * mul;
+    cur.impressions += Number(row.impressions || 0);
+    cur.clicks += Number(row.inline_link_clicks || 0);
+  }
+}
+
+// 토큰을 차례로 시도하며 페이지를 끝까지 훑는다. 200 을 준 토큰의 결과만 채택.
+async function metaPaged(path: string, params: Record<string, string>, acc: string,
+                         hours: Record<number, Hourly>, mul: number): Promise<string> {
   const tokens = tokensFor(acc);
-  if (!tokens.length) return { hours: {} as Record<number, Hourly>, err: "Meta 토큰이 설정되지 않았습니다(Edge Secret 확인)" };
+  if (!tokens.length) return "Meta 토큰이 설정되지 않았습니다(Edge Secret 확인)";
   let lastErr = "";
   for (const token of tokens) {
-    const qs = new URLSearchParams({
-      access_token: token,
-      time_range: JSON.stringify({ since: date, until: date }),
-      breakdowns: "hourly_stats_aggregated_by_advertiser_time_zone",
-      time_increment: "1",
-      fields: "spend,impressions,inline_link_clicks",
-      limit: "200",
-    });
-    let url: string | null = `${GRAPH}/${adsetId}/insights?${qs}`;
-    const hours: Record<number, Hourly> = {};
+    const qs = new URLSearchParams({ ...params, access_token: token });
+    let url: string | null = `${GRAPH}/${path}?${qs}`;
+    const tmp: Record<number, Hourly> = {};
     let ok = false, page = 0;
     while (url) {
       let res: Response;
-      try {
-        res = await fetch(url);
-      } catch (e) {
-        lastErr = String((e as Error).message || e);
-        break;
-      }
-      if (!res.ok) {
-        lastErr = (await res.text()).slice(0, 300);
-        break;
-      }
+      try { res = await fetch(url); } catch (e) { lastErr = String((e as Error).message || e); break; }
+      if (!res.ok) { lastErr = (await res.text()).slice(0, 300); break; }
       const j = await res.json();
       ok = true;
-      for (const row of (j.data ?? [])) {
-        const m = /^(\d{1,2})/.exec(String(row["hourly_stats_aggregated_by_advertiser_time_zone"] ?? ""));
-        if (!m) continue;
-        const h = Number(m[1]);
-        if (!(h >= 0 && h <= 23)) continue;
-        const cur = hours[h] ?? (hours[h] = { spend: 0, impressions: 0, clicks: 0 });
-        cur.spend += Number(row.spend || 0);
-        cur.impressions += Number(row.impressions || 0);
-        cur.clicks += Number(row.inline_link_clicks || 0);
-      }
+      accumHourly(j.data ?? [], tmp, mul);
       url = j.paging?.next ?? null;
-      if (++page > 20) break;
+      if (++page > 40) break;
     }
-    if (ok) return { hours, err: "" };
+    if (ok) {
+      for (const [h, v] of Object.entries(tmp)) {
+        const cur = hours[Number(h)] ?? (hours[Number(h)] = { spend: 0, impressions: 0, clicks: 0 });
+        cur.spend += v.spend; cur.impressions += v.impressions; cur.clicks += v.clicks;
+      }
+      return "";
+    }
   }
-  return { hours: {} as Record<number, Hourly>, err: lastErr || "Meta 조회 실패" };
+  return lastErr || "Meta 조회 실패";
+}
+
+const META_BASE_PARAMS = (date: string) => ({
+  time_range: JSON.stringify({ since: date, until: date }),
+  breakdowns: "hourly_stats_aggregated_by_advertiser_time_zone",
+  time_increment: "1",
+  fields: "spend,impressions,inline_link_clicks",
+  limit: "500",
+});
+
+// 세트 하나든(셀 클릭) 수백 개든(종합·소계) 같은 입구.
+//   1개 → 세트 엔드포인트(계정 없이도 조회된다).
+//   여러 개 → 계정별로 묶어 level=adset + filtering IN 한 번에. 세트 수만큼 호출하지 않는다.
+//   계정을 모르는 세트는 세트 엔드포인트로 개별 조회하되 MAX_SOLO 개까지만(무한 팬아웃 방지).
+const MAX_SOLO = 25;
+const CHUNK = 100;   // filtering IN 한 번에 넣는 세트 수 (URL 길이·응답 크기 타협점)
+
+async function metaHourlySets(sets: SetRef[], date: string, target: string,
+                              conv: (n: number, f: string, t: string) => number) {
+  const hours: Record<number, Hourly> = {};
+  const errs: string[] = [];
+  const notes: string[] = [];
+  const base = META_BASE_PARAMS(date);
+
+  if (sets.length === 1) {
+    const s = sets[0];
+    const mul = conv(1, ACC[s.acc]?.ccy || target, target);
+    const e = await metaPaged(`${s.id}/insights`, base, s.acc, hours, mul);
+    if (e) errs.push(e);
+    return { hours, err: errs.join(" / "), notes };
+  }
+
+  const byAcc = new Map<string, string[]>();
+  for (const s of sets) {
+    const k = s.acc || "";
+    if (!byAcc.has(k)) byAcc.set(k, []);
+    byAcc.get(k)!.push(s.id);
+  }
+  for (const [acc, ids] of byAcc) {
+    if (!acc) {
+      const solo = ids.slice(0, MAX_SOLO);
+      if (ids.length > solo.length) notes.push(`광고계정이 비어 있는 세트 ${ids.length}개 중 ${solo.length}개만 지출을 집계했습니다`);
+      for (const id of solo) {
+        const e = await metaPaged(`${id}/insights`, base, "", hours, 1);
+        if (e) errs.push(e);
+      }
+      continue;
+    }
+    const mul = conv(1, ACC[acc]?.ccy || target, target);
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const e = await metaPaged(`${acc}/insights`, {
+        ...base,
+        level: "adset",
+        filtering: JSON.stringify([{ field: "adset.id", operator: "IN", value: chunk }]),
+      }, acc, hours, mul);
+      if (e) errs.push(e);
+    }
+  }
+  return { hours, err: [...new Set(errs)].join(" / "), notes };
 }
 
 // ── Mixpanel: 세트 × 하루 × 1시간 매출 ────────────────────────
@@ -335,20 +397,33 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return json({ ok: false, error: "JSON 파싱 실패" }, 400); }
 
   const mode = String(body?.mode || "");
-  const adsetId = cleanId(body?.adset_id);
-  const acc = String(body?.ad_account_id || "");
   const date = String(body?.date || "");
 
+  // 셀 하나(세트) = adset_id / 종합·소계 = sets:[{id,acc}]. 둘 다 같은 경로로 처리한다.
+  const raw: any[] = Array.isArray(body?.sets) && body.sets.length
+    ? body.sets
+    : [{ id: body?.adset_id, acc: body?.ad_account_id }];
+  const seen = new Set<string>();
+  const sets: SetRef[] = [];
+  for (const s of raw) {
+    const id = cleanId(s?.id ?? s?.adset_id);
+    if (!/^\d{6,}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    sets.push({ id, acc: String(s?.acc ?? s?.ad_account_id ?? "") });
+  }
+
   if (!MODE_CCY[mode]) return json({ ok: false, error: "세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다" }, 400);
-  if (!/^\d{6,}$/.test(adsetId)) return json({ ok: false, error: "세트 ID 형식 오류" }, 400);
+  if (!sets.length) return json({ ok: false, error: "세트 ID 형식 오류" }, 400);
+  if (sets.length > MAX_SETS) return json({ ok: false, error: `한 번에 ${MAX_SETS}개 세트까지만 집계합니다(요청 ${sets.length}개)` }, 400);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ ok: false, error: "날짜 형식 오류" }, 400);
 
   const target = MODE_CCY[mode];
-  const accCcy = ACC[acc]?.ccy || target;
+  const idSet = new Set(sets.map((s) => s.id));
 
-  // 지출·매출·환율은 서로를 기다릴 필요가 없다 → 병렬. (MP export 가 훨씬 느리다)
-  const [meta, mp, rates] = await Promise.all([metaHourly(adsetId, acc, date), mpEvents(date), perUsd()]);
+  // 환율표를 먼저 받아 두고(캐시라 대개 즉시) 지출·매출을 병렬로 — MP export 가 훨씬 느리다.
+  const rates = await perUsd();
   const conv = makeConv(rates);
+  const [meta, mp] = await Promise.all([metaHourlySets(sets, date, target, conv), mpEvents(date)]);
 
   const hours = Array.from({ length: 24 }, (_, h) => ({
     h, spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0,
@@ -356,13 +431,13 @@ Deno.serve(async (req) => {
 
   for (const [hs, v] of Object.entries(meta.hours)) {
     const h = Number(hs);
-    hours[h].spend = conv(v.spend, accCcy, target);
+    hours[h].spend = v.spend;              // metaHourlySets 가 이미 표시통화로 환산해 준다
     hours[h].impressions = v.impressions;
     hours[h].clicks = v.clicks;
   }
   for (const e of mp.evs) {
     if (e.date !== date) continue;
-    if (!e.utm_term || e.utm_term !== adsetId) continue;
+    if (!e.utm_term || !idSet.has(e.utm_term)) continue;
     if (!isMetaSource(e.utm_source)) continue;                 // stale utm 오귀속 차단(파이프라인과 동일)
     hours[e.hour].revenue += conv(e.revenue, e.ccy, target);
     hours[e.hour].purchases += 1;
@@ -376,11 +451,15 @@ Deno.serve(async (req) => {
   const notes: string[] = [];
   if (meta.err) notes.push("지출(Meta) 조회 실패: " + meta.err);
   if (mp.err) notes.push("매출(Mixpanel) 조회 실패: " + mp.err);
+  for (const n of meta.notes) notes.push(n);
   notes.push("매출=Mixpanel utm_term 귀속. 일별 파이프라인의 크로스셀 UTM 백필은 반영되지 않아 합계가 셀보다 낮을 수 있습니다.");
-  if (accCcy !== target) notes.push(`지출 ${accCcy}→${target} 실시간 환율 환산`);
+  const ccys = [...new Set(sets.map((s) => ACC[s.acc]?.ccy || target))].filter((c) => c !== target);
+  if (ccys.length) notes.push(`지출 ${ccys.join("·")}→${target} 실시간 환율 환산`);
 
   return json({
-    ok: true, mode, adset_id: adsetId, ad_account_id: acc, date,
+    ok: true, mode, date, sets: sets.length,
+    adset_id: sets.length === 1 ? sets[0].id : null,
+    ad_account_id: sets.length === 1 ? sets[0].acc : null,
     currency: target, hours, totals, notes,
   });
 });

@@ -1,8 +1,11 @@
-# hourly-roas — 추이차트 셀 클릭 → 세트 × 그 날짜의 시간별 ROAS
+# hourly-roas — 추이차트 셀 클릭 → 그 날짜의 시간별 ROAS
 
-추이차트(국내·글로벌·밴스드·🇹🇼 대만·보조지표)에서 **세트 행의 날짜 셀**을 누르면 화면이
-시간별 화면으로 바뀌고, 그 세트의 그날 **1시간 단위 ROAS·지출·매출**을 그린다.
-이 함수가 그 화면의 데이터를 만든다.
+추이차트(국내·글로벌·밴스드·🇹🇼 대만·보조지표)에서 **날짜 셀**을 누르면 화면이 시간별
+화면으로 바뀌고 **1시간 단위 ROAS·지출·매출**을 그린다. 이 함수가 그 화면의 데이터를 만든다.
+
+- **세트 행** 셀 → 그 세트 하나
+- **종합 행** 셀 → 지금 화면에 잡힌 세트 전부의 합
+- **상품 소계 행** 셀 → 그 상품에 속한 세트들의 합
 
 ## 왜 서버가 필요한가 · 왜 테이블이 아닌가
 
@@ -47,13 +50,23 @@
 ```
 POST /functions/v1/hourly-roas
 Authorization: Bearer <로그인 JWT>
-{ "mode": "kr" | "gl" | "vn", "adset_id": "1234...", "ad_account_id": "act_...", "date": "2026-08-23" }
 
-→ { ok, currency, hours: [{h, spend, revenue, purchases, impressions, clicks} × 24],
+세트 셀:      { "mode":"kr"|"gl"|"vn", "date":"2026-08-23",
+                "adset_id":"1234...", "ad_account_id":"act_..." }
+종합·소계 셀: { "mode":"kr", "date":"2026-08-23",
+                "sets":[{"id":"1234...","acc":"act_..."}, …] }     // 최대 1,200개
+
+→ { ok, currency, sets, hours: [{h, spend, revenue, purchases, impressions, clicks} × 24],
     totals: {...}, notes: [...] }
 ```
 
-`ad_account_id` 는 토큰을 고르는 데만 쓴다. 비면 가진 토큰을 차례로 시도한다(소유 계정 토큰만 200).
+`ad_account_id`/`acc` 는 토큰과 계정통화를 고르는 데 쓴다. 비면 가진 토큰을 차례로 시도한다
+(소유 계정 토큰만 200). 묶음일 때 계정을 모르는 세트는 개별 조회하되 25개까지만 집계하고 `notes` 로 알린다.
+
+**묶음은 세트 수만큼 호출하지 않는다.** 계정별로 모아 `level=adset` +
+`filtering=[{field:"adset.id",operator:"IN",value:[…100개]}]` 로 한 번에 받는다.
+국내 종합(세트 124개·계정 3개)이 Meta 3콜 + Mixpanel 1콜, **15.7초**로 끝난다
+(실측 2026-08-23: 지출 **+0.0%**, 매출 −1.8%).
 
 ## 시크릿
 

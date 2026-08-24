@@ -67,6 +67,7 @@ const META_ROWS = {
 
 let mpCalls = 0;
 let metaAuth = [];
+let metaAcctCalls = [];   // 계정 단위(종합·소계) 호출 기록
 
 globalThis.fetch = async (url, opts) => {
   const u = String(url);
@@ -81,10 +82,18 @@ globalThis.fetch = async (url, opts) => {
     return jwt === "GOODJWT" ? res({ id: "u1", email: "dashboard@newtightauto.app" }) : res({}, 401);
   }
   if (u.includes("graph.facebook.com")) {
-    const m = /graph\.facebook\.com\/[^/]+\/(\d+)\/insights/.exec(u);
-    const setId = m ? m[1] : "";
-    metaAuth.push(new URL(u).searchParams.get("access_token"));
-    return res({ data: META_ROWS[setId] || [] });
+    const q = new URL(u).searchParams;
+    metaAuth.push(q.get("access_token"));
+    const m = /graph\.facebook\.com\/[^/]+\/([^/?]+)\/insights/.exec(u);
+    const obj = m ? m[1] : "";
+    if (obj.startsWith("act_")) {
+      // 종합·소계 경로: 계정 1콜 + level=adset + filtering IN
+      metaAcctCalls.push({ acc: obj, ids: JSON.parse(q.get("filtering") || "[]")[0]?.value || [] });
+      if (q.get("level") !== "adset") throw new Error("계정 조회인데 level=adset 이 아님");
+      const ids = metaAcctCalls[metaAcctCalls.length - 1].ids;
+      return res({ data: ids.flatMap((id) => META_ROWS[id] || []) });
+    }
+    return res({ data: META_ROWS[obj] || [] });
   }
   if (u.includes("data.mixpanel.com")) {
     mpCalls++;
@@ -183,6 +192,43 @@ console.log("\n[5] to_date UTC 상한 클램프");
   await call({ mode: "kr", adset_id: SET_KR, ad_account_id: KR_ACC, date: kstToday });
   globalThis.fetch = realFetch;
   ok(seenTo != null && seenTo <= utcToday, "to_date ≤ UTC 오늘", { seenTo, utcToday });
+}
+
+// ── 6) 종합·소계 (세트 묶음) ───────────────────────────────────
+console.log("\n[6] 종합·소계 — sets:[{id,acc}] 합산");
+{
+  metaAcctCalls = [];
+  // 같은 계정의 두 세트 → 계정 1콜(filtering IN)로 끝나야 한다
+  const j = await (await call({ mode: "kr", date: DATE, sets: [
+    { id: SET_KR, acc: KR_ACC }, { id: SET_GL, acc: KR_ACC },
+  ] })).json();
+  ok(j.sets === 2 && j.adset_id === null, "sets=2 · 단일 세트 필드는 비움", { sets: j.sets, adset_id: j.adset_id });
+  ok(metaAcctCalls.length === 1 && metaAcctCalls[0].ids.length === 2,
+     "같은 계정 세트는 계정 1콜(filtering IN)로 묶임 — 세트 수만큼 호출하지 않는다", metaAcctCalls);
+  ok(near(j.totals.spend, 15040), "지출 = 두 세트 합(15,000 + 40)", j.totals);
+  // 매출: SET_KR 50,000원 + SET_GL 의 TWD 3,200 → KRW(3,200/32×1,450=145,000)
+  ok(near(j.totals.revenue, 195000), "매출 = 두 세트 합, 통화 환산 포함", j.totals);
+  ok(near(j.hours[10].spend, 40), "다른 세트의 10시 지출도 합쳐짐", j.hours[10]);
+}
+{
+  // 계정이 섞이면 계정별로 1콜씩 + 계정통화별 환산 (gl 표시통화 USD)
+  metaAcctCalls = [];
+  const j = await (await call({ mode: "gl", date: DATE, sets: [
+    { id: SET_KR, acc: KR_ACC }, { id: SET_GL, acc: GL_ACC },
+  ] })).json();
+  ok(metaAcctCalls.length === 2, "계정 2개 → 2콜", metaAcctCalls.map((c) => c.acc));
+  // KRW 계정 15,000원 → $10.34 + USD 계정 $40
+  ok(Math.abs(j.totals.spend - (15000 / 1450 + 40)) < 0.1, "계정통화별로 USD 환산해 합산", j.totals);
+  ok(/KRW→USD/.test((j.notes || []).join(" ")), "환산 안내 문구", j.notes);
+}
+{
+  const many = Array.from({ length: 1201 }, (_, i) => ({ id: "12021400000000" + String(1000 + i), acc: KR_ACC }));
+  const r = await call({ mode: "kr", date: DATE, sets: many });
+  ok(r.status === 400, "세트 1,200개 초과는 400", r.status);
+  const dup = await (await call({ mode: "kr", date: DATE, sets: [
+    { id: SET_KR, acc: KR_ACC }, { id: SET_KR, acc: KR_ACC },
+  ] })).json();
+  ok(dup.sets === 1, "중복 세트는 1개로", dup.sets);
 }
 
 console.log(fail ? `\n❌ 실패 ${fail}건` : "\n✅ 전부 통과");
