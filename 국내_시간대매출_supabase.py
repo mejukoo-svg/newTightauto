@@ -12,6 +12,7 @@
          ② utm_term(adset_id)∈밴스드(국내)세트 & utm_source=Meta → '밴스드'
          ③ is_naver_event(utm/referrer/ch=naver) → '네이버'
          ④ properties.ch=='google' → '구글디멘드젠'  ⑤ ch=='kakao' → '카카오'
+         ⑤' ch=='line' & ct like 'crm%' → '대만 LINE CRM' (글로벌 권역, KRW 환산)
          ⑥ Meta 흔적(utm=Meta계열+세트미매칭 / ch=meta·ins / 후행24h 크로스셀)·KRW → '메타(기타)'
             단 선행24h 메타결제 보유분은 세트별 백필이 이미 국내메타 귀속 → 제외(이중계상 방지)
          ⑦ 그 외 → 스킵(오가닉)
@@ -81,10 +82,11 @@ CH_GGDG   = "디멘드젠(타이트)"
 CH_KAKAO  = "카카오"               # CRM(ch=kakao) — 대시보드에서 CRM(알림톡)에 합산. 매출만(지출0)
 CH_META_ETC = "메타(기타)"         # Meta 광고 흔적은 명확하나 세트 귀속 불가(만료세트/utm소실). 매출만(지출0)
 CH_VN_TW  = "대만 밴스드"          # 글로벌 scope
+CH_LINE   = "대만 LINE CRM"        # 글로벌 scope — ch=line & ct=crm*(LINE OA 발송). 매출만(지출0)
 CH_GLOBAL = "글로벌(밴스드 제외)"  # 글로벌 scope (매출=Stripe−대만밴스드귀속, 지출=글로벌 타이트메타)
 
 DOMESTIC_CHANNELS = (CH_META, CH_VANCED, CH_NAVER, CH_GGDG, CH_KAKAO, CH_META_ETC)
-GLOBAL_CHANNELS = (CH_VN_TW, CH_GLOBAL)
+GLOBAL_CHANNELS = (CH_VN_TW, CH_LINE, CH_GLOBAL)
 
 # ── Meta 시간대 지출 — Mixpanel 매출과 합쳐 4시간 ROAS 산출 ──
 #   계정 광고주 타임존=KST → hourly breakdown 시각이 KST(매출 버킷)와 정렬.
@@ -188,6 +190,14 @@ def is_google_event(props):
 def is_kakao_event(props):
     v = props.get("ch")
     return v is not None and str(v).strip().lower() == "kakao"
+# 대만 LINE CRM — ch=line 이면서 ct 가 crm 으로 시작(=LINE OA 발송 메시지 랜딩).
+#   ct=result_link/share/menu_* 는 리포트 결과 링크 공유·채널 메뉴 유입이라 CRM 성과가 아니다(오가닉).
+#   crm_test 는 테스트 발송. 규칙은 대만라인_CRM_supabase.py / 'LINE CRM tracking' 시트와 동일.
+def is_line_crm_event(props):
+    if str(props.get("ch") or "").strip().lower() != "line":
+        return False
+    ct = str(props.get("ct") or "").strip().lower()
+    return ct.startswith("crm") and "test" not in ct
 def is_excluded_ct(ct):
     if not ct:
         return False
@@ -286,6 +296,18 @@ class SupabaseClient:
 # =========================================================
 # 채널 세트(adset_id) 로드
 # =========================================================
+def load_global_adsets(sb):
+    """글로벌 타이트 메타 adset_id — 채널 분류엔 안 쓰고, 대만 LINE CRM 이중계상 제외용."""
+    cutoff = (TODAY - timedelta(days=120)).isoformat()
+    out = set()
+    for row in sb.select_rows("global_ad_performance_daily", "adset_id", f"&date=gte.{cutoff}"):
+        aid = clean_id(row.get("adset_id"))
+        if aid:
+            out.add(aid)
+    log.info(f"  📇 글로벌 타이트 세트 {len(out)} adset (LINE CRM 중복 제외용)")
+    return out
+
+
 def load_channel_adsets(sb):
     """국내메타 / 밴스드(국내) / 대만밴스드 adset_id 집합을 Supabase 에서 로드."""
     cutoff = (TODAY - timedelta(days=120)).isoformat()
@@ -420,7 +442,7 @@ def dedup_events(events):
     log.info(f"  🧹 dedup: {len(events)} → {len(kept)}건 (order_id {len(kept)-len(no_oid)}? / 유지 {len(kept)})")
     return kept
 
-def classify(e, kr_adsets, vn_adsets, vn_tw_adsets):
+def classify(e, kr_adsets, vn_adsets, vn_tw_adsets, gl_adsets=frozenset()):
     """이벤트 → (channel, revenue_krw) 또는 None."""
     props = e["props"]
     ut = e["utm_term"]
@@ -462,6 +484,20 @@ def classify(e, kr_adsets, vn_adsets, vn_tw_adsets):
         if cur != "KRW":
             rev = rev * get_krw_rates().get(cur, 1.0)
         return CH_KAKAO, rev
+    # ⑤' 대만 LINE CRM — ch=line & ct=crm*. 결제통화 TWD → KRW(대만밴스드와 동일 환율),
+    #     소액 혼입 HKD/SGD/USD 도 KRW 환산(글로벌 종합=Stripe KRW 와 정합).
+    #     ※ ①에서 이미 세트(국내메타/밴스드/대만밴스드) 귀속된 결제는 여기 오지 않는다.
+    #       글로벌 타이트 세트 귀속분도 gl_adsets 로 함께 제외 — 일별 뷰(line_crm_daily_campaign)와 동일 규칙.
+    if is_line_crm_event(props):
+        if ut and ut in gl_adsets and meta:
+            return None
+        cur = event_currency(props)
+        rev = e["revenue"]
+        if cur == "TWD":
+            rev = rev * TWD_KRW_RATE
+        elif cur != "KRW":
+            rev = rev * get_krw_rates().get(cur, 1.0)
+        return CH_LINE, rev
     # ⑥ 메타(기타) — Meta 광고 흔적은 명확하나 세트 귀속이 불가한 KRW 결제 (2026-07-17)
     #   (a) Meta계열 utm + 세트ID(utm_term) 보유했으나 목록 미매칭(만료/120일 밖/미등록 세트)
     #   (b) utm 소실됐지만 자사 Meta 광고 랜딩 태그(ch=meta/ins)가 남은 결제
@@ -616,6 +652,7 @@ def main():
 
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
     kr_adsets, vn_adsets, vn_tw_adsets = load_channel_adsets(sb)
+    gl_adsets = load_global_adsets(sb)
 
     fetch_from = START - timedelta(days=MP_FETCH_BUFFER_DAYS)
     lines = fetch_mixpanel(fetch_from, END)
@@ -628,7 +665,7 @@ def main():
     # 1차 분류 + 메타 귀속 결제 시각 수집(버퍼 포함 전체 — 메타(기타) 크로스셀/백필중복 판정용)
     meta_ts_by_user = defaultdict(list)
     for e in events:
-        e["_res"] = classify(e, kr_adsets, vn_adsets, vn_tw_adsets)
+        e["_res"] = classify(e, kr_adsets, vn_adsets, vn_tw_adsets, gl_adsets)
         if e["_res"] and e["_res"][0] in (CH_META, CH_VANCED) and e.get("ts"):
             meta_ts_by_user[e["distinct_id"]].append(e["ts"])
     apply_crosssell_meta_etc(events, meta_ts_by_user)
@@ -654,6 +691,8 @@ def main():
     meta_spend = fetch_meta_hourly_spend(START, END)
 
     # 글로벌 종합 매출 = Stripe 실결제(KRW). '글로벌' 채널 매출 = Stripe − 대만밴스드 귀속(chrev 정의와 동일).
+    #   ⚠️ 대만 LINE CRM 은 여기서 빼지 않는다 — 아래 only-raise 가드가 '내려가는 값'을 되돌려
+    #     이중계상으로 고착시키기 때문. 대신 index.html(_chrevHourly)이 표시 시점에 뺀다.
     stripe_total = fetch_stripe_hourly(START, END)
     for (ds, bk), krw in stripe_total.items():
         vntw_rev = agg.get((ds, bk, CH_VN_TW), (0.0, 0))[0]
