@@ -1004,6 +1004,9 @@ function navBoot(){
   navPush(true);            // 첫 화면은 새 기록을 쌓지 않고 현재 항목을 덮어쓴다
 }
 window.addEventListener('popstate',e=>{
+  // 시간별 ROAS 화면이 열려 있으면 뒤로가기는 '그 화면 닫기'다 (추이차트를 다시 렌더하지 않는다 —
+  // 재렌더는 스크롤 위치를 잃는다). hrOpen 이 해시 그대로 상태 한 칸을 쌓아 두었다.
+  if(typeof HR_OPEN!=='undefined'&&HR_OPEN){hrClose();return}
   const s=e.state||navParse(location.hash);
   if(s)navApply(s,false);
 });
@@ -2434,6 +2437,9 @@ function renderTrend(opts){
   const BUD_MIN_PCT=budExact?0.5:3;
   const budBorderKey=(pct)=>pct>=20?'up20':pct>=BUD_MIN_PCT?'up10':pct<=-50?'down50':pct<=-20?'down20':pct<=-BUD_MIN_PCT?'down10':null;
   const AUX=opts.metric==='aux';  // 보조지표 모드: 셀에 CTR/CVR/CPM/CPP/구매당단가 표시
+  // 데이터 셀 클릭 → 시간별 ROAS 화면(hrOpen). 행이 '세트'인 모드에서만 — 소재별(cr)은 광고 단위라 제외.
+  //   HR_MODES 를 직접 안 보는 이유: 그 const 는 파일 맨 아래라 여기서 참조하면 TDZ 위험이 있다.
+  const hrOK=(MODE==='kr'||MODE==='gl'||MODE==='vn');
   const byA={};
   ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   // 예산 변화 판정용 '전체 히스토리' 맵 (표시기간 dd 밖의 직전일도 포함해야 가장 오래된 열의 증감도 판정 가능).
@@ -2498,7 +2504,7 @@ function renderTrend(opts){
       // 세트별 예산 변화 테두리 색 맵: 전체 히스토리(budHist)를 오름차순으로 전일(직전 보유일) 대비 비교.
       //   테두리는 표시기간(dd) 내 날짜에만 그리되, 비교 기준일은 dd 밖(직전일)도 허용 → 첫 열 증감도 표시.
       const budBc={};{const bh=budHist[a.id]||{};let pv=null;Object.keys(bh).sort().forEach(d=>{const b=bh[d];if(pv>0&&b!==pv){const k=budBorderKey((b-pv)/pv*100);if(k&&dd.includes(d))budBc[d]=HL_CONFIG[k].bg}pv=b})}
-      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const mk=d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight);let bcol=budBc[d];if(!bcol&&mk==='off')bcol=HL_CONFIG.off.bg;const cb=(showChg&&bcol)?' style="box-shadow:inset 0 0 0 3px '+bcol+'"':'';if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'"'+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr,r.results_mp>0?r.spend/r.results_mp:0))+'</td>'}).join('');
+      const cells=dd.map(d=>{const r=a.d[d];const yd=d===yDay?' col-yday':'';const mk=d===today?(HIGHLIGHTS[a.id]||(r&&r.highlight)):(r&&r.highlight);let bcol=budBc[d];if(!bcol&&mk==='off')bcol=HL_CONFIG.off.bg;const cb=(showChg&&bcol)?' style="box-shadow:inset 0 0 0 3px '+bcol+'"':'';if(!r||!r.spend)return'<td class="'+yd+'"'+cb+'></td>';const cpm=r.impressions>0?r.spend/r.impressions*1000:0;const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+(hrOK?' hr-cell':'')+'"'+(hrOK?' data-hd="'+d+'"':'')+cb+'>'+(AUX?MCAUX(r.spend,r.revenue,(r.unique_clicks||0),(r.results_mp||0),(r.impressions||0)):MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,cpm,ctr,r.results_mp>0?r.spend/r.results_mp:0))+'</td>'}).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const chgTd='';  // 증감 컬럼 제거(국내·글로벌 추이차트)
       const budTd=showChg?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'';
@@ -2519,7 +2525,7 @@ function renderTrend(opts){
       // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
       const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr data-adset-row="'+a.id+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+budTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      h+='<tr data-adset-row="'+a.id+'" data-acc="'+(a.acc||'')+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+budTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -6476,4 +6482,218 @@ function _cpProdAdsTable(n, data, errKey) {
     });
   });
   tbl.innerHTML = h + '</tbody>';
+}
+
+// ===== 시간별 ROAS 화면 (추이차트 셀 클릭 → 화면 전환) =====
+// 추이차트 세트 행의 '날짜 셀'을 누르면 화면 전체가 이 화면으로 바뀌고, 그 세트의 그날
+// 1시간 단위 ROAS·지출·매출을 그린다. ←(뒤로가기)·ESC·상단 버튼으로 추이차트로 돌아온다.
+//
+// 데이터: 시간별 그레인은 DB 에 없다(kr_channel_revenue_4h 는 '채널×4시간'이라 세트로 못 쪼갠다).
+//   → Edge Function hourly-roas 가 클릭 시점에 Meta insights(hourly 지출) + Mixpanel export
+//     (utm_term=세트 귀속 매출)을 직접 읽어 돌려준다. 저장하지 않으므로 아무 과거 날짜나 열린다.
+//   기준·괴리 요인은 supabase/functions/hourly-roas/README.md.
+const HR_FN=SB_URL+'/functions/v1/hourly-roas';
+const HR_MODES={kr:'국내',gl:'글로벌',vn:'밴스드'};      // 세트 단위 모드만 (cr=소재는 제외)
+let HR_OPEN=false;      // 화면이 열려 있는가 (뒤로가기가 이 화면만 닫도록 popstate 에서 본다)
+let HR_PUSHED=false;    // 열 때 히스토리를 쌓았는가
+let HR_CTX=null;        // {mode,id,acc,date,name,camp,day}
+let HR_CHART=null;
+let HR_SEQ=0;           // 응답 경합 방지 — 마지막 요청만 그린다
+const HR_CACHE={};      // 'mode|id|date' → 응답 (같은 셀 재클릭은 즉시)
+
+function hrSupported(){return !!HR_MODES[MODE]}
+function hrKey(c){return c.mode+'|'+c.id+'|'+c.date}
+function hrMoney(n,ccy){
+  if(n==null||!isFinite(n))return'';
+  return ccy==='USD'?'$'+Math.round(n).toLocaleString('en-US'):'₩'+Math.round(n).toLocaleString('ko-KR');
+}
+function _hrToday(){const t=new Date();return t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0')+'-'+String(t.getDate()).padStart(2,'0')}
+
+// 추이차트 셀 클릭 — 위임 리스너 하나로 모든 추이차트(국내·글로벌·밴스드·대만·보조지표)를 받는다.
+//   대상 셀에는 renderTrend 가 class="hr-cell" + data-hd="YYYY-MM-DD" 를, 행에는 data-acc 를 심는다.
+document.addEventListener('click',function(e){
+  const td=e.target&&e.target.closest?e.target.closest('td.hr-cell'):null;
+  if(!td)return;
+  const tr=td.closest('tr[data-adset-row]');
+  if(!tr||!td.dataset.hd)return;
+  hrOpen(tr.dataset.adsetRow,tr.dataset.acc||'',td.dataset.hd);
+});
+
+document.addEventListener('keydown',function(e){if(HR_OPEN&&e.key==='Escape')hrBack()});
+
+function hrOpen(id,acc,date){
+  if(!id||!date)return;
+  if(!hrSupported()){alert('시간별 화면은 세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다.');return}
+  // 세트 이름·캠페인·그날 일별 셀 값(합계 대조용)을 현재 데이터셋에서 집는다
+  let name='',camp='',day=null;
+  for(let i=0;i<AD.length;i++){
+    const r=AD[i];
+    if(r.date===date&&String(rowId(r))===String(id)){
+      name=r.adset_name||'';camp=r.campaign_name||'';
+      day={spend:+r.spend||0,revenue:+r.revenue||0,roas:+r.roas||0};
+      break;
+    }
+  }
+  HR_CTX={mode:MODE,id:String(id),acc:acc||'',date:date,name:name,camp:camp,day:day};
+  if(!HR_OPEN){
+    HR_OPEN=true;
+    document.getElementById('hrView').classList.add('show');
+    // 뒤로가기로 이 화면만 닫히게 한다(해시는 그대로 두고 상태만 한 칸 쌓는다)
+    try{history.pushState(Object.assign({},navState(),{hr:1}),'',location.hash);HR_PUSHED=true}catch(e){HR_PUSHED=false}
+  }
+  hrRender(null);
+  hrFetch();
+}
+
+function hrClose(){
+  HR_OPEN=false;HR_PUSHED=false;HR_CTX=null;
+  try{if(HR_CHART)HR_CHART.destroy()}catch(e){}
+  HR_CHART=null;
+  const v=document.getElementById('hrView');if(v)v.classList.remove('show');
+}
+// 사용자가 닫는 경로 — 히스토리를 쌓았다면 뒤로가기로 되돌려 앞/뒤 이동이 어긋나지 않게 한다
+function hrBack(){
+  if(HR_PUSHED){history.back();return}   // popstate 가 hrClose 를 부른다
+  hrClose();
+}
+function hrShift(n){
+  if(!HR_CTX)return;
+  const d=new Date(HR_CTX.date+'T00:00:00');d.setDate(d.getDate()+n);
+  const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  if(ds>_hrToday())return;
+  hrOpen(HR_CTX.id,HR_CTX.acc,ds);
+}
+function hrReload(){
+  if(!HR_CTX)return;
+  delete HR_CACHE[hrKey(HR_CTX)];
+  hrRender(null);hrFetch();
+}
+
+async function hrFetch(){
+  const c=HR_CTX,seq=++HR_SEQ;
+  const cached=HR_CACHE[hrKey(c)];
+  if(cached){hrRender(cached);return}
+  let out;
+  try{
+    const r=await fetch(HR_FN,{method:'POST',headers:await abAuthHeaders(),
+      body:JSON.stringify({mode:c.mode,adset_id:c.id,ad_account_id:c.acc,date:c.date})});
+    const j=await r.json().catch(function(){return{}});
+    if(!r.ok||j.ok===false){
+      // 404 = 함수 미배포. 원인이 바로 보이도록 배포 명령을 그대로 띄운다.
+      out={error:(r.status===404?'hourly-roas Edge Function 이 배포되지 않았습니다.':(j.error||('서버 오류 ('+r.status+')'))),status:r.status};
+    }else{
+      out=j;HR_CACHE[hrKey(c)]=j;
+    }
+  }catch(e){
+    out={error:String(e&&e.message||e)};
+  }
+  if(seq!==HR_SEQ)return;      // 그 사이 다른 셀을 눌렀다
+  hrRender(out);
+}
+
+// data=null → 로딩 / data.error → 오류 / 그 외 → 차트+표
+function hrRender(data){
+  const c=HR_CTX;if(!c)return;
+  const ttl=document.getElementById('hrTtl'),sub=document.getElementById('hrSub'),body=document.getElementById('hrBody');
+  ttl.textContent='⏱ 시간별 ROAS · '+(c.name||('세트 '+c.id));
+  sub.textContent=[HR_MODES[c.mode]||c.mode,c.camp,c.date+'('+WD(c.date)+')','세트 '+c.id].filter(Boolean).join('  ·  ');
+  const nx=document.getElementById('hrNext');if(nx)nx.disabled=(c.date>=_hrToday());
+
+  try{if(HR_CHART)HR_CHART.destroy()}catch(e){}
+  HR_CHART=null;
+
+  if(!data){
+    body.innerHTML='<div class="hr-msg">⏳ Meta 시간별 지출 + Mixpanel 결제를 조회하는 중입니다…<br>'
+      +'<span style="font-size:10px;color:#999">저장된 표가 아니라 원천을 직접 읽습니다 — 처음 여는 날짜는 15~30초 걸립니다(그 날짜의 결제 전량을 받아 걸러야 해서). 같은 날짜의 다른 세트는 훨씬 빠릅니다.</span></div>';
+    return;
+  }
+  if(data.error){
+    body.innerHTML='<div class="hr-msg"><div class="hr-err">'+_mEsc(data.error)+'</div>'
+      +(data.status===404
+        ?'<div style="margin-top:10px;font-size:11px;line-height:1.9">배포 후 다시 시도해 주세요.<br>'
+          +'<code>cd newTightauto &amp;&amp; supabase functions deploy hourly-roas --project-ref grtglwavqhvlqcocahao</code><br>'
+          +'Mixpanel 시크릿도 필요합니다 — <code>supabase secrets set MIXPANEL_USERNAME=… MIXPANEL_SECRET=… MIXPANEL_PROJECT_ID=3390233</code><br>'
+          +'<span style="color:#999">자세한 절차: supabase/functions/hourly-roas/README.md</span></div>'
+        :'<div style="margin-top:10px"><button class="hr-back" style="border-color:#ccc;color:#333" onclick="hrReload()">↻ 다시 시도</button></div>')
+      +'</div>';
+    return;
+  }
+
+  const ccy=data.currency||'KRW';
+  const hs=data.hours||[];
+  const tot=data.totals||{spend:0,revenue:0,purchases:0};
+  const roas=tot.spend>0?tot.revenue/tot.spend*100:0;
+  // 일별 셀과의 괴리 — 크로스셀 백필·환율·(글로벌)메타치환 때문에 완전히 같지는 않다
+  const dd=c.day;
+  const diff=function(a,b){return b>0?((a-b)/b*100):null};
+  const dS=dd?diff(tot.spend,dd.spend):null,dR=dd?diff(tot.revenue,dd.revenue):null;
+  const dTxt=function(v){return v==null?'':(v>=0?'+':'')+v.toFixed(1)+'%'};
+
+  // 시간별 ROAS + 누적 ROAS(하루가 흐르며 어디서 수익이 붙었는지)
+  const labels=hs.map(function(x){return String(x.h).padStart(2,'0')+'시'});
+  const spend=hs.map(function(x){return +(+x.spend||0).toFixed(2)});
+  const rev=hs.map(function(x){return +(+x.revenue||0).toFixed(2)});
+  const hRoas=hs.map(function(x){return x.spend>0?+(x.revenue/x.spend*100).toFixed(1):null});
+  let _cs=0,_cr=0;
+  const cRoas=hs.map(function(x){_cs+=+x.spend||0;_cr+=+x.revenue||0;return _cs>0?+(_cr/_cs*100).toFixed(1):null});
+
+  body.innerHTML=''
+    +'<div class="hr-kpi">'
+    +  '<div class="hr-k"><span>하루 ROAS</span><b style="color:'+(roas>=100?'#0a7d32':'#c00')+'">'+roas.toFixed(0)+'%</b>'
+    +    '<div class="hr-d">'+(dd?'일별 셀 '+dd.roas.toFixed(0)+'%':'')+'</div></div>'
+    +  '<div class="hr-k"><span>지출</span><b>'+hrMoney(tot.spend,ccy)+'</b><div class="hr-d">'+(dS==null?'':'일별 대비 '+dTxt(dS))+'</div></div>'
+    +  '<div class="hr-k"><span>매출</span><b>'+hrMoney(tot.revenue,ccy)+'</b><div class="hr-d">'+(dR==null?'':'일별 대비 '+dTxt(dR))+'</div></div>'
+    +  '<div class="hr-k"><span>구매</span><b>'+(tot.purchases||0)+'건</b><div class="hr-d">'+(tot.purchases?hrMoney(tot.spend/tot.purchases,ccy)+' /건':'')+'</div></div>'
+    +  '<div class="hr-k"><span>노출 · 클릭</span><b style="font-size:12px">'+F(tot.impressions)+' · '+F(tot.clicks)+'</b>'
+    +    '<div class="hr-d">'+(tot.impressions>0?'CTR '+P(tot.clicks/tot.impressions*100):'')+'</div></div>'
+    +'</div>'
+    +'<div class="hr-card"><h4>시간별 ROAS(선) · 지출·매출(막대) — KST</h4><div class="hr-chart"><canvas id="hrChart"></canvas></div></div>'
+    +'<div class="hr-card"><h4>시간별 값</h4><div style="overflow-x:auto">'+_hrTable(hs,ccy)+'</div></div>'
+    +'<div class="hr-card"><h4>기준</h4><div class="hr-notes">'
+    +  '지출=Meta insights 시간대 브레이크다운(광고주 타임존=KST) · 매출=Mixpanel 결제완료 중 utm_term=이 세트 귀속(order_id dedup)<br>'
+    +  (data.notes||[]).map(function(n){return /실패|없습니다/.test(n)?'<span class="hr-warn">⚠ '+_mEsc(n)+'</span>':'· '+_mEsc(n)}).join('<br>')
+    +  ((COUNTRY&&COUNTRY!=='ALL')?'<br><span class="hr-warn">⚠ 국가 필터('+COUNTRY+') 적용 중 — 이 화면은 세트 전체(국가 합산) 기준이라 일별 셀보다 큽니다.</span>':'')
+    +'</div></div>';
+
+  if(typeof Chart==='undefined')return;
+  const cv=document.getElementById('hrChart');if(!cv)return;
+  HR_CHART=new Chart(cv.getContext('2d'),{
+    data:{labels:labels,datasets:[
+      {type:'bar',label:'지출',data:spend,backgroundColor:'rgba(120,130,145,.45)',order:3,yAxisID:'y'},
+      {type:'bar',label:'매출',data:rev,backgroundColor:'rgba(10,125,50,.5)',order:3,yAxisID:'y'},
+      {type:'line',label:'시간별 ROAS',data:hRoas,borderColor:'#d00',backgroundColor:'#d00',borderWidth:2,pointRadius:2.5,spanGaps:true,tension:.25,order:1,yAxisID:'y1'},
+      {type:'line',label:'누적 ROAS',data:cRoas,borderColor:'#e8912d',borderDash:[5,4],borderWidth:2,pointRadius:0,spanGaps:true,order:2,yAxisID:'y1'}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
+      plugins:{legend:{labels:{boxWidth:12,font:{size:10}}},
+        tooltip:{callbacks:{label:function(x){
+          const v=x.parsed.y;
+          if(v==null)return x.dataset.label+': —';
+          return x.dataset.label+': '+(x.dataset.yAxisID==='y1'?v.toFixed(0)+'%':hrMoney(v,ccy));
+        }}}},
+      scales:{
+        y:{position:'left',beginAtZero:true,ticks:{font:{size:9},callback:function(v){return hrMoney(v,ccy)}},title:{display:true,text:'금액('+ccy+')',font:{size:9}}},
+        y1:{position:'right',beginAtZero:true,grid:{drawOnChartArea:false},ticks:{font:{size:9},callback:function(v){return v+'%'}},title:{display:true,text:'ROAS',font:{size:9}}},
+        x:{ticks:{font:{size:9},maxRotation:0,autoSkip:false}}
+      }}
+  });
+}
+
+function _hrTable(hs,ccy){
+  let h='<table class="hr-tbl"><thead><tr><th>시각(KST)</th><th>지출</th><th>매출</th><th>ROAS</th><th>누적 ROAS</th><th>구매</th><th>노출</th><th>클릭</th></tr></thead><tbody>';
+  let cs=0,cr=0;
+  hs.forEach(function(x){
+    const s=+x.spend||0,r=+x.revenue||0;cs+=s;cr+=r;
+    const ro=s>0?r/s*100:null,cro=cs>0?cr/cs*100:null;
+    h+='<tr class="'+(s||r?'':'hr-zero')+'"><td class="hr-h">'+String(x.h).padStart(2,'0')+':00</td>'
+      +'<td>'+(s?hrMoney(s,ccy):'-')+'</td><td>'+(r?hrMoney(r,ccy):'-')+'</td>'
+      +'<td'+(ro!=null?' style="font-weight:600;color:'+(ro>=100?'#0a7d32':'#c00')+'"':'')+'>'+(ro!=null?ro.toFixed(0)+'%':'-')+'</td>'
+      +'<td style="color:#888">'+(cro!=null?cro.toFixed(0)+'%':'-')+'</td>'
+      +'<td>'+(x.purchases||'-')+'</td><td>'+(x.impressions?F(x.impressions):'-')+'</td><td>'+(x.clicks?F(x.clicks):'-')+'</td></tr>';
+  });
+  const ro=cs>0?cr/cs*100:0;
+  const sum=function(k){return hs.reduce(function(a,x){return a+(+x[k]||0)},0)};
+  h+='</tbody><tfoot><tr><td class="hr-h">합계</td><td>'+hrMoney(cs,ccy)+'</td><td>'+hrMoney(cr,ccy)+'</td><td>'+ro.toFixed(0)+'%</td><td></td>'
+    +'<td>'+sum('purchases')+'</td><td>'+F(sum('impressions'))+'</td><td>'+F(sum('clicks'))+'</td></tr></tfoot></table>';
+  return h;
 }
