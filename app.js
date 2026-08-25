@@ -1587,6 +1587,7 @@ function renderTab(id){
   if(id==='expstat'){_expEnsureSrc(()=>renderExpStatus());renderExpStatus()}
   if(id==='allmedia')renderAllMedia();
   if(id==='compet'){renderCompet();loadCompet().then(renderCompet)}  // 시트 도착하면 다시 그림
+  if(id==='competgl'){renderCompetGl();loadCompetGl().then(renderCompetGl)}
 }
 function renderAllMedia(){
   const f=document.getElementById('allmediaFrame');
@@ -6301,12 +6302,12 @@ function loadCompet(force){
   if(CP_LOADING&&!force)return CP_LOADING;
   const dCut=_cpCut(CP_DAYS_MAX), wCut=_cpCut(CP_WEEKS_MAX*7);
   CP_LOADING=Promise.all([
-    _cpLoad('adDay','competitor_ad_daily','select=date,company,ads&date=gte.'+dCut+'',_cpFoldAdDaily),
-    _cpLoad('adWeek','competitor_ad_weekly','select=week_start,company,ads&week_start=gte.'+wCut+'',
+    _cpLoad('adDay','competitor_ad_daily','select=date,company,ads&country=eq.KR&date=gte.'+dCut+'',_cpFoldAdDaily),
+    _cpLoad('adWeek','competitor_ad_weekly','select=week_start,company,ads&country=eq.KR&week_start=gte.'+wCut+'',
             function(r){return _cpPivot(r,'week_start','company','ads',null)}),
-    _cpLoad('prodDay','competitor_product_count','select=date,site,total,free&date=gte.'+dCut+'',
+    _cpLoad('prodDay','competitor_product_count','select=date,site,total,free&country=eq.KR&date=gte.'+dCut+'',
             function(r){return _cpPivot(r,'date','site','total','free')}),
-    _cpLoad('prodWeek','competitor_product_count_weekly','select=week_start,site,total,free&week_start=gte.'+wCut+'',
+    _cpLoad('prodWeek','competitor_product_count_weekly','select=week_start,site,total,free&country=eq.KR&week_start=gte.'+wCut+'',
             function(r){return _cpPivot(r,'week_start','site','total','free')}),
     _cpLoad('paDay','competitor_product_ad_daily','select=date,company,product,ads&date=gte.'+dCut+'',
             function(r){return _cpPivotProducts(r,'date','ads')}),
@@ -6381,6 +6382,44 @@ function _cpTable(tblId, data, n, errKey, nameLabel) {
        + '</tr>';
   });
   tbl.innerHTML = h + '</tbody>';
+}
+// ---------- 글로벌(대만) 경쟁사 ----------------------------------------------
+// 같은 테이블을 country=TW 로 읽는다. 국내와 표 구조가 같아 _cpTable 을 그대로 쓴다.
+// ⚠ 용용사주는 국내 표에도 나오지만 **숫자가 다르다** — 같은 페이지를 KR/TW 두 기준으로
+//    따로 관측한 값이라 서로 비교하면 안 된다.
+let COMPETGL={adDay:null,adWeek:null,prodDay:null,prodWeek:null},
+    CPG_LOADED=false,CPG_LOADING=null;
+function _cpgLoad(key,table,q,fold){
+  return _cpPage(table,q).then(function(rows){COMPETGL[key]=fold(rows);delete CP_ERR['gl_'+key]})
+    .catch(function(e){COMPETGL[key]=null;CP_ERR['gl_'+key]=e.message||String(e)});
+}
+function loadCompetGl(force){
+  if(CPG_LOADED&&!force)return Promise.resolve();
+  if(CPG_LOADING&&!force)return CPG_LOADING;
+  const dCut=_cpCut(CP_DAYS_MAX), wCut=_cpCut(CP_WEEKS_MAX*7);
+  CPG_LOADING=Promise.all([
+    _cpgLoad('adDay','competitor_ad_daily','select=date,company,ads&country=eq.TW&date=gte.'+dCut+'',_cpFoldAdDaily),
+    _cpgLoad('adWeek','competitor_ad_weekly','select=week_start,company,ads&country=eq.TW&week_start=gte.'+wCut+'',
+             function(r){return _cpPivot(r,'week_start','company','ads',null)}),
+    _cpgLoad('prodDay','competitor_product_count','select=date,site,total,free&country=eq.TW&date=gte.'+dCut+'',
+             function(r){return _cpPivot(r,'date','site','total','free')}),
+    _cpgLoad('prodWeek','competitor_product_count_weekly','select=week_start,site,total,free&country=eq.TW&week_start=gte.'+wCut+'',
+             function(r){return _cpPivot(r,'week_start','site','total','free')})
+  ]).then(function(){CPG_LOADED=true;CPG_LOADING=null});
+  return CPG_LOADING;
+}
+function renderCompetGl(){
+  if(!document.getElementById('cpgAdTbl'))return;
+  const gran=(document.getElementById('cpgAdGran')||{}).value||'day';
+  const adN=parseInt((document.getElementById('cpgAdN')||{}).value||30)||30;
+  const u=document.getElementById('cpgAdUnit'); if(u)u.textContent=(gran==='week'?'주':'일');
+  _cpTable('cpgAdTbl', gran==='week'?COMPETGL.adWeek:COMPETGL.adDay, adN,
+           'gl_'+(gran==='week'?'adWeek':'adDay'), '회사');
+  const pGran=(document.getElementById('cpgProdGran')||{}).value||'day';
+  const pw=parseInt((document.getElementById('cpgProdN')||{}).value||30)||30;
+  const pu=document.getElementById('cpgProdUnit'); if(pu)pu.textContent=(pGran==='week'?'주':'일');
+  _cpTable('cpgProdTbl', pGran==='week'?COMPETGL.prodWeek:COMPETGL.prodDay, pw,
+           'gl_'+(pGran==='week'?'prodWeek':'prodDay'), '사이트');
 }
 function renderCompet() {
   if (!document.getElementById('cpAdTbl')) return;
