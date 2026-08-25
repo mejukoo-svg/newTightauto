@@ -86,6 +86,9 @@ td.budc{font-size:10px;text-align:right;white-space:nowrap;color:#444;padding:2p
 .es-wrap{overflow-x:auto;max-width:100%}
 .col-rz:hover,.col-rz:active{background:rgba(26,115,232,.45)}
 tr.sr{background:#e8e8e8;font-weight:700}
+/* 경쟁사 표 자사 행 강조 */
+tr.cpown{background:#dbe8ff}
+tr.cpown td{font-weight:700;color:#0b47b3;background:#dbe8ff!important}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
 .ex-caret{display:inline-block;color:#2563eb;font-weight:700;font-size:12px;margin-right:5px;min-width:11px;cursor:pointer}
@@ -416,11 +419,11 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="panel" id="p-competgl">
 <div class="filter"><label>광고 수 단위</label><select id="cpgAdGran" onchange="renderCompetGl()"><option value="day" selected>일별</option><option value="week">주별</option></select><label style="margin-left:10px">최근</label><select id="cpgAdN" onchange="renderCompetGl()"><option value="14">14</option><option value="30" selected>30</option><option value="60">60</option><option value="90">90</option></select><span id="cpgAdUnit" style="font-size:11px;color:#555">일</span><label style="margin-left:14px">상품 수 단위</label><select id="cpgProdGran" onchange="renderCompetGl()"><option value="day" selected>일별</option><option value="week">주별</option></select><label style="margin-left:6px">최근</label><select id="cpgProdN" onchange="renderCompetGl()"><option value="14">14</option><option value="30" selected>30</option><option value="60">60</option><option value="90">90</option></select><span id="cpgProdUnit" style="font-size:11px;color:#555">일</span><button onclick="loadCompetGl(true).then(renderCompetGl)" title="DB에서 다시 읽어옵니다" style="margin-left:10px;padding:4px 10px;border:1px solid #1a73e8;border-radius:4px;background:#fff;color:#1a73e8;font-size:10px;font-weight:600;cursor:pointer;font-family:inherit">🔄 새로고침</button><span style="color:#888;margin-left:auto;font-size:10px">소스=Supabase <code>new-tightauto</code> (<code>country=TW</code>) · 수집 00:20(광고수)·00:15(상품수) KST</span></div>
 <div class="sheet-wrap" style="max-height:none;margin-bottom:20px">
-  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📣 광고 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">회사별 Meta 광고 라이브러리 <b>🇹🇼 대만(TW) 활성 광고 수</b> · 하루 1회(00:20 KST) 관측 스냅샷 · 최신 왼쪽 · 셀 아래 ▲▼=직전 관측 대비 증감 · 여러 페이지로 집행하는 회사는 페이지 합계 · <b>2026-08-25부터 수집</b>(그 이전은 소급 불가) · ⚠ <b>용용사주는 국내 경쟁사분석 탭에도 나오지만 숫자가 다르다</b> — 같은 페이지를 KR 기준·TW 기준으로 따로 센 값이라 서로 비교하면 안 된다(같은 날 기준 KR 460 vs TW 22 수준) · 현지 경쟁사 科技紫微網(과기자미망, @click108)·簡少年(간소년, @TaoTaoShiYoungChien)·張盛舒(장성서, @samclick108)·先知命局命理(선지명국명리)·星語命境智庫(성어명경지고)·神算智導(신산지도, @destiny24x7)·莎莉小宇宙ღ(샐리소우주)·易經啟示錄(역경계시록)·運勢儲藏所(운세저장소)·先知命局.療愈(선지명국·요유)·Cogi(앱, 페이지명은 'Steven Rose Martinez')</span></div>
+  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📣 광고 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">회사별 Meta 광고 라이브러리 <b>🇹🇼 대만(TW) 활성 광고 수</b> · 하루 1회(00:20 KST) 관측 스냅샷 · 최신 왼쪽 · 셀 아래 ▲▼=직전 관측 대비 증감 · 여러 페이지로 집행하는 회사는 페이지 합계 · <b>2026-08-25부터 수집</b>(그 이전은 소급 불가) · ⚠ <b>용용사주는 국내 경쟁사분석 탭에도 나오지만 숫자가 다르다</b> — 같은 페이지를 KR 기준·TW 기준으로 따로 센 값이라 서로 비교하면 안 된다(같은 날 기준 KR 460 vs TW 22 수준) · 자사 ★타이트사주(TTightSaju, 1064504070075708)는 파란 행으로 강조 · 현지 경쟁사 科技紫微網(과기자미망, @click108)·簡少年(간소년, @TaoTaoShiYoungChien)·張盛舒(장성서, @samclick108)·先知命局命理(선지명국명리)·星語命境智庫(성어명경지고)·神算智導(신산지도, @destiny24x7)·莎莉小宇宙ღ(샐리소우주)·易經啟示錄(역경계시록)·運勢儲藏所(운세저장소)·先知命局.療愈(선지명국·요유)·Cogi(앱, 페이지명은 'Steven Rose Martinez')</span></div>
   <table id="cpgAdTbl"></table>
 </div>
 <div class="sheet-wrap" style="max-height:none">
-  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">사이트별 <b>대만 노출 상품 수</b> · 매일 1회 관측 · 용용사주(tw.yongyong.ai)는 KR과 <b>같은 카탈로그 API 하나</b>를 locale로만 갈라 쓰므로, <b>TWD 가격이 매겨졌고 zh-TW로 번역된 상품</b>만 대만 노출로 센다(전부 세면 KR과 같은 숫자라 무의미) · 실측 KR 55 vs TW 50, 빠지는 5개는 KR 전용 2개(무당의 집 사주·용용 작명 연구소)와 JP 전용 3개 · 現地 경쟁사는 상품 페이지가 없어 광고 수만 수집</span></div>
+  <div style="font-size:12px;font-weight:700;margin:4px 0 6px 0;color:#1a73e8">📦 상품 수 추이 <span style="color:#888;font-weight:400;font-size:10px;margin-left:6px">사이트별 <b>대만 노출 상품 수</b> · 매일 1회 관측 · 용용사주(tw.yongyong.ai)는 KR과 <b>같은 카탈로그 API 하나</b>를 locale로만 갈라 쓰므로, <b>TWD 가격이 매겨졌고 zh-TW로 번역된 상품</b>만 대만 노출로 센다(전부 세면 KR과 같은 숫자라 무의미) · 실측 KR 55 vs TW 49, 빠지는 6개는 KR 전용 2개(무당의 집 사주·용용 작명 연구소)·JP 전용 3개·테스트 SKU 1개(Stripe 付款測試) · 現地 경쟁사는 상품 페이지가 없어 광고 수만 수집</span></div>
   <table id="cpgProdTbl"></table>
 </div>
 </div>
@@ -495,7 +498,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260825a"></script>
+<script src="app.js?v=20260825b"></script>
 </div>
 </body>
 </html>

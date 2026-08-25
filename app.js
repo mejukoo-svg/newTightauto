@@ -6376,7 +6376,7 @@ function _cpTable(tblId, data, n, errKey, nameLabel) {
      + cols.map(function (k, i) { return _cpCell(tot[k], tot[cols[i + 1]]) }).join('') + '</tr>';
   rows.forEach(function (r) {
     const own = /타이트사주/.test(r.name);
-    h += '<tr><td class="fx fx0"' + (own ? ' style="font-weight:700;color:#1a73e8"' : '') + '>' + r.name + '</td>'
+    h += '<tr' + (own ? ' class="cpown"' : '') + '><td class="fx fx0">' + r.name + '</td>'
        + _cpSummaryCell(r.vals, cols)
        + cols.map(function (k, i) { return _cpCell(r.vals[k], r.vals[cols[i + 1]]) }).join('')
        + '</tr>';
