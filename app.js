@@ -689,17 +689,67 @@ const ACC_NAMES={
   'act_1560037899174007':'타이트사주 2 (밴스드)',
   'act_1286632473622244':'타이트사주(밴스드_대만)'};
 const accName=id=>{const k=String(id||'');if(!k)return'';return ACC_NAMES[k]||k.replace(/^act_/,'')};
-// 글로벌 상품명 통합: 한국어명·영문 변형을 하나의 canonical 로 합쳐서 같은 상품으로 집계.
-// (예: 솔로→solo, 무당·mudang→shaman, 무녀→mzpian) 키는 소문자, 조회 시 trim+소문자화하여 대소문자·표기변형 무시.
-const GL_PRODUCT_CANON={'솔로':'solo','solo':'solo',
-  '무당':'shaman','mudang':'shaman','shaman':'shaman',
-  '무녀':'mzpian','mzpian':'mzpian',
-  '집착':'possessive','possessive':'possessive',
-  '커리어':'job','job':'job'};
+// ===== 글로벌탭 국가·상품 인식 =====
+// 캠페인명 규칙이 '국가_[날짜]_상품_...' 이라 파이프라인이 상품 토큰을 뽑아 product 에 넣는데,
+// 국가 토큰이 두 번 붙는 캠페인(미국_무당_ASC_미국 / 싱가포르_SG_무당_ASC_싱가포르 / 간체_무당_전환캠페인)
+// 에서는 국가·언어 토큰이 그대로 product 로 들어와 '미국'·'전세계' 같은 가짜 상품 행이 만들어졌다.
+//   ① 국가·언어 토큰은 상품이 아님을 인식하고 캠페인명에서 진짜 상품을 되찾는다.
+//   ② 한국어명·영문명·표기변형은 하나의 영문 canonical 로 합쳐 같은 상품으로 집계한다.
+// 키는 전부 소문자, 조회 시 trim+소문자화하여 대소문자·표기변형을 무시한다.
+
+// 상품이 아닌 토큰 = 국가·지역·언어. 값은 ISO 코드(전세계/간체/번체 = WW, 국가 무관 타겟).
+const GL_NON_PRODUCT_TOKENS={
+  '대만':'TW','tw':'TW','taiwan':'TW',        '홍콩':'HK','hk':'HK','hongkong':'HK',
+  '일본':'JP','jp':'JP','japan':'JP',         '태국':'TH','th':'TH','thailand':'TH',
+  '미국':'US','us':'US','usa':'US',           '호주':'AU','au':'AU','australia':'AU',
+  '싱가포르':'SG','싱가폴':'SG','sg':'SG','singapore':'SG',
+  '말레이시아':'MY','my':'MY','malaysia':'MY','멕시코':'MX','mx':'MX','mexico':'MX',
+  '한국':'KR','kr':'KR','korea':'KR',         '중국':'CN','cn':'CN','china':'CN',
+  '마카오':'MO','mo':'MO','macau':'MO',       '베트남':'VN','vn':'VN','vietnam':'VN',
+  '영국':'GB','gb':'GB','uk':'GB',
+  '전세계':'WW','worldwide':'WW','global':'WW','간체':'WW','번체':'WW','sc':'WW','tc':'WW'};
+
+// 상품명 canonical — 한글·영문·표기변형을 영문 이름 하나로 통일한다.
+// 영문 짝이 없는 상품(구미호·속궁합)은 합칠 대상이 없어 한글 그대로 유지.
+const GL_PRODUCT_CANON={
+  'solo':'solo','솔로':'solo',
+  'shaman':'shaman','무당':'shaman','mudang':'shaman','moodang':'shaman','샤먼':'shaman','범산':'shaman',
+  'mzpian':'mzpian','무녀':'mzpian',
+  'possessive':'possessive','집착':'possessive','clinger':'possessive',
+  'job':'job','커리어':'job',
+  'again':'again','재회':'again',
+  'againjami':'againjami','재회자미두수':'againjami',
+  'adult':'adult','18금':'adult',
+  'adult29':'adult29','29금':'adult29',
+  'starsun':'starsun','별선':'starsun',
+  'starsea':'starsea','별해':'starsea',
+  'money':'money','재물운':'money',
+  'gender':'gender','home':'home','marry':'marry','1%':'1%',
+  'desirezodiac':'desirezodiac','shyshy':'shyshy',
+  '구미호':'구미호','속궁합':'속궁합'};
+
+// product 자리에 국가·언어 토큰이 들어온 행 → 캠페인명 토큰을 훑어 진짜 상품을 복원.
+//   예: '미국_무당_ASC_미국' → shaman,  '전세계_29금_전환캠페인' → adult29,  '싱가폴_sc_solo' → solo
+function _glProductFromCampaign(cn){
+  const toks=String(cn||'').split(/[_\s]+/);
+  for(let i=0;i<toks.length;i++){
+    const k=toks[i].trim().toLowerCase();
+    if(!k||GL_NON_PRODUCT_TOKENS[k])continue;      // 국가·언어 토큰은 건너뛴다
+    if(GL_PRODUCT_CANON[k])return GL_PRODUCT_CANON[k];
+  }
+  return null;                                      // 날짜·캠페인유형만 남은 이름(CBO#1 등)
+}
+// 행의 최종 상품명. 아는 상품이면 canonical 영문명, 모르면 원본 유지(임의 변형 금지).
+function glProduct(r){
+  const raw=r.product==null?'':String(r.product).trim();
+  const k=raw.toLowerCase();
+  if(k&&!GL_NON_PRODUCT_TOKENS[k])return GL_PRODUCT_CANON[k]||raw;
+  return _glProductFromCampaign(r.campaign_name)||raw;
+}
 const canonGLRows=rows=>(rows||[]).map(r=>{
   if(!r||r.product==null)return r;
-  const c=GL_PRODUCT_CANON[String(r.product).trim().toLowerCase()];
-  return c?{...r,product:c}:r;
+  const p=glProduct(r);
+  return (p&&p!==r.product)?{...r,product:p}:r;
 });
 // 밴스드 행의 상품명 보정 (테이블 product 는 대부분 'etc' 라 캠페인명에서 복원한다).
 //   norm() 의 vn 분기와 주간종합의 '밴스드 포함' 합산이 같은 규칙을 쓰도록 분리해둔다.
@@ -767,7 +817,19 @@ const _CC_CANON={'홍콩':'HK','香港':'HK','HONGKONG':'HK','HONG KONG':'HK',
   '태국':'TH','THAILAND':'TH','베트남':'VN','VIETNAM':'VN','싱가포르':'SG','SINGAPORE':'SG',
   '마카오':'MO','MACAU':'MO','MACAO':'MO','영국':'GB','UK':'GB','UNITED KINGDOM':'GB',
   '호주':'AU','AUSTRALIA':'AU','말레이시아':'MY','MALAYSIA':'MY','인도네시아':'ID','INDONESIA':'ID',
-  '독일':'DE','GERMANY':'DE','프랑스':'FR','FRANCE':'FR'};
+  '독일':'DE','GERMANY':'DE','프랑스':'FR','FRANCE':'FR',
+  '싱가폴':'SG','멕시코':'MX','MEXICO':'MX','중국':'CN','CHINA':'CN','필리핀':'PH','PHILIPPINES':'PH',
+  '캐나다':'CA','CANADA':'CA','뉴질랜드':'NZ','NEW ZEALAND':'NZ',
+  '전세계':'WW','WORLDWIDE':'WW','GLOBAL':'WW','간체':'WW','번체':'WW'};
+// 드롭다운 표기용 한글 국가명 (option value 는 ISO 코드 그대로 → URL 해시·필터 호환).
+const _CC_LABEL={TW:'대만',HK:'홍콩',JP:'일본',TH:'태국',US:'미국',AU:'호주',SG:'싱가포르',
+  MY:'말레이시아',MX:'멕시코',KR:'한국',CN:'중국',MO:'마카오',VN:'베트남',GB:'영국',ID:'인도네시아',
+  PH:'필리핀',CA:'캐나다',NZ:'뉴질랜드',NL:'네덜란드',DE:'독일',FR:'프랑스',IT:'이탈리아',ES:'스페인',
+  BR:'브라질',AT:'오스트리아',BE:'벨기에',KH:'캄보디아',NO:'노르웨이',CO:'콜롬비아',UY:'우루과이',
+  AR:'아르헨티나',CL:'칠레',MA:'모로코',IL:'이스라엘',QA:'카타르',FI:'핀란드',IE:'아일랜드',
+  AE:'아랍에미리트',IS:'아이슬란드',IN:'인도',AM:'아르메니아',MN:'몽골',GE:'조지아',MM:'미얀마',
+  PA:'파나마',WW:'전세계'};
+const ccLabel=c=>_CC_LABEL[c]?_CC_LABEL[c]+' ('+c+')':c;
 function canonCountry(c){
   const s=String(c==null?'':c).trim(); if(!s) return 'XX';
   const u=s.toUpperCase();
@@ -807,7 +869,7 @@ function _populateCountrySel(m){
   _modeSrc(m).forEach(r=>{const c=canonCountry(r.country); if(c&&c!=='ALL'&&c!=='XX')set[c]=(set[c]||0)+(+ (r.spend!=null?r.spend:r.spend_usd)||0);});
   const codes=Object.keys(set).sort((a,b)=>set[b]-set[a]);   // 지출 큰 순
   if(!codes.includes(COUNTRY)) COUNTRY='ALL';
-  sel.innerHTML='<option value="ALL">🌐 전체</option>'+codes.map(c=>'<option value="'+c+'">'+c+'</option>').join('');
+  sel.innerHTML='<option value="ALL">🌐 전체</option>'+codes.map(c=>'<option value="'+c+'">'+ccLabel(c)+'</option>').join('');
   sel.value=COUNTRY; sel.style.display='';
 }
 function onCountryChange(){
