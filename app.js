@@ -1480,7 +1480,7 @@ function renderKpiTable(period){
 }
 
 // ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper report 구성 복제(라이트 테마) =====
-const KR_MARKETERS=['수연','희상','혜린','본걸','지은','휘동','지연','정헌','연희','지영','하루','훤기','베스'];
+const KR_MARKETERS=['수연','희상','혜린','본걸','지은','휘동','지연','정헌','연희','지영','하루','훤기','베스','기쁨'];
 const GL_MARKETERS=['본걸','지은','훤기','채채','지영','하루'];
 const _mkToday=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const _mkAddDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
@@ -1681,7 +1681,22 @@ document.getElementById('dtStart').addEventListener('change',renderDateTab);
 document.getElementById('dtEnd').addEventListener('change',renderDateTab);
 document.getElementById('dtFilter').addEventListener('input',renderDateTab);
 document.getElementById('dpSel').addEventListener('change',renderDateProduct);
-document.getElementById('dpPeriod').addEventListener('change',renderDateProduct);
+document.getElementById('dpPeriod').addEventListener('change',function(){
+  // '📅 직접 선택' → 캘린더를 쓴다(비어 있으면 최근 30일로 미리 채움).
+  // 하루/주간/월간 → 캘린더를 비운다(둘이 동시에 살아있으면 어느 기준인지 헷갈린다).
+  const f=document.getElementById('dpFrom'),t=document.getElementById('dpTo');
+  if(this.value==='custom'){
+    if(f&&t&&!(f.value&&t.value)){
+      const hi=DATES[0]||_dpDstr(new Date());
+      const lo=DATES.length?DATES[Math.min(29,DATES.length-1)]:hi;
+      f.value=lo;t.value=hi;
+    }
+    if(f)f.focus();
+  }else if(f&&t){f.value='';t.value=''}
+  renderDateProduct();
+});
+document.getElementById('dpFrom').addEventListener('change',renderDateProduct);
+document.getElementById('dpTo').addEventListener('change',renderDateProduct);
 document.getElementById('crDays').addEventListener('change',renderCreativeRanking);
 document.getElementById('crSort').addEventListener('change',renderCreativeRanking);
 document.getElementById('krDays').addEventListener('change',renderAdsetRanking);
@@ -2375,6 +2390,39 @@ function curBudMap(rows,accFilter){
 // 세트 정렬 비교자 — 예산↓ → (동률·예산없음) 전날 지출↓ → 7일 지출↓
 function budCmp(a,b){return (( b._bud||0)-(a._bud||0))||((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))}
 
+// ===== 세트필터 키워드 파서 (모든 추이차트 공용) =====
+//   단어 하나만 넣으면 예전처럼 '포함' 검색이고, 여러 단어를 조합해 AND/OR/제외를 쓸 수 있다.
+//     무당 troas         → 둘 다 포함            (공백 = AND, & && + and 도 같음)
+//     무당 | 임신        → 둘 중 하나            (| , or 또는 = OR)
+//     무당 troas | 임신  → (무당 AND troas) OR 임신   ※ OR 로 먼저 갈라지고 그룹 안이 AND
+//     무당 -복제         → 무당 포함 & '복제' 제외    (앞에 - 또는 ! = 제외)
+//     "무당 사주"        → 따옴표 안은 공백째로 한 덩어리(구문 그대로 검색)
+//   검색 대상 문자열(캠페인명+세트/소재명+ID)은 호출부에서 이어붙여 넘긴다.
+function kwParse(raw){
+  const s=String(raw==null?'':raw).trim();if(!s)return null;
+  const ph=[];   // 따옴표 구문은 자리표시자로 빼두고(공백 분할에 안 걸리게) 마지막에 되돌린다
+  const s2=s.replace(/"([^"]*)"|'([^']*)'/g,function(m,a,b){ph.push(a!=null?a:(b!=null?b:''));return '\u0000'+(ph.length-1)+'\u0000'});
+  const unph=function(t){return t.replace(/\u0000(\d+)\u0000/g,function(m,i){return ph[+i]||''})};
+  const groups=s2.split(/\s*(?:\|\||\||,|\bor\b|\bOR\b|또는)\s*/).map(function(g){
+    const inc=[],exc=[];
+    g.split(/\s*(?:&&|&|\+|\band\b|\bAND\b|그리고)\s*|\s+/).forEach(function(t0){
+      let t=String(t0).trim();if(!t)return;
+      let neg=false;if(t.length>1&&(t[0]==='-'||t[0]==='!')){neg=true;t=t.slice(1)}
+      t=unph(t).trim().toLowerCase();if(!t)return;
+      (neg?exc:inc).push(t);
+    });
+    return {inc:inc,exc:exc};
+  }).filter(function(g){return g.inc.length||g.exc.length});
+  return groups.length?groups:null;
+}
+// kwParse 결과로 문자열 하나를 판정 — 그룹(OR) 중 하나라도 통과하면 true. groups 가 null 이면 필터 없음.
+function kwTest(groups,text){
+  if(!groups)return true;
+  const t=String(text==null?'':text).toLowerCase();
+  return groups.some(function(g){
+    return g.inc.every(function(w){return t.indexOf(w)>=0})&&!g.exc.some(function(w){return t.indexOf(w)>=0});
+  });
+}
 // ===== 추이차트 정렬 모드 =====
 //   모든 추이차트(일별·주월·보조지표·대만·상품별·틱톡)가 이 값 하나를 공유한다.
 //   budget   = 💸 예산순(기본) — 현재 일예산 큰 순
@@ -2513,8 +2561,8 @@ function renderTrend(opts){
   const BUD=curBudMap(ROWS,accFilter);
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;a._bud=BUD[a.id]||0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
-  const tKw=(document.getElementById(filterElId).value||'').trim().toLowerCase();
-  if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
+  const tKw=kwParse(document.getElementById(filterElId).value);
+  if(tKw)list=list.filter(a=>kwTest(tKw,(a.cn||'')+' '+(a.an||'')+' '+(a.id||'')));
   // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 "개별 행"만 숨김 (DOM 부담 감소).
   //   단, 종합/소계/일별 합계는 전체 세트 기준으로 계산해야 추이차트(주간) 합과 일치한다.
   //   (예전엔 list 자체를 필터해 합계가 과거 구간에서 누락됐음)
@@ -2768,8 +2816,8 @@ function renderTrendAgg(gran){
     a._s=s;a._r=r;a._p=p;a._roas=s>0?r/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;
     a._recentS=a.b[recentCol]?a.b[recentCol].s:0;a._bud=BUD[a.id]||0;a._yS=a._recentS;return a});
   // 세트필터 (공용 #tFilter)
-  const tKw=(document.getElementById('tFilter').value||'').trim().toLowerCase();
-  if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
+  const tKw=kwParse(document.getElementById('tFilter').value);
+  if(tKw)list=list.filter(a=>kwTest(tKw,(a.cn||'')+' '+(a.an||'')+' '+(a.id||'')));
   const ths=cols.map(ck=>'<th style="min-width:var(--cw)">'+colLabel(ck)+'</th>').join('');
   // 광고 계정 컬럼(캠페인 왼쪽) — 일별 뷰(renderTrend)와 동일하게 국내·글로벌만
   const showAcc=MODE==='kr'||MODE==='gl';
@@ -3012,9 +3060,9 @@ function renderTrendProduct(){
   const ensure=(o,k)=>{if(!o[k])o[k]={s:0,r:0,p:0,mp:0,uc:0,imp:0};return o[k]};
   const prodCol={};const prodSort={};const byA={};
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (상품별 종합·소계도 필터 결과 기준)
-  const tpKw=(document.getElementById('tpFilter')?.value||'').trim().toLowerCase();
+  const tpKw=kwParse(document.getElementById('tpFilter')?.value);
   AD.forEach(r=>{if(!dd.includes(r.date))return;
-    if(tpKw){const _nm=((r.campaign_name||'')+' '+(MODE==='cr'?(r.ad_name||''):(r.adset_name||''))+' '+rowId(r)).toLowerCase();if(!_nm.includes(tpKw))return}
+    if(tpKw&&!kwTest(tpKw,(r.campaign_name||'')+' '+(MODE==='cr'?(r.ad_name||''):(r.adset_name||''))+' '+rowId(r)))return;
     const ck=colKey(r.date);const p=r.product||'기타';
     if(!prodCol[p])prodCol[p]={};const pc=ensure(prodCol[p],ck);
     pc.s+=r.spend;pc.r+=r.revenue;pc.p+=r.profit;pc.mp+=r.results_mp;pc.uc+=r.unique_clicks;pc.imp+=(r.impressions||0);
@@ -3088,8 +3136,8 @@ function renderChange(){
   AD.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,p:{},d:{}};const o=byA[rid].p[pkey(r.date)]||(byA[rid].p[pkey(r.date)]={s:0,r:0});o.s+=r.spend;o.r+=r.revenue;byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (종합 합계도 필터 결과 기준)
-  const tKw=(document.getElementById('cFilter')?.value||'').trim().toLowerCase();
-  if(tKw)list=list.filter(a=>((a.cn||'')+' '+(a.an||'')+' '+(a.id||'')).toLowerCase().includes(tKw));
+  const tKw=kwParse(document.getElementById('cFilter')?.value);
+  if(tKw)list=list.filter(a=>kwTest(tKw,(a.cn||'')+' '+(a.an||'')+' '+(a.id||'')));
   // 컬럼(기간) — 최신순
   const limit=view==='day'?30:view==='week'?16:6;
   const cols=(view==='day'?DATES.slice():[...new Set(AD.map(r=>pkey(r.date)))].sort().reverse()).slice(0,limit);
@@ -3835,11 +3883,38 @@ function extractCountry(cn){if(!cn)return'기타';for(const c of COUNTRY_LIST){i
 // 캠페인명이 국가 접두사로 시작하지 않으면(예: '무당_…','솔로_…') split 결과가 상품명이 됨.
 // 그 경우 레코드의 country 필드(글로벌 파이프라인이 분류한 실제 국가)로 합산한다.
 function countryOf(r){const c=extractCountry(r.campaign_name);if(COUNTRY_LIST.includes(c))return c;if(r.country&&COUNTRY_LIST.includes(r.country))return r.country;if(r.country)return r.country;return c}
+// 캘린더(dpFrom~dpTo) 기간 선택 — 국내·글로벌 '나라별_상품별' 공용.
+//   양쪽이 다 채워졌을 때만 구간으로 인정하고(한쪽만 고른 중간 상태는 무시), 거꾸로 넣어도 정렬한다.
+function _dpDstr(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+function _dpRange(){
+  const f=(document.getElementById('dpFrom')?.value||'').trim();
+  const t=(document.getElementById('dpTo')?.value||'').trim();
+  if(!f||!t)return null;
+  let a=f,b=t;if(a>b){const x=a;a=b;b=x}
+  const d1=new Date(a+'T00:00:00'),d2=new Date(b+'T00:00:00');
+  return {from:a,to:b,days:Math.round((d2-d1)/864e5)+1};
+}
+// 캘린더 초기화 → 하루/주간/월간 드롭다운으로 복귀
+function dpClearRange(){
+  const f=document.getElementById('dpFrom'),t=document.getElementById('dpTo');
+  if(f)f.value='';if(t)t.value='';
+  const p=document.getElementById('dpPeriod');if(p&&p.value==='custom')p.value='day';
+  renderDateProduct();
+}
 function renderDateProduct(){
   const sel=document.getElementById('dpSel');
-  const per=(document.getElementById('dpPeriod')||{}).value||'day';
+  const perSel=document.getElementById('dpPeriod');
+  const rng=_dpRange();
+  let per=(perSel||{}).value||'day';
+  if(rng&&per!=='custom'&&perSel){per='custom';perSel.value='custom'}   // 캘린더가 채워져 있으면 그 구간이 우선
+  if(per==='custom'&&!rng)per='day';                                    // 한쪽만 고른 상태 → 드롭다운 유지
+  // 캘린더 입력 범위를 실제 데이터가 있는 구간으로 제한
+  {const f=document.getElementById('dpFrom'),t=document.getElementById('dpTo');
+   if(f&&t&&DATES.length){const lo=DATES[DATES.length-1],hi=DATES[0];f.min=t.min=lo;f.max=t.max=hi}}
+  // 캘린더 구간을 쓰는 동안 날짜 드롭다운은 비활성 (어느 기준인지 헷갈리지 않게)
+  sel.disabled=!!rng;sel.style.opacity=rng?0.45:1;
   // 기간(하루/주간/월간) 바뀌면 날짜 드롭다운 옵션 재구성
-  if(sel.dataset.per!==per||!sel.options.length){
+  if(!rng&&(sel.dataset.per!==per||!sel.options.length)){
     sel.innerHTML='';sel.dataset.per=per;let opts=[];
     if(per==='week'){opts=[...new Set(DATES.map(WM))].sort().reverse().map(w=>{const m=new Date(w),s=new Date(m.getTime()+6*864e5);return[w,(m.getMonth()+1)+'/'+m.getDate()+'~'+(s.getMonth()+1)+'/'+s.getDate()+' 주']})}
     else if(per==='month'){opts=[...new Set(DATES.map(d=>d.slice(0,7)))].sort().reverse().map(m=>[m,m.slice(0,4)+'.'+m.slice(5,7)+' 월'])}
@@ -3847,7 +3922,14 @@ function renderDateProduct(){
     opts.forEach(o=>{const e=document.createElement('option');e.value=o[0];e.textContent=o[1];sel.appendChild(e)});
   }
   const key=sel.value||(sel.options[0]&&sel.options[0].value)||'';
-  const rows=AD.filter(per==='week'?(r=>WM(r.date)===key):per==='month'?(r=>r.date.slice(0,7)===key):(r=>r.date===key));
+  const rows=rng?AD.filter(r=>r.date>=rng.from&&r.date<=rng.to)
+    :AD.filter(per==='week'?(r=>WM(r.date)===key):per==='month'?(r=>r.date.slice(0,7)===key):(r=>r.date===key));
+  // 집계 기간 안내 — 표의 모든 수치가 이 기간의 '합계'임을 명시
+  {const info=document.getElementById('dpRangeInfo');
+   if(info){const nd=new Set(rows.map(r=>r.date)).size;
+     info.innerHTML=rng
+       ?'📊 <b>'+rng.from+' ~ '+rng.to+'</b> 합계 · '+rng.days+'일 중 데이터 '+nd+'일'
+       :'📊 '+(per==='week'?'주간':per==='month'?'월간':'하루')+' 합계 · 데이터 '+nd+'일 <span style="color:#aaa">(📅 캘린더로 기간을 직접 고를 수 있습니다)</span>';}}
   const byP={};rows.forEach(r=>{if(!byP[r.product])byP[r.product]={product:r.product,spend:0,revenue:0,profit:0,mp:0,uc:0,imp:0,ids:new Set()};byP[r.product].spend+=r.spend;byP[r.product].revenue+=r.revenue;byP[r.product].profit+=r.profit;byP[r.product].mp+=r.results_mp;byP[r.product].uc+=r.unique_clicks;byP[r.product].imp+=(r.impressions||0);byP[r.product].ids.add(r.adset_id||r.adset_name)});
   const list=Object.values(byP).sort((a,b)=>b.spend-a.spend);
   const totS=rows.reduce((a,b)=>a+b.spend,0);
@@ -5851,7 +5933,7 @@ function renderGgdgTight(){
   }
   const days=parseInt(document.getElementById('ggdgkrDays').value)||30;
   const view=document.getElementById('ggdgkrView')?.value||'day';
-  const kw=(document.getElementById('ggdgkrFilter')?.value||'').trim().toLowerCase();
+  const kw=kwParse(document.getElementById('ggdgkrFilter')?.value);
   // 최신 날짜 왼쪽: 내림차순 정렬 후 days 만큼
   const allDates=[...new Set(GGDG_TIGHT.map(r=>r.date))].sort().reverse().slice(0,days);
   if(!allDates.length){tbl.innerHTML='<tr><td>데이터 없음</td></tr>';return}
@@ -5891,7 +5973,7 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
     let as=0,ar=0,ac=0;avgDates.forEach(d=>{const x=o.d[d];if(x){as+=x.s;ar+=x.r;ac+=x.c}});o._as=as;o._ar=ar;o._ac=ac;
     o._bud=(GBUD[o.id]||{}).b||0;return o});
   list=list.filter(o=>o._s>0||o._r>0);
-  if(kw)list=list.filter(o=>((o.camp||'')+' '+(o.name||'')+' '+(o.id||'')).toLowerCase().includes(kw));
+  if(kw)list=list.filter(o=>kwTest(kw,(o.camp||'')+' '+(o.name||'')+' '+(o.id||'')));
   list.sort((a,b)=>(b._sy-a._sy)||(b._s-a._s));
   GGDG_ROWS=list;   // '구글에 예산 적용' 대상 = 화면에 실제로 보이는 광고그룹
   abSyncBtnG();
@@ -6173,7 +6255,7 @@ function renderTiktok(){
   const tbl=document.getElementById('ttTbl');if(!tbl)return;
   const info=document.getElementById('ttInfo');
   const days=parseInt(document.getElementById('ttDays').value)||30;
-  const kw=(document.getElementById('ttFilter').value||'').trim().toLowerCase();
+  const kw=kwParse(document.getElementById('ttFilter').value);
   const dd=[...new Set(TIKTOK.map(r=>r.date))].sort().reverse().slice(0,days);
   if(info)info.innerHTML=' · 데이터 '+TT_SRC+(dd.length?' · 최신 '+dd[0]:'');
   if(!dd.length){tbl.innerHTML='<tr><td style="padding:12px;color:#888">틱톡 데이터 없음 — 시트를 읽지 못했습니다</td></tr>';return}
@@ -6190,7 +6272,7 @@ function renderTiktok(){
     byC[id].d[r.date]=r;
   });
   let list=Object.values(byC);
-  if(kw)list=list.filter(a=>((a.cn||'')+' '+(a.gn||'')+' '+(a.id||'')).toLowerCase().indexOf(kw)>=0);
+  if(kw)list=list.filter(a=>kwTest(kw,(a.cn||'')+' '+(a.gn||'')+' '+(a.id||'')));
   list.forEach(a=>{let s=0,rv=0,o=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders}});
     a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
     a._yS=a.d[yDay]?a.d[yDay].spend:0;
