@@ -72,24 +72,24 @@ ROWS = [
     ("무녀_피안애니메이션모음_ASC(1-3)", "1874029022819346", "1873573699433889"),
     ("무녀_피안애니메이션모음_ASC(1-4)", "1874029022820466", "1873573699433889"),
     ("무녀_피안애니메이션모음_ASC(1-5)", "1874029022823762", "1873573699433889"),
-    # 신규 캠페인 4개 — 광고그룹 리포트에는 캠페인 ID 컬럼이 없어 진짜 캠페인 ID 를 모른다.
-    # ⚠️ 아래 세 번째 값은 **캠페인 ID 가 아니라 그 캠페인의 첫 광고그룹 ID(대용키)** 다.
-    #    같은 캠페인의 복사본끼리 묶는 용도로만 쓰인다. MP 매출은 08/20·08/21 실측에서
-    #    전부 utm_id=광고그룹 ID 로 들어와 직접 귀속되므로 지금은 대용키로 충분하다.
-    #    캠페인 레벨 리포트를 받는 날 진짜 캠페인 ID 로 교체할 것(그 전까지는 utm_id 가
-    #    진짜 캠페인 ID 로 오면 load_revenue 의 '⚠️ 매칭 안 된 틱톡 utm_id' 경고가 잡아준다).
-    ("구미호_0819_ASC", "1873936928573601", "1873936928573601"),
-    ("외모정병_0819_ASC", "1873938593488098", "1873938593488098"),
-    ("무당_0820_신규전환모음(1-1)", "1874026288642113", "1874026288642113"),
-    ("무당_0820_신규전환모음(1-2)", "1874028716506385", "1874026288642113"),
-    ("무당_0820_신규전환모음의(1-3)", "1874028716508545", "1874026288642113"),
-    ("무당_0820_신규전환모음의(1-4)", "1874028716509297", "1874026288642113"),
-    ("무당_0820_신규전환모음의(1-5)", "1874028716512545", "1874026288642113"),
-    ("무녀_0820_피안2차(1-1)", "1874027641849442", "1874027641849442"),
-    ("무녀_0820_피안2차(1-2)", "1874028446470626", "1874027641849442"),
-    ("무녀_0820_피안2차의(1-3)", "1874028446472594", "1874027641849442"),
-    ("무녀_0820_피안2차의(1-4)", "1874028446474818", "1874027641849442"),
-    ("무녀_0820_피안2차의(1-5)", "1874028446476002", "1874027641849442"),
+    # 신규 캠페인 4개 — 2026-08-24 캠페인 레벨 리포트로 진짜 캠페인 ID 를 확인해
+    # 대용키(첫 광고그룹 ID)를 교체했다. 대용키였던 동안은 캠페인 레벨 리포트의 캠페인 ID 와
+    # 안 맞아 load_spend 의 `cid not in CIDS` 에서 이 4개 캠페인 지출이 조용히 버려졌다.
+    ("구미호_0819_ASC", "1873936928573601", "1873936871185570"),
+    ("외모정병_0819_ASC", "1873938593488098", "1873938558940257"),
+    ("무당_0820_신규전환모음(1-1)", "1874026288642113", "1874026254620802"),
+    ("무당_0820_신규전환모음(1-2)", "1874028716506385", "1874026254620802"),
+    ("무당_0820_신규전환모음의(1-3)", "1874028716508545", "1874026254620802"),
+    ("무당_0820_신규전환모음의(1-4)", "1874028716509297", "1874026254620802"),
+    ("무당_0820_신규전환모음의(1-5)", "1874028716512545", "1874026254620802"),
+    ("무녀_0820_피안2차(1-1)", "1874027641849442", "1874027568799361"),
+    ("무녀_0820_피안2차(1-2)", "1874028446470626", "1874027568799361"),
+    ("무녀_0820_피안2차의(1-3)", "1874028446472594", "1874027568799361"),
+    ("무녀_0820_피안2차의(1-4)", "1874028446474818", "1874027568799361"),
+    ("무녀_0820_피안2차의(1-5)", "1874028446476002", "1874027568799361"),
+    # --- 2026-08-26 신규 캠페인 2개 (08/26 첫 지출 · 광고그룹 리포트 실측) ---
+    ("무당_소재수십개ASC_세트A", "1874574395129122", "1874574320593378"),
+    ("무녀_소재여러개_ASC_a", "1874577359594753", "1874577345364225"),
 ]
 
 # 캠페인 ID -> 캠페인 이름. 시트 A열은 캠페인명과 광고그룹명이 다를 때 두 줄로 병기한다
@@ -106,12 +106,13 @@ CAMP_NAME = {
     "1873303422916690": "무당_애니메이션모음_ASC(3)",
     "1873308019491889": "1%_0812_1%전환소재들",
     "1873573699433889": "무녀_피안애니메이션모음_ASC(1-1)",
-    # 아래 4개의 키는 대용키(첫 광고그룹 ID) — 캠페인 레벨 리포트로 CBO 예산을 찾을 때는
-    # 이름으로 매칭하므로 이름만 맞으면 동작한다(키는 ROWS 와 짝만 맞으면 된다).
-    "1873936928573601": "구미호_0819_ASC",
-    "1873938593488098": "외모정병_0819_ASC",
-    "1874026288642113": "무당_0820_신규전환모음",
-    "1874027641849442": "무녀_0820_피안2차",
+    # 아래 4개는 2026-08-24 캠페인 레벨 리포트로 진짜 캠페인 ID 를 확인해 대용키를 교체했다.
+    "1873936871185570": "구미호_0819_ASC",
+    "1873938558940257": "외모정병_0819_ASC",
+    "1874026254620802": "무당_0820_신규전환모음",
+    "1874027568799361": "무녀_0820_피안2차",
+    "1874574320593378": "무당_소재수십개ASC",
+    "1874577345364225": "무녀_소재여러개_ASC",
 }
 
 
@@ -127,9 +128,11 @@ def sheet_label(name, cid):
 # 시트 컬럼(0-based). 2026-08-18 예산 컬럼을 C 에 끼워 넣으며 합계·날짜가 한 칸씩 밀렸다.
 COL_ID = 1                # B: 광고그룹 ID
 COL_BUD = 2               # C: 예산(설정 스냅샷)
-COL_TOT = 3               # D: 합계
+COL_TOT = 3               # D: 최근 7일 평균(2026-08-27~ · 그전엔 전기간 합계)
 COL_D0 = 4                # E~: 날짜(최신 좌측)
 BUD_HDR = "예산"
+AVG_DAYS = 7              # D열 평균 창(최근 N개 날짜 열)
+AVG_HDR = f"최근 {AVG_DAYS}일 평균"
 
 NROW = len(ROWS)          # 헤더(4행) 아래 데이터 행 수
 LASTROW = 4 + NROW        # 마지막 데이터 행 번호(1-based)
@@ -177,9 +180,35 @@ def roas_bg(roas):
 
 
 def cell_text(spend, revenue, cnt):
+    """일자 셀은 정수, D열(최근 7일 평균) 셀은 소수가 섞여 들어온다.
+
+    금액은 원 단위로 반올림해 쓰고, 판매수는 float 이면 소수 1자리로 쓴다
+    (평균을 정수로 반올림하면 주 1~2건짜리 광고그룹이 '0건' 으로 사라진다).
+    순이익은 반올림한 지출·매출의 차로 계산해야 화면상 세 줄이 서로 맞는다.
+    """
     roas = round(revenue / spend * 100) if spend else 0
-    profit = revenue - spend
-    return (f"{roas}\n {profit:+,}\n {-spend:,}\n {revenue:,}\n {cnt}건"), roas, profit
+    s_i, r_i = round(spend), round(revenue)
+    profit = r_i - s_i
+    cs = f"{cnt:,.1f}" if isinstance(cnt, float) else f"{cnt:,}"
+    return (f"{roas}\n {profit:+,}\n {-s_i:,}\n {r_i:,}\n {cs}건"), roas, profit
+
+
+def avg_cells(cells):
+    """최근 AVG_DAYS 개 날짜 열(왼쪽=최신)의 **일평균** -> (지출, 매출, 판매수).
+
+    분모는 항상 AVG_DAYS 고정이다(2026-08-27 사용자 결정). 빈칸(그날 지출 0)도 0 으로
+    세서 나눈다 — 집행일 수로 나누면 행마다 분모가 달라 '전체' 행과 세로합이 안 맞고
+    행끼리 '하루당 얼마' 비교가 성립하지 않는다. 어제 시작한 광고그룹이 1/7 로 희석돼
+    보이는 건 의도된 성질이다(run-rate).
+    ROAS 는 7일 지출·매출 **합**의 비율 = 평균끼리의 비율이라 자동으로 가중평균이 된다.
+    반환값을 여기서 미리 반올림한다 — 시트에 쓰는 값과 검증에서 비교하는 값이
+    글자 단위로 같아야 재실행 때 '불일치' 로 멈추지 않는다.
+    """
+    win = cells[:AVG_DAYS]
+    sp = sum(x[0] for x in win if x)
+    rv = sum(x[1] for x in win if x)
+    cn = sum(x[2] for x in win if x)
+    return round(sp / AVG_DAYS), round(rv / AVG_DAYS), round(cn / AVG_DAYS, 1)
 
 
 def cell_data(spend, revenue, cnt):
@@ -218,7 +247,8 @@ def parse_cell(s):
         raise ValueError(f"예상 밖 셀 포맷: {s!r}")
     spend = abs(int(L[2].replace(",", "").replace("+", "")))
     revenue = int(L[3].replace(",", ""))
-    cnt = int(L[4].replace("건", "").replace(",", ""))
+    t = L[4].replace("건", "").replace(",", "")
+    cnt = float(t) if "." in t else int(t)   # D열 평균 셀은 소수 1자리
     return spend, revenue, cnt
 
 
@@ -572,11 +602,13 @@ def main():
     ap.add_argument("--budget-only", action="store_true",
                     help="날짜 값은 건드리지 않고 C열 예산만 갱신")
     ap.add_argument("--note", default="", help="2행 주석에 이어붙일 문장")
+    ap.add_argument("--recalc", action="store_true",
+                    help="날짜·예산은 그대로 두고 D열(최근 7일 평균)만 다시 계산")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
 
-    if not a.spend and not a.budget_only:
-        sys.exit("❌ --spend 가 없습니다 (예산만 갱신하려면 --budget-only --budget <xlsx>)")
+    if not a.spend and not a.budget_only and not a.recalc:
+        sys.exit("❌ --spend 가 없습니다 (예산만 갱신하려면 --budget-only --budget <xlsx>,\n                 D열만 다시 계산하려면 --recalc)")
     budgets = load_budgets(a.budget) if a.budget else {}
     if a.budget_only and not budgets:
         sys.exit("❌ --budget-only 인데 --budget 에서 읽은 예산이 없습니다")
@@ -608,6 +640,19 @@ def main():
     vals = svc.spreadsheets().values().get(
         spreadsheetId=SID, range=f"{TAB}!A4:AZ{LASTROW}").execute().get("values", [])
     hdr = vals[0]
+    # ⚠️ 이미 채운 날짜를 또 주면 열이 '삽입'돼 같은 날짜 열이 두 개가 된다.
+    # 2026-08-27 실제로 08/25 가 중복 생성됐다(전 세션이 이미 채워 둔 걸 모르고 재실행).
+    # D열이 전기간 합계였을 땐 중복분이 합계에 그대로 더해져도 검증을 통과해 버려서
+    # 조용히 과대계상됐다. 다시 채우려면 _undo_dates.py 로 먼저 지울 것.
+    dup = [d for d in dates
+           if f"{datetime.date.fromisoformat(d):%m/%d}" in
+              " ".join(str(h) for h in hdr[COL_D0:])]
+    if dup:
+        sys.exit(f"\n❌ 이미 시트에 있는 날짜입니다 — 중단: {', '.join(dup)}\n"
+                 f"   그대로 두면 같은 날짜 열이 두 개 생깁니다(열은 삽입만 됩니다).\n"
+                 f"   다시 채우려면 먼저: python _undo_dates.py "
+                 f"{' '.join(f'{datetime.date.fromisoformat(d):%m/%d}' for d in dup)} --apply")
+
     # C4 가 '예산'이면 이관 완료된 시트. 아니면 이번 실행에서 C 에 컬럼을 끼워 넣는다.
     hasbud = len(hdr) > COL_BUD and str(hdr[COL_BUD]).strip() == BUD_HDR
     if not hasbud:
@@ -641,22 +686,38 @@ def main():
     if missing:
         print("\n➕ 시트에 없는 신규 광고그룹 → 행 추가: " + ", ".join(n for n, _, _ in missing))
 
-    # 기존 일자 셀 파싱 + 합계 검증 (새로 삽입할 행은 검증 대상 아님)
-    existing = []
+    # 기존 일자 셀 파싱 + D열 검증 (새로 삽입할 행은 검증 대상 아님).
+    # D열은 2026-08-27 부터 '전기간 합계' 가 아니라 '최근 7일 평균' 이다. 전환 첫 실행에서는
+    # 시트에 아직 구 합계가 들어 있으므로, 두 규칙 중 어느 쪽과 맞는지 먼저 판정한 뒤
+    # 전 행을 같은 규칙으로 검증한다(행마다 규칙이 갈리면 그건 진짜 오염이다).
+    existing, chk = [], []
     for ri in range(1, NROW + 1):
         if ri > nhave:
             existing.append([])
+            chk.append(None)
             continue
         row = vals[ri] + [""] * (max(len(hdr), COL_D0) - len(vals[ri]))
-        # 예산 컬럼이 아직 없는 시트(이관 전)는 합계·날짜가 한 칸 왼쪽에 있다.
+        # 예산 컬럼이 아직 없는 시트(이관 전)는 D열·날짜가 한 칸 왼쪽에 있다.
         cells = [parse_cell(c) for c in row[(COL_D0 if hasbud else COL_D0 - 1):]]
-        tot = parse_cell(row[COL_TOT if hasbud else COL_TOT - 1])
-        s = sum(x[0] for x in cells if x); rv = sum(x[1] for x in cells if x); cn = sum(x[2] for x in cells if x)
-        ok = tot == (s, rv, cn)
-        print(f"검증 {ROWS[ri-1][0]:26} 합계={tot} 일자합=({s}, {rv}, {cn}) {'✅' if ok else '❌'}")
-        if not ok:
-            sys.exit("❌ 합계 컬럼 불일치 — 중단")
+        cur = parse_cell(row[COL_TOT if hasbud else COL_TOT - 1])
+        tot = (sum(x[0] for x in cells if x), sum(x[1] for x in cells if x),
+               sum(x[2] for x in cells if x))
+        chk.append((ROWS[ri - 1][0], cur, avg_cells(cells), tot))
         existing.append(cells)
+
+    seen = [c for c in chk if c and c[1] is not None]
+    legacy = bool(seen) and all(cur == tot for _n, cur, _av, tot in seen)
+    if legacy:
+        print(f"\n🔀 D열 전환: '전기간 합계' → '{AVG_HDR}'(분모 {AVG_DAYS} 고정) — 이번 실행에서 갱신됩니다")
+    for c in chk:
+        if not c or c[1] is None:
+            continue
+        name, cur, av, tot = c
+        exp = tot if legacy else av
+        ok = cur == exp
+        print(f"검증 {name:26} D열={cur} 기대={exp} {'✅' if ok else '❌'}")
+        if not ok:
+            sys.exit("❌ D열 불일치 — 중단 (열이 어긋났거나 손으로 고친 셀이 있는지 확인)")
 
     # 새 날짜별 값
     new_cells = {}
@@ -744,18 +805,16 @@ def main():
                       "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,"
                       "userEnteredFormat.textFormat,userEnteredFormat.wrapStrategy,textFormatRuns"}})
 
-    # D열 합계 갱신
-    # '합계 (N일)' 의 N = 헤더 열 수가 아니라 **데이터가 있는 날 수**.
-    # 07/23~07/30 처럼 미수집으로 빈 열이 섞여 있어 열 수로 세면 부풀려진다.
-    ndays = sum(1 for x in existing[0] if x) + sum(1 for d in dates if any(new_cells[d][0]))
-    totrows = [{"values": [hdr_cell(f"합계 ({ndays}일)")]}]
+    # D열 = 최근 AVG_DAYS 일 평균 갱신(2026-08-27~ · 그전엔 전기간 합계였다).
+    # 새 날짜 열은 오래된 날부터 E 에 끼워 넣으므로 반영 후 순서는 [최신 → 과거] 다.
+    # 여기서도 같은 순서로 이어 붙여야 '최근 7개 열' 창이 실제 시트와 일치한다.
+    totrows = [{"values": [hdr_cell(AVG_HDR)]}]
     for ri in range(NROW):
-        s = sum(x[0] for x in existing[ri] if x); rv = sum(x[1] for x in existing[ri] if x); cn = sum(x[2] for x in existing[ri] if x)
-        for d in dates:
-            v = new_cells[d][ri]
-            if v:
-                s += v[0]; rv += v[1]; cn += v[2]
-        totrows.append({"values": [cell_data(s, rv, cn)]})
+        series = [new_cells[d][ri] for d in reversed(dates)] + existing[ri]
+        totrows.append({"values": [cell_data(*avg_cells(series))]})
+    win = [f"{datetime.date.fromisoformat(d):%m/%d}" for d in reversed(dates)]
+    win += [str(h) for h in hdr[COL_D0 if hasbud else COL_D0 - 1:]]
+    print(f"\n📊 D열 = {AVG_HDR} (분모 {AVG_DAYS} 고정) · 창: {', '.join(win[:AVG_DAYS])}")
     reqs.append({"updateCells": {
         "start": {"sheetId": GID, "rowIndex": 3, "columnIndex": COL_TOT},
         "rows": totrows,
