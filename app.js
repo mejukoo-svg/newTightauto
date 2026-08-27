@@ -2803,6 +2803,17 @@ function renderTrendAgg(gran){
   const colKey=d=>isWeek?WM(d):d.slice(0,7);
   const cols=[...new Set(dd.map(colKey))];            // 최신순(좌측이 최근)
   const recentCol=cols[0];
+  // ── 주별·월별 셀도 누르면 시간별 화면이 열린다(2026-08-27). 버킷 하나가 여러 날이라
+  //    셀 열쇠를 'YYYY-MM-DD~YYYY-MM-DD' 로 쓴다(일별 뷰는 날짜 하나 그대로).
+  //    구간의 양 끝은 **표시 기간(dd) 안에 실제로 있는 날짜**로 잡는다 — 맨 왼쪽 주/월은
+  //    아직 진행 중이고 맨 오른쪽은 기간 컷오프로 잘려 있어서, 달력상의 주/월과 다르다.
+  //    (달력 기준으로 보내면 화면에 없는 날의 지출·매출이 시간별 합계에 섞여 셀과 안 맞는다)
+  const colRange={};dd.forEach(d=>{const ck=colKey(d);const r=colRange[ck]||(colRange[ck]={f:d,t:d});if(d<r.f)r.f=d;if(d>r.t)r.t=d});
+  const rk=ck=>{const r=colRange[ck];return r?(r.f===r.t?r.f:r.f+'~'+r.t):''};
+  // HR_MODES 를 직접 안 보는 이유는 renderTrend 와 같다(그 const 는 파일 하단 → TDZ 위험).
+  const hrOK=(MODE==='kr'||MODE==='gl'||MODE==='vn');
+  // 종합·소계 행이 넘길 '버킷별 합계' — hrPutGroup 은 날짜키를 기대하므로 구간키로 바꿔 넣는다.
+  const hrDaily=src=>{const o={};cols.forEach(ck=>{const t=src[ck];if(t)o[rk(ck)]={s:t.s,r:t.r}});return o};
   const wkLabel=wk=>{const m=new Date(wk);const s=new Date(m.getTime()+6*864e5);return(m.getMonth()+1)+'/'+m.getDate()+'~'+(s.getMonth()+1)+'/'+s.getDate()};
   const colLabel=ck=>isWeek?wkLabel(ck):(ck.slice(0,4)+'.'+ck.slice(5,7));
   // rowId 별 · 컬럼별 합산
@@ -2828,7 +2839,9 @@ function renderTrendAgg(gran){
   const budTh=showBud?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것">예산</th>':'';
   const budTdSr=showBud?'<td style="background:#e8e8e8"></td>':'';   // 종합·소계는 합산 금지라 빈칸
   const colSpan=cols.length+4+(showAcc?1:0)+(showBud?1:0);
-  const cell=t=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;return'<td class="mc '+RC(roas)+'">'+MC(roas,t.p,t.s,t.r,cvr,cpm,ctr,t.mp>0?t.s/t.mp:0)+'</td>'};
+  const cell=(t,ck)=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;
+    const hc=hrOK&&ck&&rk(ck);
+    return'<td class="mc '+RC(roas)+(hc?' hr-cell':'')+'"'+(hc?' data-hd="'+rk(ck)+'" data-hu="'+gran+'"':'')+'>'+MC(roas,t.p,t.s,t.r,cvr,cpm,ctr,t.mp>0?t.s/t.mp:0)+'</td>'};
   // 컬럼별 종합
   const totC={};cols.forEach(ck=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;list.forEach(a=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;mp+=b.mp;uc+=b.uc;imp+=b.imp}});totC[ck]={s,r,p,mp,uc,imp}});
   const ts=cols.reduce((a,ck)=>a+totC[ck].s,0),tr=cols.reduce((a,ck)=>a+totC[ck].r,0),tp=tr-ts,troas=ts>0?tr/ts*100:0;
@@ -2836,8 +2849,9 @@ function renderTrendAgg(gran){
   const tmp=cols.reduce((a,ck)=>a+totC[ck].mp,0),tuc=cols.reduce((a,ck)=>a+totC[ck].uc,0),tcvr=tuc>0&&tmp>0?tmp/tuc*100:0,tctr=timp>0?tuc/timp*100:0;
   const legend='<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
   let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+'<th>전체</th>'+ths+'</tr></thead><tbody>';
-  h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+budTdSr+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
-  cols.forEach(ck=>{h+=cell(totC[ck])});
+  if(hrOK)hrPutGroup(TBL,'all','종합',list,hrDaily(totC));
+  h+='<tr class="sr"'+(hrOK?' data-hrg="'+TBL+'|all"':'')+'>'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+budTdSr+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
+  cols.forEach(ck=>{h+=cell(totC[ck],ck)});
   h+='</tr>';
   // 상품별 그룹
   const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0};byProd[p].adsets.push(a);byProd[p].yS+=a._recentS;byProd[p].bud+=(a._bud||0)});
@@ -2849,16 +2863,17 @@ function renderTrendAgg(gran){
     const pByCol={};cols.forEach(ck=>{let s=0,r=0,p=0,mp=0,uc=0,imp=0;g.adsets.forEach(a=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;mp+=b.mp;uc+=b.uc;imp+=b.imp}});pByCol[ck]={s,r,p,mp,uc,imp}});
     const pImp=cols.reduce((a,ck)=>a+pByCol[ck].imp,0),pCpm=pImp>0?pS/pImp*1000:0;
     const pMp=g.adsets.reduce((a,x)=>a+(x._mp||0),0),pUc=g.adsets.reduce((a,x)=>a+(x._uc||0),0),pCvr=pUc>0&&pMp>0?pMp/pUc*100:0,pCtr=pImp>0?pUc/pImp*100:0;
-    const pCells=cols.map(ck=>cell(pByCol[ck])).join('');
-    h+='<tr class="sr">'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+budTdSr+'<td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
+    const pCells=cols.map(ck=>cell(pByCol[ck],ck)).join('');
+    if(hrOK)hrPutGroup(TBL,'p:'+prod,prod+' 소계',g.adsets,hrDaily(pByCol));
+    h+='<tr class="sr"'+(hrOK?' data-hrg="'+TBL+'|p:'+_mEsc(prod)+'"':'')+'>'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'+budTdSr+'<td class="mc '+RC(pRoas)+'">'+MC(pRoas,pR-pS,pS,pR,pCvr,pCpm,pCtr,pMp>0?pS/pMp:0)+'</td>'+pCells+'</tr>';
     orderSets(g.adsets.slice()).forEach(a=>{
-      const cells=cols.map(ck=>cell(a.b[ck])).join('');
+      const cells=cols.map(ck=>cell(a.b[ck],ck)).join('');
       const hl=hlClass(a.id);const ck=' clickable" data-id="'+a.id+'" onclick="showCP(\''+a.id+'\',this)"';
       const anm=accName(a.acc).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
       const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+(showBud?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'')+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+(hrOK?' data-adset-row="'+a.id+'" data-acc="'+(a.acc||'')+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+(showBud?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'')+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -6706,7 +6721,7 @@ function hrPutGroup(tbl,key,label,adsets,dailyMap){
 
 function hrSupported(){return !!HR_MODES[MODE]}
 // 캐시 열쇠 — 묶음은 구성원 수까지 넣어 필터가 바뀌면 다른 결과로 취급한다
-function hrKey(c){return c.mode+'|'+(c.kind==='group'?('g:'+c.gkey+':'+c.sets.length):c.id)+'|'+c.date}
+function hrKey(c){return c.mode+'|'+(c.kind==='group'?('g:'+c.gkey+':'+c.sets.length):c.id)+'|'+c.from+'~'+c.to}
 function hrMoney(n,ccy){
   if(n==null||!isFinite(n))return'';
   return ccy==='USD'?'$'+Math.round(n).toLocaleString('en-US'):'₩'+Math.round(n).toLocaleString('ko-KR');
@@ -6718,40 +6733,52 @@ function _hrToday(){const t=new Date();return t.getFullYear()+'-'+String(t.getMo
 document.addEventListener('click',function(e){
   const td=e.target&&e.target.closest?e.target.closest('td.hr-cell'):null;
   if(!td||!td.dataset.hd)return;
+  const unit=td.dataset.hu||'day';                // 'day' | 'week' | 'month' (주/월은 구간 열쇠)
   const gr=td.closest('tr[data-hrg]');            // 종합·소계 행 = 세트 묶음
-  if(gr){hrOpenGroup(gr.dataset.hrg,td.dataset.hd);return}
+  if(gr){hrOpenGroup(gr.dataset.hrg,td.dataset.hd,unit);return}
   const tr=td.closest('tr[data-adset-row]');      // 세트 행
   if(!tr)return;
-  hrOpen(tr.dataset.adsetRow,tr.dataset.acc||'',td.dataset.hd);
+  hrOpen(tr.dataset.adsetRow,tr.dataset.acc||'',td.dataset.hd,unit);
 });
 
 document.addEventListener('keydown',function(e){if(HR_OPEN&&e.key==='Escape')hrBack()});
 
-// 세트 셀 — 세트 하나의 그날
-function hrOpen(id,acc,date){
-  if(!id||!date)return;
-  if(!hrSupported()){alert('시간별 화면은 세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다.');return}
-  // 세트 이름·캠페인·그날 일별 셀 값(합계 대조용)을 현재 데이터셋에서 집는다
-  let name='',camp='',day=null;
-  for(let i=0;i<AD.length;i++){
-    const r=AD[i];
-    if(r.date===date&&String(rowId(r))===String(id)){
-      name=r.adset_name||'';camp=r.campaign_name||'';
-      day={spend:+r.spend||0,revenue:+r.revenue||0,roas:+r.roas||0};
-      break;
-    }
-  }
-  _hrShow({mode:MODE,kind:'set',id:String(id),acc:acc||'',date:date,name:name,camp:camp,day:day});
+// 셀 열쇠 → 구간. 일별 뷰는 'YYYY-MM-DD', 주별·월별 뷰는 'YYYY-MM-DD~YYYY-MM-DD'.
+function hrRange(key){
+  const p=String(key||'').split('~');
+  const from=p[0]||'',to=p[1]||p[0]||'';
+  const days=(from&&to)?Math.round((Date.parse(to+'T00:00:00Z')-Date.parse(from+'T00:00:00Z'))/864e5)+1:1;
+  return {from:from,to:to,days:days>0?days:1};
 }
 
-// 종합·소계 셀 — 그 행이 합산하던 세트들의 그날. 일별 값도 그 행이 그린 값을 그대로 쓴다.
-function hrOpenGroup(gkey,date){
+// 세트 셀 — 세트 하나의 그날(일별) 또는 그 주/월(주별·월별)
+function hrOpen(id,acc,key,unit){
+  if(!id||!key)return;
+  if(!hrSupported()){alert('시간별 화면은 세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다.');return}
+  const rg=hrRange(key);
+  // 세트 이름·캠페인 + 그 구간의 일별 셀 합(합계 대조용)을 현재 데이터셋에서 집는다
+  let name='',camp='',sp=0,rv=0,n=0;
+  for(let i=0;i<AD.length;i++){
+    const r=AD[i];
+    if(String(rowId(r))!==String(id))continue;
+    if(r.date<rg.from||r.date>rg.to)continue;
+    if(!name){name=r.adset_name||'';camp=r.campaign_name||''}
+    sp+=+r.spend||0;rv+=+r.revenue||0;n++;
+  }
+  _hrShow({mode:MODE,kind:'set',id:String(id),acc:acc||'',date:key,from:rg.from,to:rg.to,days:rg.days,
+           unit:unit||'day',name:name,camp:camp,
+           day:n?{spend:sp,revenue:rv,roas:sp>0?rv/sp*100:0}:null});
+}
+
+// 종합·소계 셀 — 그 행이 합산하던 세트들의 그 구간. 대조값도 그 행이 그린 값을 그대로 쓴다.
+function hrOpenGroup(gkey,key,unit){
   const g=HR_GROUPS[gkey];
-  if(!date)return;
+  if(!key)return;
   if(!g||!g.sets.length){alert('이 행의 세트 목록을 찾지 못했습니다. 추이차트를 다시 그린 뒤 눌러 주세요.');return}
   if(!hrSupported()){alert('시간별 화면은 세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다.');return}
-  _hrShow({mode:MODE,kind:'group',gkey:gkey,sets:g.sets,date:date,
-           name:g.label,camp:g.sets.length+'개 세트 합계',day:g.daily[date]||null});
+  const rg=hrRange(key);
+  _hrShow({mode:MODE,kind:'group',gkey:gkey,sets:g.sets,date:key,from:rg.from,to:rg.to,days:rg.days,
+           unit:unit||'day',name:g.label,camp:g.sets.length+'개 세트 합계',day:g.daily[key]||null});
 }
 
 function _hrShow(ctx){
@@ -6778,12 +6805,29 @@ function hrBack(){
   hrClose();
 }
 function hrShift(n){
-  if(!HR_CTX)return;
-  const d=new Date(HR_CTX.date+'T00:00:00');d.setDate(d.getDate()+n);
-  const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-  if(ds>_hrToday())return;
-  if(HR_CTX.kind==='group')hrOpenGroup(HR_CTX.gkey,ds);
-  else hrOpen(HR_CTX.id,HR_CTX.acc,ds);
+  const c=HR_CTX;if(!c)return;
+  const T=_hrToday();
+  const mk=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const u=c.unit||'day';
+  let from,to;
+  if(u==='month'){
+    // 달력 월 단위로 이동 — 버킷 길이가 28~31일로 들쭉날쭉해 일수로 밀면 경계가 어긋난다.
+    const b=new Date(c.from+'T00:00:00');b.setDate(1);b.setMonth(b.getMonth()+n);
+    from=mk(b);to=mk(new Date(b.getFullYear(),b.getMonth()+1,0));
+  }else if(c.days>1){
+    const st=c.days;
+    const b=new Date(c.from+'T00:00:00');b.setDate(b.getDate()+n*st);
+    const e=new Date(c.to+'T00:00:00');e.setDate(e.getDate()+n*st);
+    from=mk(b);to=mk(e);
+  }else{
+    const b=new Date(c.from+'T00:00:00');b.setDate(b.getDate()+n);
+    from=to=mk(b);
+  }
+  if(from>T)return;              // 통째로 미래면 이동하지 않는다
+  if(to>T)to=T;                  // 진행 중인 주·월은 오늘까지만
+  const key=(from===to)?from:(from+'~'+to);
+  if(c.kind==='group')hrOpenGroup(c.gkey,key,u);
+  else hrOpen(c.id,c.acc,key,u);
 }
 function hrReload(){
   if(!HR_CTX)return;
@@ -6798,8 +6842,11 @@ async function hrFetch(){
   let out;
   try{
     const payload=(c.kind==='group')
-      ?{mode:c.mode,date:c.date,sets:c.sets}                                   // 종합·소계 = 세트 묶음
-      :{mode:c.mode,date:c.date,adset_id:c.id,ad_account_id:c.acc};
+      ?{mode:c.mode,date_from:c.from,date_to:c.to,sets:c.sets}                 // 종합·소계 = 세트 묶음
+      :{mode:c.mode,date_from:c.from,date_to:c.to,adset_id:c.id,ad_account_id:c.acc};
+    // 하루짜리는 구버전 함수도 알아듣게 date 를 같이 보낸다. 구간은 **일부러 안 보낸다** —
+    // 구간 지원 전 버전이 배포돼 있으면 400 으로 시끄럽게 실패해야 한다(첫날만 조용히 그리면 오답).
+    if(c.days<=1)payload.date=c.from;
     const r=await fetch(HR_FN,{method:'POST',headers:await abAuthHeaders(),body:JSON.stringify(payload)});
     const j=await r.json().catch(function(){return{}});
     if(!r.ok||j.ok===false){
@@ -6819,18 +6866,26 @@ async function hrFetch(){
 function hrRender(data){
   const c=HR_CTX;if(!c)return;
   const ttl=document.getElementById('hrTtl'),sub=document.getElementById('hrSub'),body=document.getElementById('hrBody');
+  const isRange=c.days>1;
+  const unitLab=c.unit==='month'?'월별 셀':c.unit==='week'?'주별 셀':'';
+  const dateLab=isRange
+    ?(DK(c.from)+'~'+DK(c.to)+' · '+c.days+'일'+(unitLab?' ('+unitLab+')':''))
+    :(c.date+'('+WD(c.date)+')');
   ttl.textContent='⏱ 시간별 ROAS · '+(c.name||('세트 '+c.id));
-  sub.textContent=[HR_MODES[c.mode]||c.mode,c.camp,c.date+'('+WD(c.date)+')',
+  sub.textContent=[HR_MODES[c.mode]||c.mode,c.camp,dateLab,
                    c.kind==='group'?'':'세트 '+c.id].filter(Boolean).join('  ·  ');
-  const nx=document.getElementById('hrNext');if(nx)nx.disabled=(c.date>=_hrToday());
+  const nx=document.getElementById('hrNext');if(nx)nx.disabled=(c.to>=_hrToday());
 
   try{if(HR_CHART)HR_CHART.destroy()}catch(e){}
   HR_CHART=null;
 
   if(!data){
     body.innerHTML='<div class="hr-msg">⏳ '+(c.kind==='group'?('세트 '+c.sets.length+'개의 '):'')
-      +'Meta 시간별 지출 + Mixpanel 결제를 조회하는 중입니다…<br>'
-      +'<span style="font-size:10px;color:#999">저장된 표가 아니라 원천을 직접 읽습니다 — 처음 여는 날짜는 15~30초 걸립니다(그 날짜의 결제 전량을 받아 걸러야 해서). 같은 날짜의 다른 세트는 훨씬 빠릅니다.</span></div>';
+      +(isRange?(c.days+'일치 '):'')+'Meta 시간별 지출 + Mixpanel 결제를 조회하는 중입니다…<br>'
+      +'<span style="font-size:10px;color:#999">저장된 표가 아니라 원천을 직접 읽습니다 — 처음 여는 '
+      +(isRange?'구간은 결제 전량을 '+c.days+'일치 받아야 해서 '+(c.unit==='month'?'1~3분':'30초~1분')+' 걸립니다'
+               :'날짜는 15~30초 걸립니다(그 날짜의 결제 전량을 받아 걸러야 해서)')
+      +'. 같은 구간의 다른 세트는 훨씬 빠릅니다.</span></div>';
     return;
   }
   if(data.error){
@@ -6865,16 +6920,16 @@ function hrRender(data){
 
   body.innerHTML=''
     +'<div class="hr-kpi">'
-    +  '<div class="hr-k"><span>하루 ROAS</span><b style="color:'+(roas>=100?'#0a7d32':'#c00')+'">'+roas.toFixed(0)+'%</b>'
-    +    '<div class="hr-d">'+(dd?'일별 셀 '+dd.roas.toFixed(0)+'%':'')+'</div></div>'
-    +  '<div class="hr-k"><span>지출</span><b>'+hrMoney(tot.spend,ccy)+'</b><div class="hr-d">'+(dS==null?'':'일별 대비 '+dTxt(dS))+'</div></div>'
-    +  '<div class="hr-k"><span>매출</span><b>'+hrMoney(tot.revenue,ccy)+'</b><div class="hr-d">'+(dR==null?'':'일별 대비 '+dTxt(dR))+'</div></div>'
-    +  '<div class="hr-k"><span>구매</span><b>'+(tot.purchases||0)+'건</b><div class="hr-d">'+(tot.purchases?hrMoney(tot.spend/tot.purchases,ccy)+' /건':'')+'</div></div>'
+    +  '<div class="hr-k"><span>'+(isRange?'구간 ROAS':'하루 ROAS')+'</span><b style="color:'+(roas>=100?'#0a7d32':'#c00')+'">'+roas.toFixed(0)+'%</b>'
+    +    '<div class="hr-d">'+(dd?'셀 '+dd.roas.toFixed(0)+'%':'')+'</div></div>'
+    +  '<div class="hr-k"><span>지출</span><b>'+hrMoney(tot.spend,ccy)+'</b><div class="hr-d">'+[(dS==null?'':'셀 대비 '+dTxt(dS)),(isRange?'일평균 '+hrMoney(tot.spend/c.days,ccy):'')].filter(Boolean).join(' · ')+'</div></div>'
+    +  '<div class="hr-k"><span>매출</span><b>'+hrMoney(tot.revenue,ccy)+'</b><div class="hr-d">'+[(dR==null?'':'셀 대비 '+dTxt(dR)),(isRange?'일평균 '+hrMoney(tot.revenue/c.days,ccy):'')].filter(Boolean).join(' · ')+'</div></div>'
+    +  '<div class="hr-k"><span>구매</span><b>'+(tot.purchases||0)+'건</b><div class="hr-d">'+[(tot.purchases?hrMoney(tot.spend/tot.purchases,ccy)+' /건':''),(isRange&&tot.purchases?'일평균 '+(tot.purchases/c.days).toFixed(1)+'건':'')].filter(Boolean).join(' · ')+'</div></div>'
     +  '<div class="hr-k"><span>노출 · 클릭</span><b style="font-size:12px">'+F(tot.impressions)+' · '+F(tot.clicks)+'</b>'
     +    '<div class="hr-d">'+(tot.impressions>0?'CTR '+P(tot.clicks/tot.impressions*100):'')+'</div></div>'
     +'</div>'
-    +'<div class="hr-card"><h4>시간별 ROAS(선) · 지출·매출(막대) — KST</h4><div class="hr-chart"><canvas id="hrChart"></canvas></div></div>'
-    +'<div class="hr-card"><h4>시간별 값</h4><div style="overflow-x:auto">'+_hrTable(hs,ccy)+'</div></div>'
+    +'<div class="hr-card"><h4>시간별 ROAS(선) · 지출·매출(막대) — KST'+(isRange?' · '+c.days+'일 합산':'')+'</h4><div class="hr-chart"><canvas id="hrChart"></canvas></div></div>'
+    +'<div class="hr-card"><h4>시간별 값'+(isRange?' <span style="font-weight:400;color:#888;font-size:10px">— '+c.days+'일을 시각으로 접은 합계</span>':'')+'</h4><div style="overflow-x:auto">'+_hrTable(hs,ccy,isRange?c.days:0)+'</div></div>'
     +'<div class="hr-card"><h4>기준</h4><div class="hr-notes">'
     +  '지출=Meta insights 시간대 브레이크다운(광고주 타임존=KST) · 매출=Mixpanel 결제완료 중 utm_term=이 세트 귀속(order_id dedup)<br>'
     +  (data.notes||[]).map(function(n){return /실패|없습니다/.test(n)?'<span class="hr-warn">⚠ '+_mEsc(n)+'</span>':'· '+_mEsc(n)}).join('<br>')
@@ -6905,21 +6960,24 @@ function hrRender(data){
   });
 }
 
-function _hrTable(hs,ccy){
-  let h='<table class="hr-tbl"><thead><tr><th>시각(KST)</th><th>지출</th><th>매출</th><th>ROAS</th><th>누적 ROAS</th><th>구매</th><th>노출</th><th>클릭</th></tr></thead><tbody>';
+function _hrTable(hs,ccy,days){
+  // days>0 이면 구간(주/월) 화면 — 시각별 값 옆에 하루 평균을 같이 보여준다.
+  const dv=days>0?days:0;
+  let h='<table class="hr-tbl"><thead><tr><th>시각(KST)</th><th>지출</th><th>매출</th>'+(dv?'<th>일평균 매출</th>':'')+'<th>ROAS</th><th>누적 ROAS</th><th>구매</th><th>노출</th><th>클릭</th></tr></thead><tbody>';
   let cs=0,cr=0;
   hs.forEach(function(x){
     const s=+x.spend||0,r=+x.revenue||0;cs+=s;cr+=r;
     const ro=s>0?r/s*100:null,cro=cs>0?cr/cs*100:null;
     h+='<tr class="'+(s||r?'':'hr-zero')+'"><td class="hr-h">'+String(x.h).padStart(2,'0')+':00</td>'
       +'<td>'+(s?hrMoney(s,ccy):'-')+'</td><td>'+(r?hrMoney(r,ccy):'-')+'</td>'
+      +(dv?'<td style="color:#888">'+(r?hrMoney(r/dv,ccy):'-')+'</td>':'')
       +'<td'+(ro!=null?' style="font-weight:600;color:'+(ro>=100?'#0a7d32':'#c00')+'"':'')+'>'+(ro!=null?ro.toFixed(0)+'%':'-')+'</td>'
       +'<td style="color:#888">'+(cro!=null?cro.toFixed(0)+'%':'-')+'</td>'
       +'<td>'+(x.purchases||'-')+'</td><td>'+(x.impressions?F(x.impressions):'-')+'</td><td>'+(x.clicks?F(x.clicks):'-')+'</td></tr>';
   });
   const ro=cs>0?cr/cs*100:0;
   const sum=function(k){return hs.reduce(function(a,x){return a+(+x[k]||0)},0)};
-  h+='</tbody><tfoot><tr><td class="hr-h">합계</td><td>'+hrMoney(cs,ccy)+'</td><td>'+hrMoney(cr,ccy)+'</td><td>'+ro.toFixed(0)+'%</td><td></td>'
+  h+='</tbody><tfoot><tr><td class="hr-h">합계</td><td>'+hrMoney(cs,ccy)+'</td><td>'+hrMoney(cr,ccy)+'</td>'+(dv?'<td>'+hrMoney(cr/dv,ccy)+'</td>':'')+'<td>'+ro.toFixed(0)+'%</td><td></td>'
     +'<td>'+sum('purchases')+'</td><td>'+F(sum('impressions'))+'</td><td>'+F(sum('clicks'))+'</td></tr></tfoot></table>';
   return h;
 }

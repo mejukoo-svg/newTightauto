@@ -7,8 +7,14 @@
 //   → 클릭할 때 그때그때 원천을 읽는다. 저장하지 않으므로 백필도, 창(window) 제한도 없다.
 //   Meta 토큰·Mixpanel 시크릿을 브라우저에 둘 수 없어서 서버 한 겹이 필요하다(apply-budget 과 같은 이유).
 //
-// 요청: POST { mode:'kr'|'gl'|'vn', adset_id, ad_account_id?, date:'YYYY-MM-DD' }
-// 응답: { ok, currency, hours:[{h,spend,revenue,purchases,impressions,clicks}], totals, notes[] }
+// 요청: POST { mode:'kr'|'gl'|'vn', adset_id, ad_account_id?,
+//              date:'YYYY-MM-DD'  또는  date_from/date_to (추이차트 주별·월별 셀) }
+// 응답: { ok, currency, date_from, date_to, days, hours:[{h,...}], totals, notes[] }
+//
+// 구간(주/월) 요청이면 **그 구간의 모든 날을 시각(0~23시)으로 접어서** 합산한다.
+// "이 주에는 몇 시가 잘 팔렸나" 를 보는 화면이지 날짜별 추이가 아니다(그건 추이차트 본체다).
+// 지출은 Meta insights 를 time_range 로 한 번에 받고(응답이 날짜×시각 행이라 시각으로 누적하면 끝),
+// 매출은 Mixpanel export 를 구간 전체로 한 번만 받는다 — 날짜마다 호출하면 N배 느리다.
 //
 // 그레인·기준(추이차트 셀과 같게 맞춘 것):
 //   지출 = Meta insights, breakdowns=hourly_stats_aggregated_by_advertiser_time_zone.
@@ -54,6 +60,8 @@ const TOKEN_ENVS = [
 ];
 
 const MODE_CCY: Record<string, string> = { kr: "KRW", gl: "USD", vn: "KRW" };
+// 한 번에 집계할 수 있는 최대 일수(추이차트 월별 버킷 = 최대 31일).
+const MAX_SPAN_DAYS = 31;
 
 const MP_PROJECT = Deno.env.get("MIXPANEL_PROJECT_ID") || "3390233";
 const MP_USER = Deno.env.get("MIXPANEL_USERNAME") || "";
@@ -182,6 +190,10 @@ function accumHourly(rows: any[], hours: Record<number, Hourly>, mul: number) {
 }
 
 // 토큰을 차례로 시도하며 페이지를 끝까지 훑는다. 200 을 준 토큰의 결과만 채택.
+// 페이지 상한 — 넘으면 잘렸다고 알린다(조용한 과소집계 금지).
+const MAX_PAGES = 60;
+let truncated = false;
+
 async function metaPaged(path: string, params: Record<string, string>, acc: string,
                          hours: Record<number, Hourly>, mul: number): Promise<string> {
   const tokens = tokensFor(acc);
@@ -200,7 +212,7 @@ async function metaPaged(path: string, params: Record<string, string>, acc: stri
       ok = true;
       accumHourly(j.data ?? [], tmp, mul);
       url = j.paging?.next ?? null;
-      if (++page > 40) break;
+      if (++page > MAX_PAGES) { if (url) truncated = true; break; }
     }
     if (ok) {
       for (const [h, v] of Object.entries(tmp)) {
@@ -213,10 +225,15 @@ async function metaPaged(path: string, params: Record<string, string>, acc: stri
   return lastErr || "Meta 조회 실패";
 }
 
-const META_BASE_PARAMS = (date: string) => ({
-  time_range: JSON.stringify({ since: date, until: date }),
+// ⚠ 구간(주/월)에서는 time_increment 를 "all_days" 로 둔다.
+//   "1" 이면 응답이 (세트 × 날짜 × 24시각) 행이라, 종합 행(세트 수백 개) × 한 달이면
+//   7만 행을 넘겨 페이지 상한에 걸려 **조용히 잘린다**. 어차피 날짜는 접어서 시각별로만 쓰므로
+//   Meta 쪽에서 미리 합쳐 받는 편이 정확하고 훨씬 빠르다(세트당 24행).
+//   하루짜리는 기존 동작을 그대로 둔다("1" == all_days 이지만 검증된 경로를 건드리지 않는다).
+const META_BASE_PARAMS = (from: string, to: string) => ({
+  time_range: JSON.stringify({ since: from, until: to }),
   breakdowns: "hourly_stats_aggregated_by_advertiser_time_zone",
-  time_increment: "1",
+  time_increment: from === to ? "1" : "all_days",
   fields: "spend,impressions,inline_link_clicks",
   limit: "500",
 });
@@ -228,12 +245,14 @@ const META_BASE_PARAMS = (date: string) => ({
 const MAX_SOLO = 25;
 const CHUNK = 100;   // filtering IN 한 번에 넣는 세트 수 (URL 길이·응답 크기 타협점)
 
-async function metaHourlySets(sets: SetRef[], date: string, target: string,
+async function metaHourlySets(sets: SetRef[], from: string, to: string, target: string,
                               conv: (n: number, f: string, t: string) => number) {
   const hours: Record<number, Hourly> = {};
   const errs: string[] = [];
   const notes: string[] = [];
-  const base = META_BASE_PARAMS(date);
+  // time_increment=1 이라 응답은 날짜×시각 행이다. accumHourly 가 날짜를 무시하고
+  // 시각으로만 누적하므로 구간을 그대로 넘기면 시각별 합계가 나온다.
+  const base = META_BASE_PARAMS(from, to);
 
   if (sets.length === 1) {
     const s = sets[0];
@@ -294,16 +313,9 @@ function addDays(d: string, n: number): string {
   return t.toISOString().slice(0, 10);
 }
 
-async function mpEvents(date: string): Promise<{ evs: Ev[]; err: string }> {
-  const hit = MP_CACHE.get(date);
-  if (hit && Date.now() - hit.at < MP_TTL_MS) return { evs: hit.evs, err: "" };
-  if (!MP_USER || !MP_SECRET) {
-    return { evs: [], err: "Mixpanel 시크릿(MIXPANEL_USERNAME/MIXPANEL_SECRET)이 설정되지 않았습니다" };
-  }
-  // export 의 날짜 필터는 UTC 기준. KST 하루(= UTC 전날 15:00 ~ 당일 15:00)를 덮으려면 전날까지 받는다.
-  // to_date 가 UTC 오늘보다 크면 400 → UTC 오늘로 자른다(KST 오늘 00~09시에 발생).
-  const to = date > utcToday() ? utcToday() : date;
-  const from = addDays(date, -1);
+// export 응답을 한 줄씩 흘려보내며 파싱한다. res.text() 로 통째로 받으면 한 달치(20만 줄 이상)에서
+// 메모리가 터진다 — 구간 지원의 핵심이라 반드시 스트리밍을 유지할 것.
+async function mpFetchLines(from: string, to: string, onEv: (ev: any) => void): Promise<string> {
   const qs = new URLSearchParams({
     from_date: from, to_date: to,
     event: JSON.stringify(MP_EVENTS),
@@ -312,24 +324,48 @@ async function mpEvents(date: string): Promise<{ evs: Ev[]; err: string }> {
   // where 절은 쓰지 않는다 — 조건이 붙으면 날짜창이 조용히 무시되는 사례가 있어(memory:
   // mixpanel-export-where-gotchas) 파이프라인과 같이 전량 받아 여기서 필터한다.
   const auth = "Basic " + btoa(`${MP_USER}:${MP_SECRET}`);
-  let text = "";
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(`https://data.mixpanel.com/api/2.0/export?${qs}`, { headers: { Authorization: auth } });
     if (res.status === 429) { await new Promise((r) => setTimeout(r, 3000 * (attempt + 1))); continue; }
-    if (!res.ok) return { evs: [], err: `Mixpanel HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
-    text = await res.text();
-    break;
+    if (!res.ok) return `Mixpanel HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`;
+    if (!res.body) return "Mixpanel 응답 본문이 비어 있습니다";
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i: number;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (line.trim()) { try { onEv(JSON.parse(line)); } catch { /* 깨진 줄은 버린다 */ } }
+      }
+    }
+    if (buf.trim()) { try { onEv(JSON.parse(buf)); } catch { /* 마지막 줄 */ } }
+    return "";
   }
-  if (!text) return { evs: [], err: "Mixpanel 조회 실패(429 재시도 초과)" };
+  return "Mixpanel 조회 실패(429 재시도 초과)";
+}
+
+async function mpEvents(from: string, to: string): Promise<{ evs: Ev[]; err: string }> {
+  const ck = `${from}|${to}`;
+  const hit = MP_CACHE.get(ck);
+  if (hit && Date.now() - hit.at < MP_TTL_MS) return { evs: hit.evs, err: "" };
+  if (!MP_USER || !MP_SECRET) {
+    return { evs: [], err: "Mixpanel 시크릿(MIXPANEL_USERNAME/MIXPANEL_SECRET)이 설정되지 않았습니다" };
+  }
+  // export 의 날짜 필터는 UTC 기준. KST 하루(= UTC 전날 15:00 ~ 당일 15:00)를 덮으려면 전날까지 받는다.
+  // to_date 가 UTC 오늘보다 크면 400 → UTC 오늘로 자른다(KST 오늘 00~09시에 발생).
+  const qTo = to > utcToday() ? utcToday() : to;
+  const qFrom = addDays(from, -1);
 
   const evs: Ev[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    let ev: any;
-    try { ev = JSON.parse(line); } catch { continue; }
-    const p = ev.properties || {};
+  const err = await mpFetchLines(qFrom, qTo, (ev) => {
+    const p = ev?.properties || {};
     const ts = Number(p.time || 0);
-    if (!ts) continue;
+    if (!ts) return;
     const kst = new Date((ts + 9 * 3600) * 1000);            // epoch(UTC초) + 9h → KST 벽시계
     let ut = "";
     for (const k of ["utm_term", "UTM_Term", "UTM Term"]) if (p[k]) { ut = cleanId(p[k]); break; }
@@ -348,9 +384,10 @@ async function mpEvents(date: string): Promise<{ evs: Ev[]; err: string }> {
       distinct_id: String(p.distinct_id ?? ""),
       svc: String(p["서비스"] ?? ""),
     });
-  }
+  });
+  if (err) return { evs: [], err };
   const kept = dedup(evs);
-  MP_CACHE.set(date, { at: Date.now(), evs: kept });
+  MP_CACHE.set(ck, { at: Date.now(), evs: kept });
   return { evs: kept, err: "" };
 }
 
@@ -397,7 +434,9 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return json({ ok: false, error: "JSON 파싱 실패" }, 400); }
 
   const mode = String(body?.mode || "");
-  const date = String(body?.date || "");
+  // 일별 셀은 date 하나, 주별·월별 셀은 date_from~date_to. 예전 클라이언트 호환으로 date 도 받는다.
+  const dFrom = String(body?.date_from || body?.date || "");
+  const dTo = String(body?.date_to || body?.date || dFrom);
 
   // 셀 하나(세트) = adset_id / 종합·소계 = sets:[{id,acc}]. 둘 다 같은 경로로 처리한다.
   const raw: any[] = Array.isArray(body?.sets) && body.sets.length
@@ -415,15 +454,23 @@ Deno.serve(async (req) => {
   if (!MODE_CCY[mode]) return json({ ok: false, error: "세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다" }, 400);
   if (!sets.length) return json({ ok: false, error: "세트 ID 형식 오류" }, 400);
   if (sets.length > MAX_SETS) return json({ ok: false, error: `한 번에 ${MAX_SETS}개 세트까지만 집계합니다(요청 ${sets.length}개)` }, 400);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ ok: false, error: "날짜 형식 오류" }, 400);
+  const DFMT = /^\d{4}-\d{2}-\d{2}$/;
+  if (!DFMT.test(dFrom) || !DFMT.test(dTo)) return json({ ok: false, error: "날짜 형식 오류" }, 400);
+  if (dTo < dFrom) return json({ ok: false, error: "날짜 구간이 거꾸로입니다" }, 400);
+  const days = Math.round((Date.parse(dTo + "T00:00:00Z") - Date.parse(dFrom + "T00:00:00Z")) / 86400000) + 1;
+  // 한 달(31일)까지. 더 길면 Mixpanel export 수신만으로 함수 실행시간을 넘긴다.
+  if (days > MAX_SPAN_DAYS) {
+    return json({ ok: false, error: `한 번에 ${MAX_SPAN_DAYS}일까지만 집계합니다(요청 ${days}일)` }, 400);
+  }
 
   const target = MODE_CCY[mode];
   const idSet = new Set(sets.map((s) => s.id));
+  truncated = false;   // isolate 가 재사용되므로 요청마다 초기화
 
   // 환율표를 먼저 받아 두고(캐시라 대개 즉시) 지출·매출을 병렬로 — MP export 가 훨씬 느리다.
   const rates = await perUsd();
   const conv = makeConv(rates);
-  const [meta, mp] = await Promise.all([metaHourlySets(sets, date, target, conv), mpEvents(date)]);
+  const [meta, mp] = await Promise.all([metaHourlySets(sets, dFrom, dTo, target, conv), mpEvents(dFrom, dTo)]);
 
   const hours = Array.from({ length: 24 }, (_, h) => ({
     h, spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0,
@@ -436,7 +483,7 @@ Deno.serve(async (req) => {
     hours[h].clicks = v.clicks;
   }
   for (const e of mp.evs) {
-    if (e.date !== date) continue;
+    if (e.date < dFrom || e.date > dTo) continue;
     if (!e.utm_term || !idSet.has(e.utm_term)) continue;
     if (!isMetaSource(e.utm_source)) continue;                 // stale utm 오귀속 차단(파이프라인과 동일)
     hours[e.hour].revenue += conv(e.revenue, e.ccy, target);
@@ -449,15 +496,17 @@ Deno.serve(async (req) => {
   }), { spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0 });
 
   const notes: string[] = [];
+  if (truncated) notes.push("Meta 응답이 페이지 상한에 걸려 지출 일부가 빠졌습니다 — 기간을 좁혀서 다시 봐 주세요.");
   if (meta.err) notes.push("지출(Meta) 조회 실패: " + meta.err);
   if (mp.err) notes.push("매출(Mixpanel) 조회 실패: " + mp.err);
   for (const n of meta.notes) notes.push(n);
   notes.push("매출=Mixpanel utm_term 귀속. 일별 파이프라인의 크로스셀 UTM 백필은 반영되지 않아 합계가 셀보다 낮을 수 있습니다.");
+  if (days > 1) notes.push(`${days}일치를 시각(0~23시)으로 접어 합산한 값입니다 — 날짜별 추이가 아니라 '이 구간에 몇 시가 잘 나왔나' 를 보는 화면입니다.`);
   const ccys = [...new Set(sets.map((s) => ACC[s.acc]?.ccy || target))].filter((c) => c !== target);
   if (ccys.length) notes.push(`지출 ${ccys.join("·")}→${target} 실시간 환율 환산`);
 
   return json({
-    ok: true, mode, date, sets: sets.length,
+    ok: true, mode, date: dFrom, date_from: dFrom, date_to: dTo, days, sets: sets.length,
     adset_id: sets.length === 1 ? sets[0].id : null,
     ad_account_id: sets.length === 1 ? sets[0].acc : null,
     currency: target, hours, totals, notes,
