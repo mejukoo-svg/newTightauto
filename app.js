@@ -1480,8 +1480,12 @@ function renderKpiTable(period){
 }
 
 // ===== 마케터 모드 (CR_AD 소재 레벨, 이름 substring 필터) — tightauto-scraper report 구성 복제(라이트 테마) =====
-const KR_MARKETERS=['수연','희상','혜린','본걸','지은','휘동','지연','정헌','연희','지영','하루','훤기','베스','기쁨'];
-const GL_MARKETERS=['본걸','지은','훤기','채채','지영','하루'];
+// 마케터 목록은 DB(new-tightauto.marketers)에서 읽어 대시보드에서 직접 추가/삭제한다(sql/marketers.sql).
+//   아래 배열은 '최후 폴백' — DB 로드 실패 + localStorage 캐시도 없을 때만 쓰인다.
+const KR_MARKETERS_DEFAULT=['수연','희상','혜린','본걸','지은','휘동','지연','정헌','연희','지영','하루','훤기','베스','기쁨'];
+const GL_MARKETERS_DEFAULT=['본걸','지은','훤기','채채','지영','하루'];
+let KR_MARKETERS=KR_MARKETERS_DEFAULT.slice();
+let GL_MARKETERS=GL_MARKETERS_DEFAULT.slice();
 const _mkToday=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 const _mkAddDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
 let mktState={region:'kr',name:'수연',from:_mkAddDays(-13),to:_mkToday(),preset:'14d',sortKey:'roas',sortDir:-1};
@@ -1490,8 +1494,79 @@ const _mkNorm=s=>(s==null?'':String(s)).normalize('NFC').toLowerCase().replace(/
 // 귀속 규칙: ①ad_name(제작자 태그) 1순위. ②ad_name 에 '아무 제작자도 없을 때만' adset_name(세트 주인) 2순위 폴백.
 //   → 제작자 A 소재가 B 세트에 있어도 B로 안 넘어가고, 무명 소재(랜딩 등)만 세트 주인에게 귀속.
 //   (캠페인명·메모는 제작자 출처가 아니라 매칭 제외)
-const _MK_ALL=[...new Set([...KR_MARKETERS,...GL_MARKETERS])].map(_mkNorm);
+let _MK_ALL=[];
+// 목록이 바뀌면(추가/삭제/DB로드) 반드시 다시 만든다 — 귀속 2순위(세트 주인) 폴백 판정의 기준이라
+//   여기가 낡으면 새 마케터 소재가 '무명'으로 취급돼 엉뚱한 세트 주인에게 넘어간다.
+function _mkRebuildAll(){_MK_ALL=[...new Set([...KR_MARKETERS,...GL_MARKETERS])].map(_mkNorm)}
 function _adHasAnyMarketer(an){for(const n of _MK_ALL){if(an.includes(n))return true}return false}
+
+// ----- 마케터 목록 저장소: DB(new-tightauto.marketers) 1순위 · localStorage 캐시 2순위 · 코드 기본값 3순위 -----
+const _MKT_CACHE_KEY='mkt_names_v1';
+let _MKT_DB=false;        // 이번 세션에서 DB 읽기가 성공했나 (false면 쓰기는 로컬 캐시에만)
+let _MKT_P=null;          // 로드 프로미스(중복 호출 방지)
+function _mktCacheSave(){try{localStorage.setItem(_MKT_CACHE_KEY,JSON.stringify({kr:KR_MARKETERS,gl:GL_MARKETERS}))}catch(e){}}
+function _mktCacheLoad(){
+  try{const o=JSON.parse(localStorage.getItem(_MKT_CACHE_KEY)||'null');
+    if(o&&Array.isArray(o.kr)&&Array.isArray(o.gl)){KR_MARKETERS=o.kr.slice();GL_MARKETERS=o.gl.slice();return true}
+  }catch(e){}
+  return false;
+}
+_mktCacheLoad();_mkRebuildAll();   // 부팅 즉시 캐시 반영(깜빡임 없이 이전 목록으로 그린다)
+// sbQ 가 아니라 직접 fetch 한다 — 마케터 목록은 '코어 데이터'가 아니라서,
+//   테이블이 아직 없거나(404) 권한이 빠져(401) 실패해도 sbQ 의 authLost(로그인 화면 강제)로
+//   대시보드 전체를 튕기면 안 된다. 실패는 조용히 로컬 목록 폴백으로 끝낸다.
+function loadMarketers(force){
+  if(_MKT_P&&!force)return _MKT_P;
+  _MKT_P=fetch(SB_URL+'/rest/v1/marketers?select=region,name,sort_order&order=sort_order.asc,name.asc',{headers:SBH})
+    .then(r=>r.ok?r.json():r.text().then(t=>{throw new Error('HTTP '+r.status+' '+t.slice(0,120))}))
+    .then(rows=>{
+      if(!Array.isArray(rows))throw new Error('응답이 배열이 아님');
+      _MKT_DB=true;
+      if(rows.length){   // 행이 0개 = 아직 시드 안 된 테이블 → 기본값/캐시 유지
+        KR_MARKETERS=rows.filter(r=>r.region==='kr').map(r=>r.name);
+        GL_MARKETERS=rows.filter(r=>r.region==='gl').map(r=>r.name);
+        _mkRebuildAll();_mktCacheSave();
+      }
+      return true;
+    }).catch(e=>{
+      _MKT_DB=false;_MKT_P=null;   // 다음 진입 때 다시 시도
+      console.warn('[marketers] 목록 DB 로드 실패 — 로컬/기본 목록 사용:',e&&e.message||e);
+      return false;
+    });
+  return _MKT_P;
+}
+const _mktList=region=>region==='gl'?GL_MARKETERS:KR_MARKETERS;
+async function mktAddName(region,name){
+  if(!_MKT_DB)await loadMarketers();   // 첫 로드가 아직이면 기다렸다 쓴다(로컬에만 저장되는 경합 방지)
+  name=String(name==null?'':name).normalize('NFC').trim();
+  if(!name)throw new Error('이름을 입력해 주세요.');
+  if(name.length>20)throw new Error('이름이 너무 깁니다(20자 이내).');
+  const list=_mktList(region);
+  if(list.some(n=>_mkNorm(n)===_mkNorm(name)))throw new Error('"'+name+'" 은(는) 이미 목록에 있습니다.');
+  if(_MKT_DB){
+    const r=await fetch(SB_URL+'/rest/v1/marketers',{method:'POST',
+      headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify({region,name,sort_order:list.length+1,updated_at:new Date().toISOString()})});
+    if(!r.ok){let m='';try{m=(await r.json()).message||''}catch(e){}
+      throw new Error('저장 실패 (HTTP '+r.status+(m?' — '+m:'')+')')}
+  }
+  list.push(name);_mkRebuildAll();_mktCacheSave();
+  return _MKT_DB;   // false = 이 브라우저에만 저장됨
+}
+async function mktRemoveName(region,name){
+  if(!_MKT_DB)await loadMarketers();
+  const list=_mktList(region);
+  const i=list.indexOf(name);
+  if(i<0)throw new Error('목록에 없는 이름입니다.');
+  if(_MKT_DB){
+    const q='region=eq.'+encodeURIComponent(region)+'&name=eq.'+encodeURIComponent(name);
+    const r=await fetch(SB_URL+'/rest/v1/marketers?'+q,{method:'DELETE',headers:{...SBH,'Prefer':'return=minimal'}});
+    if(!r.ok){let m='';try{m=(await r.json()).message||''}catch(e){}
+      throw new Error('삭제 실패 (HTTP '+r.status+(m?' — '+m:'')+')')}
+  }
+  list.splice(i,1);_mkRebuildAll();_mktCacheSave();
+  return _MKT_DB;
+}
 function _mkMatch(r,needle){
   const an=_mkNorm(r.ad_name);
   if(an&&an.includes(needle))return true;            // 1순위: 소재 제작자
@@ -1508,12 +1583,82 @@ function _mkAggregate(rows){const byId={};
     const t=byId[key];const sp=+(r.spend!=null?r.spend:r.spend_usd)||0,rv=+(r.revenue!=null?r.revenue:r.revenue_usd)||0,pf=(r.profit!=null?+r.profit:(r.profit_usd!=null?+r.profit_usd:(rv-sp)));t.imp+=(+r.impressions||0);t.clk+=(+r.unique_clicks||0);t.spend+=sp;t.rev+=rv;t.profit+=pf;t.res+=(+r.results_mp||0);t.days.add(r.date)});
   return Object.values(byId).map(t=>({...t,ndays:t.days.size,ctr:t.imp>0?t.clk/t.imp*100:0,cpm:t.imp>0?t.spend/t.imp*1000:0,roas:t.spend>0?t.rev/t.spend*100:0,cvr:t.clk>0?t.res/t.clk*100:0}));}
 function _mkTotals(list){const t={spend:0,rev:0,profit:0,imp:0,clk:0,res:0};list.forEach(c=>{t.spend+=c.spend;t.rev+=c.rev;t.profit+=c.profit;t.imp+=c.imp;t.clk+=c.clk;t.res+=c.res});t.ctr=t.imp>0?t.clk/t.imp*100:0;t.cpm=t.imp>0?t.spend/t.imp*1000:0;t.roas=t.spend>0?t.rev/t.spend*100:0;t.cvr=t.clk>0?t.res/t.clk*100:0;return t}
+// ----- 마케터탭 컨트롤바 (지역 · 마케터 선택/추가/삭제 · 프리셋 · 날짜범위) -----
+const _mktEsc=v=>String(v==null?'':v).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const _mkBtn=(id,label,title,color)=>'<button id="'+id+'" title="'+_mktEsc(title)+'" style="padding:3px 8px;border:1px solid '+color+';border-radius:5px;background:#fff;color:'+color+';font-size:12px;line-height:1.2;cursor:pointer;font-family:inherit">'+label+'</button>';
+function _mktCtrlHTML(region,names,countLabel){
+  let h='<div class="dash-filter" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
+  h+='<span style="font-weight:700;font-size:14px">👤 마케터</span>';
+  h+='<span style="display:inline-flex;gap:4px;margin-left:4px">'+[['kr','🇰🇷 국내'],['gl','🌏 글로벌']].map(rg=>'<button class="mkt-region" data-r="'+rg[0]+'" style="padding:4px 9px;border:1px solid '+(region===rg[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(region===rg[0]?'#1a73e8':'#fff')+';color:'+(region===rg[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+rg[1]+'</button>').join('')+'</span>';
+  h+='<select id="mktName"'+(names.length?'':' disabled')+'>'+names.map(n=>'<option value="'+_mktEsc(n)+'"'+(n===mktState.name?' selected':'')+'>'+_mktEsc(n)+'</option>').join('')+'</select>';
+  // 이름 추가/삭제 — 목록은 new-tightauto.marketers 에 저장돼 모든 사용자에게 공유된다.
+  h+='<span style="display:inline-flex;gap:3px">'+_mkBtn('mktAddBtn','＋','마케터 추가','#1a73e8')+(names.length?_mkBtn('mktDelBtn','✕','선택한 마케터 삭제','#c00'):'')+'</span>';
+  if(mktState.addOpen){
+    h+='<span style="display:inline-flex;gap:4px;align-items:center;padding:2px 6px;border:1px solid #1a73e8;border-radius:5px;background:#f5f9ff">'
+      +'<input id="mktNewName" type="text" maxlength="20" placeholder="이름 (예: 수연)" value="'+_mktEsc(mktState.addDraft||'')+'" style="font-size:11px;width:110px">'
+      +_mkBtn('mktNewSave','저장','목록에 추가','#1a73e8')+_mkBtn('mktNewCancel','취소','','#888')+'</span>';
+  }
+  h+='<span style="margin-left:6px;display:inline-flex;gap:4px">'+[['all','전체'],['today','오늘'],['3d','3일'],['7d','7일'],['14d','2주'],['30d','30일']].map(p=>'<button class="mkt-preset" data-p="'+p[0]+'" style="padding:4px 9px;border:1px solid '+(mktState.preset===p[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(mktState.preset===p[0]?'#1a73e8':'#fff')+';color:'+(mktState.preset===p[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+p[1]+'</button>').join('')+'</span>';
+  h+='<input type="date" id="mktFrom" value="'+mktState.from+'" style="font-size:11px"><span style="color:#888">~</span><input type="date" id="mktTo" value="'+mktState.to+'" style="font-size:11px"><button id="mktGo" style="padding:4px 12px;border:1px solid #1a73e8;border-radius:5px;background:#1a73e8;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">조회</button>';
+  h+='<span style="color:#888;font-size:11px;margin-left:auto">'+_mktEsc(countLabel)+' · '+mktState.from+'~'+mktState.to+(region==='gl'?' · USD':' · KRW')+'</span>';
+  h+='</div>';
+  if(mktState.note)h+='<div style="margin:-4px 0 10px;font-size:11px;color:'+(mktState.noteErr?'#c00':'#1a73e8')+'">'+_mktEsc(mktState.note)+'</div>';
+  return h;
+}
+function _mktSetNote(msg,isErr){mktState.note=msg||'';mktState.noteErr=!!isErr}
+function _mktWireCtrl(){
+  const $=id=>document.getElementById(id);
+  if($('mktName'))$('mktName').addEventListener('change',e=>{mktState.name=e.target.value;_mktSetNote('');renderMarketer()});
+  document.querySelectorAll('.mkt-region').forEach(b=>b.addEventListener('click',()=>{mktState.region=b.dataset.r;const nl=mktState.region==='gl'?GL_MARKETERS:KR_MARKETERS;if(!nl.includes(mktState.name))mktState.name=nl[0]||'';mktState.addOpen=false;_mktSetNote('');renderMarketer()}));
+  document.querySelectorAll('.mkt-preset').forEach(b=>b.addEventListener('click',()=>{const p=b.dataset.p;mktState.preset=p;const td=_mkToday();
+    if(p==='all'){mktState.from='2024-01-01';mktState.to=td}else if(p==='today'){mktState.from=td;mktState.to=td}else{const n={'3d':3,'7d':7,'14d':14,'30d':30}[p];mktState.from=_mkAddDays(-(n-1));mktState.to=td}renderMarketer()}));
+  if($('mktGo'))$('mktGo').addEventListener('click',()=>{mktState.from=$('mktFrom').value;mktState.to=$('mktTo').value;mktState.preset='';renderMarketer()});
+  // --- 마케터 추가 ---
+  if($('mktAddBtn'))$('mktAddBtn').addEventListener('click',()=>{mktState.addOpen=!mktState.addOpen;mktState.addDraft='';_mktSetNote('');renderMarketer();const i=document.getElementById('mktNewName');if(i)i.focus()});
+  if($('mktNewCancel'))$('mktNewCancel').addEventListener('click',()=>{mktState.addOpen=false;mktState.addDraft='';_mktSetNote('');renderMarketer()});
+  const save=()=>{
+    const inp=document.getElementById('mktNewName');if(!inp||inp.disabled)return;
+    const v=inp.value;mktState.addDraft=v;inp.disabled=true;
+    const rg=mktState.region;
+    mktAddName(rg,v).then(inDb=>{
+      const nm=String(v).normalize('NFC').trim();
+      mktState.addOpen=false;mktState.addDraft='';mktState.region=rg;mktState.name=nm;
+      _mktSetNote(inDb?('"'+nm+'" 추가됨 — 모든 사용자에게 공유됩니다.'):('"'+nm+'" 추가됨 — ⚠️ DB 저장 실패로 이 브라우저에만 남습니다.'),!inDb);
+      renderMarketer();
+    }).catch(e=>{_mktSetNote(e&&e.message||String(e),true);renderMarketer();const i=document.getElementById('mktNewName');if(i)i.focus()});
+  };
+  if($('mktNewSave'))$('mktNewSave').addEventListener('click',save);
+  if($('mktNewName'))$('mktNewName').addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();save()}
+    else if(e.key==='Escape'){mktState.addOpen=false;mktState.addDraft='';_mktSetNote('');renderMarketer()}
+  });
+  // --- 마케터 삭제 ---
+  if($('mktDelBtn'))$('mktDelBtn').addEventListener('click',()=>{
+    const nm=mktState.name;if(!nm)return;
+    if(!confirm('"'+nm+'" 을(를) 마케터 목록에서 삭제할까요?\n\n· 드롭다운 목록에서만 사라집니다 — 소재/지출/매출 데이터는 그대로입니다.\n· 모든 사용자에게 적용됩니다.'))return;
+    mktRemoveName(mktState.region,nm).then(inDb=>{
+      const nl=mktState.region==='gl'?GL_MARKETERS:KR_MARKETERS;
+      mktState.name=nl[0]||'';
+      _mktSetNote(inDb?('"'+nm+'" 삭제됨.'):('"'+nm+'" 삭제됨 — ⚠️ DB 반영 실패로 이 브라우저에만 적용됐습니다.'),!inDb);
+      renderMarketer();
+    }).catch(e=>{_mktSetNote(e&&e.message||String(e),true);renderMarketer()});
+  });
+}
 function _mkDestroy(){Object.values(mktCharts).forEach(c=>{try{c.destroy()}catch(e){}});mktCharts={}}
 function renderMarketer(){
   const body=document.getElementById('mktBody');if(!body)return;
+  // 마케터 목록 DB 로드는 이 탭 첫 진입 때 1회. 실패하면 _MKT_P 가 null 로 되돌아가
+  //   다음 진입 때 다시 시도한다(실패 시엔 재렌더를 안 하므로 루프는 없다).
+  if(!_MKT_P)loadMarketers().then(ok=>{if(ok&&document.getElementById('mktBody'))renderMarketer()});
   const region=mktState.region;
   const names=region==='gl'?GL_MARKETERS:KR_MARKETERS;
-  if(!names.includes(mktState.name))mktState.name=names[0];
+  if(!names.includes(mktState.name))mktState.name=names[0]||'';
+  if(!names.length){   // 전부 삭제된 상태 — 빈 needle 이 전 소재를 매칭하지 않도록 여기서 멈춘다
+    _mkDestroy();
+    body.innerHTML=_mktCtrlHTML(region,names,'마케터 0명')
+      +'<div style="padding:40px;text-align:center;color:#888">마케터 목록이 비어 있습니다. 위 <b>＋</b> 버튼으로 추가해 주세요.</div>';
+    _mktWireCtrl();return;
+  }
   const src=region==='gl'?GL_CR:CR_AD;
   if(!src.length){
     // 재시도 가드: 로드가 실패/빈결과로 끝나면 renderMarketer→ensureBigTable→renderMarketer 가
@@ -1546,16 +1691,7 @@ function renderMarketer(){
   const byDate={};rows.forEach(r=>{if(!byDate[r.date])byDate[r.date]={s:0,r:0,p:0};const sp=_sp(r),rv=_rv(r);byDate[r.date].s+=sp;byDate[r.date].r+=rv;byDate[r.date].p+=_pf(r,sp,rv)});
   const dts=Object.keys(byDate).sort();
   const pct=(v,d)=>(v||0).toFixed(d==null?2:d)+'%';
-  let h='';
-  // 컨트롤 (마케터 + 프리셋 + 날짜범위)
-  h+='<div class="dash-filter" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">';
-  h+='<span style="font-weight:700;font-size:14px">👤 마케터</span>';
-  h+='<span style="display:inline-flex;gap:4px;margin-left:4px">'+[['kr','🇰🇷 국내'],['gl','🌏 글로벌']].map(rg=>'<button class="mkt-region" data-r="'+rg[0]+'" style="padding:4px 9px;border:1px solid '+(region===rg[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(region===rg[0]?'#1a73e8':'#fff')+';color:'+(region===rg[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+rg[1]+'</button>').join('')+'</span>';
-  h+='<select id="mktName">'+names.map(n=>'<option value="'+n+'"'+(n===mktState.name?' selected':'')+'>'+n+'</option>').join('')+'</select>';
-  h+='<span style="margin-left:6px;display:inline-flex;gap:4px">'+[['all','전체'],['today','오늘'],['3d','3일'],['7d','7일'],['14d','2주'],['30d','30일']].map(p=>'<button class="mkt-preset" data-p="'+p[0]+'" style="padding:4px 9px;border:1px solid '+(mktState.preset===p[0]?'#1a73e8':'#ccc')+';border-radius:5px;background:'+(mktState.preset===p[0]?'#1a73e8':'#fff')+';color:'+(mktState.preset===p[0]?'#fff':'#333')+';font-size:11px;cursor:pointer;font-family:inherit">'+p[1]+'</button>').join('')+'</span>';
-  h+='<input type="date" id="mktFrom" value="'+mktState.from+'" style="font-size:11px"><span style="color:#888">~</span><input type="date" id="mktTo" value="'+mktState.to+'" style="font-size:11px"><button id="mktGo" style="padding:4px 12px;border:1px solid #1a73e8;border-radius:5px;background:#1a73e8;color:#fff;font-size:11px;cursor:pointer;font-family:inherit">조회</button>';
-  h+='<span style="color:#888;font-size:11px;margin-left:auto">소재 '+list.length+'개 · '+mktState.from+'~'+mktState.to+(region==='gl'?' · USD':' · KRW')+'</span>';
-  h+='</div>';
+  let h=_mktCtrlHTML(region,names,'소재 '+list.length+'개');
   // KPI 카드 (원본 8개)
   const card=(l,v,c)=>'<div class="kpi-card"><div class="k-label">'+l+'</div><div class="k-value"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div></div>';
   h+='<div class="kpi-grid">';
@@ -1595,11 +1731,7 @@ function renderMarketer(){
   h+='</tbody></table></div>';
   body.innerHTML=h;
   // 리스너
-  document.getElementById('mktName').addEventListener('change',e=>{mktState.name=e.target.value;renderMarketer()});
-  document.querySelectorAll('.mkt-region').forEach(b=>b.addEventListener('click',()=>{mktState.region=b.dataset.r;const nl=mktState.region==='gl'?GL_MARKETERS:KR_MARKETERS;if(!nl.includes(mktState.name))mktState.name=nl[0];renderMarketer()}));
-  document.querySelectorAll('.mkt-preset').forEach(b=>b.addEventListener('click',()=>{const p=b.dataset.p;mktState.preset=p;const td=_mkToday();
-    if(p==='all'){mktState.from='2024-01-01';mktState.to=td}else if(p==='today'){mktState.from=td;mktState.to=td}else{const n={'3d':3,'7d':7,'14d':14,'30d':30}[p];mktState.from=_mkAddDays(-(n-1));mktState.to=td}renderMarketer()}));
-  document.getElementById('mktGo').addEventListener('click',()=>{mktState.from=document.getElementById('mktFrom').value;mktState.to=document.getElementById('mktTo').value;mktState.preset='';renderMarketer()});
+  _mktWireCtrl();
   document.querySelectorAll('#mktTbl th[data-key]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.key;if(mktState.sortKey===k)mktState.sortDir*=-1;else{mktState.sortKey=k;mktState.sortDir=-1}renderMarketer()}));
   // 차트 렌더
   _mkDestroy();if(typeof Chart==='undefined')return;
