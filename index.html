@@ -92,7 +92,17 @@ tr.cpown td{font-weight:700;color:#0b47b3;background:#dbe8ff!important}
 tr.sr td.fx{background:#e8e8e8;cursor:default}
 .prod-header{background:#334d80!important;color:#fff!important;font-weight:700;font-size:12px;text-align:left!important;padding:8px!important}
 .ex-caret{display:inline-block;color:#2563eb;font-weight:700;font-size:12px;margin-right:5px;min-width:11px;cursor:pointer}
-.dv-sub{display:inline-block;width:13px;color:#9aa4b2;font-size:10px;line-height:1;text-align:center;user-select:none}
+/* ===== 카테고리(원본+변형) 정렬 - 하위 세트 계보 표시 =====
+   추이차트 정렬을 "카테고리"로 두면 원본 세트 아래에 복제/tROAS 등 변형 세트가 붙는데,
+   L 글리프만으로는 하위인지 눈에 안 띄어서 (1) 세트명을 확실히 들여쓰고
+   (2) 들여쓴 빈 자리를 연보라 띠로 채우고 (3) 가족 전체를 왼쪽 보라 척추로 묶는다.
+   ** 색은 box-shadow(inset)로 그린다 - 하이라이트가 background 를 !important 로 덮어도 살아남는다. */
+tr.dv-head>td.fx1{box-shadow:inset 4px 0 0 0 #8b5cf6}
+tr.dv-kid>td.fx1{padding-left:36px;box-shadow:inset 4px 0 0 0 #8b5cf6,inset 30px 0 0 0 #f3ecff,inset 32px 0 0 0 #cbb6f5}
+/* 가족의 마지막 변형 행 - 이름 컬럼 아래에만 선을 그어 계보 묶음의 끝을 표시 */
+tr.dv-kid-last>td.fx{border-bottom:2px solid #cbb6f5}
+/* 글리프는 색 띠 안쪽에 절대배치(들여쓴 세트명과 겹치지 않게). td.fx 가 position:sticky 라 기준이 된다 */
+.dv-sub{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;color:#8b5cf6;font-weight:700;font-size:10px;line-height:1;text-align:center;user-select:none}
 .fam-caret{display:inline-block;margin-right:4px;padding:0 4px;border-radius:8px;background:#f1e9ff;color:#6d28d9;font-weight:700;font-size:9.5px;line-height:14px;cursor:pointer;user-select:none;vertical-align:1px}
 .fam-caret:hover{background:#e4d5ff}
 /* 소재 펼침 행 — sticky 미적용으로 스크롤 성능 확보 */
@@ -498,7 +508,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260830a"></script>
+<script src="app.js?v=20260901b"></script>
 </div>
 </body>
 </html>

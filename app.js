@@ -2594,7 +2594,7 @@ function orderSets(arr){
 //   정렬: ① 가족(원본+파생) 매출 합 큰 순 ② 가족 안에서는 원본 먼저, 나머지는 매출 큰 순.
 //   원본이 기간 안에 없으면(중단·이름변경) 매출 1위 파생이 가족 머리가 되고 들여쓰기 없음.
 function dvTreeOrder(adsets,enabled){
-  if(!enabled){adsets.forEach(a=>{a._dvChild=false;a._dvHead=null;a._dvKids=0});return adsets}
+  if(!enabled){adsets.forEach(a=>{a._dvChild=false;a._dvHead=null;a._dvKids=0;a._dvLast=false});return adsets}
   const fam={};
   adsets.forEach(a=>{
     const c=dvClassify(a.an||'');a._dv=c;
@@ -2611,14 +2611,24 @@ function dvTreeOrder(adsets,enabled){
     });
     //   들여쓰기는 '원본이 아닌' 파생만 — 동명 원본이 둘이면 둘 다 맨 위에 나란히 두고,
     //   원본이 아예 없는 가족은 머리(매출 1위 파생)를 들여쓰지 않는다(위가 비어 보이지 않게).
-    f.mem.forEach((m,i)=>{m._dvChild=(i>0&&m._dv.kind!=='orig');m._dvHead=null;m._dvKids=0});
+    f.mem.forEach((m,i)=>{m._dvChild=(i>0&&m._dv.kind!=='orig');m._dvHead=null;m._dvKids=0;m._dvLast=false});
     //   가족 머리(맨 윗행) ↔ 실험세트 연결 — 머리의 🧬 토글이 data-dvfam 으로 자식 행을 찾는다.
     const _hd=f.mem[0],_kid=f.mem.filter(m=>m._dvChild);
     _kid.forEach(m=>{m._dvHead=_hd.id});_hd._dvKids=_kid.length;
+    //   가족의 맨 아래 변형 행 = 계보 묶음의 끝 → 이름 컬럼 밑에 마감선(CSS .dv-kid-last)
+    if(_kid.length)_kid[_kid.length-1]._dvLast=true;
   });
   fams.sort((a,b)=>(b.r-a.r)||(b.s-a.s));
   const out=[];fams.forEach(f=>f.mem.forEach(m=>out.push(m)));
   return out;
+}
+// 계보 행 클래스 — 카테고리 정렬에서 원본(dv-head)/변형(dv-kid)을 CSS 로 구분한다.
+//   변형 행은 세트명을 들여쓰고 그 빈 자리를 연보라 띠로 칠해 '하위'임이 한눈에 보이게 한다.
+function dvTrCls(a){
+  const c=[];
+  if(a._dvKids>0)c.push('dv-head');
+  if(a._dvChild){c.push('dv-kid');if(a._dvLast)c.push('dv-kid-last')}
+  return c.length?' class="'+c.join(' ')+'"':'';
 }
 // 오리지널 행에 붙는 실험세트 토글 버튼(자식 없으면 빈 문자열).
 function famBtn(a){
@@ -2773,7 +2783,7 @@ function renderTrend(opts){
       // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
       const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr data-adset-row="'+a.id+'" data-acc="'+(a.acc||'')+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+budTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
+      h+='<tr'+dvTrCls(a)+' data-adset-row="'+a.id+'" data-acc="'+(a.acc||'')+'"'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+caretBtn+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+chgTd+budTd+memoTd+'<td class="mc '+RC(a._roas)+'">'+(AUX?MCAUX(a._s,a._r,a._uc,a._mp,a._imp):MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0))+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -3005,7 +3015,7 @@ function renderTrendAgg(gran){
       // 컬럼을 좁게 줄여 이름이 …로 잘려도 마우스를 올리면 전체 이름이 보이도록
       const cnT=abEsc(a.cn||'').replace(/"/g,'&quot;'),anT=abEsc(a.an||'').replace(/"/g,'&quot;');
       const accTd=showAcc?'<td class="fx fxa '+hl+ck+' title="'+anm+'">'+anm+'</td>':'';
-      h+='<tr'+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+(hrOK?' data-adset-row="'+a.id+'" data-acc="'+(a.acc||'')+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+(showBud?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'')+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
+      h+='<tr'+dvTrCls(a)+(a._dvHead?' data-dvfam="'+a._dvHead+'"':'')+(hrOK?' data-adset-row="'+a.id+'" data-acc="'+(a.acc||'')+'"':'')+'>'+accTd+'<td class="fx fx0 '+hl+ck+' title="'+cnT+'">'+(a.cn||'')+'</td><td class="fx fx1 '+hl+ck+' title="'+anT+'">'+(a._dvChild?'<span class="dv-sub">└</span>':'')+famBtn(a)+(a.an||'')+'</td><td class="idc '+hl+ck+' style="font-size:9px">'+a.id+'</td>'+(showBud?'<td class="budc">'+(a._bud>0?money(a._bud):'')+'</td>':'')+'<td class="mc '+RC(a._roas)+'">'+MC(a._roas,a._p,a._s,a._r,a._cvr,a._cpm,a._ctr,a._mp>0?a._s/a._mp:0)+'</td>'+cells+'</tr>';
     });
   });
   const tblEl=document.getElementById(TBL);
@@ -4671,7 +4681,7 @@ function renderAdsetRanking(){
 //   세트 복제가 아니다(예: '바람기_260703_신혼 | 바람기_0613_전환캠페인 - 사본').
 // ★ 날짜 토큰(260418 / 0421 / 250311)은 키에서 제거한다. 복제·변형은 원본과 날짜가
 //   다른 경우가 많아(원본 260420 → 복제 260422) 날짜를 남기면 가족이 갈라진다.
-// 마커를 새로 쓰기 시작하면 아래 두 배열에만 추가하면 된다.
+// 마커를 새로 쓰기 시작하면 아래 세 배열(DV_DUP·DV_VAR·DV_VAR_ANY)에만 추가하면 된다.
 const DV_DUP=[
   {rx:/\[\s*복제\s*\]/,tag:'복제'},
   {rx:/\s*-\s*(사본|복사본|copy)\s*$/i,tag:'사본'},
@@ -4679,17 +4689,26 @@ const DV_DUP=[
 ];
 // 변형 마커는 이름 '꼬리'에 구분자와 함께 붙은 것만 인정한다.
 //   (원본 소재명에 우연히 섞인 단어의 오분류 방지 — 예 '자체UGC파트너십실험'의 '실험')
+//   ※ 단어가 고유해 오분류 위험이 없는 마커는 아래 DV_VAR_ANY 에 두고 위치와 무관하게 걷어낸다.
 const DV_VAR=[
   {rx:/[_\-\s]+troas(실험)?$/i,tag:'tROAS'},
   {rx:/[_\-\s]+구매당(비용)?(변경|전환)?$/,tag:'구매당비용'},
   {rx:/[_\-\s]+결과당비용(전환|변경|목표)?$/,tag:'결과당비용'},
   {rx:/[_\-\s]+(기존)?구매자\s*제외(실험)?$/,tag:'구매자제외'},
   {rx:/[_\-\s]+(테스트|test)$/i,tag:'테스트'},
-  {rx:/[_\-\s]+전세계중국어$/,tag:'전세계중국어'},
+];
+// 꼬리가 아니어도(뒤에 다른 토큰이 더 붙어도) 걷어내는 변형 마커.
+//   단어 자체가 충분히 고유해 오분류 위험이 없고, 실제 세트명에서 마커 뒤에 배수(x2)나
+//   또 다른 꼬리(_Tpurchase 등)가 붙는 경우가 많아 꼬리 고정이면 계보가 갈라진다.
+//   예 '무당_260818_aiUGC이어폰_전세계한국어_Tpurchase' · '무당_260507_aiUGC정확도_피드노출'
+const DV_VAR_ANY=[
+  {rx:/[_\-\s]*전세계중국어/,tag:'전세계중국어'},
   // 전세계한국어 = 국내 위닝 세트를 해외 한국어 인벤토리로 넓힌 변형(2026-07-21~). 한국제외는 성과가
   // 크게 달라서(CPM은 더 싸지만 CPA 악화) 태그를 따로 둔다 — 같은 계보 안에서 A/B로 비교되게.
-  {rx:/[_\-\s]+전세계한국어[_\-\s(（]*한국\s*제외[)）]*$/,tag:'전세계한국어(한국제외)'},
-  {rx:/[_\-\s]+전세계한국어$/,tag:'전세계한국어'},
+  {rx:/[_\-\s]*전세계한국어[_\-\s(（]*한국\s*제외[)）]*/,tag:'전세계한국어(한국제외)'},
+  {rx:/[_\-\s]*전세계한국어/,tag:'전세계한국어'},
+  // 피드 = 노출위치를 피드로 좁힌 변형(피드노출·피드전용·피드배치 등 표기가 섞여 있다).
+  {rx:/[_\-\s]*피드(노출|전용|배치|만)?/,tag:'피드'},
 ];
 const DV_EMOJI=/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu;
 const DV_DATE=/^\d{4}(\d{2})?(\d{2})?$/;   // 0421 · 260418 · 19930920
@@ -4701,9 +4720,11 @@ function dvClassify(name){
   const s=String(name||'').trim();
   const tags=[];let kind='orig';
   const stripVar=w=>{
-    for(let i=0;i<4;i++){
+    for(let i=0;i<6;i++){
       let hit=null;
       for(const v of DV_VAR){if(v.rx.test(w)){w=w.replace(v.rx,'');hit=v.tag;break}}
+      // 꼬리 마커가 없으면 '위치 무관' 마커(전세계한국어·피드 등)를 걷어낸다.
+      if(!hit)for(const v of DV_VAR_ANY){if(v.rx.test(w)){w=w.replace(v.rx,'');hit=v.tag;break}}
       if(!hit)break;
       if(tags.indexOf(hit)<0)tags.push(hit);
       kind='var';
