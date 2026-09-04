@@ -72,6 +72,10 @@ let NSA_DAILY=[],GOOGLE_ADS=[],GOOGLE_DG=[],NAVER_MP=[],NAVER_PL=[],NAVER_KW=[],
 //   지출=Ads API, 매출=MP utm_campaign 귀속, country=캠페인명 TW 태그, owner=[Tight]/그 외.
 let GCAMP=[];
 let ALIMTALK=[];  // CRM(알림톡) 채널 — alimtalk_daily_campaign (일자×캠페인, rev=귀속매출·cost=발송비용)
+// 글로벌 CRM(대만 LINE OA) 채널 — global_crm_daily (일자×캠페인, revenue=KRW 환산·revenue_twd=시트 원값).
+//   소스: 구글시트 'LINE CRM tracking' 자동갱신 탭 → 글로벌CRM_시트_supabase.py (하루 1회 cron).
+//   발송비용 원천이 수기라 지출은 0(매출만).
+let GLCRM=[];
 // 구글 디멘드젠 증감액 테두리용 — budget_apply_log(region='gd') = '⚡ 구글에 예산 적용'으로 실제 반영된 기록.
 //   메타 추이차트는 ad_performance_daily.budget 의 전일 대비 변화로 테두리를 그리는데,
 //   google_demandgen_campaign_daily 엔 budget 컬럼이 없어 같은 방식이 불가 → 실제 적용 로그를 쓴다.
@@ -1197,6 +1201,7 @@ function _applyCore(d){
   NSA_DAILY=keep(d.nsa,NSA_DAILY);GOOGLE_ADS=keep(d.google,GOOGLE_ADS);GOOGLE_DG=keep(d.googledg,GOOGLE_DG);NAVER_PL=keep(d.naverpl,NAVER_PL);
   NAVER_MP=keep(d.naver_mp,NAVER_MP);TOSS_DAILY=keep(d.toss_kr,TOSS_DAILY);
   if(d.alimtalk!=null)ALIMTALK=d.alimtalk;  // CRM 채널(알림톡) — null(실패)이면 기존 값 유지
+  if(d.glcrm!=null)GLCRM=d.glcrm;           // 글로벌 CRM(대만 LINE OA) — 위와 동일
   // 하이라이트: in-place merge — HIGHLIGHTS 참조 identity 유지 + 로컬 쓰기(저장 직후) 보존
   // (이전엔 KR_HL={} 으로 재할당해서 HIGHLIGHTS 가 옛 객체에 dangle → 모드 전환/refresh 시 사라짐)
   // ★ 오늘(updated_at ≥ 오늘0시) 마킹만 적용 — 지난날 것은 스킵(자동 삭제). 로컬 저장 보존 위해 delete는 안 함.
@@ -1216,7 +1221,7 @@ async function initData(){
   }
   const D180='&date=gte.'+_dateCutoff(215);
   // 1단계: IndexedDB 캐시에서 모든 테이블 즉시 로드 (병렬)
-  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','glcr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp','ggdg_tight','gcamp','alimtalk'];
+  const cKeys=['kr','gl','vn','krhl','glhl','crhl','vnhl','stripe','toss','nsa','google','googledg','naverpl','naver_mp','toss_kr','cr','glcr','nsa_kw','naver_kw','ggdg_ct','ggdg_sp','ggdg_tight','gcamp','alimtalk','glcrm'];
   const cached={};
   await Promise.all(cKeys.map(k=>cacheGet('t_'+k).then(v=>{cached[k]=v?.data;})));
   let renderedFromCache=false;
@@ -1259,9 +1264,10 @@ async function initData(){
     _cf('네이버 파워링크(naver_powerlink_daily)',sbQ('naver_powerlink_daily','select=*&order=date.desc&limit=2000')),
     sbQ('daily_memos','select=*').catch(()=>null),
     _cf('CRM 알림톡(alimtalk_daily_campaign)',sbQ('alimtalk_daily_campaign','select=date,campaign_key,rev,sent,cost&order=date.desc&limit=5000')),
+    _cf('글로벌 CRM(global_crm_daily)',sbQ('global_crm_daily','select=date,campaign,revenue,revenue_twd,purchase_count&order=date.desc&limit=5000')),
   ]).then(arr=>{
-    const [kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr,googledg,naverpl,dmemo,alimtalk]=arr;
-    return {kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr,googledg,naverpl,dmemo,alimtalk};
+    const [kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr,googledg,naverpl,dmemo,alimtalk,glcrm]=arr;
+    return {kr,gl,vn,krhl,glhl,crhl,vnhl,stripe,toss,nsa,google,naver_mp,toss_kr,googledg,naverpl,dmemo,alimtalk,glcrm};
   });
   const applyAndRerender=async(d)=>{
     _applyCore(d);
@@ -5286,6 +5292,14 @@ function _chrevChannels(){
   // CRM(알림톡): alimtalk_daily_campaign 을 일자별로 합산. 매출=Σrev(귀속), 지출=Σcost(발송비용=sent×13원).
   const byDateCRM={};
   ALIMTALK.forEach(r=>{if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].s+=(+r.cost||0);byDateCRM[r.date].r+=(+r.rev||0)});
+  // 글로벌 CRM(대만 LINE OA, 글로벌·우리) = global_crm_daily 일자합. 매출 = 구글시트 'LINE CRM tracking'
+  //   자동갱신 탭(ch=line·ct=crm_*·TWD·KST)의 집계값을 TWD→KRW 환산한 것(글로벌CRM_시트_supabase.py).
+  //   지출 0 — LINE OA 발송비용은 수기 시트에만 있고 통화·기입이 들쭉날쭉해 매출만 싣는다.
+  //   이 매출은 Stripe 실결제(글로벌 종합)의 일부라, 아래 glExcRow(잔여)에서 같은 값을 빼야
+  //   '채널 합 = 글로벌 종합' 이 유지된다(오가닉/잔여로 새던 것을 채널로 끌어내는 구조).
+  const byDateGLCRM={};
+  GLCRM.forEach(r=>{byDateGLCRM[r.date]=(byDateGLCRM[r.date]||0)+(+r.revenue||0)});
+  const glCrmR=d=>byDateGLCRM[d]||0;
   // MP ch=kakao 매출도 CRM 에 포함 — kr_channel_revenue_4h 채널='카카오' 를 일자별 합산(매출만, 지출 0).
   // + 네이버(MP 귀속, ch=naver 포함)·메타(기타) 일자합 — 네이버/메타 광고 추정분을 오가닉에서 분리(2026-07-17).
   const byDateNvMP={},byDateMetaEtc={};
@@ -5374,10 +5388,13 @@ function _chrevChannels(){
   // 글로벌(밴스드 제외) = 글로벌 전체(종합) − 밴스드(대만 밴스드 메타 + 대만 구글).
   //   매출=Stripe 실결제−밴스드귀속, 지출=글로벌 전체지출−밴스드지출(=GL_AD) → 상세행 합=글로벌 종합.
   //   ★ 계산은 항상 '전체(All)' helper 기준 — 밴스드 제외 모드에서 glSpend/glRev 를 쓰면 이중 차감된다.
-  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s-gTW(d).s, r:glRevAll(d)-glVanR(d)};}};
+  //   ★ 글로벌 CRM(glCrmR)도 Stripe 안에 들어있는 귀속매출이라 잔여에서 함께 뺀다.
+  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s-gTW(d).s, r:glRevAll(d)-glVanR(d)-glCrmR(d)};}};
+  // 글로벌 CRM — 밴스드가 아니라 우리(gl_us) 운영이라 밴스드 제외 모드에서도 그대로 남는다.
+  const glCrmRow={name:'글로벌 CRM',revOnly:true,get:d=>({s:0,r:glCrmR(d)})};
   const glChannels=incVan
-    ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0},van:true},...gRowsTW,glExcRow]   // 대만밴스드=VN_TW_ACC 단독(KRW)
-    : [glExcRow];
+    ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0},van:true},...gRowsTW,glCrmRow,glExcRow]   // 대만밴스드=VN_TW_ACC 단독(KRW)
+    : [glCrmRow,glExcRow];
   // 행 그룹 태그 — 나열 순서를 권역(국내→글로벌) → 소속(우리→밴스드) 로 묶기 위한 키.
   //   실제 정렬/구분선은 _chrevSortByRev 가 처리(그룹 안에서만 매출 내림차순).
   const IS_VAN=c=>c.van===true||c.name==='밴스드 국내'||c.name==='밴스드 구글'||c.name==='대만 밴스드';
@@ -5544,7 +5561,7 @@ function _chrevChart(channels,periods){
   const labels=pers.map(p=>p.label);
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -5587,7 +5604,7 @@ function renderChannelDonut(){
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)

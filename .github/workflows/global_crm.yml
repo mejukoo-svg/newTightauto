@@ -1,0 +1,32 @@
+name: 💚 글로벌 CRM(대만 LINE) 매출 → Supabase
+
+# 구글시트 'LINE CRM tracking' 자동갱신 탭(ch=line·ct=crm_*·TWD·KST)을 읽어
+# global_crm_daily 로 적재. 매출탭(chrev) '글로벌 CRM' 채널(글로벌·우리)의 소스.
+# 시트가 매 실행마다 전 기간을 재작성하므로 이쪽도 하루 1번 전 기간 재적재로 충분하다.
+# 링크 공개 시트라 구글 자격증명은 필요 없다.
+concurrency:
+  group: global-crm-revenue
+  cancel-in-progress: false
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 매일 16:00 KST — 시트 자동갱신(≈13:44 KST) 이후에 읽는다
+  workflow_dispatch:
+
+jobs:
+  global-crm:
+    name: 글로벌 CRM 매출
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Run 글로벌 CRM
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
+        run: python 글로벌CRM_시트_supabase.py
