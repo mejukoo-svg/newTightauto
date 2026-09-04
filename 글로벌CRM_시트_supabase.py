@@ -33,9 +33,14 @@
 가드   : ① CSV 가 비었거나 날짜행 0건이면 아무것도 쓰지 않고 종료코드 1
          ② 파싱한 매출 총합이 0 이면 동일 — 시트 구조 변경/일시 장애를 조용히 0으로 덮지 않는다
          ③ 적재 후, 시트 날짜 범위 안에서 시트에 없는 (date,campaign) 행은 삭제(캠페인 리네임 대응)
+         ④ 시트 2행의 '자동갱신 YYYY-MM-DD HH:MM'(KST) 이 STALE_HOURS(기본 24) 보다 낡으면
+            **적재는 정상 수행한 뒤** 종료코드 1 로 알람. 시트를 채우는 잡은 이 레포 밖에 있어
+            (2026-09-04 전수검색 결과 로컬에 없음 — Apps Script 등 외부) 그쪽이 멈추면
+            값이 '있는데 낡은' 상태로 굳는다. ①②는 그걸 못 잡으므로 별도 가드가 필요하다.
+            낡았어도 값 자체는 유효하니 쓰기는 막지 않고, Actions 를 빨갛게 만들어 알린다.
 
 환경변수: SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_DB_SCHEMA,
-          GLOBAL_CRM_SHEET_ID, GLOBAL_CRM_SHEET_GID, TWD_KRW_RATE, DRY_RUN
+          GLOBAL_CRM_SHEET_ID, GLOBAL_CRM_SHEET_GID, TWD_KRW_RATE, STALE_HOURS, DRY_RUN
 
 [사용법]  python 글로벌CRM_시트_supabase.py
 ============================================================
@@ -76,8 +81,14 @@ CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&
 # 대만밴스드 매출 환산과 동일 환율(대만 파이프라인 관례)
 TWD_KRW_RATE = float(os.environ.get("TWD_KRW_RATE") or 47.85)
 DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
+# 시트 '자동갱신' 스탬프가 이보다 낡으면 알람(적재는 하고 종료코드 1).
+#   평상시 시트 갱신 ≈13:44 KST / 이 잡 16:00 KST → 정상 나이 ≈2시간. 하루를 통째로 거르면 ≈26시간.
+STALE_HOURS = float(os.environ.get("STALE_HOURS") or 24)
 
+KST = timezone(timedelta(hours=9))
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# 시트 2행: '자동갱신 2026-09-04 13:44 · 이 탭은 매 실행마다 전체 재작성되니 수기 입력 금지'
+STAMP_RE = re.compile(r"자동갱신\s*(\d{4}-\d{2}-\d{2})[ T]+(\d{1,2}):(\d{2})")
 
 REV_HEADER = "매출"        # '매출(TWD)' — 통화 표기가 바뀌어도 걸리도록 접두만 본다
 CNT_HEADER = "구매건수"
@@ -155,6 +166,18 @@ def _num(cell):
     return float(s)
 
 
+def parse_stamp(rows):
+    """시트 상단 안내줄의 '자동갱신 …' 시각(KST) → datetime. 못 찾으면 None."""
+    for row in rows[:5]:
+        for cell in row:
+            m = STAMP_RE.search(cell or "")
+            if m:
+                d, hh, mm = m.group(1), int(m.group(2)), int(m.group(3))
+                y, mo, dd = (int(x) for x in d.split("-"))
+                return datetime(y, mo, dd, hh, mm, tzinfo=KST)
+    return None
+
+
 def parse_block(rows, header_prefix):
     """header_prefix 로 시작하는 헤더행을 찾아 {date: {campaign: value}} 반환."""
     for i, row in enumerate(rows):
@@ -188,6 +211,16 @@ def parse_block(rows, header_prefix):
     return {}
 
 
+def warn_if_stale(stamp, age_h):
+    """가드 ④ — 적재를 마친 뒤 호출. 시트가 낡았으면 종료코드 1(의도된 알람)."""
+    if age_h is None or age_h <= STALE_HOURS:
+        return
+    log.error(f"❌ 시트가 낡았다 — 자동갱신 {stamp:%Y-%m-%d %H:%M} KST, "
+              f"{age_h:.1f}시간 전(임계 {STALE_HOURS:g}h). 적재는 마쳤지만 값이 갱신되지 않고 있다.")
+    log.error("   시트를 채우는 잡은 이 레포 밖(Apps Script 등)에 있다 — 그쪽이 멈췄는지 확인할 것.")
+    sys.exit(1)
+
+
 # =========================================================
 def main():
     log.info("=" * 60)
@@ -204,6 +237,16 @@ def main():
         note = " ".join((c or "").strip() for c in r0 if (c or "").strip())
         if note:
             log.info(f"   {note}")
+
+    # 가드 ④ 준비 — 시트를 채우는 잡은 이 레포 밖이라, 그쪽이 멈추면 값이 '낡은 채로' 남는다.
+    #   여기선 판정만 하고 알람은 적재를 마친 뒤에 낸다(값 자체는 유효하므로 쓰기는 막지 않는다).
+    stamp = parse_stamp(rows)
+    stamp_age_h = None
+    if stamp:
+        stamp_age_h = (datetime.now(KST) - stamp).total_seconds() / 3600
+        log.info(f"   ↳ 시트 자동갱신 {stamp:%Y-%m-%d %H:%M} KST ({stamp_age_h:.1f}시간 전)")
+    else:
+        log.warning("   ⚠️ 시트에서 '자동갱신' 스탬프를 못 찾음 — 신선도 판정 생략")
 
     rev = parse_block(rows, REV_HEADER)
     cnt = parse_block(rows, CNT_HEADER)
@@ -249,6 +292,7 @@ def main():
         log.info("🧪 DRY_RUN — 쓰지 않고 종료")
         for r in records[-5:]:
             log.info(f"   {r}")
+        warn_if_stale(stamp, stamp_age_h)
         return
 
     sb = SupabaseClient(SUPABASE_URL, SUPABASE_KEY)
@@ -266,6 +310,7 @@ def main():
     if stale:
         log.info(f"🧹 시트에 없는 {len(stale)}행 삭제")
     log.info("🏁 완료")
+    warn_if_stale(stamp, stamp_age_h)
 
 
 if __name__ == "__main__":
