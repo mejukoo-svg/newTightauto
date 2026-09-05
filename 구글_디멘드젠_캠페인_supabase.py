@@ -12,6 +12,7 @@ google_demandgen_campaign_daily 테이블에 upsert.
            날짜별 이력이 아닌 '현재' 스냅샷이라 **광고그룹별 최신 날짜 행에만** 적재한다.
   · 매출 = Mixpanel export (payment_complete) properties.utm_campaign(=구글 campaign.id)
            매칭 → $insert_id + order_id dedup 후 (date_KST, campaign_id) 별 매출/건수
+           비KRW 결제(대만 TWD 등)는 KRW 환산 — 지출이 KRW라 통일 (2026-09-05, [Tight]DG_TT_TW_*)
   ※ Mixpanel 결제 이벤트의 utm_campaign 값이 구글 캠페인 숫자 id 와 동일.
     (utm_content = 광고 id) — 캠페인 id 로 지출↔매출 직접 귀속.
 
@@ -302,6 +303,62 @@ def fetch_tight_ad_spend(client, cids, tight_group_ids):
     return spend, clicks, imps
 
 
+# ── 결제 통화 판별 + KRW 환산 (구글_캠페인_supabase.py / 구글_디멘드젠_mp_supabase.py 와 동일 규칙) ──
+#   지출(Ads cost)은 KRW 계정 기준인데 대만 결제가 TWD 로 적재되면 ROAS 가 ~48배 과소(가짜 적자).
+#   [Tight]DG_TT_TW_* (글로벌·대만) 캠페인이 생기면서 필요해졌다 (2026-09-05).
+KNOWN_NONKRW = {"TWD", "HKD", "THB", "JPY", "USD"}
+SUFFIX_CURRENCY = {"tw": "TWD", "th": "THB", "jp": "JPY", "hk": "HKD"}
+FALLBACK_KRW_PER = {"TWD": 48.0, "HKD": 197.0, "THB": 45.0, "JPY": 10.3, "USD": 1540.0, "KRW": 1.0}
+
+
+def currency_from_suffix(svc):
+    m = re.search(r'-([a-z]{2,3})$', str(svc or "").strip().lower())
+    return SUFFIX_CURRENCY.get(m.group(1)) if m else None
+
+
+def event_currency(props):
+    """통화필드 → 서비스 접미사(-tw 등) → mp_country_code → KRW(기본).
+    해외 신호가 명확할 때만 비KRW 로 판정(국내 결제를 해외로 오판해 ×수십배 부풀리는 것 방지)."""
+    c = str(props.get("통화") or "").strip().upper()
+    if c in KNOWN_NONKRW:
+        return c
+    if c == "KRW":
+        return "KRW"
+    sc = currency_from_suffix(props.get("서비스"))
+    if sc:
+        return sc
+    cc = str(props.get("mp_country_code") or "").strip().upper()
+    return {"TW": "TWD", "HK": "HKD", "TH": "THB", "JP": "JPY"}.get(cc, "KRW")
+
+
+_krw_rates = None
+
+
+def get_krw_rates():
+    """1 단위 외화 → KRW 환율 맵. er-api(USD 기준) 1회 조회, 실패 시 폴백."""
+    global _krw_rates
+    if _krw_rates is not None:
+        return _krw_rates
+    rates = dict(FALLBACK_KRW_PER)
+    try:
+        r = req_lib.get("https://open.er-api.com/v6/latest/USD", timeout=15)
+        if r.status_code == 200:
+            usd = r.json().get("rates", {})
+            krw = usd.get("KRW")
+            if krw:
+                for cur in ("TWD", "HKD", "THB", "JPY"):
+                    per = usd.get(cur)
+                    if per:
+                        rates[cur] = krw / per
+                rates["USD"] = krw
+                rates["KRW"] = 1.0
+                log.info(f"  💱 환율(KRW/단위): TWD={rates['TWD']:.2f} JPY={rates['JPY']:.3f}")
+    except Exception as e:
+        log.warning(f"  ⚠️ 환율 조회 실패 → 폴백 사용: {e}")
+    _krw_rates = rates
+    return rates
+
+
 # ── Mixpanel ──────────────────────────────────────────────────────────────────
 def fetch_mp(tight_camp_ids, ad_to_group, group_meta):
     """utm_campaign ∈ tight_camp_ids 결제를 utm_content(광고id)→광고그룹으로 귀속.
@@ -318,6 +375,7 @@ def fetch_mp(tight_camp_ids, ad_to_group, group_meta):
                             "event": json.dumps(MP_EVENTS), "project_id": MP_PID},
                     auth=(MP_USER, MP_SECRET), timeout=600)
     r.raise_for_status()
+    rates = get_krw_rates()    # 비KRW 결제(대만 TWD 등) KRW 환산용
     rev = defaultdict(float)   # rev[(ad_group_id, date)]
     cnt = defaultdict(int)
     rev_ad = defaultdict(float)   # rev_ad[(ad_group_id, ad_id, date)]
@@ -353,6 +411,9 @@ def fetch_mp(tight_camp_ids, ad_to_group, group_meta):
             if v is not None:
                 try: amt = float(v); break
                 except Exception: pass
+        cur = event_currency(p)                       # 대만 등 비KRW 결제는 KRW 로 환산 —
+        if cur != "KRW":                              #   지출이 KRW 라 통일해야 ROAS 가 맞는다.
+            amt *= rates.get(cur, FALLBACK_KRW_PER.get(cur, 1.0))
         adid = digits(p.get("utm_content"))
         gid = ad_to_group.get(adid)
         if not gid:

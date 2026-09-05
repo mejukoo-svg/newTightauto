@@ -934,7 +934,8 @@ function applyMode(m){
     if(t.classList.contains('mkt-only')){t.style.display=isMkt?'inline-block':'none';return}
     if(t.classList.contains('kpi-only')){t.style.display=isKpi?'inline-block':'none';return}
     if(t.classList.contains('global-only')){t.style.display=(!isSpecial&&m==='gl')?'inline-block':'none';return}
-    if(t.dataset.t==='ggdgkr'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // [Tight] 디멘드젠은 국내(kr) 전용 (vn 의 ggdgct 와 라벨 중복 방지)
+    if(t.dataset.t==='ggdgkr'){t.style.display=(!isSpecial&&(m==='kr'||m==='gl'))?'inline-block':'none';
+      t.textContent=(m==='gl')?'🟢 구글 디멘드젠 (대만)':'🟢 구글 디멘드젠';return} // [Tight] 디멘드젠 — 국내(kr)=DG_TT_*, 글로벌(gl)=DG_TT_TW_* (vn 의 ggdgct 와 라벨 중복 방지)
     if(t.dataset.t==='tiktok'){t.style.display=(!isSpecial&&m==='kr')?'inline-block':'none';return} // 틱톡은 국내(kr) 전용 — 밴스드(vn)엔 틱톡 집행이 없다
     if(t.dataset.t==='krank'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 세트랭킹: 국내·밴스드·글로벌 공통(kr-only 클래스보다 먼저 처리)
     if(t.dataset.t==='dupvar'){t.style.display=(!isSpecial&&(m==='kr'||m==='vn'||m==='gl'))?'inline-block':'none';return} // 복제·변형 계보: 국내·밴스드·글로벌 공통
@@ -1896,6 +1897,9 @@ const perfTbl=()=>{const m={kr:'ad_performance_daily',gl:'global_ad_performance_
 // 하이라이트 배경색 + AI 출처 점선 테두리(.hl-ai). source='ai'(오늘의퍼포먼스봇 자동 마킹)면 점선 테두리로 사람 마킹과 구분.
 //   0시 지나면 하이라이트·테두리 함께 삭제(HL_SRC도 clear/오늘필터 대상), 다음날 봇 새 조언이 재생성.
 //   (Meta 실제 예산변경 테두리 budBc는 box-shadow로 별개 표시 — outline과 공존)
+// 구글 디멘드젠 전용 — 하이라이트 저장소가 항상 KR(adset_highlights)이라 모드와 무관하게 KR_HL 를 읽는다.
+function hlClassGgdg(id){const ai=KR_SRC[id]==='ai'?'hl-ai':'';const h=KR_HL[id];
+  if(!h||!HL_CONFIG[h])return ai;return HL_CONFIG[h].cls+(ai?' '+ai:'')}
 function hlClass(id){const ai=HL_SRC[id]==='ai'?'hl-ai':'';const h=HIGHLIGHTS[id];if(!h||!HL_CONFIG[h])return ai;/*하이라이트 취소돼도 AI면 테두리만 유지*/return HL_CONFIG[h].cls+(ai?' '+ai:'')}
 // 현재 MODE의 원본 배열 반환 (norm된 AD 가 아닌 raw)
 function _srcAD(){
@@ -1940,7 +1944,7 @@ async function saveHL(id,c){
 async function saveHLGgdg(id,c){
   const body={adset_id:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/adset_highlights',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
-  KR_HL[id]=c||null;HIGHLIGHTS[id]=c||null;
+  KR_HL[id]=c||null;HIGHLIGHTS[id]=c||null;   // 표시는 hlClassGgdg(KR_HL) 로 읽는다 — 글로벌 모드에서도 동일
   renderGgdgTight();   // 안에서 GGDG_ROWS·abSyncBtnG 까지 갱신된다
 }
 function showCPGgdg(id,el){showCP(id,el);currentHlGgdg=true}
@@ -2928,6 +2932,19 @@ function gTwUsdByDate(){
   const out={};
   (GCAMP||[]).forEach(r=>{
     if(String(r.country||'')!=='TW')return;
+    if(String(r.owner||'')==='tight')return;   // [Tight]DG_TT_TW_* = 우리 글로벌 디멘드젠 → 밴스드 아님(2026-09-05)
+    const rate=usdKrwRateAt(r.date)||1380;
+    const o=out[r.date]||(out[r.date]={s:0,r:0});
+    o.s+=(+r.spend||0)/rate;o.r+=(+r.revenue||0)/rate;
+  });
+  return out;
+}
+// 🟢 대만 [Tight] 디멘드젠(=우리 글로벌 디멘드젠) 일자별 지출·귀속매출 USD. 위(밴스드)와 상보 관계.
+function gTwUsUsdByDate(){
+  const out={};
+  (GCAMP||[]).forEach(r=>{
+    if(String(r.country||'')!=='TW')return;
+    if(String(r.owner||'')!=='tight')return;
     const rate=usdKrwRateAt(r.date)||1380;
     const o=out[r.date]||(out[r.date]={s:0,r:0});
     o.s+=(+r.spend||0)/rate;o.r+=(+r.revenue||0)/rate;
@@ -3324,6 +3341,13 @@ function renderChange(){
 // 디멘드젠 ad_group/캠페인명 → 상품 추출 (주간종합 상품 분해용). 매칭 없으면 '기타'.
 const _DG_PROD_KW=['무당','무녀','29금궁합','속궁합','29금','궁합','솔로','재회','환승','도화','커리어','팩폭','재물','임신','집착','바람기','구미호','욕망','신점','관상','사주'];
 function _dgProduct(name){const s=String(name||'');for(const p of _DG_PROD_KW){if(s.includes(p))return p}return '기타'}
+// 구글 디멘드젠 권역 — 캠페인명의 TW 토큰으로 국내/글로벌(대만)을 가른다 (2026-09-05).
+//   '[Tight]DG_TT_TW_0630_무당_변호사' = 글로벌(대만) / '[Tight]DG_TT_0811_임신' = 국내.
+//   토큰 단위 매칭이라 연속문자에 묻힌 tw 는 무시 — 구글_캠페인_supabase.py is_tw_campaign 과 같은 규칙.
+const _dgIsTW=n=>{const t=String(n||'');const parts=t.toLowerCase().split(/[-_\s\[\]().\/]+/);
+  return parts.includes('tw')||parts.includes('taiwan')||t.includes('대만')||t.includes('台灣')||t.includes('台湾')};
+// 현재 모드 기준 디멘드젠 행 — 국내(kr)=TW 제외 / 글로벌(gl)=TW 만.
+const _dgScopeRows=()=>{const gl=(MODE==='gl');return (GGDG_TIGHT||[]).filter(r=>_dgIsTW(r.campaign_name)===gl)};
 // 디멘드젠(GGDG_TIGHT) → AD 유사 행 (spend/revenue/profit/results_mp/product/클릭·노출)
 //   클릭·노출=Google Ads API clicks/impressions (메타의 unique_clicks 와 달리 전체 클릭 — CVR/CTR 계산용)
 function _dgRows(){return (GGDG_TIGHT||[]).map(r=>{const s=+r.spend||0,rv=+r.revenue||0;return {date:r.date,spend:s,revenue:rv,profit:rv-s,results_mp:+r.purchase_count||0,unique_clicks:+r.clicks||0,impressions:+r.impressions||0,product:_dgProduct(r.ad_group_name||r.campaign_name)}})}
@@ -3736,7 +3760,7 @@ function abTargets(src){
   if(S==='google'){
     (GGDG_ROWS||[]).forEach(o=>{
       const id=String(o.id||'');if(!id||seen.has(id))return;
-      const tag=HIGHLIGHTS[id];if(!tag||!HL_CONFIG[tag])return;
+      const tag=KR_HL[id];if(!tag||!HL_CONFIG[tag])return;   // 디멘드젠 마킹은 항상 KR 저장소(글로벌 모드에서도 동일)
       seen.add(id);
       out.push({adset_id:id,ad_account_id:'',tag:tag,name:(o.name||''),campaign:(o.camp||'')});
     });
@@ -4347,7 +4371,7 @@ function renderGlobalRevenuePeriod(){
   const incVan=(document.getElementById('grevVanced')?.value||'inc')==='inc';
   // 날짜별 성분 맵 (renderGlobalRevenue 와 동일 소스)
   const byDate={};STRIPE_DATA.forEach(r=>{if(!byDate[r.date])byDate[r.date]={};byDate[r.date][r.country]=r});
-  const glSpend={},vanSpend={},vanRev={};
+  const glSpend={},vanSpend={},vanRev={},usTwDgSpend={};   // usTwDgSpend = 대만 [Tight] 디멘드젠(우리 지출, 참고표시용)
   const cSel=_grevCountry();                       // 상단 국가 드롭다운 반영
   const twOK=(cSel==='ALL'||cSel==='TW');
   const shownC=countries.filter(c=>cSel==='ALL'||GREV_CC[c]===cSel);
@@ -4359,6 +4383,9 @@ function renderGlobalRevenuePeriod(){
     vnTwUsdRows().forEach(r=>{vanSpendM_[r.date]=(vanSpendM_[r.date]||0)+(+r.spend||0);vanRevM_[r.date]=(vanRevM_[r.date]||0)+(+r.revenue||0)});
     const g=gTwUsdByDate();
     Object.keys(g).forEach(d=>{vanSpendG_[d]=(vanSpendG_[d]||0)+g[d].s;vanRevG_[d]=(vanRevG_[d]||0)+g[d].r});
+    // 🟢 대만 [Tight] 디멘드젠은 우리 운영 — 밴스드 차감·수수료 대상이 아니라 '지출합'(글로벌 타이트)에 넣는다.
+    const gu=gTwUsUsdByDate();
+    Object.keys(gu).forEach(d=>{glSpend[d]=(glSpend[d]||0)+gu[d].s;usTwDgSpend[d]=gu[d].s});
   }
   [...new Set([...Object.keys(vanSpendM_),...Object.keys(vanRevM_),...Object.keys(vanSpendG_),...Object.keys(vanRevG_)])].forEach(d=>{
     vanSpend[d]=(vanSpendM_[d]||0)+(vanSpendG_[d]||0);
@@ -4376,6 +4403,7 @@ function renderGlobalRevenuePeriod(){
   allDates.forEach(dt=>{if(dt<sd||dt>ed)return;
     vanRevSum+=(vanRev[dt]||0);vanSpendSum+=(vanSpend[dt]||0);
     vanRevM+=(vanRevM_[dt]||0);vanRevG+=(vanRevG_[dt]||0);vanSpM+=(vanSpendM_[dt]||0);vanSpG+=(vanSpendG_[dt]||0)});
+  let usTwDgSum=0;allDates.forEach(dt=>{if(dt>=sd&&dt<=ed)usTwDgSum+=(usTwDgSpend[dt]||0)});   // 지출합에 이미 더해진 우리 대만 디멘드젠
   const vanFeeAll=vanSpendSum*GREV_VAN_FEE_PCT/100;
   // 미포함 보기면 매출합에서 밴스드 귀속매출이 빠져 있으니 비용도 빼지 않는다(숫자는 참고용으로 표시).
   const vanSpendCut=incVan?vanSpendSum:0, vanFee=incVan?vanFeeAll:0;
@@ -4401,6 +4429,7 @@ function renderGlobalRevenuePeriod(){
     +'<span style="color:#aaa"> · 매출은 우리 몫이라 매출합에 그대로 둡니다</span>'
     +(incVan?'':' <span style="color:#a15c00">— 밴스드 미포함 보기라 매출합에서 밴스드 매출이 빠져 있어 비용도 차감하지 않음</span>')
     +(twOK?'':' <span style="color:#a15c00">— 대만 외 국가 선택이라 밴스드 없음</span>')
+    +(usTwDgSum>0?'<br>🟢 대만 [Tight] 디멘드젠 지출 $'+F(usTwDgSum)+'<span style="color:#aaa">는 우리 운영이라 위 지출합에 포함(밴스드 지출·수수료 대상 아님)</span>':'')
     +'</div>';
 }
 
@@ -4689,49 +4718,153 @@ function renderAdsetRanking(){
 //   다른 경우가 많아(원본 260420 → 복제 260422) 날짜를 남기면 가족이 갈라진다.
 // 마커를 새로 쓰기 시작하면 아래 세 배열(DV_DUP·DV_VAR·DV_VAR_ANY)에만 추가하면 된다.
 const DV_DUP=[
-  {rx:/\[\s*복제\s*\]/,tag:'복제'},
-  {rx:/\s*-\s*(사본|복사본|copy)\s*$/i,tag:'사본'},
-  {rx:/\s*-\s*복제증액\s*$/,tag:'복제증액'},
+  {rx:/\[\s*복제\s*(증액)?\s*\]/,tag:'복제'},                       // [복제] · [복제증액]
+  {rx:/[_\-\s]*복제\s*증액/,tag:'복제증액'},                          // ' - 복제증액' · '벨라복제증액' (구분자 없이 이름에 붙는 표기)
+  {rx:/[\s_]*[-xX]?\s*(사본|복사본|copy)\s*\d*\s*$/i,tag:'사본'},      // '- 사본' · '_사본' · 'x 사본1' · '_copy2'
+  {rx:/[\s_]*[xX]\s*\d{1,2}\s*$/,tag:'복제'},                      // 복제 마커 없이 배수만 붙인 것('영머니 x3')
+  // '복제30만시작' · '복제3배' — [복제] 대괄호 없이 복제 사실을 이름에 녹여 쓴 표기.
+  {rx:/[_\-\s]*복제\s*\d+\s*(만|배)\s*(시작|증액)?/,tag:'복제'},
+  // '복증60만' = 복제증액 축약형(구분자 없이 소재명에 붙는다 — '두솔복증60만').
+  {rx:/[_\-\s]*복증\s*\d*\s*만?/,tag:'복제증액'},
+  // 위 규칙들이 배수·금액을 걷어낸 뒤 꼬리에 '복제'만 남는 경우('다루복제30만시작' → '다루복제').
+  {rx:/[_\-\s]*복제\s*$/,tag:'복제'},
+  // 'ASC(2)' — 배수(x2) 대신 괄호 번호로 2차 세트를 표기한 것.
+  {rx:/[(（]\s*\d{1,2}\s*[)）]\s*$/,tag:'복제'},
+  // '첫광고-1' — 하이픈+번호로 붙인 복제(글로벌 태국 세트에서 쓴다).
+  //   앞이 숫자면 걷지 않는다 — '260503-02'는 날짜 뒤 일련번호라 걷으면 키가 통째로 사라진다.
+  {rx:/(?<![0-9])[\s_]*[-–]\s*\d{1,2}\s*$/,tag:'복제'},
+  {rx:/[_\-\s]+재업로드$/,tag:'재업로드'},
 ];
 // 변형 마커는 이름 '꼬리'에 구분자와 함께 붙은 것만 인정한다.
 //   (원본 소재명에 우연히 섞인 단어의 오분류 방지 — 예 '자체UGC파트너십실험'의 '실험')
 //   ※ 단어가 고유해 오분류 위험이 없는 마커는 아래 DV_VAR_ANY 에 두고 위치와 무관하게 걷어낸다.
 const DV_VAR=[
-  {rx:/[_\-\s]+troas(실험)?$/i,tag:'tROAS'},
+  // tROAS 는 배수·목표값 표기가 섞여 붙는다: '_tROAS' · '_tROASx2' · '_tROAS(2)' · '_ROAS(1.5)'
+  {rx:/[_\-\s]+troas\s*(실험)?\s*([(（]\s*[\d.]+\s*[)）]|[xX]\s*\d+|\d+)?$/i,tag:'tROAS'},
+  {rx:/[_\-\s]+t?roas\s*[(（]\s*[\d.]+\s*[)）]$/i,tag:'tROAS'},
   {rx:/[_\-\s]+구매당(비용)?(변경|전환)?$/,tag:'구매당비용'},
   {rx:/[_\-\s]+결과당비용(전환|변경|목표)?$/,tag:'결과당비용'},
-  {rx:/[_\-\s]+(기존)?구매자\s*제외(실험)?$/,tag:'구매자제외'},
+  //   '- 전체 구매자 제외' · '_ 기존 구매자 제외' 처럼 수식어와 공백이 섞여 들어온다.
+  //   수식어(기존·전체)까지 함께 걷어내야 키에 찌꺼기가 안 남아 원본과 같은 가족이 된다.
+  //   '- 전체 구매자'처럼 '제외'를 빠뜨린 표기도 같은 실험이라 함께 잡는다.
+  {rx:/[_\-\s]+((기존|전체)\s*구매자(\s*(제외|타[겟깃]팅?))?|구매자\s*(제외|타[겟깃]팅?))(실험)?$/,tag:'구매자제외'},
   {rx:/[_\-\s]+(테스트|test)$/i,tag:'테스트'},
+  // tCPA(구매당비용 목표) = 원본과 같은 소재·타깃에 입찰전략만 바꾼 변형 → 원본 밑 자녀로 묶는다.
+  {rx:/[_\-\s]+t\s*cpa$/i,tag:'tCPA'},
+  // 성별타겟 = 원본에서 타깃 성별만 좁힌 변형(남성제외·남성타겟 등 표기가 섞여 있다).
+  {rx:/[_\-\s]+(남성|여성|남자|여자)\s*(제외|타[겟깃](팅)?|타게팅)$/,tag:'성별타겟'},
+  // 기여증대 = 어트리뷰션(기여) 설정만 바꾼 변형.
+  {rx:/[_\-\s]+기여\s*(증대|증분)$/,tag:'기여증대'},
+  // 타깃변경 = 소재는 그대로 두고 대상 오디언스만 바꾼 변형.
+  //   '무당타겟/피안제외' · '무당리타겟/무녀제외' 처럼 타깃+제외가 / 로 이어 붙는 표기가 많고,
+  //   '유사타겟6' 처럼 뒤에 번호가, '유사타겟실험'·'리타겟팅' 처럼 꼬리가 더 붙기도 한다.
+  //   ★ 타깃 앞 토큰에 괄호를 넣지 않는다 — 넣으면 '성향(리타겟팅)' 에서 소재명 '성향'까지 먹어
+  //     원본과 다른 가족이 된다(2026-09-01 수정).
+  //   ※ '남성제외'는 위 성별타겟이 먼저 잡는다(규칙 순서).
+  {rx:/[_\-\s]+[가-힣A-Za-z0-9]{1,14}(리)?타[겟깃][\/／][가-힣A-Za-z0-9()]{1,14}제외$/,tag:'타깃변경'},
+  {rx:/[_\-\s(（]+[가-힣A-Za-z0-9]{1,14}(리)?타[겟깃](팅)?(실험)?\d*[)）]*$/,tag:'타깃변경'},
+  //   '리타게팅'(겟/깃 대신 '게')·'(리타겟)' 처럼 앞 토큰 없이 홀로 붙는 표기.
+  {rx:/[_\-\s(（]+(리)?타(?:[겟깃]팅?|게팅)[)）]*$/,tag:'타깃변경'},
+  {rx:/[_\-\s]+[가-힣A-Za-z0-9]{1,14}타[겟깃]\s*[(（][^)）]{0,20}[)）]$/,tag:'타깃변경'},   // '신규타깃(전체구매자제외)'
+  {rx:/[_\-\s]+asc\s*해제$/i,tag:'ASC해제'},
+  // ── 아래는 2026-09-02 전수조사에서 나온 표기들(같은 소재를 설정만 바꿔 다시 돌린 세트) ──
+  // 위닝 재출격 = 성과 좋았던 세트를 그대로 다시 켠 것 ('_찐위닝' · 'ASC(위닝)').
+  //   ※ '위닝ASC' · '위닝베리' 처럼 소재명 안에 들어간 '위닝'은 꼬리가 아니라 안 걷힌다.
+  {rx:/[_\-\s(（]+(찐)?위닝[)）]*$/,tag:'위닝'},
+  // 부계정 = 같은 소재를 다른 광고계정에서 돌린 것('_부계' · '_v1_부계정'). 본계정은 아래 규칙.
+  {rx:/[_\-\s]+(v\s*\d+[_\-\s]*)?부계(정)?$/i,tag:'부계정'},
+  // 최적화 이벤트를 '구매전환'/'tPurchase'로 바꾼 변형.
+  {rx:/[_\-\s(（]+구매\s*전환[)）]*$/,tag:'구매전환'},
+  {rx:/[_\-\s]+t\s*purchase\s*\d*$/i,tag:'PurchaseAll'},
+  // 시간대(노출 스케줄)만 바꾼 변형 — '오전시간제외테스트' · '(3시간만)' · '야간만' · '모든시간' · '주말'.
+  {rx:/[_\-\s(（\[]*((오전|오후|야간|주간|심야|아침|저녁)\s*시간\s*제외(테스트)?|\d+\s*시간\s*만|모든\s*시간|(야간|주간|심야|주말|평일)\s*만?)[)）\]]*$/,tag:'시간대'},
+  // 실험용 캠페인으로 옮겨 돌린 것('_실험캠페인').
+  {rx:/[_\-\s]+실험\s*캠페인$/,tag:'실험캠페인'},
+  // 지표 하나를 보려고 붙인 실험 꼬리 — 후킹/CPM/CTR/CVR 실험.
+  {rx:/[_\-\s(（]+(후킹|후크|hook|cpm|ctr|cvr|cpa)\s*실험[)）]*$/i,tag:'실험'},
+  // 연령·성별 타깃을 좁힌 변형('_연령대/성별제한').
+  {rx:/[_\-\s(（]+(연령대?|나이)?\s*[\/／·,]?\s*성별\s*(제한|한정)[)）]*$/,tag:'성별타겟'},
+  // 랜딩페이지 A/B — '- landing B' · '_랜딩B'.
+  {rx:/[_\-\s]+(landing|랜딩)\s*[a-zA-Z]$/i,tag:'랜딩AB'},
+  // 소재 버전 표기('(음원 버젼)').
+  {rx:/[_\-\s(（]+[가-힣A-Za-z0-9]{0,6}\s*(버젼|버전|version)\s*\d*[)）]*$/i,tag:'버전'},
+  // 세트를 쪼갠 것('포기분리' · '캐릭터강조분리') · 단독으로 뺀 것('단독세트' · '단세트').
+  {rx:/[_\-\s]*(세트)?\s*분리$/,tag:'세트분리'},
+  {rx:/[_\-\s]*(단독|단일|단)\s*세트$/,tag:'단독세트'},
+  // 랜딩 주소·API 등을 고쳐 다시 올린 것('_제품주소수정' · '_솔로API수정본').
+  {rx:/[_\-\s]+[가-힣A-Za-z]{0,10}\s*수정(본)?$/,tag:'수정'},
+  // 유사타깃 비율 표기(밴스드 '_lal6%').
+  {rx:/[_\-\s]+lal\s*\d{1,2}\s*%?$/i,tag:'유사타깃'},
+  // '일예산 40만원' — 예산만 적어 둔 같은 세트(아래 '예산증액'은 '원' 표기를 안 먹어서 따로 둔다).
+  {rx:/[_\-\s(（\[]*(일)?\s*예산\s*\d+\s*만\s*원?[)）\]]*$/,tag:'예산'},
+  // PurchaseAll(전체구매 최적화) = 원본 세트의 최적화 이벤트만 바꾼 변형 → 원본 밑 자녀로 묶는다.
+  //   표기가 섞여 있다: '_PurchaseAll' · '_purchaseall' · '(purchase all 실험)' · '_전체구매'.
+  //   ※ 한글 표기는 꼬리 고정 — '신규타깃(전체구매자제외)' 같은 구매자제외 세트를 잘못 걷어내지 않게.
+  {rx:/[_\-\s]*[(（]?\s*purchase\s*all\s*(실험)?\s*[)）]?\s*([xX]\s*\d+)?$/i,tag:'PurchaseAll'},
+  {rx:/[_\-\s]+(전체구매|구매전체)(실험)?\s*([xX]\s*\d+)?$/,tag:'PurchaseAll'},
+  // 전세계한국어 계열은 꼬리로 붙는 경우가 대부분이라 여기서 먼저 잡는다(아래 '한국어' 단독 규칙보다 앞).
+  //   '_전세계한국어_찐한국제외' 처럼 사이에 수식어가 끼는 표기가 있어 [가-힣]{0,3} 을 둔다.
+  {rx:/[_\-\s]*전세계한국어[_\-\s(（]*[가-힣]{0,3}한국\s*제외[)）]*$/,tag:'전세계한국어(한국제외)'},
+  {rx:/[_\-\s]*전세계한국어\s*([xX]\s*\d+)?$/,tag:'전세계한국어'},
+  {rx:/[_\-\s]+전세계$/,tag:'전세계'},          // 글로벌 세트의 '전세계' 확장 변형
+  {rx:/[_\-\s]+한국어$/,tag:'한국어'},          // '무녀_ASC_한국어' — 언어 타깃만 바꾼 변형
+  // 예산증액 = 같은 소재를 예산만 키워 다시 돌린 것('_150만' · '_80만시작' · '복증60만').
+  //   '일예산 40만원' 같은 '원' 표기는 원본 이름이라 제외한다(원 뒤에는 매칭하지 않는다).
+  {rx:/[_\-\s(（\[]*\d+\s*만\s*(시작|증액)?[)）\]]*$/,tag:'예산증액'},
+  {rx:/[_\-\s]+본계(정)?$/,tag:'본계정'},
 ];
 // 꼬리가 아니어도(뒤에 다른 토큰이 더 붙어도) 걷어내는 변형 마커.
 //   단어 자체가 충분히 고유해 오분류 위험이 없고, 실제 세트명에서 마커 뒤에 배수(x2)나
 //   또 다른 꼬리(_Tpurchase 등)가 붙는 경우가 많아 꼬리 고정이면 계보가 갈라진다.
 //   예 '무당_260818_aiUGC이어폰_전세계한국어_Tpurchase' · '무당_260507_aiUGC정확도_피드노출'
+//   ★ 배수(x2/x4)를 마커와 함께 걷어낸다 — 안 그러면 '…260531_전세계중국어x2' 가
+//     '…260531x2' 로 남아 날짜 토큰이 깨지고 원본과 다른 가족이 된다(2026-09-01 수정).
 const DV_VAR_ANY=[
-  {rx:/[_\-\s]*전세계중국어/,tag:'전세계중국어'},
+  {rx:/[_\-\s]*전세계중국어\s*([xX]\s*\d+)?/,tag:'전세계중국어'},
+  // 결제이탈 리타겟 = 이름 중간에 끼워 넣는 경우가 많다('…_결제이탈리타겟_희상').
+  {rx:/[_\-\s]*결제이탈\s*리타[겟깃](팅)?/,tag:'타깃변경'},
   // 전세계한국어 = 국내 위닝 세트를 해외 한국어 인벤토리로 넓힌 변형(2026-07-21~). 한국제외는 성과가
   // 크게 달라서(CPM은 더 싸지만 CPA 악화) 태그를 따로 둔다 — 같은 계보 안에서 A/B로 비교되게.
-  {rx:/[_\-\s]*전세계한국어[_\-\s(（]*한국\s*제외[)）]*/,tag:'전세계한국어(한국제외)'},
-  {rx:/[_\-\s]*전세계한국어/,tag:'전세계한국어'},
+  {rx:/[_\-\s]*전세계한국어[_\-\s(（]*[가-힣]{0,3}한국\s*제외[)）]*/,tag:'전세계한국어(한국제외)'},
+  {rx:/[_\-\s]*전세계한국어\s*([xX]\s*\d+)?/,tag:'전세계한국어'},
   // 피드 = 노출위치를 피드로 좁힌 변형(피드노출·피드전용·피드배치 등 표기가 섞여 있다).
   {rx:/[_\-\s]*피드(노출|전용|배치|만)?/,tag:'피드'},
+  // 대괄호 마커는 이름 '앞'에 붙는다 — '[인스타 제외]피안싸다구_본걸' · '[야간]aiUGC이어폰'.
+  //   꼬리 고정이면 원본과 다른 가족이 되므로 위치 무관으로 걷어낸다.
+  {rx:/[\[［]\s*(인스타(그램)?|페북|페이스북|스토리|릴스|피드)\s*(제외|전용|타[겟깃]팅?|only)?\s*[\]］]/i,tag:'노출위치'},
+  {rx:/[\[［]\s*(야간|주간|심야|오전|오후|주말|평일)\s*[\]］]/,tag:'시간대'},
 ];
 const DV_EMOJI=/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu;
-const DV_DATE=/^\d{4}(\d{2})?(\d{2})?$/;   // 0421 · 260418 · 19930920
+// 날짜 토큰 — 0421 · 260418 · 19930920. 자릿수가 틀린 오타(04011 · 2606011 · 26051)도 실제로 많아
+//   4~8자리 숫자는 전부 날짜로 보고 버린다(그래야 오타 하나로 계보가 갈라지지 않는다).
+const DV_DATE=/^\d{4,8}$/;
+// 메타 기본 이름(이름을 안 바꾼 세트) — 상품이 달라도 이름이 같아 한 가족으로 잘못 묶인다 → 계보에서 제외.
+const DV_DEFAULT=/^(새\s*(판매|트래픽|참여|앱|전환)?\s*광고\s*세트|new\s+.*ad\s*set)\s*\d*$/i;
 
 function dvStripAll(s,rx){let p;do{p=s;s=s.replace(rx,'')}while(s!==p);return s}
 
 // 세트 이름 → {kind:'orig'|'dup'|'var', tags:[], key, label}
+// ★ 이름은 NFC 로 정규화한 뒤 판정한다 — 메타에서 내려오는 한글이 NFD(자모 분리)인 경우가 있어
+//   그대로 두면 key 정규식([^0-9a-z가-힣%] 제거)이 그 한글을 통째로 지운다.
+//   실제로 '무당_연애외모소구(face)_260415_수연' 의 키가 'face' 만 남아 다른 상품과 섞였다(2026-09-01 수정).
 function dvClassify(name){
-  const s=String(name||'').trim();
+  const s=String(name||'').normalize('NFC').trim();
   const tags=[];let kind='orig';
+  if(DV_DEFAULT.test(s))return {kind:'orig',tags:[],key:'',label:s};
+  // 꼬리 날짜 토큰 — 마커 뒤에 날짜가 한 번 더 붙는 표기가 많다('_copy_260621' · '_tROAS160_260513').
+  //   날짜는 어차피 키에서 버리므로 먼저 벗겨야 그 앞의 꼬리 마커가 드러난다(2026-09-02 추가).
+  const DV_TAILDATE=/[_\-\s]+\d{4,8}\s*$/;
   const stripVar=w=>{
-    for(let i=0;i<6;i++){
+    for(let i=0;i<12;i++){
       let hit=null;
       for(const v of DV_VAR){if(v.rx.test(w)){w=w.replace(v.rx,'');hit=v.tag;break}}
       // 꼬리 마커가 없으면 '위치 무관' 마커(전세계한국어·피드 등)를 걷어낸다.
       if(!hit)for(const v of DV_VAR_ANY){if(v.rx.test(w)){w=w.replace(v.rx,'');hit=v.tag;break}}
-      if(!hit)break;
+      if(!hit){
+        // 마커가 안 보이면 꼬리 날짜를 한 칸 벗기고 다시 본다(태그는 안 붙인다 — 날짜는 변형이 아니다).
+        if(DV_TAILDATE.test(w)){w=w.replace(DV_TAILDATE,'');continue}
+        break;
+      }
       if(tags.indexOf(hit)<0)tags.push(hit);
       kind='var';
     }
@@ -4743,9 +4876,10 @@ function dvClassify(name){
     if(d.rx.test(work)){dup=true;if(tags.indexOf(d.tag)<0)tags.push(d.tag);work=dvStripAll(work,d.rx)}
   }
   if(dup){
-    // 배수 표기(x2/x4/ x8)는 복제 마커가 있을 때만 제거 — 일반 이름의 'x2' 오제거 방지
-    work=work.replace(/\s*[xX]\s*\d+/g,'');
-    work=dvStripAll(dvStripAll(work,DV_DUP[0].rx),DV_DUP[1].rx);
+    // 배수 표기(x2/x4)는 복제 마커가 있을 때만 제거. 1~2자리 + 토큰 끝에서만 —
+    //   'ex0808'(인플루언서 핸들) 같은 이름의 x를 먹지 않게 한다.
+    work=dvStripAll(work,/\s*[xX]\s*\d{1,2}(?=[_\s]|$)/);
+    for(const d of DV_DUP)work=dvStripAll(work,d.rx);
     work=stripVar(work);   // xN 제거로 꼬리에 드러난 변형 마커 재수거(예 '[복제]…_전세계중국어x4')
   }
   // 복제+변형 동시 보유 → '복제'로 센다(증액 목적의 복제가 1차 성격, 변형은 태그로 표시)
@@ -5262,7 +5396,8 @@ function _chrevChannels(){
   GOOGLE_ADS.forEach(r=>{byDateGG[r.date]={s:(r.cost_vat||0),r:(r.revenue||0)}});
   // 디멘드젠(타이트) = 국내탭 '🟢 구글 디멘드젠' 종합과 동일 소스(google_demandgen_campaign_daily: 지출=Ads API·매출=MP귀속).
   //   구 소스 GOOGLE_DG(google_demandgen_daily, 시트 지출·구글전환값)는 매출 기준이 달라 폐기.
-  GGDG_TIGHT.forEach(r=>{if(!byDateGGDG[r.date])byDateGGDG[r.date]={s:0,r:0};byDateGGDG[r.date].s+=(+r.spend||0);byDateGGDG[r.date].r+=(+r.revenue||0)});
+  //   ★ 국내 행이므로 대만 캠페인([Tight]DG_TT_TW_*)은 뺀다(2026-09-05).
+  (GGDG_TIGHT||[]).forEach(r=>{if(_dgIsTW(r.campaign_name))return;if(!byDateGGDG[r.date])byDateGGDG[r.date]={s:0,r:0};byDateGGDG[r.date].s+=(+r.spend||0);byDateGGDG[r.date].r+=(+r.revenue||0)});
   // 틱톡(국내) = 🎵 틱톡 탭과 동일 소스(구글시트 '틱톡 캠페인 추이차트' → TIKTOK, 미로드 시 스냅샷).
   //   지출=틱톡 광고관리자 실지출, 매출=MP 결제완료(utm_id 귀속 — 광고그룹ID/캠페인ID 혼재). 국내 집행만 있어 국내 채널로 둔다.
   const byDateTT={};
@@ -5276,7 +5411,7 @@ function _chrevChannels(){
   const _gkey=r=>{
     const c=(r.country==='TW')?'TW':'KR', t=r.channel_type||'';
     if(t==='SEARCH')return c+'_SEARCH';
-    if(t==='DEMAND_GEN')return c==='KR'?('KR_DG_'+(r.owner==='tight'?'T':'V')):'TW_DG';
+    if(t==='DEMAND_GEN')return c+'_DG_'+(r.owner==='tight'?'T':'V');   // 대만도 [Tight](우리)/[Vanced](밴스드) 분리(2026-09-05)
     if(t==='PERFORMANCE_MAX'&&c==='KR')return 'KR_PMAX';
     return c+'_ETC';   // GDN(DISPLAY)·VIDEO·대만 PMAX 등 — 지출이 사라지지 않게 '기타'로 보존
   };
@@ -5288,7 +5423,10 @@ function _chrevChannels(){
   // KR_ETC(GDN·동영상 등 미분류)는 매출탭에서 제외 — 행·종합 양쪽에서 함께 빼야 채널 합 = 종합이 맞는다.
   const G_KR_ALL=['KR_SEARCH','KR_DG_T','KR_DG_V','KR_PMAX'];
   const G_KR_VAN=['KR_SEARCH','KR_DG_V','KR_PMAX'];   // 국내 구글 중 밴스드 운영분
-  const G_TW_ALL=['TW_SEARCH','TW_DG','TW_ETC'];               // 대만 구글은 전부 밴스드 운영
+  // 대만 구글 — [Tight]DG_TT_TW_*(우리 글로벌 디멘드젠)만 우리 운영, 나머지는 전부 밴스드(2026-09-05).
+  const G_TW_VAN=['TW_SEARCH','TW_DG_V','TW_ETC'];   // 대만 구글 중 밴스드 운영분
+  const G_TW_US =['TW_DG_T'];                        // 대만 구글 중 우리(타이트) 운영분 = 글로벌 디멘드젠
+  const G_TW_ALL=[...G_TW_VAN,...G_TW_US];
   // CRM(알림톡): alimtalk_daily_campaign 을 일자별로 합산. 매출=Σrev(귀속), 지출=Σcost(발송비용=sent×13원).
   const byDateCRM={};
   ALIMTALK.forEach(r=>{if(!byDateCRM[r.date])byDateCRM[r.date]={s:0,r:0};byDateCRM[r.date].s+=(+r.cost||0);byDateCRM[r.date].r+=(+r.rev||0)});
@@ -5318,7 +5456,9 @@ function _chrevChannels(){
   const gKR=d=>gcOK?gSum(d,G_KR_ALL):{s:((byDateGG[d]||{s:0}).s||0)+((byDateGGDG[d]||{s:0}).s||0),
                                        r:((byDateGG[d]||{r:0}).r||0)+((byDateGGDG[d]||{r:0}).r||0)};
   const gKRvan=d=>gcOK?gSum(d,G_KR_VAN):{s:((byDateGG[d]||{s:0}).s||0),r:((byDateGG[d]||{r:0}).r||0)};
-  const gTW=d=>gcOK?gSum(d,G_TW_ALL):{s:0,r:0};
+  const gTW   =d=>gcOK?gSum(d,G_TW_ALL):{s:0,r:0};
+  const gTWvan=d=>gcOK?gSum(d,G_TW_VAN):{s:0,r:0};   // 밴스드 차감 대상
+  const gTWus =d=>gcOK?gSum(d,G_TW_US ):{s:0,r:0};   // 우리 몫 — 밴스드 제외 모드에서도 남는다
   const vanDomS=d=>((byDateVN[d]||{s:0}).s||0)+gKRvan(d).s;
   const vanDomR=d=>((byDateVN[d]||{r:0}).r||0)+gKRvan(d).r;
   const domRevAll=d=>(HIST_REVENUE[d]!=null?HIST_REVENUE[d]:(byDateTOSS[d]||0));
@@ -5327,10 +5467,10 @@ function _chrevChannels(){
   const domSpend=d=>incVan?domSpendAll(d):domSpendAll(d)-vanDomS(d);
   const glRevAll=d=>(byDateStripe[d]||0);  // 글로벌 종합 매출 = Stripe revenue_usd × usd_krw_rate (KRW, 실 결제액)
   // 글로벌 밴스드 귀속매출 = 대만 밴스드(메타) + 대만 구글 — 밴스드 제외 시 종합·잔여행에서 함께 차감
-  const glVanR=d=>((byDateVNTW[d]||{r:0}).r||0)+gTW(d).r;
+  const glVanR=d=>((byDateVNTW[d]||{r:0}).r||0)+gTWvan(d).r;
   const glRev=d=>incVan?glRevAll(d):glRevAll(d)-glVanR(d);
   const glSpendAll=d=>{const vt=byDateVNTW[d]||{s:0},gl=byDateGL[d]||{s:0};return vt.s+gl.s+gTW(d).s};  // 대만밴스드 + 글로벌(타이트) + 대만구글. 서로 중복 없음
-  const glSpend=d=>incVan?glSpendAll(d):(byDateGL[d]||{s:0}).s;
+  const glSpend=d=>incVan?glSpendAll(d):((byDateGL[d]||{s:0}).s+gTWus(d).s);   // 밴스드 제외 = 글로벌 메타 + 대만 디멘드젠(타이트)
   // 권역별 종합 행. 전체 종합은 항상 맨 위 고정, 국내/글로벌 종합은 해당 권역 탭에서만 표시
   const sumDom={name:'국내 종합', sum:true, get:d=>({s:domSpend(d),r:domRev(d)})};
   const sumGl ={name:'글로벌 종합',sum:true, get:d=>({s:glSpend(d),r:glRev(d)})};
@@ -5350,8 +5490,9 @@ function _chrevChannels(){
     : [{name:'밴스드 구글',get:d=>byDateGG[d]||{s:0,r:0},van:true},
        {name:'디멘드젠(타이트)',get:d=>byDateGGDG[d]||{s:0,r:0}}];
   const gRowsTW=gcOK
-    ? [['구글 대만 검색광고','TW_SEARCH'],['구글 대만 디멘드젠','TW_DG'],['구글 대만 기타','TW_ETC']]
-        .filter(x=>gHas(x[1])).map(x=>({name:x[0],get:gGet(x[1]),van:true}))
+    ? [['구글 대만 검색광고','TW_SEARCH',true],['구글 대만 디멘드젠(밴스드)','TW_DG_V',true],
+       ['구글 대만 디멘드젠(타이트)','TW_DG_T',false],['구글 대만 기타','TW_ETC',true]]
+        .filter(x=>gHas(x[1])).map(x=>({name:x[0],get:gGet(x[1]),van:x[2]}))
     : [];
   // 권역별 상세 채널
   const domChannels=[
@@ -5389,12 +5530,13 @@ function _chrevChannels(){
   //   매출=Stripe 실결제−밴스드귀속, 지출=글로벌 전체지출−밴스드지출(=GL_AD) → 상세행 합=글로벌 종합.
   //   ★ 계산은 항상 '전체(All)' helper 기준 — 밴스드 제외 모드에서 glSpend/glRev 를 쓰면 이중 차감된다.
   //   ★ 글로벌 CRM(glCrmR)도 Stripe 안에 들어있는 귀속매출이라 잔여에서 함께 뺀다.
-  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s-gTW(d).s, r:glRevAll(d)-glVanR(d)-glCrmR(d)};}};
+  //   ★ '구글 대만 디멘드젠(타이트)'(gTWus)도 별도 채널 행이 됐으니 잔여에서 그 귀속매출까지 빼야 이중계상이 없다.
+  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s-gTW(d).s, r:glRevAll(d)-glVanR(d)-glCrmR(d)-gTWus(d).r};}};
   // 글로벌 CRM — 밴스드가 아니라 우리(gl_us) 운영이라 밴스드 제외 모드에서도 그대로 남는다.
   const glCrmRow={name:'글로벌 CRM',revOnly:true,get:d=>({s:0,r:glCrmR(d)})};
   const glChannels=incVan
     ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0},van:true},...gRowsTW,glCrmRow,glExcRow]   // 대만밴스드=VN_TW_ACC 단독(KRW)
-    : [glCrmRow,glExcRow];
+    : [...gRowsTW.filter(c=>!c.van),glCrmRow,glExcRow];   // 밴스드 제외에도 '구글 대만 디멘드젠(타이트)'는 우리 채널이라 남는다
   // 행 그룹 태그 — 나열 순서를 권역(국내→글로벌) → 소속(우리→밴스드) 로 묶기 위한 키.
   //   실제 정렬/구분선은 _chrevSortByRev 가 처리(그룹 안에서만 매출 내림차순).
   const IS_VAN=c=>c.van===true||c.name==='밴스드 국내'||c.name==='밴스드 구글'||c.name==='대만 밴스드';
@@ -5561,7 +5703,7 @@ function _chrevChart(channels,periods){
   const labels=pers.map(p=>p.label);
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 디멘드젠(타이트)':'#fbbf24','구글 대만 디멘드젠(밴스드)':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -5604,7 +5746,7 @@ function renderChannelDonut(){
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 디멘드젠(타이트)':'#fbbf24','구글 대만 디멘드젠(밴스드)':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)
@@ -6116,11 +6258,26 @@ function renderGgdgTight(){
     tbl.innerHTML='<tr><td style="padding:24px;color:#888">데이터 없음 — <code>google_demandgen_campaign_daily</code> 테이블이 비어있거나 파이프라인(google-dg-tight) 실행 전입니다.</td></tr>';
     return;
   }
+  // 권역 분리(2026-09-05) — 국내 모드=[Tight]DG_TT_*, 글로벌 모드=[Tight]DG_TT_TW_*.
+  //   지출·예산은 KRW 구글 계정 기준이라 글로벌 모드에서도 ₩ 표기 그대로 둔다(예산 적용도 ₩).
+  const isGlDG=(MODE==='gl');
+  const SCOPE_LBL=isGlDG?'[Tight] 글로벌·대만':'[Tight] 국내';
+  // 글로벌 모드에서 국가필터가 대만·전체가 아니면 대만 디멘드젠은 해당 없음
+  if(isGlDG&&COUNTRY!=='ALL'&&COUNTRY!=='TW'){
+    tbl.innerHTML='<tr><td style="padding:24px;color:#888">🟢 [Tight] 글로벌 디멘드젠은 <b>대만</b>에만 집행됩니다 — 국가 필터를 전체 또는 대만으로 바꾸세요.</td></tr>';
+    return;
+  }
+  const SRC=_dgScopeRows();
+  if(!SRC.length){
+    tbl.innerHTML='<tr><td style="padding:24px;color:#888">'+SCOPE_LBL+' 디멘드젠 데이터 없음'
+      +(isGlDG?' — 대만 캠페인([Tight]DG_TT_TW_*)이 아직 집행되지 않았거나 파이프라인 적재 전입니다.':'')+'</td></tr>';
+    return;
+  }
   const days=parseInt(document.getElementById('ggdgkrDays').value)||30;
   const view=document.getElementById('ggdgkrView')?.value||'day';
   const kw=kwParse(document.getElementById('ggdgkrFilter')?.value);
   // 최신 날짜 왼쪽: 내림차순 정렬 후 days 만큼
-  const allDates=[...new Set(GGDG_TIGHT.map(r=>r.date))].sort().reverse().slice(0,days);
+  const allDates=[...new Set(SRC.map(r=>r.date))].sort().reverse().slice(0,days);
   if(!allDates.length){tbl.innerHTML='<tr><td>데이터 없음</td></tr>';return}
   const dateSet=new Set(allDates);
   // 첫 컬럼 = 최근 7일 일평균 (2026-08-08: 기존 '기간합계'에서 변경).
@@ -6134,10 +6291,10 @@ function renderGgdgTight(){
     //   '예산이 들어있는 가장 최근 행'을 집는다 — 표시 기간(dateSet) 밖도 허용해야
     //   기간을 14일로 좁혔을 때 값이 사라지지 않는다.
   const GBUD={};
-  GGDG_TIGHT.forEach(r=>{const b=+r.budget||0;if(!(b>0))return;const id=r.ad_group_id;const p=GBUD[id];if(!p||r.date>p.d)GBUD[id]={d:r.date,b:b}});
+  SRC.forEach(r=>{const b=+r.budget||0;if(!(b>0))return;const id=r.ad_group_id;const p=GBUD[id];if(!p||r.date>p.d)GBUD[id]={d:r.date,b:b}});
   // 그룹화 — 행=세트(ad_group_id), 상품(prod)은 표시용 묶음 키. d[date]={s,r,c}
   const byC={};
-  GGDG_TIGHT.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.ad_group_id;if(!byC[id])byC[id]={id,camp:r.campaign_name||'',name:r.ad_group_name||id,prod:_dgProduct(r.ad_group_name||r.campaign_name),d:{}};/* 이름은 ★선택 기간 내 최신 날짜 행★ 기준 (2026-08-12). 구글에서 캠페인/광고그룹 이름을 바꾸면
+  SRC.forEach(r=>{if(!dateSet.has(r.date))return;const id=r.ad_group_id;if(!byC[id])byC[id]={id,camp:r.campaign_name||'',name:r.ad_group_name||id,prod:_dgProduct(r.ad_group_name||r.campaign_name),d:{}};/* 이름은 ★선택 기간 내 최신 날짜 행★ 기준 (2026-08-12). 구글에서 캠페인/광고그룹 이름을 바꾸면
    파이프라인이 재적재 창 안쪽 날짜만 새 이름으로 갱신해 한 id 에 옛/새 이름이 공존한다.
    무조건 덮어쓰면 date.desc 로드 순서상 '가장 오래된 이름'이 남아 새 이름으로는 표·검색에서
    사라진다(예: 23948103750 이 0618_구미호_2nd → 0811_임신 개명 후 구미호로만 보이던 건). */
@@ -6150,6 +6307,12 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
     if(view==='week'){const s=new Date(k),e=new Date(k);e.setDate(e.getDate()+6);return(s.getMonth()+1)+'/'+s.getDate()+'~'+(e.getMonth()+1)+'/'+e.getDate()}
     return DK(k)+'('+WD(k)+')'};
   const setCol=(o,k)=>{let s=0,r=0,c=0;colOf[k].forEach(d=>{const x=o.d[d];if(x){s+=x.s;r+=x.r;c+=x.c}});return{s,r,c}};
+  // ── 셀 클릭 → 시간별 ROAS 화면(hrOpenGgdg). 추이차트와 같은 표식(hr-cell + data-hd)을 쓴다.
+  //    주/월 보기는 버킷 하나가 여러 날이라 열쇠를 'YYYY-MM-DD~YYYY-MM-DD' 로 쓴다.
+  //    구간의 양 끝은 **화면에 실제로 있는 날짜**(colOf) — 달력상의 주/월과 다를 수 있다.
+  const colRange={};Object.keys(colOf).forEach(k=>{const ds=colOf[k].slice().sort();colRange[k]={f:ds[0],t:ds[ds.length-1]}});
+  const rkG=k=>{const r=colRange[k];return r?(r.f===r.t?r.f:r.f+'~'+r.t):''};
+  const hrA=k=>{const v=rkG(k);return v?(' data-hd="'+v+'"'+(view==='day'?'':' data-hu="'+view+'"')):''};
   // 소재 펼침(toggleGgdgCreatives)이 세트 행과 똑같은 컬럼을 그리도록 현재 컬럼 구성을 보관
   _GGDG_COLCFG={cols,colOf,view,yDay,allDates,avgDates,AVGN};
   // 기간합계(_s/_r/_c, 정렬·소계용) + 최근 7일 합계(_a*, 첫 컬럼 표시용) + 검색필터
@@ -6180,8 +6343,11 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
   // 종합행
   const totCol={};cols.forEach(k=>{let s=0,r=0,c=0;list.forEach(o=>{const x=setCol(o,k);s+=x.s;r+=x.r;c+=x.c});totCol[k]={s,r,c}});
   const gS=list.reduce((a,o)=>a+o._as,0),gR=list.reduce((a,o)=>a+o._ar,0),gC=list.reduce((a,o)=>a+o._ac,0),gRoas=gS>0?gR/gS*100:0;
-  h+='<tr class="sr"><td colspan="4" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ([Tight] '+list.length+'세트'+(kw?' · 검색결과':'')+')</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(gS,gR,gC)+'</td>';
-  cols.forEach(k=>{const x=totCol[k];const yd=(view==='day'&&k===yDay)?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+'">'+cell(x.s,x.r,x.c)+'</td>'});
+  // 종합 행도 셀을 누르면 '이 목록 전체의 시간별'이 열린다 — 묶음(광고그룹 목록+버킷별 값)을 담아 둔다.
+  const hrDailyG=src=>{const o={};cols.forEach(k=>{const t=src[k];if(t)o[rkG(k)]={s:t.s,r:t.r}});return o};
+  hrPutGroup('ggdgkrTbl','all','종합 ('+SCOPE_LBL+')',list,hrDailyG(totCol),'gd');
+  h+='<tr class="sr" data-hrg="ggdgkrTbl|all"><td colspan="4" style="background:#e8e8e8;font-weight:700;text-align:left">종합 ('+SCOPE_LBL+' '+list.length+'세트'+(kw?' · 검색결과':'')+')</td><td class="mc '+(gS>0?RC(gRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(gS,gR,gC)+'</td>';
+  cols.forEach(k=>{const x=totCol[k];const yd=(view==='day'&&k===yDay)?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const hc=!!(x.s||x.r||x.c);h+='<td class="mc '+(x.s>0?RC(roas):'')+yd+(hc?' hr-cell':'')+'"'+(hc?hrA(k):'')+'>'+cell(x.s,x.r,x.c)+'</td>'});
   h+='</tr>';
   // 증감액 테두리 — '⚡ 구글에 예산 적용'으로 실제 반영된 날짜 셀에 색 링(메타 추이차트와 동일한 표현).
   //   주/월 보기에선 그 기간에 적용이 하나라도 있으면 링을 그리고, 여러 건이면 최신 건의 색을 쓴다.
@@ -6197,9 +6363,9 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
     const cells=cols.map(k=>{const x=setCol(o,k);const yd=(view==='day'&&k===yDay)?' col-yday':'';
       const cg=chgOfCol(o.id,k);
       const cb=cg?' style="box-shadow:inset 0 0 0 3px '+cg.bg+'" title="증감액 적용: '+cg.txt.replace(/"/g,'&quot;')+'"':'';
-      if(!x.s&&!x.r&&!x.c)return'<td class="'+yd+'"'+cb+'></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+'"'+cb+'>'+cell(x.s,x.r,x.c)+'</td>'}).join('');
+      if(!x.s&&!x.r&&!x.c)return'<td class="'+yd+'"'+cb+'></td>';const roas=x.s>0?x.r/x.s*100:0;return'<td class="mc '+(x.s>0?RC(roas):'')+yd+' hr-cell"'+hrA(k)+cb+'>'+cell(x.s,x.r,x.c)+'</td>'}).join('');
     // 하이라이트 — 추이차트와 동일한 색상 피커·저장소(키=세트 id)
-    const hl=hlClass(o.id);
+    const hl=hlClassGgdg(o.id);
     const ck=' clickable" data-id="'+o.id+'" onclick="showCPGgdg(\''+o.id+'\',this)"';
     // 캠페인 칸의 ▶ 캐럿 = 그 캠페인(=세트) 하위 소재 목록 펼치기/접기.
     //   '(세트미상)' 합성 행(camp_<id>)은 실제 광고가 없으므로 캐럿 없음.
@@ -6224,8 +6390,10 @@ if(r.date>=(byC[id]._nd||'')){if(r.campaign_name)byC[id].camp=r.campaign_name;if
       const paS=g.sets.reduce((a,o)=>a+o._as,0),paR=g.sets.reduce((a,o)=>a+o._ar,0),paC=g.sets.reduce((a,o)=>a+o._ac,0);
       const paRoas=paS>0?paR/paS*100:0;
       h+='<tr><td colspan="'+colSpanAll+'" class="prod-header">📦 '+p+' ('+g.sets.length+'개) 전날 '+(moneyKRW(g.sy)||'₩0')+' · 기간 ROAS '+pRoas.toFixed(0)+'%</td></tr>';
-      const pCells=cols.map(k=>{let s=0,r=0,c=0;g.sets.forEach(o=>{const x=setCol(o,k);s+=x.s;r+=x.r;c+=x.c});const yd=(view==='day'&&k===yDay)?' col-yday':'';if(!s&&!r&&!c)return'<td class="'+yd+'" style="background:#e8e8e8"></td>';const roas=s>0?r/s*100:0;return'<td class="mc '+(s>0?RC(roas):'')+yd+'" style="background:#e8e8e8">'+cell(s,r,c)+'</td>'}).join('');
-      h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8;text-align:left;font-weight:700">'+p+' 소계</td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td class="mc '+(paS>0?RC(paRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(paS,paR,paC)+'</td>'+pCells+'</tr>';
+      const pByCol={};cols.forEach(k=>{let s=0,r=0,c=0;g.sets.forEach(o=>{const x=setCol(o,k);s+=x.s;r+=x.r;c+=x.c});pByCol[k]={s,r,c}});
+      const pCells=cols.map(k=>{const t=pByCol[k];const s=t.s,r=t.r,c=t.c;const yd=(view==='day'&&k===yDay)?' col-yday':'';if(!s&&!r&&!c)return'<td class="'+yd+'" style="background:#e8e8e8"></td>';const roas=s>0?r/s*100:0;return'<td class="mc '+(s>0?RC(roas):'')+yd+' hr-cell" style="background:#e8e8e8"'+hrA(k)+'>'+cell(s,r,c)+'</td>'}).join('');
+      hrPutGroup('ggdgkrTbl','p:'+p,p+' 소계',g.sets,hrDailyG(pByCol),'gd');
+      h+='<tr class="sr" data-hrg="ggdgkrTbl|p:'+_mEsc(p)+'"><td class="fx fx0" style="background:#e8e8e8;text-align:left;font-weight:700">'+p+' 소계</td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td style="background:#e8e8e8"></td><td class="mc '+(paS>0?RC(paRoas):'')+'" style="background:#e8e8e8;font-weight:700" title="'+avgTitle+'">'+cellAvg(paS,paR,paC)+'</td>'+pCells+'</tr>';
       g.sets.forEach(o=>{h+=rowHtml(o)});
     });
   }
@@ -6364,9 +6532,12 @@ function _ttCSV(txt){
   if(cur!==''||row.length){row.push(cur);rows.push(row)}
   return rows;
 }
-function _ttNum(s){s=String(s).replace(/[,원건%+\s]/g,'');if(!s||s==='-')return null;const v=parseFloat(s);return isNaN(v)?null:v}
-// 시트 → [{date,campaign,campaign_id,budget,spend,revenue,orders}]
-//   헤더행 = '캠페인 ＼ 날짜', 날짜 컬럼 = 'MM/DD (요일)' (최신 왼쪽), 셀 = ROAS/순이익/지출/매출/판매수 5줄.
+function _ttNum(s){s=String(s).replace(/cpm/gi,'').replace(/[,원건회%+\s]/g,'');if(!s||s==='-')return null;const v=parseFloat(s);return isNaN(v)?null:v}
+// 시트 → [{date,campaign,campaign_id,budget,spend,revenue,orders,cpm,impressions}]
+//   헤더행 = '캠페인 ＼ 날짜', 날짜 컬럼 = 'MM/DD (요일)' (최신 왼쪽),
+//   셀 = ROAS/순이익/지출/매출/판매수 5줄 · 2026-09-01~ 은 매출과 판매수 사이에 'CPM 1,569' 가 끼어 6줄.
+//   노출수는 시트에 없다 → 지출/CPM×1000 으로 되돌려 둔다(impressions). 7일·소계·종합 CPM 을
+//   '지출합/노출합' 가중평균으로 내려면 노출이 필요하기 때문(CPM 끼리 평균 내면 틀린다).
 //   '전체' 행은 화면에서 다시 합산하므로 버린다(캠페인 합 = 전체 행과 일치함을 확인).
 function _ttParseSheet(txt){
   const rows=_ttCSV(txt);
@@ -6404,9 +6575,13 @@ function _ttParseSheet(txt){
       if(!c)continue;
       const p=c.split('\n').map(s=>s.trim());
       if(p.length<4)continue;
-      const spend=_ttNum(p[2]),rev=_ttNum(p[3]),ord=p.length>4?_ttNum(p[4]):null;
+      const has6=p.length>5;   // 6줄 = CPM 줄이 낀 셀(2026-09-01~) / 5줄 = 그 이전
+      const spend=_ttNum(p[2]),rev=_ttNum(p[3]);
+      const cpm=has6?_ttNum(p[4]):null;
+      const ord=has6?_ttNum(p[5]):(p.length>4?_ttNum(p[4]):null);
       if(spend==null&&rev==null)continue;
-      out.push({date:d,campaign:cname,adgroup:gname,campaign_id:cid,budget:budget,spend:Math.abs(spend||0),revenue:rev||0,orders:ord||0});
+      const sp=Math.abs(spend||0);
+      out.push({date:d,campaign:cname,adgroup:gname,campaign_id:cid,budget:budget,spend:sp,revenue:rev||0,orders:ord||0,cpm:cpm||0,impressions:cpm>0?sp/cpm*1000:0});
     }
   }
   return out.length?out:null;
@@ -6422,20 +6597,39 @@ function loadTiktok(force){
     .then(()=>{TT_LOADING=null});
   return TT_LOADING;
 }
-// 틱톡 셀 — 추이차트 MC 와 같은 배치. 클릭/노출이 없어 CVR·CPM 대신 판매수(건)를 넣는다.
-function TTC(roas,profit,spend,revenue,orders,cpa){
+// 틱톡 셀 — 클릭이 없어 CVR 자리엔 판매수(건)를 넣는다.
+// 줄 순서 = ROAS / 순이익 / 지출 / 매출 / CPM / 판매수 / 구매당비용 (2026-09-01 사용자 지정 —
+// 시트 셀과 같은 순서다. 추이차트 MC 는 CPM 이 판매수 아래라 여기만 다르다).
+// CPM 은 시트 CPM 줄에서 오므로 2026-09-01 이전 날짜와 스냅샷 폴백엔 없다 → 0 이면 줄을 안 그린다.
+function TTC(roas,profit,spend,revenue,orders,cpa,cpm){
   if(!spend&&!revenue)return'';
   const pc=profit>=0?'p':'p neg';
   let h='<div class="r">'+(spend>0?roas.toFixed(0):'')+'</div>'
     +'<div class="'+pc+'">'+money(profit)+'</div>'
     +'<div class="s">'+(spend?'-'+money(spend):'')+'</div>'
-    +'<div class="rv">'+money(revenue)+'</div>'
-    +'<div class="cv">'+(orders?orders+'건':'')+'</div>';
+    +'<div class="rv">'+money(revenue)+'</div>';
+  if(cpm)h+='<div class="cm">'+money(cpm)+'</div>';
+  h+='<div class="cv">'+(orders?orders+'건':'')+'</div>';
   if(cpa)h+='<div class="cpa">'+money(cpa)+'</div>';
   return h;
 }
-// 캠페인명 앞머리(무당_/무녀_)를 상품으로 — 추이차트의 📦 상품별 소계와 같은 모양
-function _ttProduct(name){const s=String(name||'');const i=s.indexOf('_');return (i>0?s.slice(0,i):s)||'기타'}
+// 광고그룹명에서 상품을 뽑는다 — 추이차트의 📦 상품별 소계와 같은 모양.
+//   ★ 앞머리(첫 '_' 앞)만 자르면 광고그룹을 복사한 행('Copy 1 of 무당_…')이 통째로
+//     'Copy 1 of 무당' 이라는 가짜 상품으로 갈렸다(2026-09-03 수정).
+//     → ① 복사 접두사를 먼저 떼고 ② 이름 안에서 상품 키워드를 찾아 붙인다.
+//     키워드가 하나도 없을 때만 옛 앞머리 규칙으로 폴백한다(신상품 자동 노출용).
+const _TT_PROD_KW=['무당','무녀','29금궁합','속궁합','29금','궁합','1%','외모정병','구미호',
+  '솔로','재회','환승','도화','커리어','팩폭','재물','임신','집착','바람기','욕망','신점','관상','사주'];
+function _ttProduct(name){
+  // 'Copy 1 of ' · 'Copy of ' · '사본/복사본' 접두사 제거(여러 번 복사하면 겹쳐 붙는다)
+  const s=String(name||'').trim().replace(/^(?:copys*d*s*ofs+|사본s*d*s*|복사본s*d*s*)+/i,'').trim();
+  // 가장 앞에 나오는 키워드가 상품. 같은 자리면 긴 쪽 우선(29금궁합 > 29금 > 궁합)
+  let best=null,bi=Infinity;
+  for(const k of _TT_PROD_KW){const i=s.indexOf(k);if(i<0)continue;
+    if(i<bi||(i===bi&&k.length>best.length)){bi=i;best=k}}
+  if(best)return best;
+  const u=s.indexOf('_');return (u>0?s.slice(0,u):s)||'기타';
+}
 function renderTiktok(){
   const tbl=document.getElementById('ttTbl');if(!tbl)return;
   const info=document.getElementById('ttInfo');
@@ -6458,39 +6652,43 @@ function renderTiktok(){
   });
   let list=Object.values(byC);
   if(kw)list=list.filter(a=>kwTest(kw,(a.cn||'')+' '+(a.gn||'')+' '+(a.id||'')));
-  list.forEach(a=>{let s=0,rv=0,o=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders}});
+  list.forEach(a=>{let s=0,rv=0,o=0,im=0,ims=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders;if(x.impressions>0){im+=x.impressions;ims+=x.spend}}});
     a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
+    // CPM 은 '지출합/노출합' 가중평균 — 일별 CPM 을 평균 내면 틀린다.
+    // 분자는 노출이 있는 날의 지출(ims)만 — CPM 이 없는 날(2026-09-01 이전·리포트에 노출 없음)의
+    // 지출까지 더하면 그만큼 CPM 이 부풀려진다.
+    a._im=im;a._cpm=im>0?ims/im*1000:0;
     a._yS=a.d[yDay]?a.d[yDay].spend:0;
     // 일예산: 시트 값이 '-100,000' 같은 문자열이라 숫자만 뽑아 정렬 기준으로 쓴다.
     a._bud=Math.abs(parseFloat(String(a.bud||'').replace(/[^0-9.\-]/g,''))||0);});
   list.sort((a,b)=>tSortMode()==='budget'?((b._bud-a._bud)||(b._yS-a._yS)||(b._s-a._s)):((b._yS-a._yS)||(b._s-a._s)));
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4;  // 캠페인/ID/일예산/7일
-  const agg=(items,d)=>{let s=0,r=0,o=0;items.forEach(a=>{const x=a.d[d];if(x){s+=x.spend;r+=x.revenue;o+=x.orders}});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
+  const agg=(items,d)=>{let s=0,r=0,o=0,im=0,ims=0;items.forEach(a=>{const x=a.d[d];if(x){s+=x.spend;r+=x.revenue;o+=x.orders;if(x.impressions>0){im+=x.impressions;ims+=x.spend}}});return{s,r,o,im,ims,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0,cpm:im>0?ims/im*1000:0}};
   const cellsOf=items=>dd.map(d=>{const t=agg(items,d);const yd=d===yDay?' col-yday':'';
-    return (t.s||t.r)?'<td class="mc '+RC(t.roas)+yd+'">'+TTC(t.roas,t.p,t.s,t.r,t.o,t.cpa)+'</td>':'<td class="'+yd+'"></td>'}).join('');
-  const sum7=items=>{let s=0,r=0,o=0;d7.forEach(d=>{const t=agg(items,d);s+=t.s;r+=t.r;o+=t.o});return{s,r,o,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0}};
+    return (t.s||t.r)?'<td class="mc '+RC(t.roas)+yd+'">'+TTC(t.roas,t.p,t.s,t.r,t.o,t.cpa,t.cpm)+'</td>':'<td class="'+yd+'"></td>'}).join('');
+  const sum7=items=>{let s=0,r=0,o=0,im=0,ims=0;d7.forEach(d=>{const t=agg(items,d);s+=t.s;r+=t.r;o+=t.o;im+=t.im;ims+=t.ims});return{s,r,o,im,ims,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0,cpm:im>0?ims/im*1000:0}};
   let h='<thead><tr><th style="text-align:left;white-space:nowrap">광고그룹</th><th style="min-width:130px">광고그룹 ID</th><th style="min-width:70px">일예산</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   // 종합
   const T=sum7(list);
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합 ('+list.length+'개)</td><td class="fx fx1" style="background:#e8e8e8"></td>'
     +'<td style="background:#e8e8e8"></td>'   // 일예산 칸은 색 없이 비워둔다
-    +'<td class="mc '+RC(T.roas)+'">'+TTC(T.roas,T.p,T.s,T.r,T.o,T.cpa)+'</td>'+cellsOf(list)+'</tr>';
+    +'<td class="mc '+RC(T.roas)+'">'+TTC(T.roas,T.p,T.s,T.r,T.o,T.cpa,T.cpm)+'</td>'+cellsOf(list)+'</tr>';
   // 📦 상품별
   const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0,bud:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s;byProd[p].bud+=a._bud});
   orderProdKeys(byProd).forEach(prod=>{
     const g=byProd[prod];const P7=sum7(g.items);
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.items.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+P7.roas.toFixed(0)+'%</td></tr>';
     h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">'+prod+' 소계</td><td class="fx fx1" style="background:#e8e8e8"></td><td></td>'
-      +'<td class="mc '+RC(P7.roas)+'">'+TTC(P7.roas,P7.p,P7.s,P7.r,P7.o,P7.cpa)+'</td>'+cellsOf(g.items)+'</tr>';
+      +'<td class="mc '+RC(P7.roas)+'">'+TTC(P7.roas,P7.p,P7.s,P7.r,P7.o,P7.cpa,P7.cpm)+'</td>'+cellsOf(g.items)+'</tr>';
     g.items.forEach(a=>{
       const cells=dd.map(d=>{const x=a.d[d];const yd=d===yDay?' col-yday':'';
         if(!x||(!x.spend&&!x.revenue))return'<td class="'+yd+'"></td>';
         const roas=x.spend>0?x.revenue/x.spend*100:0;
-        return'<td class="mc '+RC(roas)+yd+'">'+TTC(roas,x.revenue-x.spend,x.spend,x.revenue,x.orders,x.orders>0?x.spend/x.orders:0)+'</td>'}).join('');
+        return'<td class="mc '+RC(roas)+yd+'">'+TTC(roas,x.revenue-x.spend,x.spend,x.revenue,x.orders,x.orders>0?x.spend/x.orders:0,x.cpm||0)+'</td>'}).join('');
       const lbl=a.gn&&a.gn!==a.cn?a.cn+'<div style="font-size:9px;color:#888">└ '+a.gn+'</div>':a.cn;
       h+='<tr><td class="fx fx0">'+lbl+'</td><td class="fx fx1" style="font-size:9px">'+a.id+'</td><td style="font-size:10px">'+String(a.bud||'').replace(/^-/,'')+'</td>'
-        +'<td class="mc '+RC(a._roas)+'">'+TTC(a._roas,a._p,a._s,a._r,a._o,a._cpa)+'</td>'+cells+'</tr>';
+        +'<td class="mc '+RC(a._roas)+'">'+TTC(a._roas,a._p,a._s,a._r,a._o,a._cpa,a._cpm)+'</td>'+cells+'</tr>';
     });
   });
   h+='</tbody>';tbl.innerHTML=h;
@@ -6866,7 +7064,8 @@ function _cpProdAdsTable(n, data, errKey) {
 //     (utm_term=세트 귀속 매출)을 직접 읽어 돌려준다. 저장하지 않으므로 아무 과거 날짜나 열린다.
 //   기준·괴리 요인은 supabase/functions/hourly-roas/README.md.
 const HR_FN=SB_URL+'/functions/v1/hourly-roas';
-const HR_MODES={kr:'국내',gl:'글로벌',vn:'밴스드'};      // 세트 단위 모드만 (cr=소재는 제외)
+// 세트 단위 모드 + gd(구글 디멘드젠 탭 — 행이 광고그룹). cr(소재)은 광고 단위라 제외.
+const HR_MODES={kr:'국내',gl:'글로벌',vn:'밴스드',gd:'구글 디멘드젠'};
 let HR_OPEN=false;      // 화면이 열려 있는가 (뒤로가기가 이 화면만 닫도록 popstate 에서 본다)
 let HR_PUSHED=false;    // 열 때 히스토리를 쌓았는가
 let HR_CTX=null;        // {mode,id,acc,date,name,camp,day}
@@ -6877,7 +7076,7 @@ const HR_CACHE={};      // 'mode|id|date' → 응답 (같은 셀 재클릭은 �
 // 종합·소계 행이 가리키는 '세트 묶음'. renderTrend 가 그릴 때마다 채우고(필터·기간이 바뀌면
 // 구성원도 바뀐다), 행에는 열쇠(data-hrg)만 심는다. 값: {label, sets:[{id,acc}], daily:{날짜:{...}}}
 var HR_GROUPS={};
-function hrPutGroup(tbl,key,label,adsets,dailyMap){
+function hrPutGroup(tbl,key,label,adsets,dailyMap,mode){
   const sets=[];
   (adsets||[]).forEach(function(a){if(a&&a.id)sets.push({id:String(a.id),acc:String(a.acc||'')})});
   const daily={};
@@ -6886,10 +7085,11 @@ function hrPutGroup(tbl,key,label,adsets,dailyMap){
     const s=+x.s||0,r=+x.r||0;
     daily[d]={spend:s,revenue:r,roas:s>0?r/s*100:0};
   });
-  HR_GROUPS[tbl+'|'+key]={label:label,sets:sets,daily:daily};
+  // mode 를 같이 담는다 — 구글 디멘드젠 탭(gd)의 종합·소계는 MODE(kr)와 다른 원천을 본다.
+  HR_GROUPS[tbl+'|'+key]={label:label,sets:sets,daily:daily,mode:mode||MODE};
 }
 
-function hrSupported(){return !!HR_MODES[MODE]}
+function hrSupported(m){return !!HR_MODES[m||MODE]}
 // 캐시 열쇠 — 묶음은 구성원 수까지 넣어 필터가 바뀌면 다른 결과로 취급한다
 function hrKey(c){return c.mode+'|'+(c.kind==='group'?('g:'+c.gkey+':'+c.sets.length):c.id)+'|'+c.from+'~'+c.to}
 function hrMoney(n,ccy){
@@ -6906,6 +7106,8 @@ document.addEventListener('click',function(e){
   const unit=td.dataset.hu||'day';                // 'day' | 'week' | 'month' (주/월은 구간 열쇠)
   const gr=td.closest('tr[data-hrg]');            // 종합·소계 행 = 세트 묶음
   if(gr){hrOpenGroup(gr.dataset.hrg,td.dataset.hd,unit);return}
+  const gd=td.closest('tr[data-ggdg-row]');       // 구글 디멘드젠 탭의 광고그룹 행
+  if(gd){hrOpenGgdg(gd.dataset.ggdgRow,td.dataset.hd,unit);return}
   const tr=td.closest('tr[data-adset-row]');      // 세트 행
   if(!tr)return;
   hrOpen(tr.dataset.adsetRow,tr.dataset.acc||'',td.dataset.hd,unit);
@@ -6940,15 +7142,36 @@ function hrOpen(id,acc,key,unit){
            day:n?{spend:sp,revenue:rv,roas:sp>0?rv/sp*100:0}:null});
 }
 
+// 구글 디멘드젠(🟢 탭) 셀 — 행이 메타 세트가 아니라 광고그룹(ad_group_id)이라 대조값 원천도 GGDG_TIGHT.
+//   '(세트미상)' 합성 행(camp_<캠페인id>)도 그대로 넘긴다 — 매출만 있고 지출은 0 으로 그려진다.
+function hrOpenGgdg(id,key,unit){
+  if(!id||!key)return;
+  const rg=hrRange(key);
+  let name='',camp='',nd='',sp=0,rv=0,n=0;
+  for(let i=0;i<GGDG_TIGHT.length;i++){
+    const r=GGDG_TIGHT[i];
+    if(String(r.ad_group_id||'')!==String(id))continue;
+    if(r.date<rg.from||r.date>rg.to)continue;
+    // 이름은 구간 내 최신 날짜 행 기준 (renderGgdgTight 와 같은 규칙 — 개명 시 옛 이름이 남지 않게)
+    if(r.date>=nd){nd=r.date;if(r.ad_group_name)name=r.ad_group_name;if(r.campaign_name)camp=r.campaign_name}
+    sp+=+r.spend||0;rv+=+r.revenue||0;n++;
+  }
+  _hrShow({mode:'gd',kind:'set',id:String(id),acc:'',date:key,from:rg.from,to:rg.to,days:rg.days,
+           unit:unit||'day',name:name||('광고그룹 '+id),camp:camp,
+           day:n?{spend:sp,revenue:rv,roas:sp>0?rv/sp*100:0}:null});
+}
+
 // 종합·소계 셀 — 그 행이 합산하던 세트들의 그 구간. 대조값도 그 행이 그린 값을 그대로 쓴다.
 function hrOpenGroup(gkey,key,unit){
   const g=HR_GROUPS[gkey];
   if(!key)return;
-  if(!g||!g.sets.length){alert('이 행의 세트 목록을 찾지 못했습니다. 추이차트를 다시 그린 뒤 눌러 주세요.');return}
-  if(!hrSupported()){alert('시간별 화면은 세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다.');return}
+  const gm=(g&&g.mode)||MODE;
+  const unitName=gm==='gd'?'광고그룹':'세트';
+  if(!g||!g.sets.length){alert('이 행의 '+unitName+' 목록을 찾지 못했습니다. 표를 다시 그린 뒤 눌러 주세요.');return}
+  if(!hrSupported(gm)){alert('시간별 화면은 세트 단위 추이차트(국내·글로벌·밴스드)와 구글 디멘드젠 탭에서만 지원합니다.');return}
   const rg=hrRange(key);
-  _hrShow({mode:MODE,kind:'group',gkey:gkey,sets:g.sets,date:key,from:rg.from,to:rg.to,days:rg.days,
-           unit:unit||'day',name:g.label,camp:g.sets.length+'개 세트 합계',day:g.daily[key]||null});
+  _hrShow({mode:gm,kind:'group',gkey:gkey,sets:g.sets,date:key,from:rg.from,to:rg.to,days:rg.days,
+           unit:unit||'day',name:g.label,camp:g.sets.length+'개 '+unitName+' 합계',day:g.daily[key]||null});
 }
 
 function _hrShow(ctx){
@@ -6997,6 +7220,7 @@ function hrShift(n){
   if(to>T)to=T;                  // 진행 중인 주·월은 오늘까지만
   const key=(from===to)?from:(from+'~'+to);
   if(c.kind==='group')hrOpenGroup(c.gkey,key,u);
+  else if(c.mode==='gd')hrOpenGgdg(c.id,key,u);
   else hrOpen(c.id,c.acc,key,u);
 }
 function hrReload(){
@@ -7041,21 +7265,26 @@ function hrRender(data){
   const dateLab=isRange
     ?(DK(c.from)+'~'+DK(c.to)+' · '+c.days+'일'+(unitLab?' ('+unitLab+')':''))
     :(c.date+'('+WD(c.date)+')');
-  ttl.textContent='⏱ 시간별 ROAS · '+(c.name||('세트 '+c.id));
+  const isGD=c.mode==='gd';
+  const unitName=isGD?'광고그룹':'세트';
+  const srcName=isGD?'구글 Ads':'Meta';
+  ttl.textContent='⏱ 시간별 ROAS · '+(c.name||(unitName+' '+c.id));
   sub.textContent=[HR_MODES[c.mode]||c.mode,c.camp,dateLab,
-                   c.kind==='group'?'':'세트 '+c.id].filter(Boolean).join('  ·  ');
+                   c.kind==='group'?'':unitName+' '+c.id].filter(Boolean).join('  ·  ');
   const nx=document.getElementById('hrNext');if(nx)nx.disabled=(c.to>=_hrToday());
+  // 돌아갈 곳이 탭마다 다르다(추이차트 / 구글 디멘드젠 표)
+  const bk=document.querySelector('#hrView .hr-bar .hr-back');if(bk)bk.textContent='← '+(isGD?'구글 디멘드젠':'추이차트');
 
   try{if(HR_CHART)HR_CHART.destroy()}catch(e){}
   HR_CHART=null;
 
   if(!data){
-    body.innerHTML='<div class="hr-msg">⏳ '+(c.kind==='group'?('세트 '+c.sets.length+'개의 '):'')
-      +(isRange?(c.days+'일치 '):'')+'Meta 시간별 지출 + Mixpanel 결제를 조회하는 중입니다…<br>'
+    body.innerHTML='<div class="hr-msg">⏳ '+(c.kind==='group'?(unitName+' '+c.sets.length+'개의 '):'')
+      +(isRange?(c.days+'일치 '):'')+srcName+' 시간별 지출 + Mixpanel 결제를 조회하는 중입니다…<br>'
       +'<span style="font-size:10px;color:#999">저장된 표가 아니라 원천을 직접 읽습니다 — 처음 여는 '
       +(isRange?'구간은 결제 전량을 '+c.days+'일치 받아야 해서 '+(c.unit==='month'?'1~3분':'30초~1분')+' 걸립니다'
                :'날짜는 15~30초 걸립니다(그 날짜의 결제 전량을 받아 걸러야 해서)')
-      +'. 같은 구간의 다른 세트는 훨씬 빠릅니다.</span></div>';
+      +'. 같은 구간의 다른 '+unitName+'는 훨씬 빠릅니다.</span></div>';
     return;
   }
   if(data.error){
@@ -7101,9 +7330,10 @@ function hrRender(data){
     +'<div class="hr-card"><h4>시간별 ROAS(선) · 지출·매출(막대) — KST'+(isRange?' · '+c.days+'일 합산':'')+'</h4><div class="hr-chart"><canvas id="hrChart"></canvas></div></div>'
     +'<div class="hr-card"><h4>시간별 값'+(isRange?' <span style="font-weight:400;color:#888;font-size:10px">— '+c.days+'일을 시각으로 접은 합계</span>':'')+'</h4><div style="overflow-x:auto">'+_hrTable(hs,ccy,isRange?c.days:0)+'</div></div>'
     +'<div class="hr-card"><h4>기준</h4><div class="hr-notes">'
-    +  '지출=Meta insights 시간대 브레이크다운(광고주 타임존=KST) · 매출=Mixpanel 결제완료 중 utm_term=이 세트 귀속(order_id dedup)<br>'
+    +  (isGD?'지출=Google Ads API 광고그룹×시각(계정 타임존 Asia/Seoul=KST) · 매출=Mixpanel 결제완료 중 utm_campaign(구글 캠페인 id)→utm_content(광고 id)로 이 광고그룹 귀속(order_id dedup)<br>'
+           :'지출=Meta insights 시간대 브레이크다운(광고주 타임존=KST) · 매출=Mixpanel 결제완료 중 utm_term=이 세트 귀속(order_id dedup)<br>')
     +  (data.notes||[]).map(function(n){return /실패|없습니다/.test(n)?'<span class="hr-warn">⚠ '+_mEsc(n)+'</span>':'· '+_mEsc(n)}).join('<br>')
-    +  ((COUNTRY&&COUNTRY!=='ALL')?'<br><span class="hr-warn">⚠ 국가 필터('+COUNTRY+') 적용 중 — 이 화면은 세트 전체(국가 합산) 기준이라 일별 셀보다 큽니다.</span>':'')
+    +  ((!isGD&&COUNTRY&&COUNTRY!=='ALL')?'<br><span class="hr-warn">⚠ 국가 필터('+COUNTRY+') 적용 중 — 이 화면은 세트 전체(국가 합산) 기준이라 일별 셀보다 큽니다.</span>':'')
     +'</div></div>';
 
   if(typeof Chart==='undefined')return;
