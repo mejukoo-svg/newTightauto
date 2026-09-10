@@ -44,12 +44,14 @@ const MONTHLY_REVENUE_GOAL={
     '2026-06': 1700000000,  // 국내: 17억
     '2026-07': 1700000000,  // 국내: 17억
     '2026-08': 2200000000,  // 국내: 22억
+    '2026-09': 1850000000,  // 국내: 18.5억
   },
   gl:{
     '2026-05': 304000,      // 글로벌: $304K (구 4.5억)
     '2026-06': 392000,      // 글로벌: $392K (구 6억)
     '2026-07': 1070000,     // 글로벌: $1.07M (구 16억)
     '2026-08': 1100000,     // 글로벌: $1.1M
+    '2026-09': 1100000,     // 글로벌: $1.1M
   },
 };
 
@@ -5433,7 +5435,7 @@ function _chrevChannels(){
   // 글로벌 CRM(대만 LINE OA, 글로벌·우리) = global_crm_daily 일자합. 매출 = 구글시트 'LINE CRM tracking'
   //   자동갱신 탭(ch=line·ct=crm_*·TWD·KST)의 집계값을 TWD→KRW 환산한 것(글로벌CRM_시트_supabase.py).
   //   지출 0 — LINE OA 발송비용은 수기 시트에만 있고 통화·기입이 들쭉날쭉해 매출만 싣는다.
-  //   이 매출은 Stripe 실결제(글로벌 종합)의 일부라, 아래 glExcRow(잔여)에서 같은 값을 빼야
+  //   이 매출은 Stripe 실결제(글로벌 종합)의 일부라, 아래 glOrgRow(잔여=글로벌 오가닉)에서 같은 값을 빼야
   //   '채널 합 = 글로벌 종합' 이 유지된다(오가닉/잔여로 새던 것을 채널로 끌어내는 구조).
   const byDateGLCRM={};
   GLCRM.forEach(r=>{byDateGLCRM[r.date]=(byDateGLCRM[r.date]||0)+(+r.revenue||0)});
@@ -5526,17 +5528,23 @@ function _chrevChannels(){
     //   귀속된 결제는 파이프라인에서 제외되어 국내메타 행과 이중계상 없음(2026-07-17).
     {name:'메타(기타)',revOnly:true,get:d=>({s:0,r:byDateMetaEtc[d]||0})},
   ].filter(c=>incVan||(c.name!=='밴스드 국내'&&!c.van));
-  // 글로벌(밴스드 제외) = 글로벌 전체(종합) − 밴스드(대만 밴스드 메타 + 대만 구글).
-  //   매출=Stripe 실결제−밴스드귀속, 지출=글로벌 전체지출−밴스드지출(=GL_AD) → 상세행 합=글로벌 종합.
+  // 글로벌 메타(우리) = 타이트 글로벌 Meta 계정(GL_AD) — 지출·매출 모두 Meta 기준(귀속매출=revenue_usd×환율).
+  //   ★ 2026-09-10 이전엔 이 행이 '글로벌(밴스드 제외)'/'글로벌' 이라는 이름의 *잔여* 행이었다.
+  //     지출은 글로벌 메타 실지출이지만 매출은 'Stripe 실결제 − 다른 채널 귀속' 이라
+  //     메타 귀속매출 + 어디에도 안 잡힌 매출(오가닉)이 한 칸에 섞여 ROAS 가 과대계상됐다.
+  //     → 메타 귀속분(glMetaRow)과 잔여(glOrgRow=글로벌 오가닉)로 분리. 둘의 합은 종전 값과 동일해
+  //       '채널 합 = 글로벌 종합' 은 그대로 유지된다.
+  const glMetaRow={name:'글로벌 메타',get:d=>byDateGL[d]||{s:0,r:0}};   // 지출 = 종전 glSpendAll−대만밴스드−대만구글 과 동일
+  // 글로벌 오가닉 = 글로벌 종합(Stripe 실결제) − 글로벌 채널 귀속매출 합 = 미귀속·직접유입(지출 0).
+  //   차감 대상: 밴스드(대만 메타+대만 구글) + 글로벌 CRM + 대만 디멘드젠(타이트) + 글로벌 메타 귀속매출.
   //   ★ 계산은 항상 '전체(All)' helper 기준 — 밴스드 제외 모드에서 glSpend/glRev 를 쓰면 이중 차감된다.
-  //   ★ 글로벌 CRM(glCrmR)도 Stripe 안에 들어있는 귀속매출이라 잔여에서 함께 뺀다.
-  //   ★ '구글 대만 디멘드젠(타이트)'(gTWus)도 별도 채널 행이 됐으니 잔여에서 그 귀속매출까지 빼야 이중계상이 없다.
-  const glExcRow={name:incVan?'글로벌(밴스드 제외)':'글로벌',get:d=>{const vt=byDateVNTW[d]||{s:0,r:0};return {s:glSpendAll(d)-vt.s-gTW(d).s, r:glRevAll(d)-glVanR(d)-glCrmR(d)-gTWus(d).r};}};
+  const glOrgRow={name:'글로벌 오가닉',revOnly:true,get:d=>({s:0,
+    r:glRevAll(d)-glVanR(d)-glCrmR(d)-gTWus(d).r-((byDateGL[d]||{r:0}).r||0)})};
   // 글로벌 CRM — 밴스드가 아니라 우리(gl_us) 운영이라 밴스드 제외 모드에서도 그대로 남는다.
   const glCrmRow={name:'글로벌 CRM',revOnly:true,get:d=>({s:0,r:glCrmR(d)})};
   const glChannels=incVan
-    ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0},van:true},...gRowsTW,glCrmRow,glExcRow]   // 대만밴스드=VN_TW_ACC 단독(KRW)
-    : [...gRowsTW.filter(c=>!c.van),glCrmRow,glExcRow];   // 밴스드 제외에도 '구글 대만 디멘드젠(타이트)'는 우리 채널이라 남는다
+    ? [{name:'대만 밴스드',get:d=>byDateVNTW[d]||{s:0,r:0},van:true},...gRowsTW,glCrmRow,glMetaRow,glOrgRow]   // 대만밴스드=VN_TW_ACC 단독(KRW)
+    : [...gRowsTW.filter(c=>!c.van),glCrmRow,glMetaRow,glOrgRow];   // 밴스드 제외에도 '구글 대만 디멘드젠(타이트)'는 우리 채널이라 남는다
   // 행 그룹 태그 — 나열 순서를 권역(국내→글로벌) → 소속(우리→밴스드) 로 묶기 위한 키.
   //   실제 정렬/구분선은 _chrevSortByRev 가 처리(그룹 안에서만 매출 내림차순).
   const IS_VAN=c=>c.van===true||c.name==='밴스드 국내'||c.name==='밴스드 구글'||c.name==='대만 밴스드';
@@ -5548,13 +5556,15 @@ function _chrevChannels(){
   if(scope==='dom'){head=[sumAll,sumDom];detail=domChannels;totalRev=domRev;}
   else if(scope==='gl'){head=[sumAll,sumGl];detail=glChannels;totalRev=glRev;}
   else{head=[sumAll];detail=domChannels.concat(glChannels);totalRev=d=>domRev(d)+glRev(d);}
-  // 오가닉 = 종합 실결제 매출(국내=Toss/시트, 글로벌=Stripe) − 채널 귀속 매출 합 = 미귀속·직접유입.
+  // 국내 오가닉 = 국내 종합 실결제 매출(시트/Toss) − 국내 채널 귀속 매출 합 = 미귀속·직접유입.
   //   (2026-07-17: 네이버 행 max(시트,MP)·메타(기타) 신설로 네이버/메타 광고 추정분은 오가닉에서 제외 —
   //    잔여 오가닉의 대부분은 무컨텍스트 서버이벤트(PDF/이용권 등)와 MP 미계측 Toss 결제)
-  // 지출 없음(s:0). 채널 맨 아래에 표시. (글로벌은 글로벌(밴스드제외)가 잔여라 오가닉≈0)
-  // 글로벌 단독은 '글로벌(밴스드 제외)'가 이미 잔여라 오가닉≈0 → 생략. 국내/전체만 오가닉 추가.
+  // 지출 없음(s:0). 채널 맨 아래 '미귀속' 그룹에 표시.
+  // ★ 글로벌 오가닉은 글로벌 채널 목록 안(glOrgRow)에서 이미 계산되므로 여기서 만드는 잔여는
+  //   scope 가 dom 이든 all 이든 항상 '국내' 잔여만 남는다(글로벌 채널 합 = 글로벌 종합이라 상쇄).
+  //   글로벌 단독(scope='gl')은 glOrgRow 가 목록에 들어있어 여기서 추가하지 않는다.
   if(scope==='gl')return [...head,...detail];
-  const organic={name:'오가닉',revOnly:true,get:d=>{let r=0;detail.forEach(c=>{r+=(c.get(d).r||0)});return {s:0,r:totalRev(d)-r};}};
+  const organic={name:'국내 오가닉',revOnly:true,get:d=>{let r=0;detail.forEach(c=>{r+=(c.get(d).r||0)});return {s:0,r:totalRev(d)-r};}};
   return [...head,...detail,organic];
 }
 
@@ -5575,6 +5585,8 @@ function _chrRowStyle(ch){
 // ===== '구분' 컬럼 (채널 왼쪽 최좌측) — 행이 속한 카테고리를 rowspan 으로 병합 표시 =====
 // 종합 / 국내·우리 / 국내·밴스드 / 글로벌·우리 / 글로벌·밴스드 / 미귀속(오가닉).
 // sticky 는 추이차트와 같은 방식: 구분=fxa(left 0), 채널=fx0 → 렌더 후 _fixSticky 가 left 계산.
+// 오가닉(미귀속) 행 판별 — 국내/글로벌 오가닉 모두 '미귀속' 그룹으로 묶고 표 맨 아래에 둔다.
+const IS_ORG_CH=n=>n==='오가닉'||n==='국내 오가닉'||n==='글로벌 오가닉';
 const CHR_GRP_META={
   sum      :{label:'종합',            bg:'#b9cde4'},
   dom_us   :{label:'국내<br>우리',     bg:'#d9e8d4'},
@@ -5584,7 +5596,7 @@ const CHR_GRP_META={
   organic  :{label:'미귀속',          bg:'#e5e7eb'},
   etc      :{label:'기타',            bg:'#e9edf2'},
 };
-function _chrGrpKey(ch){return ch.sum?'sum':(ch.name==='오가닉'?'organic':(CHR_GRP_META[ch.grp]?ch.grp:'etc'))}
+function _chrGrpKey(ch){return ch.sum?'sum':(IS_ORG_CH(ch.name)?'organic':(CHR_GRP_META[ch.grp]?ch.grp:'etc'))}
 // rows 와 같은 길이의 배열 반환 — 그룹 첫 행만 <td rowspan>, 병합돼 생략되는 행은 ''.
 function _chrGrpCells(rows){
   const out=rows.map(()=>'');
@@ -5600,15 +5612,17 @@ function _chrGrpCells(rows){
 }
 const CHR_TH_GRP='<th style="min-width:58px;text-align:center">구분</th>';
 
-// 채널 행 나열 순서: 종합(sum) 상단 고정 → 상세채널 → 오가닉 맨 아래.
+// 채널 행 나열 순서: 종합(sum) 상단 고정 → 상세채널 → 오가닉(국내·글로벌) 맨 아래.
 // 상세채널은 ①권역(국내→글로벌) ②소속(우리→밴스드) 로 묶고, 그 안에서만 표시기간 매출 내림차순.
 //   그룹 첫 행엔 grpTop=true 를 달아 표에서 점선 구분선을 그린다(그룹 태그는 _chrevChannels 가 부여).
 const CHR_GRP_ORDER=['dom_us','dom_van','gl_us','gl_van'];
 function _chrevSortByRev(channels,dates){
   const head=channels.filter(c=>c.sum);
-  const tail=channels.filter(c=>!c.sum&&c.name==='오가닉');
+  // 미귀속(국내·글로벌 오가닉) 맨 아래 — 권역 순서(국내→글로벌)로 고정
+  const tail=channels.filter(c=>!c.sum&&IS_ORG_CH(c.name))
+    .sort((a,b)=>(a.name.startsWith('글로벌')?1:0)-(b.name.startsWith('글로벌')?1:0));
   const rank=c=>{const i=CHR_GRP_ORDER.indexOf(c.grp);return i<0?CHR_GRP_ORDER.length:i};  // 미태깅 그룹은 맨 뒤
-  const mid=channels.filter(c=>!c.sum&&c.name!=='오가닉')
+  const mid=channels.filter(c=>!c.sum&&!IS_ORG_CH(c.name))
     .map(c=>{let r=0;dates.forEach(d=>{r+=(c.get(d).r||0)});return{c,r,g:rank(c)}})
     .sort((a,b)=>a.g-b.g||b.r-a.r).map(x=>x.c);
   let prev=null;mid.forEach(c=>{const g=rank(c);c.grpTop=(prev!==null&&g!==prev);prev=g});
@@ -5703,7 +5717,7 @@ function _chrevChart(channels,periods){
   const labels=pers.map(p=>p.label);
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 디멘드젠(타이트)':'#fbbf24','구글 대만 디멘드젠(밴스드)':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 디멘드젠(타이트)':'#fbbf24','구글 대만 디멘드젠(밴스드)':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌 메타':'#0ea5e9','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8','국내 오가닉':'#94a3b8','글로벌 오가닉':'#7dd3fc'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   const raw=chs.map((ch,i)=>({name:ch.name,color:COLORS[ch.name]||PAL[i%PAL.length],
     data:pers.map(p=>{let r=0;p.dates.forEach(d=>{r+=(ch.get(d).r||0)});return r})}));
@@ -5746,7 +5760,7 @@ function renderChannelDonut(){
   for(let i=0;i<days;i++){const d=new Date(today);d.setDate(today.getDate()-i);dates.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));}
   const COLORS={'국내 메타':'#1877F2','밴스드 국내':'#9333ea','네이버':'#03C75A','네이버 브랜드검색':'#03C75A','네이버 일반검색어':'#7cd6a0','밴스드 구글':'#EA4335','디멘드젠(타이트)':'#FBBC04','틱톡':'#25F4EE','CRM':'#FEE500','메타(기타)':'#93c5fd',
     '구글 국내 디멘드젠(타이트)':'#FBBC04','구글 국내 디멘드젠(밴스드)':'#f59e0b','구글 국내 검색광고':'#4285F4',
-    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 디멘드젠(타이트)':'#fbbf24','구글 대만 디멘드젠(밴스드)':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8'};
+    '구글 PMAX':'#34A853','구글 대만 검색광고':'#7cb0f5','구글 대만 디멘드젠':'#fcd34d','구글 대만 디멘드젠(타이트)':'#fbbf24','구글 대만 디멘드젠(밴스드)':'#fcd34d','구글 대만 기타':'#cbd5e1','대만 밴스드':'#c084fc','글로벌 CRM':'#06C755','글로벌 메타':'#0ea5e9','글로벌(밴스드 제외)':'#0ea5e9','글로벌':'#0ea5e9','오가닉':'#94a3b8','국내 오가닉':'#94a3b8','글로벌 오가닉':'#7dd3fc'};
   const PAL=['#60a5fa','#f59e0b','#34d399','#f472b6','#a78bfa','#fb7185','#22d3ee','#facc15'];
   let agg=channels.map((ch,i)=>{let r=0;dates.forEach(d=>{r+=(ch.get(d).r||0)});return {name:ch.name,rev:r,color:COLORS[ch.name]||PAL[i%PAL.length]};});
   agg=agg.filter(x=>x.rev>0).sort((a,b)=>b.rev-a.rev);   // 매출>0만(오가닉 음수 잔여 제외)
