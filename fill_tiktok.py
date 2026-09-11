@@ -89,7 +89,62 @@ ROWS = [
     ("무녀_0820_피안2차의(1-5)", "1874028446476002", "1874027568799361"),
     # --- 2026-08-26 신규 캠페인 2개 (08/26 첫 지출 · 광고그룹 리포트 실측) ---
     ("무당_소재수십개ASC_세트A", "1874574395129122", "1874574320593378"),
-    ("무녀_소재여러개_ASC_a", "1874577359594753", "1874577345364225"),
+    ("무녀_소재여러개_ASC_세트A", "1874577359594753", "1874577345364225"),
+    # --- 2026-08-27 신규 (08/27 첫 지출 · 광고그룹 리포트 실측) ---
+    # 08/26 에 만들어졌지만 지출 0 이라 행이 없었고, 08/27 에 각각 36만·40만으로
+    # 하루 지출의 78% 를 차지했다. 광고관리자 이름 그대로("Copy 1 of ~").
+    ("Copy 1 of 무당_소재수십개ASC_세트B_전환", "1874663859822242", "1874574320593378"),
+    ("Copy 1 of 무녀_소재여러개_ASC_세트B_전환", "1874663786606801", "1874577345364225"),
+    # --- 2026-08-28 신규 7개 (08/28 첫 지출 · 광고그룹 리포트 실측) ---
+    # 전부 일예산 150,000 ABO 로 새로 만든 세트B/전환 복사본. 08/28 지출의 71%(901,315)를 차지한다.
+    # 08/27 의 "Copy 1 of ~_세트B_전환" 2개(…822242 / …606801)는 08/28 리포트에서 사라졌다(삭제).
+    ("무당_소재수십개ASC_세트B", "1874735667629105", "1874574320593378"),
+    ("무녀_소재여러개_ASC_세트B", "1874735780725794", "1874577345364225"),
+    ("1%_0812_1%전환소재들_B세트", "1874739149206818", "1873308019491889"),
+    ("무당_애니메이션모음_ASC(3-6)", "1874739331000353", "1873303422916690"),
+    ("Copy 1 of 무당_aiUGC_ASC(2-6)_전환", "1874747733628258", "1873303138937266"),
+    ("Copy 1 of 무당_0820_신규전환모음의(1-6)_전환", "1874747824085089", "1874026254620802"),
+    ("Copy 1 of 무당_애니메이션모음_ASC(3-6)_전환", "1874747867054321", "1873303422916690"),
+    # --- 2026-08-29 신규 3개 (08/29 첫 지출 · 광고그룹 리포트 실측) ---
+    # 08/28 생성·지출 0 이라 어제는 행이 없었다. 같이 만들어진
+    # "Copy 1 of 무당_애니메이션모음_ASC(3-7)" 1874847546622002 은 08/29 에도 지출 0 이라 아직 미추가.
+    ("Copy 1 of 무당_소재수십개ASC_세트C", "1874847291617569", "1874574320593378"),
+    ("Copy 1 of 무녀_소재여러개_ASC_세트C", "1874847387840593", "1874577345364225"),
+    ("Copy 1 of 1%_0812_1%전환소재들_C세트", "1874847484850081", "1873308019491889"),
+    # --- 2026-08-31 신규 3개 (08/31 첫 지출 · 광고그룹 리포트 실측) ---
+    # 08/30 리포트에도 있었으나 지출 0 이라 행이 없었다. 전부 ABO 500,000.
+    # 08/31 리포트엔 Campaign ID 컬럼이 없어(32컬럼) 이름의 세트A~C 형제로 캠페인을 물려받았다.
+    ("무당_소재수십개ASC_세트D", "1875037635652754", "1874574320593378"),
+    ("무녀_소재여러개_ASC_세트D", "1875037553462658", "1874577345364225"),
+    ("1%_0812_1%전환소재들_D세트", "1875037705386145", "1873308019491889"),
+    # --- 2026-09-03 신규 2개 (09/03 첫 지출 · 광고그룹 리포트 실측) ---
+    # 09/02 리포트에도 있었으나 지출 0 이라 행이 없었다. 전부 ABO 500,000.
+    # 형제 "무녀_소재여러개_ASC_세트E"(1875295752996097, 캠페인 1874577345364225) 는
+    # 09/03 에도 지출 0 이라 아직 미추가 — 첫 지출 나는 날 넣을 것.
+    ("무당_소재수십개ASC_세트E", "1875295909280929", "1874574320593378"),
+    ("1%_0812_1%전환소재들_E세트", "1875296062362193", "1873308019491889"),
+    # --- 2026-09-04 신규 3개 (09/04 첫 지출 · 광고그룹 리포트 실측) ---
+    # 무녀 세트E 는 09/03 지출 0 이라 어제 미추가였고 09/04 에 19,370 으로 첫 지출.
+    # 세트F_심야 2개는 09/04 생성 — 첫날 지출이 51·87 로 미미하지만 0 이 아니라 넣는다.
+    # 09/04 리포트에도 Campaign ID 컬럼이 없어(32컬럼) 이름의 세트A~E 형제로 캠페인을 물려받았다.
+    ("무녀_소재여러개_ASC_세트E", "1875295752996097", "1874577345364225"),
+    ("무당_소재수십개ASC_세트F_심야", "1875379601436066", "1874574320593378"),
+    ("무녀_소재여러개_ASC_세트F_심야", "1875379474637826", "1874577345364225"),
+    # --- 2026-09-08 신규 4개 (09/08 첫 지출 · 광고그룹 리포트 실측) ---
+    # 09/07 리포트에도 이미 있었으나(양일 65행 동일) 지출 0 이라 어제는 행이 없었다. 전부 ABO 500,000.
+    # 09/08 리포트도 Campaign ID 컬럼이 없는 32컬럼판이라 앞 3개는 이름의 형제(세트A~F·F세트)로
+    # 캠페인을 물려받았다. 무당_260908_무당만화모음 은 형제가 없는 **신규 캠페인**이라
+    # 캠페인 ID 를 몰라 대용키(= 자기 광고그룹 ID)를 넣었다 — 캠페인 레벨 리포트를 받는 날
+    # 진짜 ID 로 교체할 것(대용키인 동안 캠페인 레벨 리포트를 읽으면 이 캠페인 지출이 조용히 버려진다).
+    ("Copy 1 of 무당_소재수십개ASC_G", "1875741316827553", "1874574320593378"),
+    ("Copy 1 of 무녀_소재여러개_ASC_G", "1875741351481729", "1874577345364225"),
+    ("Copy 1 of 1%_0812_1%전환소재들_F세트", "1875741445564913", "1873308019491889"),
+    ("무당_260908_무당만화모음", "1875754233915426", "1875754233915426"),
+    # --- 2026-09-09 신규 1개 (09/09 첫 지출 3,774 · ABO 500,000) ---
+    # 09/08 리포트에도 있었으나 지출 0 이라 어제는 행이 없었다. 09/09 리포트도 32컬럼판이라
+    # Campaign ID 가 없고, 형제 없는 **신규 캠페인**이라 대용키(= 자기 광고그룹 ID)를 넣었다
+    # — 무당_260908_무당만화모음 과 같은 상태다. 캠페인 레벨 리포트를 받는 날 둘 다 교체할 것.
+    ("무녀_260909_신소재모음", "1875841603889729", "1875841603889729"),
 ]
 
 # 캠페인 ID -> 캠페인 이름. 시트 A열은 캠페인명과 광고그룹명이 다를 때 두 줄로 병기한다
@@ -113,7 +168,33 @@ CAMP_NAME = {
     "1874027568799361": "무녀_0820_피안2차",
     "1874574320593378": "무당_소재수십개ASC",
     "1874577345364225": "무녀_소재여러개_ASC",
+    # 2026-09-08 신규 캠페인. 키는 아직 대용키(첫 광고그룹 ID) — 캠페인 레벨 리포트로 교체 필요.
+    "1875754233915426": "무당_260908_무당만화모음",
+    # 2026-09-09 신규 캠페인. 키는 아직 대용키(첫 광고그룹 ID) — 캠페인 레벨 리포트로 교체 필요.
+    "1875841603889729": "무녀_260909_신소재모음",
 }
+
+
+def move_sim(lst, src, dest):
+    """moveDimension 결과를 시뮬레이션한다(dest 는 '이동 전' 좌표계 기준)."""
+    seg, rest = lst[src:src + 1], lst[:src] + lst[src + 1:]
+    ins = dest - 1 if dest > src else dest
+    return rest[:ins] + seg + rest[ins:]
+
+
+def sort_key(last, av, aid):
+    """행 정렬 키: **가장 최근 날짜 열(E열)의 매출** 내림차순 (2026-09-01 사용자 확정).
+
+    last = 최신 날짜 셀 (지출, 매출, 판매수, 노출). 그날 지출 0 이면 빈칸이라 (0, 0, 0, 0).
+    D열(최근 7일 평균)이 아니라 '어제 실적' 이 기준이다 — 오늘 판단에 쓰는 표라서.
+
+    동률(대부분 그날 매출 0)은 그날 지출 큰 순 — 돈은 쓰는데 매출이 없는 행을 위로
+    올려 바로 눈에 띄게 한다. 그다음이 7일 평균 매출 — 어제만 쉰 좋은 행이 한 번도
+    안 쓴 행 아래로 가라앉지 않게 한다. 마지막은 광고그룹 ID 오름차순(=생성순)으로
+    고정해, 값이 안 바뀐 날엔 행이 흔들리지 않게 한다.
+    """
+    last = last or (0, 0, 0, 0)
+    return (-last[1], -last[0], -av[1], int(aid))
 
 
 def sheet_label(name, cid):
@@ -134,6 +215,7 @@ BUD_HDR = "예산"
 AVG_DAYS = 7              # D열 평균 창(최근 N개 날짜 열)
 AVG_HDR = f"최근 {AVG_DAYS}일 평균"
 
+FIRST_AG = 5              # 0-based 첫 광고그룹 행(6행) — 5행 '전체'는 정렬 제외
 NROW = len(ROWS)          # 헤더(4행) 아래 데이터 행 수
 LASTROW = 4 + NROW        # 마지막 데이터 행 번호(1-based)
 AIDS = [a for _, a, _ in ROWS if a]                       # 광고그룹 ID (시트 키)
@@ -169,6 +251,7 @@ def hdr_cell(text):
 GREEN_TXT = {"red": 0.101960786, "green": 0.41960785, "blue": 0.101960786}
 RED_TXT = {"red": 0.8666667, "green": 0.0, "blue": 0.0}
 BLUE_TXT = {"red": 0.0, "green": 0.0, "blue": 0.8666667}
+GRAY_TXT = {"red": 0.4, "green": 0.4, "blue": 0.4}      # 6번째 줄(노출수)
 
 
 def roas_bg(roas):
@@ -179,18 +262,30 @@ def roas_bg(roas):
     return BG_DEEPRED
 
 
-def cell_text(spend, revenue, cnt):
+def cell_text(spend, revenue, cnt, imp=0):
     """일자 셀은 정수, D열(최근 7일 평균) 셀은 소수가 섞여 들어온다.
 
     금액은 원 단위로 반올림해 쓰고, 판매수는 float 이면 소수 1자리로 쓴다
     (평균을 정수로 반올림하면 주 1~2건짜리 광고그룹이 '0건' 으로 사라진다).
     순이익은 반올림한 지출·매출의 차로 계산해야 화면상 세 줄이 서로 맞는다.
+
+    5번째 줄 = CPM(=지출/노출x1000, 2026-09-01~). **매출 아래·판매수 위** (사용자 지정 순서).
+    노출수 자체는 셀에 쓰지 않는다 — 줄이 하나 더 늘면 시트에서 잘린다. 대신 읽을 때
+    노출 = 지출/CPM x1000 으로 되돌린다(parse_cell). CPM 이 원 단위로 반올림돼 있어
+    되돌린 노출엔 0.05% 미만 오차가 있다.
+    이 되돌린 노출이 있어야 7일·상품소계·종합 CPM 을 '지출합/노출합' 가중평균으로 낼 수 있다
+    — CPM 끼리 평균 내면(평균의 평균) 틀린다.
+    리포트에 노출 컬럼이 없으면 imp=0 → CPM 줄을 아예 안 쓴다(기존 5줄 셀과 같은 모양).
     """
     roas = round(revenue / spend * 100) if spend else 0
     s_i, r_i = round(spend), round(revenue)
     profit = r_i - s_i
     cs = f"{cnt:,.1f}" if isinstance(cnt, float) else f"{cnt:,}"
-    return (f"{roas}\n {profit:+,}\n {-s_i:,}\n {r_i:,}\n {cs}건"), roas, profit
+    txt = f"{roas}\n {profit:+,}\n {-s_i:,}\n {r_i:,}"
+    if imp:
+        txt += f"\n CPM {round(spend / imp * 1000):,}"
+    txt += f"\n {cs}건"
+    return txt, roas, profit
 
 
 def avg_cells(cells):
@@ -208,25 +303,31 @@ def avg_cells(cells):
     sp = sum(x[0] for x in win if x)
     rv = sum(x[1] for x in win if x)
     cn = sum(x[2] for x in win if x)
-    return round(sp / AVG_DAYS), round(rv / AVG_DAYS), round(cn / AVG_DAYS, 1)
+    im = sum(x[3] for x in win if x)          # CPM 역산 노출 — 반올림하지 않는다(표시용이 아니다)
+    return (round(sp / AVG_DAYS), round(rv / AVG_DAYS), round(cn / AVG_DAYS, 1),
+            im / AVG_DAYS)
 
 
-def cell_data(spend, revenue, cnt):
-    """CellData(값+줄별 서식+배경) 생성"""
-    txt, roas, profit = cell_text(spend, revenue, cnt)
+def cell_data(spend, revenue, cnt, imp=0):
+    """CellData(값+줄별 서식+배경) 생성. 5줄(구 셀)·6줄(CPM 포함) 둘 다 만든다."""
+    txt, roas, profit = cell_text(spend, revenue, cnt, imp)
     L = txt.split("\n")
     idx, acc = [], 0
     for s in L:
         idx.append(acc)
         acc += len(s) + 1
-    runs = [
-        {"startIndex": idx[0], "format": {"fontSize": 11, "bold": True, "foregroundColorStyle": {"rgbColor": BLACK}}},
-        {"startIndex": idx[1], "format": {"fontSize": 11, "bold": False,
-                                          "foregroundColorStyle": {"rgbColor": GREEN_TXT if profit >= 0 else RED_TXT}}},
-        {"startIndex": idx[2], "format": {"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": RED_TXT}}},
-        {"startIndex": idx[3], "format": {"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": BLUE_TXT}}},
-        {"startIndex": idx[4], "format": {"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": BLACK}}},
-    ]
+    # 줄별 서식: ROAS(굵게) / 순이익(초록·빨강) / 지출(빨강) / 매출(파랑) / [CPM(회색)] / 판매수(검정)
+    # CPM 줄은 있을 때만 끼워 넣는다 — 5줄 셀에서 판매수가 회색이 돼 버리면 안 된다.
+    LINE_FMT = ([
+        {"fontSize": 11, "bold": True, "foregroundColorStyle": {"rgbColor": BLACK}},
+        {"fontSize": 11, "bold": False,
+         "foregroundColorStyle": {"rgbColor": GREEN_TXT if profit >= 0 else RED_TXT}},
+        {"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": RED_TXT}},
+        {"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": BLUE_TXT}},
+    ] + ([{"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": GRAY_TXT}}]
+         if len(L) == 6 else [])
+      + [{"fontSize": 9, "bold": False, "foregroundColorStyle": {"rgbColor": BLACK}}])
+    runs = [{"startIndex": idx[i], "format": LINE_FMT[i]} for i in range(len(L))]
     runs[0].pop("startIndex")
     return {
         "userEnteredValue": {"stringValue": txt},
@@ -239,17 +340,24 @@ def cell_data(spend, revenue, cnt):
 
 
 def parse_cell(s):
-    """'292\\n +137,703\\n -71,697\\n 209,400\\n 4건' -> (spend, revenue, cnt) / 빈칸이면 None"""
+    """'292 / +137,703 / -71,697 / 209,400 / [CPM 1,569 /] 4건' (줄바꿈 구분)
+    -> (spend, revenue, cnt, imp) / 빈칸이면 None.
+
+    CPM 줄(5번째)은 2026-09-01 부터 붙는다. 그 전에 채운 셀은 5줄이라 그 자리가 판매수다
+    → 줄 수로 갈라 읽는다. imp 는 셀에 없고 지출/CPM x1000 으로 되돌린 값이라
+    반올림 오차(<0.05%)가 있다 — 그래서 D열 검증에서는 imp 를 비교하지 않는다."""
     if not s or not s.strip():
         return None
     L = [x.strip() for x in s.split("\n")]
-    if len(L) != 5:
+    if len(L) not in (5, 6):
         raise ValueError(f"예상 밖 셀 포맷: {s!r}")
     spend = abs(int(L[2].replace(",", "").replace("+", "")))
     revenue = int(L[3].replace(",", ""))
-    t = L[4].replace("건", "").replace(",", "")
+    cpm = int(L[4].upper().replace("CPM", "").replace(",", "").strip()) if len(L) > 5 else 0
+    t = L[5 if len(L) > 5 else 4].replace("건", "").replace(",", "")
     cnt = float(t) if "." in t else int(t)   # D열 평균 셀은 소수 1자리
-    return spend, revenue, cnt
+    imp = spend / cpm * 1000 if cpm else 0   # 되돌린 노출(float)
+    return spend, revenue, cnt, imp
 
 
 # ---------------- 예산: 설정 컬럼 읽기 ----------------
@@ -333,6 +441,11 @@ COST_KEYS = ["지출", "비용", "총 비용", "cost", "spend", "amount spent"]
 CID_KEYS = ["캠페인 id", "campaign id", "campaign_id"]
 ADG_KEYS = ["광고 그룹 id", "광고그룹 id", "adgroup id", "ad group id", "adgroup_id"]
 DATE_KEYS = ["날짜", "date", "일자", "stat time", "time"]
+# 노출수 — CPM(=지출/노출x1000) 계산용. 리포트에 없으면 그냥 건너뛴다(예전처럼 5줄 셀).
+# 부분일치로 'CPM(노출 1,000회당 비용)'·'노출 점유율' 같은 파생 컬럼을 잡으면 안 되므로
+# 정확일치 우선 + skip 목록으로 막는다(find 의 exact-first 규칙과 같은 이유).
+IMP_KEYS = ["노출수", "노출", "노출 수", "impression", "impressions", "show cnt"]
+IMP_SKIP = ("cpm", "비용", "단가", "점유", "율", "당", "per", "rate", "share", "%")
 
 
 def load_spend(path, forced_date):
@@ -361,6 +474,7 @@ def load_spend(path, forced_date):
 
     ci_cost, ci_cid = find(COST_KEYS), find(CID_KEYS)
     ci_adg = find(ADG_KEYS)
+    ci_imp = find(IMP_KEYS, skip=IMP_SKIP)
     # 'Date Created'(캠페인 생성일)를 일자 컬럼으로 오인하면 안 된다 — 일별 브레이크다운 컬럼만 인정.
     ci_date = find(DATE_KEYS, skip=("created", "생성", "일정"))
     # 광고그룹 레벨 리포트엔 '캠페인 ID' 컬럼이 아예 없는 포맷도 있다(2026-08-16 실측).
@@ -372,9 +486,11 @@ def load_spend(path, forced_date):
             f"   → 이 파일은 캠페인 '설정' 내보내기입니다. 광고관리자에서 '지출' 지표가 포함된\n"
             f"      Campaign Report 를 날짜별로 다시 내보내 주세요.\n")
     print(f"📄 {os.path.basename(path)}: 지출='{hdr[ci_cost]}' 캠페인='{hdr[ci_cid] if ci_cid is not None else '(없음)'}'"
-          + (f" 광고그룹='{hdr[ci_adg]}'" if ci_adg is not None else " (광고그룹 컬럼 없음)"))
+          + (f" 광고그룹='{hdr[ci_adg]}'" if ci_adg is not None else " (광고그룹 컬럼 없음)")
+          + (f" 노출='{hdr[ci_imp]}'" if ci_imp is not None else " ⚠️ 노출 컬럼 없음 → CPM 미기록"))
 
     out = collections.defaultdict(dict)          # 날짜 → 광고그룹ID → 지출
+    imps = collections.defaultdict(dict)         # 날짜 → 광고그룹ID → 노출수
     unknown = collections.Counter()
     for r in rows[1:]:
         cid = str(r[ci_cid]).strip() if (ci_cid is not None and r[ci_cid] is not None) else ""
@@ -408,6 +524,12 @@ def load_spend(path, forced_date):
                     f"   → 광고그룹 레벨 리포트로 다시 내보내 주세요.\n")
             aid = cand[0]
         out[d][aid] = out[d].get(aid, 0) + cost
+        if ci_imp is not None:
+            try:
+                imp = int(round(float(str(r[ci_imp]).replace(",", "").strip())))
+            except (TypeError, ValueError):
+                imp = 0
+            imps[d][aid] = imps[d].get(aid, 0) + imp
 
     if unknown:
         print("   ⚠️ ROWS 에 없는 광고그룹인데 지출이 있음 → ROWS 에 추가해야 합니다:")
@@ -419,8 +541,10 @@ def load_spend(path, forced_date):
         print(f"   [{d}] 광고그룹 지출:")
         for aid, c in sorted(out[d].items(), key=lambda x: -x[1]):
             if c:
-                print(f"      {aid}  {NAME_BY_AID[aid]:28} {c:>9,}  (캠페인 {CAMP_BY_AID[aid]})")
-    return out
+                im = imps.get(d, {}).get(aid, 0)
+                cpm = f"  노출 {im:>9,} CPM {round(c / im * 1000):>6,}" if im else ""
+                print(f"      {aid}  {NAME_BY_AID[aid]:28} {c:>9,}  (캠페인 {CAMP_BY_AID[aid]}){cpm}")
+    return out, imps
 
 
 # ---------------- 매출: Mixpanel export API ----------------
@@ -604,6 +728,8 @@ def main():
     ap.add_argument("--note", default="", help="2행 주석에 이어붙일 문장")
     ap.add_argument("--recalc", action="store_true",
                     help="날짜·예산은 그대로 두고 D열(최근 7일 평균)만 다시 계산")
+    ap.add_argument("--no-sort", action="store_true",
+                    help="행을 매출순으로 재정렬하지 않는다(기본은 매번 재정렬)")
     ap.add_argument("--apply", action="store_true")
     a = ap.parse_args()
 
@@ -613,11 +739,14 @@ def main():
     if a.budget_only and not budgets:
         sys.exit("❌ --budget-only 인데 --budget 에서 읽은 예산이 없습니다")
 
-    spend = {}
+    spend, imps = {}, {}
     for item in a.spend:
         d, path = item.split("=", 1)
-        for dd, m in load_spend(path, d).items():
+        sp_map, im_map = load_spend(path, d)
+        for dd, m in sp_map.items():
             spend.setdefault(dd, {}).update(m)
+        for dd, m in im_map.items():
+            imps.setdefault(dd, {}).update(m)
     dates = sorted(spend)
     print(f"📅 대상 날짜: {dates}")
 
@@ -633,7 +762,9 @@ def main():
                 extra = f" — 매출 {r_:,}원 {c_}건 있으나 지출 0이라 제외" if r_ else ""
                 print(f"  {name:26} (빈칸 — 지출 0{extra})")
             else:
-                print(f"  {name:26} 지출 {s:>9,} | 매출 {r_:>9,} | {c_}건 | ROAS {round(r_/s*100)}%")
+                im = imps.get(d, {}).get(aid, 0)
+                cpm = f" | 노출 {im:,} CPM {round(s / im * 1000):,}" if im else ""
+                print(f"  {name:26} 지출 {s:>9,} | 매출 {r_:>9,} | {c_}건 | ROAS {round(r_/s*100)}%{cpm}")
 
     cr = Credentials.from_service_account_file(SA, scopes=["https://www.googleapis.com/auth/spreadsheets"])
     svc = build("sheets", "v4", credentials=cr)
@@ -680,8 +811,25 @@ def main():
         for i, (old, new) in enumerate(zip(have, migrate)):
             print(f"   {ROWS[1+i][0]:28} {old} → {new}")
     elif have != want[:len(have)]:
-        sys.exit(f"❌ 시트 행 순서가 ROWS 와 다름 — 중단\n   시트: {have}\n"
-                 f"   ROWS(광고그룹): {want}\n   ROWS(캠페인): {want_camp}")
+        # 2026-09-01~ 시트 행 순서는 '최근 7일 평균 매출 내림차순'이라 매일 바뀐다.
+        # 그래서 ROWS 소스 순서와 시트 순서가 다른 게 정상이다 — 집합만 같으면
+        # ROWS 를 시트 순서로 재배열해 이하의 '위치 기준' 쓰기를 성립시킨다.
+        # (예전엔 여기서 중단하고 사람이 ROWS 를 손으로 맞춰야 했다.)
+        by_aid = {t[1]: t for t in ROWS[1:]}
+        if len(by_aid) != len(ROWS) - 1:
+            sys.exit("[X] ROWS 에 중복 광고그룹 ID 가 있습니다 - 중단")
+        if len(set(have)) != len(have):
+            sys.exit("[X] 시트 B열에 중복 광고그룹 ID 가 있습니다 - 중단: %s" % have)
+        unknown = [x for x in have if x not in by_aid]
+        if unknown:
+            sys.exit("[X] 시트에 있는데 ROWS 에 없는 광고그룹 - 중단: %s / 시트: %s / ROWS: %s"
+                     % (unknown, have, want))
+        hset = set(have)
+        rest = [t for t in ROWS[1:] if t[1] not in hset]
+        ROWS[1:] = [by_aid[x] for x in have] + rest
+        want = [a for _, a, _ in ROWS[1:]]
+        print("")
+        print("[=] ROWS 를 시트 행 순서(매출순)에 맞춰 재배열 - %d행" % len(have))
     missing = ROWS[1 + len(have):]
     if missing:
         print("\n➕ 시트에 없는 신규 광고그룹 → 행 추가: " + ", ".join(n for n, _, _ in missing))
@@ -701,12 +849,14 @@ def main():
         cells = [parse_cell(c) for c in row[(COL_D0 if hasbud else COL_D0 - 1):]]
         cur = parse_cell(row[COL_TOT if hasbud else COL_TOT - 1])
         tot = (sum(x[0] for x in cells if x), sum(x[1] for x in cells if x),
-               sum(x[2] for x in cells if x))
+               sum(x[2] for x in cells if x), sum(x[3] for x in cells if x))
         chk.append((ROWS[ri - 1][0], cur, avg_cells(cells), tot))
         existing.append(cells)
 
     seen = [c for c in chk if c and c[1] is not None]
-    legacy = bool(seen) and all(cur == tot for _n, cur, _av, tot in seen)
+    # ⚠️ 비교는 (지출, 매출, 판매수) 3개만 — 4번째 노출은 CPM 을 역산한 값이라
+    #    반올림 오차로 재실행 때마다 1~2 씩 흔들린다. 열 어긋남·손편집은 앞 3개로 충분히 잡힌다.
+    legacy = bool(seen) and all(cur[:3] == tot[:3] for _n, cur, _av, tot in seen)
     if legacy:
         print(f"\n🔀 D열 전환: '전기간 합계' → '{AVG_HDR}'(분모 {AVG_DAYS} 고정) — 이번 실행에서 갱신됩니다")
     for c in chk:
@@ -714,8 +864,8 @@ def main():
             continue
         name, cur, av, tot = c
         exp = tot if legacy else av
-        ok = cur == exp
-        print(f"검증 {name:26} D열={cur} 기대={exp} {'✅' if ok else '❌'}")
+        ok = cur[:3] == exp[:3]
+        print(f"검증 {name:26} D열={cur[:3]} 기대={exp[:3]} {'✅' if ok else '❌'}")
         if not ok:
             sys.exit("❌ D열 불일치 — 중단 (열이 어긋났거나 손으로 고친 셀이 있는지 확인)")
 
@@ -723,16 +873,17 @@ def main():
     new_cells = {}
     for d in dates:
         col = []
-        tot_s = tot_r = tot_c = 0
+        tot_s = tot_r = tot_c = tot_i = 0
         for name, aid, _c in ROWS[1:]:
             s = spend[d].get(aid, 0)
             r_, c_ = rev[d].get(aid, [0, 0])
+            i_ = imps.get(d, {}).get(aid, 0)
             if s == 0:                      # 미집행 광고그룹 — 빈칸 & 전체 합계에서도 제외
                 col.append(None)
                 continue
-            tot_s += s; tot_r += r_; tot_c += c_
-            col.append((s, r_, c_))
-        new_cells[d] = [(tot_s, tot_r, tot_c)] + col
+            tot_s += s; tot_r += r_; tot_c += c_; tot_i += i_
+            col.append((s, r_, c_, i_))
+        new_cells[d] = [(tot_s, tot_r, tot_c, tot_i)] + col
 
     if not a.apply:
         print("\n(dry-run) --apply 를 붙이면 시트에 반영합니다.")
@@ -809,9 +960,16 @@ def main():
     # 새 날짜 열은 오래된 날부터 E 에 끼워 넣으므로 반영 후 순서는 [최신 → 과거] 다.
     # 여기서도 같은 순서로 이어 붙여야 '최근 7개 열' 창이 실제 시트와 일치한다.
     totrows = [{"values": [hdr_cell(AVG_HDR)]}]
+    davg, dlast = [], []
     for ri in range(NROW):
+        # series 는 [최신 → 과거] 순 — 새 날짜 열은 오래된 날부터 E 에 끼워 넣으므로
+        # reversed(dates) 가 먼저 오고 그 뒤에 기존 열이 붙는다. 따라서 series[0] 이
+        # 반영 후 시트의 맨 왼쪽 날짜 열(= 가장 최근 날짜) 셀이다. 정렬 키로 쓴다.
         series = [new_cells[d][ri] for d in reversed(dates)] + existing[ri]
-        totrows.append({"values": [cell_data(*avg_cells(series))]})
+        av = avg_cells(series)
+        davg.append(av)
+        dlast.append(series[0] if series else None)
+        totrows.append({"values": [cell_data(*av)]})
     win = [f"{datetime.date.fromisoformat(d):%m/%d}" for d in reversed(dates)]
     win += [str(h) for h in hdr[COL_D0 if hasbud else COL_D0 - 1:]]
     print(f"\n📊 D열 = {AVG_HDR} (분모 {AVG_DAYS} 고정) · 창: {', '.join(win[:AVG_DAYS])}")
@@ -855,8 +1013,41 @@ def main():
             "rows": [{"values": [{"userEnteredValue": {"stringValue": old + " · " + a.note}}]}],
             "fields": "userEnteredValue"}})
 
+    # 행 정렬 = 가장 최근 날짜 열(E열)의 매출 내림차순 (2026-09-01~ 사용자 요청).
+    # ⚠️ 반드시 맨 마지막 요청이어야 한다 — 위의 값/예산/D열 쓰기는 전부 '위치 기준'이고
+    #    moveDimension 은 값·서식·행높이·숨김을 통째로 끌고 간다.
+    # 정렬로 시트 순서가 매일 바뀌므로 ROWS 소스 순서는 더 이상 시트와 같을 필요가 없다
+    # (다음 실행이 시작할 때 ROWS 를 시트 순서로 재배열한다 — 위 '재배열' 블록 참조).
+    if not a.no_sort:
+        sort_col = (f"{datetime.date.fromisoformat(max(dates)):%m/%d}" if dates
+                    else str(hdr[COL_D0 if hasbud else COL_D0 - 1]).split(" ")[0])
+        cur = list(range(1, NROW))                      # 현재 시트의 ROWS 인덱스 순서
+        tgt = sorted(cur, key=lambda ri: sort_key(dlast[ri], davg[ri], ROWS[ri][1]))
+        sim, nmove = list(cur), 0
+        for i, ri in enumerate(tgt):
+            if sim[i] == ri:
+                continue
+            j = sim.index(ri)
+            reqs.append({"moveDimension": {
+                "source": {"sheetId": GID, "dimension": "ROWS",
+                           "startIndex": FIRST_AG + j, "endIndex": FIRST_AG + j + 1},
+                "destinationIndex": FIRST_AG + i}})
+            sim = move_sim(sim, j, i)
+            nmove += 1
+        assert sim == tgt, "정렬 시뮬레이션 불일치"
+        if nmove:
+            print("")
+            print("↕️  최신일 매출순 재정렬: %d행 이동 (기준 열 = %s)" % (nmove, sort_col))
+            for i, ri in enumerate(tgt[:5]):
+                lc = dlast[ri] or (0, 0, 0)
+                print("   %d위 %-30s 매출 %s 지출 %s"
+                      % (i + 1, ROWS[ri][0], f"{lc[1]:,}", f"{lc[0]:,}"))
+        else:
+            print("")
+            print("↕️  최신일 매출순 재정렬: 이미 정렬돼 있음 (기준 열 = %s)" % sort_col)
+
     svc.spreadsheets().batchUpdate(spreadsheetId=SID, body={"requests": reqs}).execute()
-    print(f"\n✅ 반영 완료: {dates or '(날짜 변경 없음)'} · 합계 {ndays}일")
+    print(f"\n✅ 반영 완료: {dates or '(날짜 변경 없음)'} · D열 = {AVG_HDR}")
 
 
 if __name__ == "__main__":

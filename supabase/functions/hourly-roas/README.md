@@ -29,6 +29,38 @@
    어차피 날짜는 접으므로 Meta 쪽에서 합쳐 받는다(세트당 24행). 그래도 상한(`MAX_PAGES`)에
    걸리면 `notes` 로 "일부가 빠졌다" 고 알린다.
 
+## 구글 디멘드젠 탭 (mode='gd', 2026-09-02 추가)
+
+'🟢 구글 디멘드젠' 탭(`renderGgdgTight`)의 날짜 셀도 같은 화면을 연다. 행 단위가 메타 세트가 아니라
+**광고그룹(ad_group_id)** 이고 지출 원천이 Google Ads API 라는 것만 다르다 — 구간 접기·캐시·응답
+모양·앞뒤 이동은 전부 같다.
+
+| 항목 | 원천 | 비고 |
+|---|---|---|
+| 지출 | Google Ads API `googleAds:search` — `SELECT ad_group.id, segments.hour, metrics.* FROM ad_group WHERE segments.date BETWEEN … AND campaign.name LIKE '%Tight%' AND campaign.advertising_channel_type='DEMAND_GEN'` | 계정(5912047700) 타임존이 **Asia/Seoul** 이라 `segments.hour` 가 곧 KST |
+| 매출 | Mixpanel 결제 중 `utm_campaign`(=구글 캠페인 id)이 [Tight] 디멘드젠인 건을 `utm_content`(=광고 id)→광고그룹으로 귀속 | `구글_디멘드젠_캠페인_supabase.py` 와 같은 규칙 |
+| 통화 | KRW | 계정 통화가 KRW |
+| 자격증명 | `G_ADS_*` (apply-budget-google 이 쓰는 것과 동일 · 이미 시크릿에 있음) | 새로 넣을 것 없음 |
+
+구현상 주의:
+
+1. **`segments.date` 를 넣지 않는다.** 넣으면 응답이 (광고그룹 × 날짜 × 24시각) 으로 폭증하는데,
+   어차피 날짜는 접어서 쓰지 않는다. 빼면 구간 전체가 시각으로 접혀 광고그룹당 24행으로 온다.
+2. **`pageSize` 를 보내면 안 된다.** v24 는 `PAGE_SIZE_NOT_SUPPORTED` 로 요청을 거절한다(10,000행 고정).
+3. **`camp_<캠페인id>` 행**('(세트미상)' — 광고 id 가 광고그룹 매핑에 없는 결제 묶음)도 그대로 받는다.
+   광고그룹이 아니므로 지출 조회 대상에서 빼고 매출만 채운다.
+
+실측 정합(2026-09-02, 로컬 종단 실행 → `google_demandgen_campaign_daily` 대조):
+
+| 대상 | 지출 | 매출 | 구매 | 클릭 |
+|---|---|---|---|---|
+| 세트 `201847072270` · 2026-09-01 | ₩323,631.43 (**일치**) | ₩443,500 (**일치**) | 12 (일치) | 420 (일치) |
+| 광고그룹 16개 합 · 08-26~09-01 | ₩5,850,006 vs ₩5,850,009 (**−0.00004%**) | ₩6,432,666 (**일치**) | 173 (일치) | 6,518 (일치) |
+| `camp_23985137658` · 2026-07-17 | ₩0 (지출 없음이 정상) | ₩34,400 (**일치**) | 1 (일치) | — |
+
+메타 경로와 달리 크로스셀 백필·환율 같은 괴리 요인이 없어 **일별 셀과 사실상 완전히 일치**한다
+(남는 차이는 시각별 반올림 뿐).
+
 ## 왜 서버가 필요한가 · 왜 테이블이 아닌가
 
 - 시간별 그레인은 DB에 없다. `kr_channel_revenue_4h` 는 `채널 × 4시간` 이라 세트로 쪼갤 수 없다.
@@ -77,6 +109,8 @@ Authorization: Bearer <로그인 JWT>
                 "adset_id":"1234...", "ad_account_id":"act_..." }
 종합·소계 셀: { "mode":"kr", "date":"2026-08-23",
                 "sets":[{"id":"1234...","acc":"act_..."}, …] }     // 최대 1,200개
+구글 디멘드젠: { "mode":"gd", "date":"2026-09-01",
+                "adset_id":"201847072270" }                        // id = 광고그룹(또는 camp_<캠페인id>)
 
 → { ok, currency, sets, hours: [{h, spend, revenue, purchases, impressions, clicks} × 24],
     totals: {...}, notes: [...] }

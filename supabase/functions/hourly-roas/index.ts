@@ -7,8 +7,10 @@
 //   → 클릭할 때 그때그때 원천을 읽는다. 저장하지 않으므로 백필도, 창(window) 제한도 없다.
 //   Meta 토큰·Mixpanel 시크릿을 브라우저에 둘 수 없어서 서버 한 겹이 필요하다(apply-budget 과 같은 이유).
 //
-// 요청: POST { mode:'kr'|'gl'|'vn', adset_id, ad_account_id?,
+// 요청: POST { mode:'kr'|'gl'|'vn'|'gd', adset_id, ad_account_id?,
 //              date:'YYYY-MM-DD'  또는  date_from/date_to (추이차트 주별·월별 셀) }
+//   mode='gd' = 구글 디멘드젠 탭(🟢). 행 단위가 메타 세트가 아니라 **광고그룹(ad_group_id)** 이고
+//   지출 원천이 Meta insights 대신 Google Ads API 다. 나머지(구간 접기·캐시·응답 모양)는 전부 같다.
 // 응답: { ok, currency, date_from, date_to, days, hours:[{h,...}], totals, notes[] }
 //
 // 구간(주/월) 요청이면 **그 구간의 모든 날을 시각(0~23시)으로 접어서** 합산한다.
@@ -59,7 +61,7 @@ const TOKEN_ENVS = [
   "META_TOKEN_2_1", "META_TOKEN_2", "META_TOKEN_4", "META_TOKEN_3",
 ];
 
-const MODE_CCY: Record<string, string> = { kr: "KRW", gl: "USD", vn: "KRW" };
+const MODE_CCY: Record<string, string> = { kr: "KRW", gl: "USD", vn: "KRW", gd: "KRW" };
 // 한 번에 집계할 수 있는 최대 일수(추이차트 월별 버킷 = 최대 31일).
 const MAX_SPAN_DAYS = 31;
 
@@ -292,9 +294,128 @@ async function metaHourlySets(sets: SetRef[], from: string, to: string, target: 
   return { hours, err: [...new Set(errs)].join(" / "), notes };
 }
 
+// ── 구글 디멘드젠(mode='gd'): 광고그룹 × 1시간 지출 ─────────────
+// 메타와 다른 점:
+//   · 원천이 Google Ads API(REST googleAds:search) — 자격증명은 apply-budget-google 이 쓰는 것과 같다.
+//   · 행 단위가 세트가 아니라 **광고그룹(ad_group)** 이다(대시보드 '🟢 구글 디멘드젠' 탭의 행).
+//   · 계정 타임존이 Asia/Seoul(실측 2026-09-02)이라 segments.hour 가 곧 KST 시각이다.
+//   · segments.date 를 **일부러 빼서** 구간 전체가 시각으로 접혀 온다(광고그룹당 24행).
+//     메타에서 time_increment=all_days 를 쓰는 것과 같은 이유 — 날짜×시각 행은 쓰지도 않으면서 폭증한다.
+const G_API = "v24";
+const GADS = `https://googleads.googleapis.com/${G_API}`;
+const G_DEV = Deno.env.get("G_ADS_DEV_TOKEN") || "";
+const G_CLIENT = Deno.env.get("G_ADS_CLIENT_ID") || "";
+const G_SECRET = Deno.env.get("G_ADS_CLIENT_SECRET") || "";
+const G_REFRESH = Deno.env.get("G_ADS_REFRESH_TOKEN") || "";
+const gDigits = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+const G_LOGIN = gDigits(Deno.env.get("G_ADS_LOGIN_ID") || "");
+const G_CUST = gDigits(Deno.env.get("G_ADS_CUSTOMER_ID") || "") || "5912047700";
+// 파이프라인(구글_디멘드젠_캠페인_supabase.py)과 같은 대상 한정자 — [Tight] 디멘드젠만.
+const G_TIGHT = "campaign.name LIKE '%Tight%' AND campaign.advertising_channel_type = 'DEMAND_GEN'";
+
+async function gToken(): Promise<string> {
+  const r = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: G_CLIENT, client_secret: G_SECRET, refresh_token: G_REFRESH, grant_type: "refresh_token",
+    }).toString(),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) throw new Error(`구글 인증 실패: ${j.error_description || j.error || r.status}`);
+  return j.access_token as string;
+}
+
+// ⚠ pageSize 는 넣지 말 것 — v24 는 PAGE_SIZE_NOT_SUPPORTED 로 거절한다(응답은 10,000행 고정).
+const G_MAX_PAGES = 20;
+async function gSearch(query: string, token: string): Promise<any[]> {
+  const out: any[] = [];
+  let pageToken = "";
+  for (let page = 0; page < G_MAX_PAGES; page++) {
+    const body: Record<string, unknown> = { query };
+    if (pageToken) body.pageToken = pageToken;
+    const r = await fetch(`${GADS}/customers/${G_CUST}/googleAds:search`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`, "developer-token": G_DEV,
+        "login-customer-id": G_LOGIN, "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const d = j?.error?.details?.[0]?.errors?.[0];
+      throw new Error(d?.message || j?.error?.message || `Google Ads HTTP ${r.status}`);
+    }
+    for (const row of j.results ?? []) out.push(row);
+    pageToken = j.nextPageToken || "";
+    if (!pageToken) break;
+    if (page === G_MAX_PAGES - 1) truncated = true;
+  }
+  return out;
+}
+
+// 광고 id → 광고그룹 / 광고그룹 → 캠페인. 매출 귀속에 필요하다.
+// (파이프라인 fetch_groups_and_ads 와 같은 질의 = 같은 매핑 = 같은 '(세트미상)' 판정)
+type GdMap = { adToGroup: Record<string, string>; groupCamp: Record<string, string>; camps: Set<string> };
+let _gdMap: { at: number; v: GdMap } | null = null;
+const GD_MAP_TTL = 10 * 60 * 1000;
+async function gdMap(token: string): Promise<GdMap> {
+  if (_gdMap && Date.now() - _gdMap.at < GD_MAP_TTL) return _gdMap.v;
+  const rows = await gSearch(
+    `SELECT campaign.id, ad_group.id, ad_group_ad.ad.id FROM ad_group_ad WHERE ${G_TIGHT}`, token);
+  const v: GdMap = { adToGroup: {}, groupCamp: {}, camps: new Set() };
+  for (const r of rows) {
+    const gid = String(r?.adGroup?.id ?? "");
+    const cid = String(r?.campaign?.id ?? "");
+    const aid = String(r?.adGroupAd?.ad?.id ?? "");
+    if (!gid || !cid) continue;
+    v.groupCamp[gid] = cid;
+    v.camps.add(cid);
+    if (aid) v.adToGroup[aid] = gid;
+  }
+  _gdMap = { at: Date.now(), v };
+  return v;
+}
+
+// 광고그룹 × 시각 지출/노출/클릭. cost_micros 는 1원 = 1,000,000.
+async function gdHourlySpend(ids: Set<string>, from: string, to: string, token: string) {
+  const hours: Record<number, Hourly> = {};
+  const rows = await gSearch(
+    `SELECT ad_group.id, segments.hour, metrics.cost_micros, metrics.clicks, metrics.impressions ` +
+    `FROM ad_group WHERE segments.date BETWEEN '${from}' AND '${to}' AND ${G_TIGHT}`, token);
+  for (const r of rows) {
+    if (!ids.has(String(r?.adGroup?.id ?? ""))) continue;
+    const h = Number(r?.segments?.hour ?? -1);
+    if (!(h >= 0 && h <= 23)) continue;
+    const cur = hours[h] ?? (hours[h] = { spend: 0, impressions: 0, clicks: 0 });
+    cur.spend += Number(r?.metrics?.costMicros ?? 0) / 1e6;
+    cur.impressions += Number(r?.metrics?.impressions ?? 0);
+    cur.clicks += Number(r?.metrics?.clicks ?? 0);
+  }
+  return hours;
+}
+
+// 메타 경로(metaHourlySets)와 같은 모양으로 돌려준다 — 핸들러가 한 갈래로 처리하도록.
+// 매핑(map)은 매출 귀속에도 쓰므로 함께 넘긴다. 실패해도 던지지 않고 err 로 알린다.
+async function gdCollect(ids: Set<string>, from: string, to: string) {
+  const empty = {} as Record<number, Hourly>;
+  try {
+    const token = await gToken();
+    const map = await gdMap(token);
+    // 'camp_<캠페인id>'(세트미상)는 광고그룹이 아니라 지출 조회 대상이 아니다.
+    const groups = new Set([...ids].filter((x) => /^\d+$/.test(x)));
+    const hours = groups.size ? await gdHourlySpend(groups, from, to, token) : empty;
+    return { hours, err: "", notes: [] as string[], map: map as GdMap | null };
+  } catch (e) {
+    return { hours: empty, err: String((e as Error).message || e), notes: [] as string[], map: null as GdMap | null };
+  }
+}
+
 // ── Mixpanel: 세트 × 하루 × 1시간 매출 ────────────────────────
 type Ev = {
   date: string; hour: number; utm_term: string; utm_source: string;
+  utm_campaign: string; utm_content: string;
   revenue: number; ccy: string; order: string; insert_id: string;
   distinct_id: string; svc: string;
 };
@@ -371,12 +492,16 @@ async function mpEvents(from: string, to: string): Promise<{ evs: Ev[]; err: str
     for (const k of ["utm_term", "UTM_Term", "UTM Term"]) if (p[k]) { ut = cleanId(p[k]); break; }
     let us = "";
     for (const k of ["utm_source", "UTM_Source", "UTM Source"]) if (p[k]) { us = String(p[k]).trim(); break; }
+    // 구글 디멘드젠 귀속 키 — utm_campaign=구글 캠페인 id, utm_content=광고 id (숫자만 남긴다)
+    let uc = "", uk = "";
+    for (const k of ["utm_campaign", "UTM_Campaign", "UTM Campaign"]) if (p[k]) { uc = gDigits(p[k]); break; }
+    for (const k of ["utm_content", "UTM_Content", "UTM Content"]) if (p[k]) { uk = gDigits(p[k]); break; }
     const amt = Number(p.amount ?? p["결제금액"] ?? 0) || 0;   // 해외는 amount=실청구액(memory)
     const val = Number(p.value ?? 0) || 0;
     evs.push({
       date: kst.toISOString().slice(0, 10),
       hour: kst.getUTCHours(),
-      utm_term: ut, utm_source: us,
+      utm_term: ut, utm_source: us, utm_campaign: uc, utm_content: uk,
       revenue: amt > 0 ? amt : (val > 0 ? val : 0),
       ccy: eventCurrency(p),
       order: String(p.order_id ?? p.order_no ?? "").trim(),
@@ -403,7 +528,8 @@ function dedup(evs: Ev[]): Ev[] {
     if (e.order) {
       const cur = byOrder.get(e.order);
       if (!cur) { byOrder.set(e.order, e); continue; }
-      const better = (e.utm_term ? 1 : 0) - (cur.utm_term ? 1 : 0) || (e.revenue - cur.revenue);
+      const score = (x: Ev) => (x.utm_term ? 2 : 0) + (x.utm_campaign ? 1 : 0);
+      const better = score(e) - score(cur) || (e.revenue - cur.revenue);
       if (better > 0) byOrder.set(e.order, e);
       continue;
     }
@@ -444,15 +570,19 @@ Deno.serve(async (req) => {
     : [{ id: body?.adset_id, acc: body?.ad_account_id }];
   const seen = new Set<string>();
   const sets: SetRef[] = [];
+  // gd(구글 디멘드젠)의 행 키는 광고그룹 id(12자리)이거나, 파이프라인이 만든 '(세트미상)'
+  // 합성 키 camp_<캠페인id> 다. 후자는 cleanId 를 태우면 'camp_' 가 날아가므로 그대로 둔다.
+  const idOK = mode === "gd" ? /^(\d{5,}|camp_\d+)$/ : /^\d{6,}$/;
   for (const s of raw) {
-    const id = cleanId(s?.id ?? s?.adset_id);
-    if (!/^\d{6,}$/.test(id) || seen.has(id)) continue;
+    const rawId = String(s?.id ?? s?.adset_id ?? "").trim();
+    const id = (mode === "gd" && /^camp_\d+$/.test(rawId)) ? rawId : cleanId(rawId);
+    if (!idOK.test(id) || seen.has(id)) continue;
     seen.add(id);
     sets.push({ id, acc: String(s?.acc ?? s?.ad_account_id ?? "") });
   }
 
-  if (!MODE_CCY[mode]) return json({ ok: false, error: "세트 단위 추이차트(국내·글로벌·밴스드)에서만 지원합니다" }, 400);
-  if (!sets.length) return json({ ok: false, error: "세트 ID 형식 오류" }, 400);
+  if (!MODE_CCY[mode]) return json({ ok: false, error: "세트 단위 추이차트(국내·글로벌·밴스드)와 구글 디멘드젠 탭에서만 지원합니다" }, 400);
+  if (!sets.length) return json({ ok: false, error: (mode === "gd" ? "광고그룹 ID 형식 오류" : "세트 ID 형식 오류") }, 400);
   if (sets.length > MAX_SETS) return json({ ok: false, error: `한 번에 ${MAX_SETS}개 세트까지만 집계합니다(요청 ${sets.length}개)` }, 400);
   const DFMT = /^\d{4}-\d{2}-\d{2}$/;
   if (!DFMT.test(dFrom) || !DFMT.test(dTo)) return json({ ok: false, error: "날짜 형식 오류" }, 400);
@@ -470,7 +600,12 @@ Deno.serve(async (req) => {
   // 환율표를 먼저 받아 두고(캐시라 대개 즉시) 지출·매출을 병렬로 — MP export 가 훨씬 느리다.
   const rates = await perUsd();
   const conv = makeConv(rates);
-  const [meta, mp] = await Promise.all([metaHourlySets(sets, dFrom, dTo, target, conv), mpEvents(dFrom, dTo)]);
+  // 지출 원천만 모드에 따라 갈린다. 매출(Mixpanel export)은 공통이고 훨씬 느리므로 병렬로 띄운다.
+  const spendJob = mode === "gd"
+    ? gdCollect(idSet, dFrom, dTo)
+    : metaHourlySets(sets, dFrom, dTo, target, conv)
+        .then((m) => ({ hours: m.hours, err: m.err, notes: m.notes, map: null as GdMap | null }));
+  const [meta, mp] = await Promise.all([spendJob, mpEvents(dFrom, dTo)]);
 
   const hours = Array.from({ length: 24 }, (_, h) => ({
     h, spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0,
@@ -484,8 +619,19 @@ Deno.serve(async (req) => {
   }
   for (const e of mp.evs) {
     if (e.date < dFrom || e.date > dTo) continue;
-    if (!e.utm_term || !idSet.has(e.utm_term)) continue;
-    if (!isMetaSource(e.utm_source)) continue;                 // stale utm 오귀속 차단(파이프라인과 동일)
+    let key = "";
+    if (mode === "gd") {
+      // 구글: utm_campaign(=캠페인 id)이 [Tight] 디멘드젠이면, utm_content(=광고 id)로 광고그룹을 찾는다.
+      //   매핑에 없는 광고 id 는 파이프라인과 똑같이 캠페인 단위 '(세트미상)' 버킷으로 보낸다.
+      if (!meta.map) break;                                    // 매핑 조회 실패 — 아래 notes 로 알린다
+      if (!e.utm_campaign || !meta.map.camps.has(e.utm_campaign)) continue;
+      key = meta.map.adToGroup[e.utm_content] || ("camp_" + e.utm_campaign);
+    } else {
+      if (!e.utm_term) continue;
+      if (!isMetaSource(e.utm_source)) continue;               // stale utm 오귀속 차단(파이프라인과 동일)
+      key = e.utm_term;
+    }
+    if (!idSet.has(key)) continue;
     hours[e.hour].revenue += conv(e.revenue, e.ccy, target);
     hours[e.hour].purchases += 1;
   }
@@ -496,11 +642,21 @@ Deno.serve(async (req) => {
   }), { spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0 });
 
   const notes: string[] = [];
-  if (truncated) notes.push("Meta 응답이 페이지 상한에 걸려 지출 일부가 빠졌습니다 — 기간을 좁혀서 다시 봐 주세요.");
-  if (meta.err) notes.push("지출(Meta) 조회 실패: " + meta.err);
+  const srcName = mode === "gd" ? "Google Ads" : "Meta";
+  if (truncated) notes.push(srcName + " 응답이 페이지 상한에 걸려 지출 일부가 빠졌습니다 — 기간을 좁혀서 다시 봐 주세요.");
+  if (meta.err) notes.push("지출(" + srcName + ") 조회 실패: " + meta.err);
   if (mp.err) notes.push("매출(Mixpanel) 조회 실패: " + mp.err);
   for (const n of meta.notes) notes.push(n);
-  notes.push("매출=Mixpanel utm_term 귀속. 일별 파이프라인의 크로스셀 UTM 백필은 반영되지 않아 합계가 셀보다 낮을 수 있습니다.");
+  if (mode === "gd") {
+    if (!meta.map && !meta.err) notes.push("광고→광고그룹 매핑을 받지 못해 매출을 귀속하지 못했습니다.");
+    notes.push("지출=Google Ads API(ad_group × segments.hour) · 계정 타임존 Asia/Seoul 이라 시각이 곧 KST");
+    notes.push("매출=Mixpanel 결제 중 utm_campaign(=구글 캠페인 id) 매칭분을 utm_content(=광고 id)→광고그룹으로 귀속 — google_demandgen_campaign_daily 파이프라인과 같은 규칙");
+    if ([...idSet].some((x) => x.startsWith("camp_"))) {
+      notes.push("'(세트미상)' 행은 광고 id 가 현재 광고그룹 매핑에 없는 결제 묶음이라 지출이 0 입니다.");
+    }
+  } else {
+    notes.push("매출=Mixpanel utm_term 귀속. 일별 파이프라인의 크로스셀 UTM 백필은 반영되지 않아 합계가 셀보다 낮을 수 있습니다.");
+  }
   if (days > 1) notes.push(`${days}일치를 시각(0~23시)으로 접어 합산한 값입니다 — 날짜별 추이가 아니라 '이 구간에 몇 시가 잘 나왔나' 를 보는 화면입니다.`);
   const ccys = [...new Set(sets.map((s) => ACC[s.acc]?.ccy || target))].filter((c) => c !== target);
   if (ccys.length) notes.push(`지출 ${ccys.join("·")}→${target} 실시간 환율 환산`);
