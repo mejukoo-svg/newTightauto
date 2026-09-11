@@ -924,6 +924,7 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 'AI 증액 권고 중 인간 하향/취소 비율'이 높고(예: 절반↑) '인간이 하향한 건의 직후 3일 ROAS 하락'이 다수면 = **내 증액 권고가 구조적으로 과하다는 신호** → 이번엔 증액 폭을 한 단계 낮추고(증20→증10) 후보 선별을 더 보수적으로.
   · 반대로 '인간이 상향한 건의 직후 ROAS 상승'이 다수면 = 내 감액이 과했다는 신호 → 감액·OFF를 약간 완화하고 증액 후보를 놓치지 마라.
   · 표본이 적으면(건수 작음) 약한 신호로만 취급하고 과적합하지 마라. 이 지표는 방향 보정용이지 개별 세트 판단을 대체하지 않는다.
+- [사례집]이 주어지면 이는 **이 계정 사람이 실제로 어떻게 결정하는지의 구체 사례**다(권고 당일 상태 → 내 권고 → 사람의 최종 실행(메모) → 이후 ROAS). 규칙 요약보다 이 사례를 먼저 보고 **오늘 세트 중 사례와 비슷한 상태의 세트는 사람이 그 상태에서 실제로 택한 쪽으로 권고를 맞춰라**(예: 사례에서 7일ROAS 110~125%·하락추세 세트의 AI 감10을 사람이 반복 취소하고 그 뒤 ROAS가 회복됐다면, 오늘 같은 상태의 세트엔 감액 대신 관찰). 다만 '이후' 결과가 사람 선택을 반박한 사례(→ 'AI 쪽이 맞았을 수도')는 그 반대로, 근거를 들어 다시 권한다. 사례의 메모는 그 결정의 이유이니 같은 이유가 오늘도 성립하는지 확인하라. 사례집은 개별 세트 판단을 대체하지 않는다 — 비슷한 상태일 때 기울이는 방향과 강도를 정하는 데 써라.
 - [학습된 교훈]이 주어지면, 이 계정에서 장기간 결과로 검증된 규칙이므로 **플레이북 다음으로 강하게 반영**하라. 일반 플레이북과 이 계정 특화 교훈이 충돌하면 이 계정 교훈을 우선한다. 단, 최근 14일 [세트 데이터]가 교훈과 명백히 어긋나면 최근 데이터를 우선하고 그 사실을 짚어라.
 - [이전 스레드 토론]이 주어지면 반드시 참고: 내가 지난 번에 한 조언과 그 뒤 사람들의 코멘트·결정을 이어받아라.
   지난 권고가 실행/반박/보류됐는지 추적하고, 사람의 피드백과 충돌하면 그 의견을 우선 존중하며, 같은 말 반복하지 말고 후속 관점을 더해라.
@@ -1037,6 +1038,163 @@ def compute_calibration(region, dc, window_days=CALIB_DAYS):
         lines.append(f"인간이 상향한 건 직후 3일 ROAS 상승 {harder_val}/{harder_tot} (상승 다수 = AI 감액이 과했다는 신호)")
     return "\n".join(lines)
 
+
+# =====================================================================
+# 사례집 (few-shot): AI 권고 vs 사람 최종결정이 갈린 실제 사례를 '그때 세트 상태 → AI → 사람(메모) → 이후 결과'
+#   로 재구성해 프롬프트에 싣는다. 규칙 요약이 아니라 구체 사례로 "이 계정 사람은 이런 상태에서 이렇게
+#   결정한다"를 보여줘 조언이 사람 결정 쪽으로 수렴하게 한다(사용자 요청 2026-09-11, 학습 2단계).
+#   상태 스냅샷은 AI가 그날 봤던 것과 같은 정의(권고일 전날까지 7일 합계·최근3일·기준일 ROAS·CPA/CVR 지수).
+# =====================================================================
+CASE_DAYS = 45        # 사례 수집 창(AI 권고일 기준)
+CASE_MAX = 30         # 갈린 사례 최대 건수
+CASE_AGREE = 6        # 일치 사례(사람이 그대로 실행) 몇 건을 곁들여 '받아들여지는 권고'도 보여준다
+CASE_PER_SET = 2      # 세트당 최대 사례 수(한 세트가 사례집을 독점하지 않게)
+
+def build_case_book(region, dc, window_days=CASE_DAYS, max_cases=CASE_MAX):
+    """최근 window_days의 AI 권고 각각에 대해 '권고 시점 세트 상태 + AI권고 + 사람 최종결정(메모) + 이후 ROAS'
+    사례를 만들고, 갈린 사례 위주로 골라 텍스트로 반환(표본 없으면 '')."""
+    table, hl_table, sf, rf, bf, cur = ADV_SRC[region]
+    d_end = dc
+    d_start = max((datetime.date.fromisoformat(dc) - datetime.timedelta(days=window_days - 1)).isoformat(),
+                  APPLY_LOG_SINCE)          # 사람 최종결정은 실행 기록이 있는 구간만 신뢰
+    since = (datetime.date.fromisoformat(d_start) - datetime.timedelta(days=HIST_DAYS)).isoformat()
+    try:
+        ai_rows = sb("ai_advice_marks", f"region=eq.{region}&date=gte.{d_start}&date=lte.{d_end}"
+                                        f"&select=date,adset_id,tag&order=date.asc") or []
+    except Exception:
+        return ""
+    if not ai_rows:
+        return ""
+    rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
+                     f"&select=date,adset_id,adset_name,product,{bf},{sf},{rf},results_meta,results_mp,unique_clicks"
+                     f"&order=date.asc")
+    agg = {}
+    for r in rows:
+        aid = r.get("adset_id") or "?"
+        a = agg.setdefault(aid, {"name": r.get("adset_name") or aid, "product": r.get("product") or "", "days": {}})
+        a["name"] = r.get("adset_name") or a["name"]
+        a["product"] = r.get("product") or a["product"]
+        a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0, r.get(bf) or 0,
+                                r.get("results_meta") or 0, r.get("results_mp") or 0, r.get("unique_clicks") or 0)
+    applied, applied_days = _load_applied_marks(region, since, d_end)
+    if applied is None:
+        return ""   # 실행 기록 없이는 '사람 최종결정'을 알 수 없다
+    hmarks = _load_human_marks(region, d_start, d_end, with_clear=True)
+    memos = _load_daily_memos(region, d_start, d_end)
+    ai = {}
+    for r in ai_rows:
+        if r.get("adset_id") and r.get("tag"):
+            ai.setdefault(r["adset_id"], {})[r["date"]] = r["tag"]
+
+    def win(aid, end, n):
+        base = datetime.date.fromisoformat(end)
+        return [(base - datetime.timedelta(days=k)).isoformat() for k in range(n - 1, -1, -1)]
+
+    def sums(aid, dates):
+        t = [0, 0, 0, 0, 0]
+        for d in dates:
+            x = agg[aid]["days"].get(d)
+            if x:
+                t[0] += x[0]; t[1] += x[1]; t[2] += x[3]; t[3] += x[4]; t[4] += x[5]
+        return t  # sp, rv, res, mp, clk
+
+    def droas(aid, d):
+        x = agg[aid]["days"].get(d)
+        return round(x[1] / x[0] * 100) if x and x[0] else None
+
+    def bench(dates):
+        """그날 기준 계정 평균 결과당비용·전환율(지출 있는 전 세트 가중)."""
+        sp = res = mp = clk = 0
+        for aid in agg:
+            t = sums(aid, dates)
+            sp += t[0]; res += t[2]; mp += t[3]; clk += t[4]
+        return (sp / res if res else None), (mp / clk * 100 if clk else None)
+
+    cases = []
+    for aid, dm in ai.items():
+        if aid not in agg:
+            continue
+        a = agg[aid]
+        first_spend = min((d for d, x in a["days"].items() if x[0] > 0), default=None)
+        for d, tag_ai in sorted(dm.items()):
+            dcp = (datetime.date.fromisoformat(d) - datetime.timedelta(days=1)).isoformat()  # 권고 기준일(전날)
+            w7 = win(aid, dcp, ADVICE_DAYS)
+            sp7, rv7, res7, mp7, clk7 = sums(aid, w7)
+            if sp7 <= 0:
+                continue
+            roas7 = round(rv7 / sp7 * 100)
+            trend = "→".join(str(droas(aid, x) if droas(aid, x) is not None else 0) for x in w7[-3:])
+            r_dc = droas(aid, dcp)
+            bud = next((a["days"][x][2] for x in reversed(w7) if a["days"].get(x) and a["days"][x][2]), 0)
+            b_cpa, b_cvr = bench(w7)
+            cpa_idx = round(sp7 / res7 / b_cpa * 100) if res7 >= CPA_MIN_RESULTS and b_cpa else None
+            cvr_idx = round(mp7 / clk7 * 100 / b_cvr * 100) if clk7 and b_cvr else None
+            age = (datetime.date.fromisoformat(dcp) - datetime.date.fromisoformat(first_spend)).days + 1 if first_spend else None
+            age_s = (f"{age}일차" if first_spend > since else f"{age}일차+") if age is not None else "?"
+            prior = [(x, t) for x, t in sorted(applied.get(aid, {}).items()) if x < d and x >= win(aid, dcp, HIST_DAYS)[0]]
+            prior_s = " → ".join(f"{x[5:]}{HL_SHORT.get(t, t)}" for x, t in prior[-3:]) or "없음"
+            final_acts = applied.get(aid, {})
+            clears = {x for x, t in hmarks.get(aid, {}).items() if t == "clear"}
+            marks = {x: t for x, t in hmarks.get(aid, {}).items() if t != "clear"}
+            lab = _human_choice_label(d, tag_ai, final_acts, marks, clears, applied_days)
+            if lab == "—":
+                continue   # 미검토일 → 사람 결정을 모름
+            memo = memos.get(aid, {}).get(d)
+            r_d = droas(aid, d)
+            w3 = [(datetime.date.fromisoformat(d) + datetime.timedelta(days=k)).isoformat() for k in (1, 2, 3)]
+            sp3, rv3, *_ = sums(aid, w3)
+            r3 = round(rv3 / sp3 * 100) if sp3 else None
+            va = CALIB_VAL.get(tag_ai)
+            h_tag = final_acts.get(d) if d in applied_days and final_acts.get(d) else None
+            vh = CALIB_VAL.get(h_tag, 0) if h_tag else 0     # 취소·미실행·관찰 = 0
+            if va is None:
+                continue
+            if vh == va:
+                kind, verdict = "일치", ""
+            elif vh < va:
+                kind = "사람 보수"
+                verdict = ("사람 옳음(AI 과함)" if r3 is not None and r3 < roas7 else
+                           "AI 쪽이 맞았을 수도(이후 상승)" if r3 is not None else "판단불가")
+            else:
+                kind = "사람 공격"
+                verdict = ("사람 옳음(AI 과보수)" if r3 is not None and r3 > roas7 else
+                           "AI 쪽이 맞았을 수도(이후 하락)" if r3 is not None else "판단불가")
+            state = (f"7일ROAS {roas7}%(지출{cur}{round(sp7):,}) · 최근3일 {trend} · 기준일 {r_dc if r_dc is not None else '—'}%"
+                     f" · 예산{cur}{round(bud):,} · 결과당비용 평균대비 {cpa_idx if cpa_idx is not None else '표본얇음'}%"
+                     f" · 전환율 평균대비 {cvr_idx if cvr_idx is not None else '—'}% · 런칭 {age_s} · 직전조치 {prior_s}")
+            after = f"당일 {r_d if r_d is not None else '—'}% · 3일후 {r3 if r3 is not None else '—'}%(7일대비 {('%+d' % (r3 - roas7)) if r3 is not None else '—'}p)"
+            line = (f"- {d[5:]} {a['name'][:34]} (ID {aid}) [{a['product']}] | 상태: {state} | AI {HL_SHORT.get(tag_ai, tag_ai)} → 사람 {lab}"
+                    + (f' (메모:"{_memo_short(memo, 40)}")' if memo else "") + f" | 이후: {after}"
+                    + (f" → {verdict}" if verdict else ""))
+            cases.append({"d": d, "aid": aid, "kind": kind, "line": line, "judged": r3 is not None})
+    if not cases:
+        return ""
+    div = [c for c in cases if c["kind"] != "일치"]
+    agree = [c for c in cases if c["kind"] == "일치"]
+
+    def pick(lst, n):
+        # 이후 결과(3일후 ROAS)가 있는 사례를 먼저(최근순), 아직 결과가 없는 최근 3일 사례는 남는 자리에만
+        out, per = [], {}
+        for c in sorted(lst, key=lambda c: (c["judged"], c["d"]), reverse=True):
+            if per.get(c["aid"], 0) >= CASE_PER_SET:
+                continue
+            per[c["aid"]] = per.get(c["aid"], 0) + 1
+            out.append(c)
+            if len(out) >= n:
+                break
+        return sorted(out, key=lambda c: c["d"])
+    chosen_div, chosen_agree = pick(div, max_cases), pick(agree, CASE_AGREE)
+    n_div, n_agree = len(div), len(agree)
+    hdr = (f"(최근 {window_days}일 AI 권고 {len(cases)}건 중 사람 최종결정이 갈린 {n_div}건 · 일치 {n_agree}건. "
+           f"아래는 갈린 사례 {len(chosen_div)}건 + 일치 사례 {len(chosen_agree)}건, 세트당 최대 {CASE_PER_SET}건. "
+           f"'상태'는 권고 당일 아침에 AI가 본 것과 같은 정의, '사람'은 그날 실제로 메타에 적용한 최종결정.)")
+    parts = [hdr]
+    if chosen_div:
+        parts += ["[갈린 사례]"] + [c["line"] for c in chosen_div]
+    if chosen_agree:
+        parts += ["[일치 사례 — 이런 권고는 그대로 실행됐다]"] + [c["line"] for c in chosen_agree]
+    return "\n".join(parts)
+
 def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
     if not ANTHROPIC_KEY or not playbook:
         return None, []
@@ -1058,10 +1216,16 @@ def compose_advice(label, region, playbook, items, p, c, dp, dc, thread_ctx=""):
         print(f"  [조언] 보정 지표 계산 실패(무시): {e}")
         calib = ""
     calib_block = f"\n\n[보정 지표 — 최근 {CALIB_DAYS}일 내 권고 vs 인간 실제선택·결과 정량요약]\n{calib}" if calib else ""
+    try:
+        cases = build_case_book(region, dc)
+    except Exception as e:
+        print(f"  [조언] 사례집 생성 실패(무시): {e}")
+        cases = ""
+    cases_block = f"\n\n[사례집 — 최근 {CASE_DAYS}일 AI 권고 vs 사람 최종결정 실제 사례(상태→AI→사람→이후)]\n{cases}" if cases else ""
     user = (f"[기간] {dp} → {dc} ({label})\n"
             f"[종합] 메타 ROAS {meta_roas_p}%→{meta_roas_c}% · 전체종합 ROAS {total_roas_p}%→{total_roas_c}%\n\n"
             f"[세트 데이터 · 최근 {ADVICE_DAYS}일 · 지출 큰 순]\n{sets_to_text(items, cur)}"
-            f"{ctx_block}\n\n[플레이북]\n{playbook}{lessons_block}{calib_block}"
+            f"{ctx_block}\n\n[플레이북]\n{playbook}{lessons_block}{calib_block}{cases_block}"
             f"{ADV_MARKS_HINT}")
     client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     # max_tokens는 thinking+본문을 함께 덮는 하드 상한. adaptive thinking이 수천 토큰을
