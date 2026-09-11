@@ -512,6 +512,33 @@ def _load_applied_marks(region, since, until):
         days.add(d)
     return out, days
 
+def _load_daily_memos(region, since, until):
+    """daily_memos(날짜탭↔추이차트 durable 메모, 사람이 그날 남긴 코멘트) → {adset_id: {date: memo}}.
+    비어있는 메모는 제외. 사람이 왜 그렇게 결정했는지(tCPA 전환·복제·수혈 등)를 담은 유일한 서술 신호."""
+    out = {}
+    try:
+        rows = sb("daily_memos", f"region=eq.{region}&date=gte.{since}&date=lte.{until}"
+                                 f"&select=date,entity_id,memo&order=date.asc")
+    except Exception:
+        return out
+    for r in rows or []:
+        m = (r.get("memo") or "").strip()
+        if r.get("entity_id") and m:
+            out.setdefault(r["entity_id"], {})[r["date"]] = m
+    return out
+
+MEMO_MAX = 60      # 메모 1건 표시 상한(자)
+MEMO_KEEP = 4      # 세트당 메모이력 표시 건수(최근순)
+
+def _memo_short(m, n=MEMO_MAX):
+    m = " ".join((m or "").split())
+    return m if len(m) <= n else m[:n - 1] + "…"
+
+def _memo_hist(memos, until=None):
+    """{date: memo} → 'MMDD"…" · MMDD"…"' (최근 MEMO_KEEP건, 오래된→최근)."""
+    ds = sorted(d for d in memos if not until or d <= until)[-MEMO_KEEP:]
+    return " · ".join(f'{d[5:]}"{_memo_short(memos[d])}"' for d in ds)
+
 def _final_human_acts(marks, applied, keep_from=None):
     """사람 조치 이력 확정. APPLY_LOG_SINCE 이후 날짜는 실행 기록(applied)만 조치로 인정하고
     마킹(marks)은 버린다. 그 이전 날짜는 마킹 유지. keep_from(예: 오늘)은 아직 실행 전이라
@@ -558,7 +585,7 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         aid = r.get("adset_id") or "?"
         a = agg.setdefault(aid, {"name": r.get("adset_name") or aid, "product": r.get("product") or "",
                                  "budget": 0, "days": {}, "ext": {}, "acts": {}, "hl": "", "memo": "",
-                                 "today": None})
+                                 "memos": {}, "today": None})
         a["name"] = r.get("adset_name") or a["name"]
         a["product"] = r.get("product") or a["product"]
         a["budget"] = max(a["budget"], r.get(bf) or 0)
@@ -576,6 +603,11 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
             a["hl"] = r["highlight"]
         if r.get("memo"):
             a["memo"] = r["memo"]
+            a["memos"][r["date"]] = r["memo"]   # 날짜별 메모(사람이 그날 남긴 코멘트)
+    # durable 날짜별 메모(daily_memos) 병합 — 글로벌은 daily 행 지연으로 perf memo가 유실되므로 이쪽이 신뢰 소스
+    for aid, dm in _load_daily_memos(region, since, d_act).items():
+        if aid in agg:
+            agg[aid]["memos"].update(dm)
     # 세트별 현재 메모/하이라이트 보강 (adset_highlights)
     for r in (sb(hl_table, "select=adset_id,highlight,memo") or []):
         aid = r.get("adset_id")
@@ -643,7 +675,9 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         airec = []
         for d in sorted(aim):
             lab = _human_choice_label(d, aim[d], a["acts"], a.get("marks", {}), clears.get(aid, set()), applied_days if applied is not None else None)
-            airec.append(f"{d[5:]}AI{HL_SHORT.get(aim[d], aim[d])}(사람:{lab})")
+            # 그날 사람이 남긴 메모 = 그 결정의 '이유' → 권고이력에 같이 붙여 왜 갈렸는지 학습하게 한다
+            mm = a["memos"].get(d)
+            airec.append(f"{d[5:]}AI{HL_SHORT.get(aim[d], aim[d])}(사람:{lab}" + (f' · 메모:"{_memo_short(mm, 40)}"' if mm else "") + ")")
         # active: True=현재 활성(하이라이트 대상) / False=중단 확정(제외) / None=상태 미상(필터 안 함)
         st = status_map.get(aid)
         # 상태 조회가 부분 실패했으면 목록에 없는 세트는 '미상'(None) — 실패 계정 세트를 중단으로 오판하지 않는다
@@ -670,7 +704,7 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
                       "cpa7": cpa7, "cvr7": cvr7, "res7": res7, "mp7": mp7, "clk7": clk7,
-                      "hl": a["hl"], "memo": a["memo"], "hist": " → ".join(hist),
+                      "hl": a["hl"], "memo": a["memo"], "memo_hist": _memo_hist(a["memos"]), "hist": " → ".join(hist),
                       "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp,
                       "active": active, "status": st or "",
                       "just_adj": just_adj, "last_act": last_act, "adj_when": adj_when,
@@ -819,6 +853,8 @@ def sets_to_text(items, cur):
             tag.append("조치:" + HL_KO.get(s["hl"], s["hl"]))
         if s["memo"]:
             tag.append("메모:" + s["memo"][:50])
+        if s.get("memo_hist"):
+            tag.append("메모이력:" + s["memo_hist"])  # 사람이 날짜별로 남긴 코멘트(결정 이유·구조 조치)
         if s.get("hist"):
             tag.append("이력:" + s["hist"])  # 최근 14일 증감액 액션@그날ROAS (조치 효과 판단용)
         if s.get("airec"):
@@ -868,7 +904,13 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
 - **전환율(CVR) 가중 — 감액군 안에서 전환율이 높으면 최대한 덜 깎는다**: 각 세트의 `전환율`은 최근 7일 결제수/고유클릭이고 역시 계정 평균 대비 지수가 붙는다. 감액·OFF 후보로 올라온 세트라도 **`전환율 우수(평균대비 130%↑)` 태그가 있으면 감액을 한 단계 완화하라**(OFF→20% 감액, 20%→10% 감액, 10% 감액→👀 지켜볼 것). 클릭이 결제로 잘 넘어가는 세트는 소재·랜딩이 아니라 매입단가(CPM·CPC)나 일시적 트래픽 문제일 확률이 높아, 끄면 잘 굴러가던 전환 자산을 잃는다. 완화했으면 조언 본문에 '전환율 평균대비 nnn%라 OFF 대신 20% 감액' 식으로 이유를 명시하라. 단, 7일ROAS<80%가 3일 연속 이어지는 명백한 적자는 전환율이 높아도 감액 자체를 면제하지 않는다(폭만 완화).
 - 우선순위: **ROAS 보호선(기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 감액·OFF 금지) > 이틀 연속 증감액 금지 > 전환율 완화 가중 > 결과당비용 가중**. 앞의 규칙이 걸리면 뒤의 가중으로 뒤집지 마라(예: 결과당비용이 아무리 높아도 기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 세트는 👀 지켜볼 것).
 - **이미 정지(중단)된 광고세트는 조언에서 아예 다루지 않는다.** 조언 대상은 '지금 돈이 나가고 있는 활성 세트'뿐이다. 중단 세트는 [세트 데이터] 목록에서 이미 제외돼 있고 하단에 제외 건수만 표기된다 → 증액·감액·OFF·복증 권고는 물론, 본문 언급도, 👀 지켜볼 것(재개·재활성 검토 포함)에 올리는 것도 금지다. [이전 스레드 토론]·'이력:'·'AI권고이력:'에 중단된 세트가 등장하더라도 이번 조언에서 되살리지 마라. (제외 안내가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
-- 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
+- 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라.
+- **'메모이력:'과 AI권고이력의 '메모:'는 사람이 그날 직접 남긴 코멘트 = 그 결정의 이유이자 지시다(가장 강한 정성 신호).** 예: `09-01"ASC모아서 tCPA로 바꾸기"`, `"purchaseall"`, `"복제"`, `"수혈 필요"`, `"2배가 생각보다 안 되고 있네요"`. 반드시 다음처럼 쓴다:
+  · 메모가 **구조 조치**(tCPA/tROAS/PurchaseAll 전환, 복제, 소재 수혈, 타겟 변경 등)를 말하면 그 세트는 예산 손장난 대신 그 조치의 결과를 보는 중이다 → 전환 직후 며칠(학습 재시작)은 감액·OFF를 유보하고 👀 지켜볼 것에 '메모대로 tCPA 전환 관찰 중'으로 적어라. 메모 내용을 인용해서.
+  · 메모가 **AI 권고를 거부한 이유**를 담고 있으면(AI권고이력에서 취소/하향과 같은 날의 메모) 그 이유를 존중해 같은 권고를 근거 없이 반복하지 마라. 다시 권하려면 그 이유가 해소됐음(데이터)을 들어라.
+  · 메모가 **의도·계획**("복증", "2배", "수혈 필요")이면 그 계획에 맞춰 조언을 잇는다(예: '복제' 메모 세트는 원본 추가 증액 대신 복제본 안착을 보라).
+  · 메모가 상태 표식("한국어", "전세계한국어")이면 세트 성격 참고용이다 — 판단 근거로 과대해석하지 마라.
+  · 메모와 데이터가 충돌하면 사람의 메모(의도)를 우선하되, 데이터가 명백히 반대면 '메모대로 X 중이나 3일 ROAS nn% 하락 — 재검토 필요'로 짚어라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
 - 각 세트의 '이력:'은 최근 14일 동안 **실제로 메타에 적용된** 증감액(날짜탭 '메타에 예산 적용' 실행 기록)과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액 실행, 그날 ROAS 172%·110%). 하이라이트만 찍고 실행하지 않은 것은 조치가 아니므로 이력에 없다(오늘 날짜만 예외 — 아직 실행 전이라 마킹을 '계획'으로 보여준다). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
   · 증액 후 며칠 뒤 ROAS가 하락했으면 '증액 안 먹힘 → 되돌림/관망', 감액 후 회복했으면 '유효'.
   · **같은 액션(예: 증액20%)을 반복했는데도 계속 하락하면** 그 패턴을 명시적으로 지적하고, 증감액 손장난 대신 다른 처방(소재 수혈·타겟 제외·OFF 등 플레이북 5·9장)을 권하라.
@@ -1071,12 +1113,15 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
     for r in rows:
         aid = r.get("adset_id") or "?"
         a = agg.setdefault(aid, {"name": r.get("adset_name") or aid, "product": r.get("product") or "",
-                                 "days": {}, "hacts": {}})
+                                 "days": {}, "hacts": {}, "memos": {}})
         a["name"] = r.get("adset_name") or a["name"]
         a["product"] = r.get("product") or a["product"]
         a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0)
         if r.get("highlight"):
             a["hacts"][r["date"]] = r["highlight"]
+    for aid, dm in _load_daily_memos(region, since, dc).items():
+        if aid in agg:
+            agg[aid]["memos"].update(dm)
     # 사람 조치 durable 병합 (글로벌 유실 보완 → 학습에도 국내와 동일하게 반영)
     clears = {}
     for aid, dm in _load_human_marks(region, since, dc, with_clear=True).items():
@@ -1134,7 +1179,9 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
                 h_lab = ("사람" + HL_SHORT.get(h, h)) if h else ""
             parts = ([("AI" + HL_SHORT.get(m, m))] if m else []) + ([h_lab] if h_lab else [])
             r0, r3 = roas_on(a, d), roas_next(a, d)
-            ev.append(f"{d[5:]}{'·'.join(parts)}@{r0 if r0 is not None else '?'}%→3일후{r3 if r3 is not None else '?'}%")
+            mm = a["memos"].get(d)
+            ev.append(f"{d[5:]}{'·'.join(parts)}@{r0 if r0 is not None else '?'}%→3일후{r3 if r3 is not None else '?'}%"
+                      + (f' 메모:"{_memo_short(mm, 50)}"' if mm else ""))
         blocks.append(f"- {a['name'][:40]} (ID {aid}) [{a['product']}] 총지출{cur}{round(tot_sp):,}\n    " + " ; ".join(ev))
         if len(blocks) >= 30:
             break
@@ -1143,6 +1190,7 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
 LESSONS_SYSTEM = """너는 이 계정의 증감액 의사결정 이력을 감사하는 분석가다.
 입력은 최근 기간 세트별 '조치(사람=실제로 메타에 적용한 최종 결정 / AI=그날 권고)와 그 직후 3일 ROAS 변화'다.
 사람 쪽 라벨: 사람증10 등=실제 실행, 사람취소=AI 하이라이트를 지움(명시적 거부), 사람미실행=그날 다른 세트는 실행했으나 이 세트는 안 건드림(관찰 선택), 사람마킹만…=표시만 하고 실행 안 함.
+이벤트 뒤의 메모:"…"는 사람이 그날 남긴 코멘트(결정 이유·구조 조치: tCPA 전환·복제·수혈 등)다. 사람이 AI와 다르게 결정한 날의 메모는 '왜 갈렸는가'의 직접 근거이므로, 메모에 반복되는 이유(예: "tCPA 전환 중이라 감액 거부")를 규칙으로 일반화하라.
 여기서 이 계정에 **반복적으로 검증된 교훈만** 뽑아, 앞으로의 증감액 조언을 날카롭게 하는 규칙으로 정리하라.
 
 원칙:
