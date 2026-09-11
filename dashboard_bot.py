@@ -450,22 +450,95 @@ def fetch_active_status(region):
                         out[aid] = row.get("effective_status") or "UNKNOWN"
                 nxt = data.get("paging", {}).get("next")
         except Exception as e:
+            # 일부 계정만 실패(대개 Meta 호출한도 code 17)하면 그 계정 세트들이 status_map에 없어
+            # '중단'으로 오판·제외되던 문제 → 실패 계정을 기록해 호출자가 '미상'으로 두게 한다.
             print(f"  [active_status] {acc} 조회 실패(무시): {e}")
+            out.setdefault("__failed__", []).append(acc)
     return out
 
-def _load_human_marks(region, since, dc):
+def _load_human_marks(region, since, dc, with_clear=False):
     """durable 사람 마킹 로드 {adset_id: {date: tag}}. 글로벌은 perfTbl.highlight 유실이 잦아
-    (daily 늦은 적재) 이 테이블이 사람 조치의 신뢰 소스. 국내도 보강(마킹 유실 방지)."""
+    (daily 늦은 적재) 이 테이블이 사람 조치의 신뢰 소스. 국내도 보강(마킹 유실 방지).
+    with_clear=True면 tag=null 행(사람이 하이라이트를 ✕로 지운 것)을 'clear'로 함께 돌려준다 —
+    AI 하이라이트를 명시적으로 거부한 신호라 학습에 필요(사용자 결정 2026-09-11)."""
     out = {}
     try:
         for r in (sb("human_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
                                            f"&select=date,adset_id,tag") or []):
             aid = r.get("adset_id")
-            if aid and r.get("tag"):
+            if not aid:
+                continue
+            if r.get("tag"):
                 out.setdefault(aid, {})[r["date"]] = r["tag"]
+            elif with_clear:
+                out.setdefault(aid, {})[r["date"]] = "clear"
     except Exception:
         pass
     return out
+
+# 사람의 '최종 의사결정' = 날짜탭 '⚡ 메타에 예산 적용'으로 실제 실행된 것(budget_apply_log, ok=true).
+# 하이라이트 마킹은 계획일 뿐이라 실행 안 한 마킹은 조치로 치지 않는다(사용자 결정 2026-09-11).
+# 이 날짜 이전은 apply log가 없으므로 마킹(highlight/human_advice_marks)으로 폴백.
+APPLY_LOG_SINCE = "2026-07-30"
+
+def _kst_bounds_utc(since, until):
+    """KST 날짜 구간 [since, until] → UTC ISO 경계 (since 00:00 KST, until+1 00:00 KST)."""
+    s = datetime.datetime.combine(datetime.date.fromisoformat(since), datetime.time(0), tzinfo=KST)
+    u = datetime.datetime.combine(datetime.date.fromisoformat(until) + datetime.timedelta(days=1),
+                                  datetime.time(0), tzinfo=KST)
+    fmt = "%Y-%m-%dT%H:%M:%SZ"   # '+00:00'은 URL에서 공백으로 깨지므로 Z 표기
+    return s.astimezone(datetime.timezone.utc).strftime(fmt), u.astimezone(datetime.timezone.utc).strftime(fmt)
+
+def _load_applied_marks(region, since, until):
+    """budget_apply_log(ok=true) → ({adset_id: {KST날짜: tag}}, {실행이 있었던 KST날짜 집합}).
+    같은 세트를 하루에 여러 번 실행했으면 마지막 것. 조회 실패 시 (None, set()) → 호출자가 마킹으로 폴백."""
+    out, days = {}, set()
+    try:
+        s_utc, u_utc = _kst_bounds_utc(since, until)
+        rows = sb("budget_apply_log", f"region=eq.{region}&ok=is.true&applied_at=gte.{s_utc}&applied_at=lt.{u_utc}"
+                                      f"&select=applied_at,adset_id,tag&order=applied_at.asc")
+    except Exception as e:
+        print(f"  [apply_log] {region} 조회 실패 → 마킹으로 폴백: {e}")
+        return None, days
+    for r in rows or []:
+        aid, tag = r.get("adset_id"), r.get("tag")
+        if not aid or not tag:
+            continue
+        try:
+            d = datetime.datetime.fromisoformat(r["applied_at"].replace("Z", "+00:00")).astimezone(KST).date().isoformat()
+        except Exception:
+            continue
+        out.setdefault(aid, {})[d] = tag
+        days.add(d)
+    return out, days
+
+def _final_human_acts(marks, applied, keep_from=None):
+    """사람 조치 이력 확정. APPLY_LOG_SINCE 이후 날짜는 실행 기록(applied)만 조치로 인정하고
+    마킹(marks)은 버린다. 그 이전 날짜는 마킹 유지. keep_from(예: 오늘)은 아직 실행 전이라
+    마킹을 '계획'으로 유지(이틀 연속 금지 판정용) — 단 실행 기록이 있으면 그것을 우선."""
+    if applied is None:            # apply log 조회 실패 → 종전대로 마킹 사용
+        return dict(marks)
+    out = {d: t for d, t in marks.items() if d < APPLY_LOG_SINCE or (keep_from and d >= keep_from)}
+    out.update(applied)
+    return out
+
+def _human_choice_label(d, ai_tag, final_acts, marks, clears, applied_days):
+    """AI권고이력의 '(사람:…)' 라벨. 실행(최종결정) > 취소 > 마킹만 > 미실행(검토일) > —(미검토)."""
+    t = final_acts.get(d)
+    if t:
+        # apply log 시대의 final_acts는 실행 기록이다. 실행이 전혀 없던 날에 남은 값은 오늘의 '계획' 마킹.
+        if applied_days is not None and d >= APPLY_LOG_SINCE and d not in applied_days:
+            return f"마킹만{HL_SHORT.get(t, t)}·미실행"
+        return HL_SHORT.get(t, t)
+    if d in clears:
+        return "취소"
+    if marks.get(d) == "watch":
+        return "관찰"                       # 관찰 마킹은 실행할 게 없으므로 그 자체가 결정
+    if marks.get(d):
+        return f"마킹만{HL_SHORT.get(marks[d], marks[d])}·미실행"
+    if applied_days is not None and d >= APPLY_LOG_SINCE and d in applied_days:
+        return "미실행"
+    return "—"
 
 def gather_sets(region, dc, days=ADVICE_DAYS):
     """세트별 최근 7일 성과 요약 + 최근 14일 증감액 액션 이력(액션 시점 ROAS 포함) 수집.
@@ -513,9 +586,20 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
                 agg[aid]["memo"] = r["memo"]
     # 사람 조치 durable 병합 (글로벌은 perfTbl.highlight 유실 잦음 → 여기서 채워 국내와 동일하게 이력 확보)
     # 오늘(d_act) 찍힌 조치까지 포함 → '오늘 이미 조정한 세트' 이틀 연속 금지 판정용
-    for aid, dm in _load_human_marks(region, since, d_act).items():
+    clears = {}   # {aid: {date}} 사람이 하이라이트를 ✕로 지운 날(AI 권고 명시적 거부)
+    for aid, dm in _load_human_marks(region, since, d_act, with_clear=True).items():
         if aid in agg:
-            agg[aid]["acts"].update(dm)
+            for d, t in dm.items():
+                if t == "clear":
+                    clears.setdefault(aid, set()).add(d)
+                else:
+                    agg[aid]["acts"][d] = t
+    # ★ 사람 최종결정 = 실제 실행(budget_apply_log). 마킹은 실행 전 '계획'일 뿐 → 실행 기록으로 이력을 확정.
+    applied, applied_days = _load_applied_marks(region, since, d_act)
+    for aid, a in agg.items():
+        a["marks"] = dict(a["acts"])                                   # 원 마킹(라벨용 보존)
+        a["acts"] = _final_human_acts(a["acts"], (applied or {}).get(aid, {}) if applied is not None else None,
+                                      keep_from=d_act)
     # AI 과거 추천 이력 (ai_advice_marks): 학습용 — 그날 내가(AI) 권한 증감액 vs 사람이 실제 선택한 하이라이트 비교
     ai_marks = {}
     try:
@@ -558,11 +642,15 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         aim = ai_marks.get(aid, {})
         airec = []
         for d in sorted(aim):
-            hs = a["acts"].get(d)
-            airec.append(f"{d[5:]}AI{HL_SHORT.get(aim[d], aim[d])}(사람:{HL_SHORT.get(hs, hs) if hs else '—'})")
+            lab = _human_choice_label(d, aim[d], a["acts"], a.get("marks", {}), clears.get(aid, set()), applied_days if applied is not None else None)
+            airec.append(f"{d[5:]}AI{HL_SHORT.get(aim[d], aim[d])}(사람:{lab})")
         # active: True=현재 활성(하이라이트 대상) / False=중단 확정(제외) / None=상태 미상(필터 안 함)
         st = status_map.get(aid)
-        active = (st in ACTIVE_STATUSES) if status_map else None
+        # 상태 조회가 부분 실패했으면 목록에 없는 세트는 '미상'(None) — 실패 계정 세트를 중단으로 오판하지 않는다
+        if st is None and status_map.get("__failed__"):
+            active = None
+        else:
+            active = (st in ACTIVE_STATUSES) if status_map else None
         # 이틀 연속 증감액 금지: 마지막 조치가 어제(dc) 또는 오늘(d_act)의 증액·감액이면 오늘은 조정 대상에서 뺀다.
         # (오늘 이미 손댄 세트를 또 건드리는 것도 '연달아 두 번'이므로 함께 막는다)
         act_dates = sorted(a["acts"])
@@ -781,12 +869,12 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
 - 우선순위: **ROAS 보호선(기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 감액·OFF 금지) > 이틀 연속 증감액 금지 > 전환율 완화 가중 > 결과당비용 가중**. 앞의 규칙이 걸리면 뒤의 가중으로 뒤집지 마라(예: 결과당비용이 아무리 높아도 기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 세트는 👀 지켜볼 것).
 - **이미 정지(중단)된 광고세트는 조언에서 아예 다루지 않는다.** 조언 대상은 '지금 돈이 나가고 있는 활성 세트'뿐이다. 중단 세트는 [세트 데이터] 목록에서 이미 제외돼 있고 하단에 제외 건수만 표기된다 → 증액·감액·OFF·복증 권고는 물론, 본문 언급도, 👀 지켜볼 것(재개·재활성 검토 포함)에 올리는 것도 금지다. [이전 스레드 토론]·'이력:'·'AI권고이력:'에 중단된 세트가 등장하더라도 이번 조언에서 되살리지 마라. (제외 안내가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
 - 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라. **하락 추세인데 '증액' 태그가 달린 세트는 플레이북 역행이므로 '재검토'로 지적**한다.
-- 각 세트의 '이력:'은 최근 14일 증감액 액션과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액, 그날 ROAS 172%·110%). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
+- 각 세트의 '이력:'은 최근 14일 동안 **실제로 메타에 적용된** 증감액(날짜탭 '메타에 예산 적용' 실행 기록)과 그 시점 ROAS다(예: `06-15증20@172% → 06-26증20@110%` = 6/15·6/26에 20% 증액 실행, 그날 ROAS 172%·110%). 하이라이트만 찍고 실행하지 않은 것은 조치가 아니므로 이력에 없다(오늘 날짜만 예외 — 아직 실행 전이라 마킹을 '계획'으로 보여준다). **이 이력을 이후 추세와 대조해 '그 조치가 실제로 먹혔는지'를 판단**하라:
   · 증액 후 며칠 뒤 ROAS가 하락했으면 '증액 안 먹힘 → 되돌림/관망', 감액 후 회복했으면 '유효'.
   · **같은 액션(예: 증액20%)을 반복했는데도 계속 하락하면** 그 패턴을 명시적으로 지적하고, 증감액 손장난 대신 다른 처방(소재 수혈·타겟 제외·OFF 등 플레이북 5·9장)을 권하라.
   · 과거에 실패한 액션을 그대로 반복 권고하지 마라. 근거로 이력의 날짜·ROAS를 인용하라.
 - **이틀 연속 증감액 절대 금지(하드 규칙)**: 한 세트의 예산을 연달아 두 번(어제 조정 → 오늘 또 조정, 또는 오늘 이미 조정 → 오늘 또 조정) 증액·감액하는 일은 없어야 한다. 조정한 다음 날은 결과를 최소 하루 지켜본다. 이력의 날짜는 '조치를 실행한 날'이므로, **이력의 가장 최근 조치가 어제 또는 오늘이고 그것이 증액 또는 감액이면 그 세트는 오늘 증액·감액 후보에서 무조건 제외**한다. 그런 세트에는 `어제조정:…(오늘 증감액 금지)` 또는 `오늘조정:…(오늘 증감액 금지)` 태그가 붙어 있으니 예외 없이 따르라 — ROAS가 아무리 좋아도 증액 연타(증액→증액) 금지, 아무리 나빠도 감액 연타(감액→감액) 금지, 방향을 뒤집는 조정(증액→감액, 감액→증액)도 금지다. 이틀 연속 손대면 어느 조치가 먹혔는지 측정이 불가능해진다. 대신 👀 지켜볼 것으로 돌려 '어제(오늘) OO 조정 → 효과 관찰 중'으로만 적어라. 태그가 없더라도 '이력:'에 어제·오늘 날짜의 증감액이 보이면 같은 규칙을 적용하라. 유일한 예외: OFF(끄기)는 증감액이 아니므로 이 제한을 받지 않는다(OFF 3기준을 명백히 충족하는 적자 세트는 어제 조정했더라도 OFF 권고 가능 — 단 오늘ROAS 110%↑·기준일ROAS 120%↑ 보호선은 여전히 우선).
-- 각 세트의 'AI권고이력:'은 **과거에 내가(AI) 그날 권한 증감액과, 그날 사람이 실제 선택한 하이라이트를 나란히** 보여준다(예: `07-01AI OFF(사람:—) → 07-02AI증20(사람:증10)`). `(사람:—)`=사람이 내 권고를 안 따랐거나 미표기, `(사람:증10)`=내가 증20을 권했으나 사람이 증10으로 하향 조정. **이 AI↔사람 차이를 이후 ROAS 추세와 대조해 내 조언 기준 자체를 채점·보정하라(핵심 학습 루프)**:
+- 각 세트의 'AI권고이력:'은 **과거에 내가(AI) 그날 권한 증감액과, 그날 사람의 최종 결정(=실제로 메타에 적용한 것)을 나란히** 보여준다(예: `07-01AI OFF(사람:미실행) → 07-02AI증20(사람:증10)`). 범례: `(사람:증10)`=사람이 실제로 증10을 실행(내가 증20을 권했으면 하향 조정한 것), `(사람:취소)`=내 하이라이트를 ✕로 지움(명시적 거부), `(사람:마킹만감20·미실행)`=표시만 하고 실행 안 함(실행 안 했으므로 결정은 '관찰'), `(사람:미실행)`=그날 다른 세트는 실행했는데 이 세트는 손대지 않음(=관찰을 선택), `(사람:—)`=그날 실행 기록이 전혀 없음(미검토, 판단 근거로 쓰지 말 것). **이 AI↔사람 차이를 이후 ROAS 추세와 대조해 내 조언 기준 자체를 채점·보정하라(핵심 학습 루프)**:
   · 사람이 내 권고를 반복적으로 하향/무시했고 그게 옳았으면(이후 ROAS가 사람 선택을 지지), 내 기준이 과했음을 인정하고 이번 권고의 강도·폭을 그 방향으로 조정하라.
   · 반대로 사람이 안 따랐는데 이후 ROAS가 나빠졌으면, 근거(그날 AI권고·이후 ROAS)를 들어 이번에 다시 설득하라.
   · 나와 사람이 일치했고 결과가 좋았던 패턴은 계속 신뢰하라. 요지: 내 과거 권고의 적중/빗나감을 스스로 채점해 조언을 발전시킨다(사람 선택을 무조건 추종하지도, 무시하지도 말고 결과로 판단).
@@ -827,6 +915,11 @@ def compute_calibration(region, dc, window_days=CALIB_DAYS):
             hact.setdefault(aid, {})[r["date"]] = r["highlight"]
     for aid, dm in _load_human_marks(region, since, dc).items():
         hact.setdefault(aid, {}).update(dm)  # 인간 실제선택 durable 병합(글로벌 유실 보완)
+    # ★ 최종결정 = 실행 기록(apply log). 실행 안 한 마킹은 선택으로 치지 않는다.
+    applied, applied_days = _load_applied_marks(region, since, dc)
+    if applied is not None:
+        for aid in set(hact) | set(applied):
+            hact[aid] = _final_human_acts(hact.get(aid, {}), applied.get(aid, {}))
     ai = {}
     try:
         for r in (sb("ai_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
@@ -852,7 +945,7 @@ def compute_calibration(region, dc, window_days=CALIB_DAYS):
             rv += r
         return round(rv / sp * 100) if sp else None
 
-    n_ai = match = softer = harder = none = 0
+    n_ai = match = softer = harder = none = noact = 0
     up_reco = up_softened = 0
     softer_val = softer_tot = harder_val = harder_tot = 0
     for aid, dm in ai.items():
@@ -865,8 +958,14 @@ def compute_calibration(region, dc, window_days=CALIB_DAYS):
                 up_reco += 1
             tag_h = hact.get(aid, {}).get(d)
             if tag_h is None:
-                none += 1
-                continue
+                # 그날 이 지역에서 실행이 있었는데 이 세트는 안 건드림 = '관찰'을 선택한 것(값 0).
+                # 실행 기록 자체가 없는 날은 미검토 → 표본에서 제외.
+                if applied is not None and d >= APPLY_LOG_SINCE and d in applied_days:
+                    tag_h = "watch"
+                    noact += 1
+                else:
+                    none += 1
+                    continue
             vh = CALIB_VAL.get(tag_h, 0)
             if vh == va:
                 match += 1
@@ -886,7 +985,8 @@ def compute_calibration(region, dc, window_days=CALIB_DAYS):
                     harder_val += 1 if r3 > r0 else 0
     if n_ai < 4:
         return ""  # 표본 얇음 → 억지 보정 금지
-    lines = [f"최근 {window_days}일 AI 권고 {n_ai}건 → 인간 반응: 일치 {match} · 하향(더 보수적) {softer} · 상향 {harder} · 미실행/미표기 {none}"]
+    lines = [f"최근 {window_days}일 AI 권고 {n_ai}건 → 인간 최종결정(메타 실제 적용 기준): 일치 {match} · 하향(더 보수적) {softer} · 상향 {harder} "
+             f"(이 중 검토일에 미실행=관찰 선택 {noact}) · 미검토일 {none}"]
     if up_reco:
         lines.append(f"AI 증액 권고 {up_reco}건 중 인간이 하향/취소 {up_softened}건({round(up_softened / up_reco * 100)}%)")
     if softer_tot:
@@ -978,9 +1078,19 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
         if r.get("highlight"):
             a["hacts"][r["date"]] = r["highlight"]
     # 사람 조치 durable 병합 (글로벌 유실 보완 → 학습에도 국내와 동일하게 반영)
-    for aid, dm in _load_human_marks(region, since, dc).items():
+    clears = {}
+    for aid, dm in _load_human_marks(region, since, dc, with_clear=True).items():
         if aid in agg:
-            agg[aid]["hacts"].update(dm)
+            for d, t in dm.items():
+                if t == "clear":
+                    clears.setdefault(aid, set()).add(d)
+                else:
+                    agg[aid]["hacts"][d] = t
+    # ★ 최종결정 = 실행 기록(apply log). 실행 안 한 마킹은 조치로 치지 않는다.
+    applied, applied_days = _load_applied_marks(region, since, dc)
+    for aid, a in agg.items():
+        a["marks"] = dict(a["hacts"])
+        a["hacts"] = _final_human_acts(a["hacts"], (applied or {}).get(aid, {}) if applied is not None else None)
     ai = {}
     try:
         for r in (sb("ai_advice_marks", f"region=eq.{region}&date=gte.{since}&date=lte.{dc}"
@@ -1016,7 +1126,13 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
         ev = []
         for d in events:
             h, m = a["hacts"].get(d), ai.get(aid, {}).get(d)
-            parts = ([("AI" + HL_SHORT.get(m, m))] if m else []) + ([("사람" + HL_SHORT.get(h, h))] if h else [])
+            if m and not h:  # AI 권고에 사람이 어떻게 반응했나(취소/마킹만/미실행/미검토)
+                lab = _human_choice_label(d, m, a["hacts"], a.get("marks", {}), clears.get(aid, set()),
+                                          applied_days if applied is not None else None)
+                h_lab = "" if lab == "—" else "사람" + lab
+            else:
+                h_lab = ("사람" + HL_SHORT.get(h, h)) if h else ""
+            parts = ([("AI" + HL_SHORT.get(m, m))] if m else []) + ([h_lab] if h_lab else [])
             r0, r3 = roas_on(a, d), roas_next(a, d)
             ev.append(f"{d[5:]}{'·'.join(parts)}@{r0 if r0 is not None else '?'}%→3일후{r3 if r3 is not None else '?'}%")
         blocks.append(f"- {a['name'][:40]} (ID {aid}) [{a['product']}] 총지출{cur}{round(tot_sp):,}\n    " + " ; ".join(ev))
@@ -1025,7 +1141,8 @@ def gather_learning_data(region, dc, window_days=LESSON_WINDOW):
     return "\n".join(blocks)
 
 LESSONS_SYSTEM = """너는 이 계정의 증감액 의사결정 이력을 감사하는 분석가다.
-입력은 최근 기간 세트별 '조치(사람/AI 증감액 표시)와 그 직후 3일 ROAS 변화'다.
+입력은 최근 기간 세트별 '조치(사람=실제로 메타에 적용한 최종 결정 / AI=그날 권고)와 그 직후 3일 ROAS 변화'다.
+사람 쪽 라벨: 사람증10 등=실제 실행, 사람취소=AI 하이라이트를 지움(명시적 거부), 사람미실행=그날 다른 세트는 실행했으나 이 세트는 안 건드림(관찰 선택), 사람마킹만…=표시만 하고 실행 안 함.
 여기서 이 계정에 **반복적으로 검증된 교훈만** 뽑아, 앞으로의 증감액 조언을 날카롭게 하는 규칙으로 정리하라.
 
 원칙:
