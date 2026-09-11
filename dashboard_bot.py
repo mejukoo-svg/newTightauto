@@ -578,7 +578,7 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
     d_act = (datetime.date.fromisoformat(dc) + datetime.timedelta(days=1)).isoformat()
     rows = sb(table, f"date=gte.{since}&date=lte.{d_act}"
                      f"&select=date,adset_id,adset_name,product,{bf},{sf},{rf},"
-                     f"results_meta,results_mp,unique_clicks,highlight,memo"
+                     f"results_meta,results_mp,unique_clicks,impressions,highlight,memo"
                      f"&order=date.asc")
     agg = {}
     for r in rows:
@@ -595,9 +595,9 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
                 a["acts"][r["date"]] = r["highlight"]
             continue
         a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0)
-        # 결과당비용·전환율 산출용 원지표 (메타 결과수 / MP 결제수 / 고유클릭)
+        # 결과당비용·전환율·CTR 산출용 원지표 (메타 결과수 / MP 결제수 / 고유클릭 / 노출)
         a["ext"][r["date"]] = (r.get("results_meta") or 0, r.get("results_mp") or 0,
-                               r.get("unique_clicks") or 0)
+                               r.get("unique_clicks") or 0, r.get("impressions") or 0)
         if r.get("highlight"):
             a["acts"][r["date"]] = r["highlight"]  # 날짜별 증감액 액션(중복행 대비 date로 dedup)
             a["hl"] = r["highlight"]
@@ -655,12 +655,15 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         if sp <= 0:
             continue
         roas7 = round(rv / sp * 100)
-        # 결과당비용(CPA=지출/메타 결과수)·전환율(CVR=MP 결제수/고유클릭). 7일 합계 기준이라 저지출일 왜곡 없음.
-        res7 = sum(a["ext"].get(d, (0, 0, 0))[0] for d in last7)
-        mp7 = sum(a["ext"].get(d, (0, 0, 0))[1] for d in last7)
-        clk7 = sum(a["ext"].get(d, (0, 0, 0))[2] for d in last7)
+        # 결과당비용(CPA=지출/메타 결과수)·전환율(CVR=MP 결제수/고유클릭)·CTR(고유클릭/노출).
+        # 7일 합계 기준이라 저지출일 왜곡 없음.
+        res7 = sum(a["ext"].get(d, (0, 0, 0, 0))[0] for d in last7)
+        mp7 = sum(a["ext"].get(d, (0, 0, 0, 0))[1] for d in last7)
+        clk7 = sum(a["ext"].get(d, (0, 0, 0, 0))[2] for d in last7)
+        imp7 = sum(a["ext"].get(d, (0, 0, 0, 0))[3] for d in last7)
         cpa7 = (sp / res7) if res7 > 0 else None      # 결과 0건 = 지출만 태움 → 별도 취급(—)
         cvr7 = (mp7 / clk7 * 100) if clk7 > 0 else None
+        ctr7 = (clk7 / imp7 * 100) if imp7 > 0 else None
         last3 = dts[-3:]
         trend = "→".join(f"{round(a['days'][d][1]/a['days'][d][0]*100) if a['days'][d][0] else 0}" for d in last3)
         # 증감액 액션 이력: 'MMDD액션@그날ROAS' 시간순 (조치가 먹혔는지 = 이후 추세와 대조)
@@ -703,17 +706,20 @@ def gather_sets(region, dc, days=ADVICE_DAYS):
         keep_today = roas_today is not None and roas_today >= KEEP_TODAY_ROAS_FLOOR
         items.append({"id": aid, "name": a["name"][:40], "product": a["product"], "budget": round(a["budget"]),
                       "sp": round(sp), "rv": round(rv), "roas7": roas7, "trend": trend,
-                      "cpa7": cpa7, "cvr7": cvr7, "res7": res7, "mp7": mp7, "clk7": clk7,
+                      "cpa7": cpa7, "cvr7": cvr7, "ctr7": ctr7, "res7": res7, "mp7": mp7, "clk7": clk7, "imp7": imp7,
                       "hl": a["hl"], "memo": a["memo"], "memo_hist": _memo_hist(a["memos"]), "hist": " → ".join(hist),
                       "airec": " → ".join(airec), "ndays": len(last7), "_sp": sp,
                       "active": active, "status": st or "",
                       "just_adj": just_adj, "last_act": last_act, "adj_when": adj_when,
                       "roas_dc": roas_dc, "keep_floor": keep_floor,
                       "roas_today": roas_today, "sp_today": round(sp_td), "keep_today": keep_today})
-    # 활성(및 상태미상) 먼저, 그 안에서 지출 큰 순 → 40칸을 조언 대상 세트가 우선 차지한다.
-    # (중단 세트는 sets_to_text에서 목록 제외되지만, 하이라이트 하드 가드용으로 뒤에 남겨둔다)
-    items.sort(key=lambda x: (x.get("active") is False, -x["_sp"]))
-    return items[:40], cur
+    # 활성(및 상태미상)은 지출 큰 순 상위 40개만 조언 대상. 중단 세트는 40칸 밖이라도 전부 뒤에 붙인다 —
+    # sets_to_text가 '정지 세트 N개 제외' 안내를 세는 근거이자(40칸에 잘리면 안내가 사라져 '상태 조회 실패'로
+    # 오인됨) 하이라이트 하드 가드(중단 세트 마킹 금지)의 대상이다.
+    items.sort(key=lambda x: -x["_sp"])
+    live = [x for x in items if x.get("active") is not False][:40]
+    dead = [x for x in items if x.get("active") is False]
+    return live + dead, cur
 
 HL_KO = {"up10": "증액10%", "up20": "증액20%", "up": "증액", "down10": "감액10%",
          "down20": "감액20%", "down50": "감액50%", "down": "감액", "off": "OFF", "watch": "관찰"}
@@ -739,6 +745,13 @@ CPA_HIGH = 130      # 평균대비 이 이상이면 '결과당비용 높음' →
 CPA_VHIGH = 160     # 평균대비 이 이상이면 '매우 높음' → OFF까지 우선 검토
 CPA_LOW = 80        # 평균대비 이 이하면 '효율 좋음' → 증액 가점
 CVR_GOOD = 130      # 전환율이 평균대비 이 이상이면 감액 완화 가중(랜딩·소재가 아니라 매입단가 문제)
+# CTR·CVR 품질 가중(사용자 결정 2026-09-11): CTR(고유클릭/노출)·전환율이 둘 다 좋으면 소재·랜딩 자산이
+# 건강한 세트 → 감액을 보수적으로(폭 축소·OFF 금지). 반대로 ROAS는 좋은데 CTR 또는 CVR이 낮으면
+# 운 좋은 매칭·소수 고액 결제에 기댄 ROAS일 수 있어 증액을 보수적으로(폭 한 단계 하향·복증 금지).
+CTR_GOOD = 130      # CTR 평균대비 이 이상이면 '우수'
+CTR_LOW = 70        # CTR 평균대비 이 이하면 '낮음' → 증액 보수 가중 (GOOD=130의 대칭 ±30%; 80이면 세트 40%가 걸려 신호가 안 됨)
+CVR_LOW = 70        # 전환율 평균대비 이 이하면 '낮음' → 증액 보수 가중
+QUAL_ROAS = 130     # 7일ROAS 이 이상(=증액 후보권)인데 CTR/CVR 낮으면 '증액 보수' 태그
 CPA_MIN_RESULTS = 3  # 7일 결과가 이보다 적으면 CPA 지수는 표본 얇음 → 가중 태그 생략
 # 봇 응답 끝에 붙일 기계용 하이라이트 블록 지시 (ADV_SYSTEM이 아닌 봇 user 프롬프트에만 → perf-advice 스킬과 무관)
 ADV_MARKS_HINT = (
@@ -811,16 +824,19 @@ def _bench(shown):
     res = sum(x.get("res7") or 0 for x in shown)
     mp = sum(x.get("mp7") or 0 for x in shown)
     clk = sum(x.get("clk7") or 0 for x in shown)
-    return ((sp / res) if res > 0 else None, (mp / clk * 100) if clk > 0 else None)
+    imp = sum(x.get("imp7") or 0 for x in shown)
+    return ((sp / res) if res > 0 else None, (mp / clk * 100) if clk > 0 else None,
+            (clk / imp * 100) if imp > 0 else None)
 
 def sets_to_text(items, cur):
     """조언용 세트 목록. 중단(비활성) 세트는 아예 빼고 건수만 알린다 — 조언 대상은 활성 세트뿐."""
     lines, skipped = [], 0
     shown = [x for x in items if x.get("active") is not False]
-    bench_cpa, bench_cvr = _bench(shown)
-    if bench_cpa or bench_cvr:
+    bench_cpa, bench_cvr, bench_ctr = _bench(shown)
+    if bench_cpa or bench_cvr or bench_ctr:
         lines.append(f"(계정 평균 — 결과당비용 {_fmt_cur(cur, bench_cpa)} · "
-                     f"전환율 {round(bench_cvr, 2) if bench_cvr else '—'}% "
+                     f"전환율 {round(bench_cvr, 2) if bench_cvr else '—'}% · "
+                     f"CTR {round(bench_ctr, 2) if bench_ctr else '—'}% "
                      f": 아래 각 세트의 '평균대비 %'는 이 값 기준)")
     for s in items:
         if s.get("active") is False:  # 이미 정지됨 → 조언에서 다루지 않음(목록에서 제외)
@@ -830,6 +846,7 @@ def sets_to_text(items, cur):
         # 결과당비용·전환율 가중: 절대금액이 아니라 계정 평균 대비 지수로 판단
         cpa_idx = round(s["cpa7"] / bench_cpa * 100) if s.get("cpa7") and bench_cpa else None
         cvr_idx = round(s["cvr7"] / bench_cvr * 100) if s.get("cvr7") and bench_cvr else None
+        ctr_idx = round(s["ctr7"] / bench_ctr * 100) if s.get("ctr7") and bench_ctr else None
         thin = (s.get("res7") or 0) < CPA_MIN_RESULTS
         if s.get("res7") == 0 and s["sp"] > 0:
             tag.append("7일 결과 0건(지출만 소진) → 감액·OFF 가중")
@@ -842,6 +859,14 @@ def sets_to_text(items, cur):
                 tag.append(f"결과당비용 낮음(평균대비 {cpa_idx}%) → 증액 가점")
         if cvr_idx is not None and cvr_idx >= CVR_GOOD:
             tag.append(f"전환율 우수(평균대비 {cvr_idx}%) → 감액 완화 가중")
+        # CTR·CVR 품질 가중(2026-09-11): 둘 다 좋으면 감액 보수, ROAS 좋은데 하나라도 낮으면 증액 보수
+        if ctr_idx is not None and cvr_idx is not None and ctr_idx >= CTR_GOOD and cvr_idx >= CVR_GOOD:
+            tag.append(f"CTR·전환율 모두 우수(CTR {ctr_idx}%·전환율 {cvr_idx}%) → 감액 보수적(최대 감10·OFF 금지)")
+        elif s["roas7"] >= QUAL_ROAS and not thin and (
+                (ctr_idx is not None and ctr_idx <= CTR_LOW) or (cvr_idx is not None and cvr_idx <= CVR_LOW)):
+            weak = " · ".join(([f"CTR 낮음({ctr_idx}%)"] if ctr_idx is not None and ctr_idx <= CTR_LOW else [])
+                              + ([f"전환율 낮음({cvr_idx}%)"] if cvr_idx is not None and cvr_idx <= CVR_LOW else []))
+            tag.append(f"ROAS 양호하나 {weak} → 증액 보수적(폭 한 단계 하향·복증 금지)")
         if s.get("keep_floor"):  # 기준일 ROAS가 보호선 이상 → 하락해도 감액·OFF 금지
             tag.append(f"기준일ROAS {s['roas_dc']}%≥{KEEP_ROAS_FLOOR}(감액·OFF 금지)")
         if s.get("keep_today"):  # 오늘 오전까지 ROAS가 보호선 이상 → 어제가 나빴어도 감액·OFF 금지
@@ -869,9 +894,12 @@ def sets_to_text(items, cur):
         cvr_s = f"{round(s['cvr7'], 2)}%" if s.get("cvr7") else "—"
         if cvr_idx is not None:
             cvr_s += f"(평균대비 {cvr_idx}%)"
+        ctr_s = f"{round(s['ctr7'], 2)}%" if s.get("ctr7") else "—"
+        if ctr_idx is not None:
+            ctr_s += f"(평균대비 {ctr_idx}%)"
         lines.append(f"- {s['name']} (ID {s['id']}) [{s['product']}] 예산{cur}{s['budget']:,} · "
                      f"{ADVICE_DAYS}일ROAS {s['roas7']}%(지출{cur}{s['sp']:,}) · "
-                     f"결과당비용 {cpa_s} · 전환율 {cvr_s} · "
+                     f"결과당비용 {cpa_s} · 전환율 {cvr_s} · CTR {ctr_s} · "
                      f"최근3일 {s['trend']}% · 기준일ROAS {rdc} · 오늘ROAS {rtd} · {s['ndays']}일{tagstr}")
     if skipped:  # 조언 대상에서 빠졌음을 명시 (세트 수가 적어 보이는 이유 + 되살리지 말라는 신호)
         lines.append(f"(이미 정지된 세트 {skipped}개는 조언 대상이 아니므로 목록에서 제외 — 언급하지 말 것)")
@@ -902,7 +930,11 @@ ADV_SYSTEM = """너는 메타 퍼포먼스 마케팅 어드바이저다. 아래 
   · 반대로 평균대비 80%↓(`결과당비용 낮음`)면 효율이 좋은 세트다 → 감액 후보에서 빼고 증액 후보로 가점.
   · `표본얇음`(7일 결과 3건 미만) 표시가 있으면 CPA 지수는 노이즈다 → 근거로 쓰지 말고 추세·ROAS로만 판단하라.
 - **전환율(CVR) 가중 — 감액군 안에서 전환율이 높으면 최대한 덜 깎는다**: 각 세트의 `전환율`은 최근 7일 결제수/고유클릭이고 역시 계정 평균 대비 지수가 붙는다. 감액·OFF 후보로 올라온 세트라도 **`전환율 우수(평균대비 130%↑)` 태그가 있으면 감액을 한 단계 완화하라**(OFF→20% 감액, 20%→10% 감액, 10% 감액→👀 지켜볼 것). 클릭이 결제로 잘 넘어가는 세트는 소재·랜딩이 아니라 매입단가(CPM·CPC)나 일시적 트래픽 문제일 확률이 높아, 끄면 잘 굴러가던 전환 자산을 잃는다. 완화했으면 조언 본문에 '전환율 평균대비 nnn%라 OFF 대신 20% 감액' 식으로 이유를 명시하라. 단, 7일ROAS<80%가 3일 연속 이어지는 명백한 적자는 전환율이 높아도 감액 자체를 면제하지 않는다(폭만 완화).
-- 우선순위: **ROAS 보호선(기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 감액·OFF 금지) > 이틀 연속 증감액 금지 > 전환율 완화 가중 > 결과당비용 가중**. 앞의 규칙이 걸리면 뒤의 가중으로 뒤집지 마라(예: 결과당비용이 아무리 높아도 기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 세트는 👀 지켜볼 것).
+- **CTR·전환율 품질 가중(사용자 결정 2026-09-11)**: 각 세트의 `CTR`은 최근 7일 고유클릭/노출이고 역시 계정 평균 대비 지수가 붙는다. CTR은 소재(후킹)의 힘, 전환율은 랜딩·상품 적합도의 힘이다 — 둘을 ROAS와 함께 보고 감액·증액의 '보수성'을 정한다.
+  · **CTR·전환율이 둘 다 좋으면(각각 평균대비 130%↑, `CTR·전환율 모두 우수` 태그) 감액을 보수적으로**: 소재와 랜딩이 모두 건강한 세트라 부진은 매입단가(CPM)·일시적 트래픽·요일 효과일 확률이 높다. 감액 후보로 올라와도 **폭은 최대 10%로 제한하고 OFF는 권고하지 마라**(20%→10%, OFF→10% 감액 또는 👀). 단, 7일ROAS<80%가 3일 연속인 명백한 적자는 감액 자체를 면제하지 않는다(폭만 10%로). 완화했으면 본문에 'CTR nnn%·전환율 nnn%로 소재·랜딩 자산 우수 → 감액 10%로 제한' 식으로 이유를 적어라.
+  · **ROAS는 좋은데 CTR 또는 전환율이 낮으면(평균대비 70%↓, `ROAS 양호하나 CTR 낮음/전환율 낮음 → 증액 보수적` 태그) 증액을 보수적으로**: 클릭이 안 나오거나 클릭이 결제로 안 넘어가는데 ROAS가 좋은 것은 소수 고액 결제·운 좋은 매칭에 기댄 ROAS일 수 있어 증액하면 무너지기 쉽다. 증액 후보라도 **폭을 한 단계 낮추고(증20→증10, 증10→조건부 증10 또는 👀) 복제증액은 금지**한다. 본문에 '전환율 평균대비 nn%라 증10만' 식으로 이유를 적어라. `표본얇음` 세트에는 이 태그가 붙지 않는다(노이즈).
+  · 이 가중은 강도 조절용이다 — 감액 여부·증액 여부 자체는 ROAS·추세·보호선·잠금으로 정하고, CTR·전환율은 그 폭을 보수 쪽으로 조정할 때만 쓴다(좋다고 증액하고 낮다고 감액하지는 마라).
+- 우선순위: **ROAS 보호선(기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 감액·OFF 금지) > 이틀 연속 증감액 금지 > CTR·전환율 품질 가중(감액 보수/증액 보수) > 전환율 완화 가중 > 결과당비용 가중**. 앞의 규칙이 걸리면 뒤의 가중으로 뒤집지 마라(예: 결과당비용이 아무리 높아도 기준일ROAS 120%↑ 또는 오늘ROAS 110%↑ 세트는 👀 지켜볼 것; CTR·전환율 모두 우수 세트는 결과당비용이 높아도 OFF 아님).
 - **이미 정지(중단)된 광고세트는 조언에서 아예 다루지 않는다.** 조언 대상은 '지금 돈이 나가고 있는 활성 세트'뿐이다. 중단 세트는 [세트 데이터] 목록에서 이미 제외돼 있고 하단에 제외 건수만 표기된다 → 증액·감액·OFF·복증 권고는 물론, 본문 언급도, 👀 지켜볼 것(재개·재활성 검토 포함)에 올리는 것도 금지다. [이전 스레드 토론]·'이력:'·'AI권고이력:'에 중단된 세트가 등장하더라도 이번 조언에서 되살리지 마라. (제외 안내가 전혀 없으면 상태 조회가 안 된 것이므로 종전대로 판단한다.)
 - 이미 취한 '조치'(증액10/20%, OFF 등)와 '메모'를 반드시 반영: 중복 권고하지 말고, 그 조치가 먹혔는지(ROAS 추세로) 평가해라.
 - **'메모이력:'과 AI권고이력의 '메모:'는 사람이 그날 직접 남긴 코멘트 = 그 결정의 이유이자 지시다(가장 강한 정성 신호).** 예: `09-01"ASC모아서 tCPA로 바꾸기"`, `"purchaseall"`, `"복제"`, `"수혈 필요"`, `"2배가 생각보다 안 되고 있네요"`. 반드시 다음처럼 쓴다:
@@ -1066,7 +1098,7 @@ def build_case_book(region, dc, window_days=CASE_DAYS, max_cases=CASE_MAX):
     if not ai_rows:
         return ""
     rows = sb(table, f"date=gte.{since}&date=lte.{dc}"
-                     f"&select=date,adset_id,adset_name,product,{bf},{sf},{rf},results_meta,results_mp,unique_clicks"
+                     f"&select=date,adset_id,adset_name,product,{bf},{sf},{rf},results_meta,results_mp,unique_clicks,impressions"
                      f"&order=date.asc")
     agg = {}
     for r in rows:
@@ -1075,7 +1107,8 @@ def build_case_book(region, dc, window_days=CASE_DAYS, max_cases=CASE_MAX):
         a["name"] = r.get("adset_name") or a["name"]
         a["product"] = r.get("product") or a["product"]
         a["days"][r["date"]] = (r.get(sf) or 0, r.get(rf) or 0, r.get(bf) or 0,
-                                r.get("results_meta") or 0, r.get("results_mp") or 0, r.get("unique_clicks") or 0)
+                                r.get("results_meta") or 0, r.get("results_mp") or 0, r.get("unique_clicks") or 0,
+                                r.get("impressions") or 0)
     applied, applied_days = _load_applied_marks(region, since, d_end)
     if applied is None:
         return ""   # 실행 기록 없이는 '사람 최종결정'을 알 수 없다
@@ -1091,24 +1124,24 @@ def build_case_book(region, dc, window_days=CASE_DAYS, max_cases=CASE_MAX):
         return [(base - datetime.timedelta(days=k)).isoformat() for k in range(n - 1, -1, -1)]
 
     def sums(aid, dates):
-        t = [0, 0, 0, 0, 0]
+        t = [0, 0, 0, 0, 0, 0]
         for d in dates:
             x = agg[aid]["days"].get(d)
             if x:
-                t[0] += x[0]; t[1] += x[1]; t[2] += x[3]; t[3] += x[4]; t[4] += x[5]
-        return t  # sp, rv, res, mp, clk
+                t[0] += x[0]; t[1] += x[1]; t[2] += x[3]; t[3] += x[4]; t[4] += x[5]; t[5] += x[6]
+        return t  # sp, rv, res, mp, clk, imp
 
     def droas(aid, d):
         x = agg[aid]["days"].get(d)
         return round(x[1] / x[0] * 100) if x and x[0] else None
 
     def bench(dates):
-        """그날 기준 계정 평균 결과당비용·전환율(지출 있는 전 세트 가중)."""
-        sp = res = mp = clk = 0
+        """그날 기준 계정 평균 결과당비용·전환율·CTR(지출 있는 전 세트 가중)."""
+        sp = res = mp = clk = imp = 0
         for aid in agg:
             t = sums(aid, dates)
-            sp += t[0]; res += t[2]; mp += t[3]; clk += t[4]
-        return (sp / res if res else None), (mp / clk * 100 if clk else None)
+            sp += t[0]; res += t[2]; mp += t[3]; clk += t[4]; imp += t[5]
+        return (sp / res if res else None), (mp / clk * 100 if clk else None), (clk / imp * 100 if imp else None)
 
     cases = []
     for aid, dm in ai.items():
@@ -1119,16 +1152,17 @@ def build_case_book(region, dc, window_days=CASE_DAYS, max_cases=CASE_MAX):
         for d, tag_ai in sorted(dm.items()):
             dcp = (datetime.date.fromisoformat(d) - datetime.timedelta(days=1)).isoformat()  # 권고 기준일(전날)
             w7 = win(aid, dcp, ADVICE_DAYS)
-            sp7, rv7, res7, mp7, clk7 = sums(aid, w7)
+            sp7, rv7, res7, mp7, clk7, imp7 = sums(aid, w7)
             if sp7 <= 0:
                 continue
             roas7 = round(rv7 / sp7 * 100)
             trend = "→".join(str(droas(aid, x) if droas(aid, x) is not None else 0) for x in w7[-3:])
             r_dc = droas(aid, dcp)
             bud = next((a["days"][x][2] for x in reversed(w7) if a["days"].get(x) and a["days"][x][2]), 0)
-            b_cpa, b_cvr = bench(w7)
+            b_cpa, b_cvr, b_ctr = bench(w7)
             cpa_idx = round(sp7 / res7 / b_cpa * 100) if res7 >= CPA_MIN_RESULTS and b_cpa else None
             cvr_idx = round(mp7 / clk7 * 100 / b_cvr * 100) if clk7 and b_cvr else None
+            ctr_idx = round(clk7 / imp7 * 100 / b_ctr * 100) if imp7 and b_ctr else None
             age = (datetime.date.fromisoformat(dcp) - datetime.date.fromisoformat(first_spend)).days + 1 if first_spend else None
             age_s = (f"{age}일차" if first_spend > since else f"{age}일차+") if age is not None else "?"
             prior = [(x, t) for x, t in sorted(applied.get(aid, {}).items()) if x < d and x >= win(aid, dcp, HIST_DAYS)[0]]
@@ -1161,7 +1195,8 @@ def build_case_book(region, dc, window_days=CASE_DAYS, max_cases=CASE_MAX):
                            "AI 쪽이 맞았을 수도(이후 하락)" if r3 is not None else "판단불가")
             state = (f"7일ROAS {roas7}%(지출{cur}{round(sp7):,}) · 최근3일 {trend} · 기준일 {r_dc if r_dc is not None else '—'}%"
                      f" · 예산{cur}{round(bud):,} · 결과당비용 평균대비 {cpa_idx if cpa_idx is not None else '표본얇음'}%"
-                     f" · 전환율 평균대비 {cvr_idx if cvr_idx is not None else '—'}% · 런칭 {age_s} · 직전조치 {prior_s}")
+                     f" · 전환율 평균대비 {cvr_idx if cvr_idx is not None else '—'}% · CTR 평균대비 {ctr_idx if ctr_idx is not None else '—'}%"
+                     f" · 런칭 {age_s} · 직전조치 {prior_s}")
             after = f"당일 {r_d if r_d is not None else '—'}% · 3일후 {r3 if r3 is not None else '—'}%(7일대비 {('%+d' % (r3 - roas7)) if r3 is not None else '—'}p)"
             line = (f"- {d[5:]} {a['name'][:34]} (ID {aid}) [{a['product']}] | 상태: {state} | AI {HL_SHORT.get(tag_ai, tag_ai)} → 사람 {lab}"
                     + (f' (메모:"{_memo_short(memo, 40)}")' if memo else "") + f" | 이후: {after}"
