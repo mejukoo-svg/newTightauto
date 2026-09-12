@@ -2452,7 +2452,7 @@ function drawRevDaily(){
       }}}
     },
     scales:{
-      y:{position:'left',ticks:{font:{size:9},callback:v=>{if(MODE==='gl')return'$'+(v/1000).toFixed(0)+'k';return'₩'+(v/10000).toFixed(0)+'만'}},grid:{color:'#f0f0f0'}},
+      y:{position:'left',ticks:{font:{size:9},callback:v=>{if(MODE==='gl')return'$'+(v/1000).toFixed(0)+'k';return'₩'+(v/10000).toFixed(0)+'만'}},grid:{color:themeGrid()}},
       y1:{position:'right',min:0,max:Math.max(300,...roasData,...ratioData)+20,ticks:{font:{size:9},callback:v=>v+'%'},grid:{display:false}},
       x:{ticks:{font:{size:9},maxRotation:45}}
     }
@@ -5894,7 +5894,7 @@ function renderChannelBars(){
           footer:items=>{if(!items.length)return'';const x=byName[items[0].label];if(!x)return'';
             return 'ROAS '+(x.roas!=null?x.roas.toFixed(0)+'%':'—(지출 없음)')}}}},
       scales:{
-        x:{beginAtZero:true,ticks:{font:{size:10},callback:v=>axMoney(v)},grid:{color:'#eef2f7'}},
+        x:{beginAtZero:true,ticks:{font:{size:10},callback:v=>axMoney(v)},grid:{color:themeGrid()}},
         y:{ticks:{font:{size:11},autoSkip:false},grid:{display:false}}}},
     plugins:[_chrBarLabels]});
 }
@@ -6725,6 +6725,36 @@ function cwReset(){colWidth=CW_DEF;applyCW()}
   if(v>=CW_MIN&&v<=CW_MAX)colWidth=v}catch(e){}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',applyCW);
   else applyCW();})();
+
+// ===== THEME (다크/라이트) =====
+// html[data-theme] 속성 하나로 CSS 가 전부 전환된다(index.html 의 다크 블록). 여기서는
+//   · 저장/복원(localStorage 'theme', 기본 라이트 — <head> 인라인 스크립트가 첫 페인트 전에 먼저 붙임)
+//   · 버튼 아이콘
+//   · Chart.js 기본색(글자·격자) 갱신 + 살아있는 차트 전부 update — 차트는 CSS 가 못 건드리므로 여기서 맞춘다
+function themeIsDark(){return document.documentElement.getAttribute('data-theme')==='dark'}
+function themeGrid(){return themeIsDark()?'#30363d':'#f0f0f0'}
+function applyTheme(t){
+  if(t==='dark')document.documentElement.setAttribute('data-theme','dark');
+  else document.documentElement.removeAttribute('data-theme');
+  try{localStorage.setItem('theme',t==='dark'?'dark':'light')}catch(e){}
+  const b=document.getElementById('themeBtn');
+  if(b){b.textContent=t==='dark'?'☀️':'🌙';b.title=t==='dark'?'라이트 테마로 전환':'다크 테마로 전환'}
+  if(typeof Chart!=='undefined'){
+    const dk=t==='dark';
+    Chart.defaults.color=dk?'#8b949e':'#666';
+    Chart.defaults.borderColor=dk?'#30363d':'rgba(0,0,0,0.1)';
+    // 격자색을 리터럴로 박은 차트(themeGrid())는 update 만으로 안 바뀌므로 옵션을 직접 고쳐준다
+    Object.values(Chart.instances||{}).forEach(c=>{try{
+      const sc=c.options&&c.options.scales;
+      if(sc)Object.values(sc).forEach(ax=>{if(ax&&ax.grid&&typeof ax.grid.color==='string'&&/^#(f0f0f0|eef2f7|30363d)$/i.test(ax.grid.color))ax.grid.color=themeGrid()});
+      c.update('none');
+    }catch(e){}});
+  }
+}
+function toggleTheme(){applyTheme(themeIsDark()?'light':'dark')}
+(function(){let t='light';try{t=localStorage.getItem('theme')==='dark'?'dark':'light'}catch(e){}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>applyTheme(t));
+  else applyTheme(t);})();
 
 // ===== ZOOM =====
 let zoomLevel=100;

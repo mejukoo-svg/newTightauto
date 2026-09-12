@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>타이트사주 비즈니스리뷰</title>
+<script>(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||t==='light')document.documentElement.setAttribute('data-theme',t)}catch(e){}})();</script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
@@ -276,6 +277,187 @@ mark.sh.active{background:#ff6d01;color:#fff}
 #appContent{display:none}
 #appContent.ready{display:block}
 @media(max-width:900px){.chart-grid{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+.theme-btn{margin-left:10px;padding:4px 9px;font-size:13px;line-height:1;cursor:pointer;border:1px solid rgba(255,255,255,.3);border-radius:4px;color:#fff;background:rgba(255,255,255,.08);font-family:inherit}
+.theme-btn:hover{background:rgba(255,255,255,.2)}
+/* ===== 다크 테마 =====
+   모드바 오른쪽 ☀️/🌙 버튼으로 전환, localStorage('theme')에 저장(기본 라이트).
+   기존 라이트 CSS 는 그대로 두고 html[data-theme=dark] 아래에서만 덮어쓴다.
+   app.js 가 인라인 style 로 박은 색은 [style*="…"] 속성 선택자로 잡는다(7천줄 JS 를 손대지 않기 위함). */
+html[data-theme=dark]{color-scheme:dark;
+  --bg:#0f1419;--sf:#161b22;--sf2:#1c2128;--sf3:#22272e;--sf4:#2a3038;--bd:#30363d;--bd2:#3d444d;
+  --tx:#e6edf3;--mu:#8b949e;--mu2:#6e7681;--bl:#58a6ff;--gr:#3fb950;--rd:#ff7b72;--or:#f0883e;--pk:#f778ba;
+  --amb:#3a2e14;--amb2:#33301a;--red-bg:#3b1d1d;--blue-bg:#1f2a4d;--pur-bg:#2d2540}
+html[data-theme=dark] body{background:var(--bg);color:var(--tx)}
+html[data-theme=dark] .mode-bar{background:#0d1117;box-shadow:0 1px 0 var(--bd)}
+html[data-theme=dark] .mode-btn{color:var(--mu)}
+html[data-theme=dark] .mode-btn.active{background:var(--sf3);color:var(--tx)}
+html[data-theme=dark] .mode-bar #countrySel{background:var(--sf3)!important;color:var(--tx)!important}
+/* 탭 */
+html[data-theme=dark] .tab-bar{background:var(--sf);border-bottom-color:var(--bl)}
+html[data-theme=dark] .tab{background:var(--sf3);color:var(--mu);border-color:var(--bd)}
+html[data-theme=dark] .tab:hover{background:var(--sf4);color:var(--tx)}
+html[data-theme=dark] .tab.active{background:var(--sf2);color:var(--bl);border-bottom-color:var(--sf2)}
+/* 컬럼 필터 */
+html[data-theme=dark] th.filterable:hover{background:var(--sf4)!important}
+html[data-theme=dark] th.filterable.filtered{background:#7a6a00!important;color:#fff!important}
+html[data-theme=dark] .col-filter{background:var(--sf2);border-color:var(--bd2);box-shadow:0 4px 12px rgba(0,0,0,.6)}
+html[data-theme=dark] .col-filter label:hover{background:var(--blue-bg)}
+html[data-theme=dark] .col-filter .cf-all{border-bottom-color:var(--bd)}
+/* 표 공통 */
+html[data-theme=dark] th,html[data-theme=dark] td{border-color:var(--bd)}
+html[data-theme=dark] th{background:var(--sf3);color:var(--tx)}
+html[data-theme=dark] th.sun{background:var(--red-bg);color:var(--rd)}
+html[data-theme=dark] td.mc .r,html[data-theme=dark] td.mc .cv{color:var(--tx)}
+html[data-theme=dark] td.mc .p{color:var(--gr)}
+html[data-theme=dark] td.mc .p.neg,html[data-theme=dark] td.mc .s{color:var(--rd)}
+html[data-theme=dark] td.mc .rv{color:var(--bl)}
+html[data-theme=dark] td.mc .cm{color:var(--pk)}
+html[data-theme=dark] td.mc .cpa{color:var(--or)}
+/* ROAS 구간색 — 채도는 유지하고 명도만 낮춘 다크 톤(밝은 글자가 읽히도록) */
+html[data-theme=dark] .bg-r300{background:#0e4f5c!important}
+html[data-theme=dark] .bg-r200{background:#1b4d2b!important}
+html[data-theme=dark] .bg-r100{background:#5a4d00!important}
+html[data-theme=dark] .bg-r50{background:#5c2a2a!important}
+html[data-theme=dark] .bg-r0{background:#6e1f1f!important}
+html[data-theme=dark] td.fx{background:var(--sf)}
+html[data-theme=dark] td.fxa,html[data-theme=dark] td.budc{color:var(--mu)}
+html[data-theme=dark] .es-card{background:var(--sf);border-color:var(--bd)}
+html[data-theme=dark] .es-sub{color:var(--tx)}
+html[data-theme=dark] .es-sub span{color:var(--mu)}
+html[data-theme=dark] .col-rz:hover,html[data-theme=dark] .col-rz:active{background:rgba(88,166,255,.45)}
+html[data-theme=dark] tr.sr,html[data-theme=dark] tr.sr td.fx{background:var(--sf4)}
+html[data-theme=dark] tr.cpown,html[data-theme=dark] tr.cpown td{background:var(--blue-bg)!important;color:var(--bl)}
+html[data-theme=dark] .ex-caret{color:var(--bl)}
+html[data-theme=dark] tr.dv-kid>td.fx1{box-shadow:inset 4px 0 0 0 #8b5cf6,inset 30px 0 0 0 var(--pur-bg),inset 32px 0 0 0 #5b4a8a}
+html[data-theme=dark] tr.dv-kid-last>td.fx{border-bottom-color:#5b4a8a}
+html[data-theme=dark] .dv-sub{color:#b794f6}
+html[data-theme=dark] .fam-caret{background:var(--pur-bg);color:#c4b5fd}
+html[data-theme=dark] .fam-caret:hover{background:#3d3355}
+html[data-theme=dark] tr.creative-expanded>td{background:var(--amb);border-top-color:#6b5a1e}
+html[data-theme=dark] tr.creative-expanded.cr-subtotal>td{background:var(--amb2)}
+html[data-theme=dark] tr.creative-expanded>td.cr-name{color:var(--mu)}
+html[data-theme=dark] tr.creative-expanded.cr-subtotal>td.cr-name{color:var(--tx)}
+html[data-theme=dark] .filter{background:var(--sf);border-bottom-color:var(--bd)}
+html[data-theme=dark] .filter select,html[data-theme=dark] .chart-card h3 select{background:var(--sf3);color:var(--tx);border-color:var(--bd2)}
+html[data-theme=dark] th.h-meta{background:var(--sf3)}
+html[data-theme=dark] th.h-mp{background:#4b5563}
+html[data-theme=dark] th.h-budget{background:#3d3555;color:#d8ccf5}
+html[data-theme=dark] th.col-yday{border-color:#c9d1d9!important;background:var(--blue-bg)!important}
+html[data-theme=dark] td.col-yday{border-left-color:#c9d1d9!important;border-right-color:#c9d1d9!important}
+/* 의미 있는 색 헤더(메모/비율/결과·메타일별 보라·상품 헤더)는 회색 th 규칙에 묻히지 않게 다크 톤으로 복원 */
+html[data-theme=dark] th.h-memo{background:#b45309;color:#fff}
+html[data-theme=dark] th.h-rate{background:#6d5aa8;color:#fff}
+html[data-theme=dark] th.h-result{background:#7c3aed;color:#fff}
+html[data-theme=dark] .mdt th{background:#4a3f6b;color:#e9e3f5;border-color:#3d3459}
+html[data-theme=dark] .prod-header{background:#2b4270!important;color:#fff!important}
+/* 하이라이트 — 색 자체는 의미가 있어 유지, 밝은 배경엔 어두운 글자 강제 */
+html[data-theme=dark] .hl-down50,html[data-theme=dark] .hl-down10,html[data-theme=dark] .hl-up10,html[data-theme=dark] .hl-up20{color:#111!important}
+html[data-theme=dark] .hl-down50 *,html[data-theme=dark] .hl-down10 *,html[data-theme=dark] .hl-up10 *,html[data-theme=dark] .hl-up20 *{color:#111!important}
+html[data-theme=dark] .hl-off{background:#000!important;outline:1px solid #555;outline-offset:-1px}
+html[data-theme=dark] .hl-ai{outline-color:var(--tx)!important}
+html[data-theme=dark] .color-picker{background:var(--sf2);border-color:var(--bd2);box-shadow:0 4px 12px rgba(0,0,0,.6)}
+html[data-theme=dark] .color-picker .cp-btn:hover{border-color:var(--tx)}
+html[data-theme=dark] .cp-clear{background:var(--sf3);border-color:var(--bd2);color:var(--tx)}
+/* 예산 적용 모달 */
+html[data-theme=dark] .ab-mask{background:rgba(0,0,0,.65)}
+html[data-theme=dark] .ab-box{background:var(--sf);box-shadow:0 8px 32px rgba(0,0,0,.7)}
+html[data-theme=dark] .ab-head,html[data-theme=dark] .ab-foot{border-color:var(--bd)}
+html[data-theme=dark] .ab-head .ab-sub,html[data-theme=dark] .ab-head button,html[data-theme=dark] .ab-body .ab-id{color:var(--mu)}
+html[data-theme=dark] .ab-body th{background:var(--sf3);border-color:var(--bd)}
+html[data-theme=dark] .ab-body td{border-color:var(--bd)}
+html[data-theme=dark] .ab-body tr.ab-err td{background:var(--red-bg);color:var(--rd)}
+html[data-theme=dark] .ab-body tr.ab-conf td{background:var(--amb);color:var(--or)}
+html[data-theme=dark] .ab-body tr.ab-skip td{background:var(--sf2);color:var(--mu2)}
+html[data-theme=dark] .ab-warn{color:var(--or)}
+html[data-theme=dark] .ab-sum{background:var(--sf2);border-color:var(--bd)}
+html[data-theme=dark] .ab-sum .ab-sum-r{border-bottom-color:var(--bd)}
+html[data-theme=dark] .ab-sum .ab-ccy{color:var(--mu)}
+html[data-theme=dark] .ab-sum .ab-up{color:var(--gr)}
+html[data-theme=dark] .ab-sum .ab-dn{color:var(--rd)}
+html[data-theme=dark] .ab-sum .ab-note,html[data-theme=dark] .ab-foot .ab-msg{color:var(--mu)}
+html[data-theme=dark] .ab-foot button{background:var(--sf3);border-color:var(--bd2);color:var(--tx)}
+html[data-theme=dark] .ab-foot button.ab-go{border-color:#da3633;background:#da3633;color:#fff}
+/* 시간별 ROAS 화면 */
+html[data-theme=dark] #hrView{background:var(--bg)}
+html[data-theme=dark] .hr-bar{background:#0d1117}
+html[data-theme=dark] .hr-kpi .hr-k,html[data-theme=dark] .hr-card{background:var(--sf);border-color:var(--bd)}
+html[data-theme=dark] .hr-kpi .hr-k span,html[data-theme=dark] .hr-kpi .hr-k .hr-d,html[data-theme=dark] .hr-card h4,html[data-theme=dark] .hr-notes{color:var(--mu)}
+html[data-theme=dark] .hr-tbl th{background:var(--sf3);border-color:var(--bd)}
+html[data-theme=dark] .hr-tbl td{border-color:var(--bd)}
+html[data-theme=dark] .hr-tbl td.hr-h,html[data-theme=dark] .hr-tbl tfoot td{background:var(--sf2)}
+html[data-theme=dark] .hr-tbl tfoot td{border-top-color:var(--bd2)}
+html[data-theme=dark] .hr-tbl tr.hr-zero td{color:var(--mu2)}
+html[data-theme=dark] .hr-msg{color:var(--mu)}
+html[data-theme=dark] .hr-msg .hr-err,html[data-theme=dark] .hr-notes .hr-warn{color:var(--rd)}
+html[data-theme=dark] .hr-msg code{background:var(--sf3)}
+html[data-theme=dark] td.hr-cell:hover{outline-color:var(--bl)}
+/* 메모 */
+html[data-theme=dark] .memo-input{background:var(--sf2);color:var(--tx);border-color:var(--bd2)}
+html[data-theme=dark] .memo-input:focus{border-color:var(--bl);background:var(--blue-bg)}
+html[data-theme=dark] .memo-hist .mh{color:var(--mu);border-top-color:var(--bd)}
+html[data-theme=dark] .memo-hist .mh b{color:var(--or)}
+html[data-theme=dark] .memo-saved{color:var(--bl)}
+/* 대시보드 카드·차트 */
+html[data-theme=dark] .kpi-card,html[data-theme=dark] .chart-card{background:var(--sf);border-color:var(--bd)}
+html[data-theme=dark] .kpi-card{border-top-color:var(--bl)}
+html[data-theme=dark] .kpi-card .k-label,html[data-theme=dark] .kpi-card .k-sub{color:var(--mu)}
+html[data-theme=dark] .donut-pair .donut-cap{color:var(--mu)}
+html[data-theme=dark] .kpi-table th{background:var(--sf3);border-color:var(--bd)}
+html[data-theme=dark] .kpi-table td{border-color:var(--bd)}
+html[data-theme=dark] .kpi-table tbody tr:hover{background:var(--sf3)}
+html[data-theme=dark] .mdt-wrap{border-color:var(--bd)}
+html[data-theme=dark] .mdt td{border-color:var(--bd);color:var(--tx)}
+html[data-theme=dark] .mdt td.dt{background:var(--sf2);color:var(--tx)}
+html[data-theme=dark] .mdt tbody tr:nth-child(even) td{background:var(--sf2)}
+html[data-theme=dark] .mdt tbody tr:hover td{background:var(--pur-bg)}
+html[data-theme=dark] .mdt tr.mdt-yday td{background:var(--amb)!important}
+html[data-theme=dark] .mdt tr.mdt-total td{background:var(--pur-bg)!important;color:#d8ccf5}
+html[data-theme=dark] .mdt .roas-hi{color:var(--gr)}
+html[data-theme=dark] .mdt .roas-lo{color:var(--rd)}
+html[data-theme=dark] .top-list li{border-bottom-color:var(--bd)}
+html[data-theme=dark] .top-list .rank{color:var(--bl)}
+/* 줌·검색·CSV 바 */
+html[data-theme=dark] .zoom-bar{background:var(--sf);border-bottom-color:var(--bd)}
+html[data-theme=dark] .zoom-bar button,html[data-theme=dark] .search-box button,html[data-theme=dark] .csv-box button{background:var(--sf3);border-color:var(--bd2);color:var(--tx)}
+html[data-theme=dark] .zoom-bar button:hover{background:var(--sf4)}
+html[data-theme=dark] .zoom-bar .zoom-pct{color:var(--tx)}
+html[data-theme=dark] .zoom-bar .cw-lbl,html[data-theme=dark] .search-box .s-info,html[data-theme=dark] .csv-box .csv-tilde{color:var(--mu)}
+html[data-theme=dark] .zoom-bar .zoom-sep{background:var(--bd2)}
+html[data-theme=dark] .search-box input,html[data-theme=dark] .csv-box input[type=date]{background:var(--sf2);color:var(--tx);border-color:var(--bd2)}
+html[data-theme=dark] .search-box input:focus{border-color:var(--bl)}
+html[data-theme=dark] .csv-box button{color:var(--bl);border-color:var(--bl)}
+html[data-theme=dark] .csv-box button:hover{background:var(--blue-bg)}
+html[data-theme=dark] mark.sh{color:#111}
+html[data-theme=dark] mark.sh.active{color:#fff}
+/* 폼 컨트롤 전반 — color-scheme:dark 로 UA 기본색이 어두워지지만 폰트/보더는 맞춰준다 */
+html[data-theme=dark] select,html[data-theme=dark] input:not([type=checkbox]):not([type=radio]),html[data-theme=dark] textarea{background-color:var(--sf2);color:var(--tx);border-color:var(--bd2)}
+html[data-theme=dark] a{color:var(--bl)}
+html[data-theme=dark] ::-webkit-scrollbar{width:10px;height:10px}
+html[data-theme=dark] ::-webkit-scrollbar-track{background:var(--bg)}
+html[data-theme=dark] ::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:5px}
+/* ---- app.js 인라인 style 색 매핑 ---- */
+html[data-theme=dark] [style*="background:#e8e8e8"]{background:var(--sf4)!important}
+html[data-theme=dark] [style*="background:#fff8e1"]{background:var(--amb)!important}
+html[data-theme=dark] [style*="background:#fff3cd"],html[data-theme=dark] [style*="background:#fef3cd"]{background:var(--amb2)!important}
+html[data-theme=dark] [style*="background:#fff7e6"],html[data-theme=dark] [style*="background:#fff4e5"]{background:var(--amb)!important}
+html[data-theme=dark] [style*="background:#fff;"],html[data-theme=dark] [style$="background:#fff"],html[data-theme=dark] [style*="background:#fafafa"],html[data-theme=dark] [style*="background:#f5f5f5"],html[data-theme=dark] [style*="background:#f8fafc"]{background:var(--sf2)!important}
+html[data-theme=dark] [style*="background:#eef3f9"],html[data-theme=dark] [style*="background:#eef1f6"],html[data-theme=dark] [style*="background:#f4f6fa"],html[data-theme=dark] [style*="background:#e0e6ee"],html[data-theme=dark] [style*="background:#dce6f0"]{background:var(--sf3)!important}
+html[data-theme=dark] [style*="background:#f0f4ff"],html[data-theme=dark] [style*="background:#eef2ff"],html[data-theme=dark] [style*="background:#f5f9ff"],html[data-theme=dark] [style*="background:#f5f8ff"],html[data-theme=dark] [style*="background:#e8eefc"],html[data-theme=dark] [style*="background:#cfe2f3"]{background:var(--blue-bg)!important}
+html[data-theme=dark] [style*="background:#ffe0e0"],html[data-theme=dark] [style*="background:#f4cccc"]{background:var(--red-bg)!important}
+html[data-theme=dark] [style*="background:#ead1dc"]{background:#3b2233!important}
+html[data-theme=dark] [style*="background:#d9ead3"]{background:#1b3a24!important}
+html[data-theme=dark] [style*="color:#000"],html[data-theme=dark] [style*="color:#111"],html[data-theme=dark] [style*="color:#222"],html[data-theme=dark] [style*="color:#333"],html[data-theme=dark] [style*="color:#33475a"]{color:var(--tx)!important}
+html[data-theme=dark] [style*="color:#444"],html[data-theme=dark] [style*="color:#555"],html[data-theme=dark] [style*="color:#666"]{color:var(--mu)!important}
+html[data-theme=dark] [style*="color:#00d"],html[data-theme=dark] [style*="color:#0000dd"],html[data-theme=dark] [style*="color:#1a73e8"],html[data-theme=dark] [style*="color:#2563eb"],html[data-theme=dark] [style*="color:#4476b8"]{color:var(--bl)!important}
+html[data-theme=dark] [style*="color:#d00"],html[data-theme=dark] [style*="color:#c00"],html[data-theme=dark] [style*="color:#a00"],html[data-theme=dark] [style*="color:#dc2626"]{color:var(--rd)!important}
+html[data-theme=dark] [style*="color:#b45309"],html[data-theme=dark] [style*="color:#a15c00"],html[data-theme=dark] [style*="color:#c60"]{color:var(--or)!important}
+html[data-theme=dark] [style*="color:#16a34a"]{color:var(--gr)!important}
+html[data-theme=dark] [style*="color:#d81b60"]{color:var(--pk)!important}
+html[data-theme=dark] [style*="color:#3730a3"]{color:#a5b4fc!important}
+html[data-theme=dark] [style*="border:1px solid #e5e7eb"],html[data-theme=dark] [style*="border:1px solid #ccc"]{border-color:var(--bd)!important}
+html[data-theme=dark] [style*="border-bottom:1px solid #eee"],html[data-theme=dark] [style*="border-bottom:1px solid #f0f0f0"],html[data-theme=dark] [style*="border-bottom:1px solid #ddd"],html[data-theme=dark] [style*="border-bottom:1px solid #e5e9f0"]{border-bottom-color:var(--bd)!important}
+/* 진한 배경 위 흰 글자 조합은 위 글자색 매핑에 밀리지 않게 마지막에 고정 */
+html[data-theme=dark] [style*="background:#4476b8"],html[data-theme=dark] [style*="background:#1a2744"],html[data-theme=dark] [style*="background:#4285f4"],html[data-theme=dark] [style*="background:#1a73e8"],html[data-theme=dark] [style*="background:#b91c1c"]{color:#fff!important}
 </style>
 </head>
 <body>
@@ -299,6 +481,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 <div class="mode-btn" data-mode="kpi" onclick="switchMode('kpi')">📈 지표KPI</div>
 <div class="mode-btn" data-mode="mkt" onclick="switchMode('mkt')">👤 마케터</div>
 <div class="mode-label" id="modeLabel">국내 · KRW</div>
+<button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="다크/라이트 테마 전환">🌙</button>
 <select id="countrySel" onchange="onCountryChange()" style="display:none;margin-left:10px;padding:5px 8px;font-size:12px;font-weight:600;border:none;border-radius:4px;background:#fff;color:#1a2744;font-family:inherit;cursor:pointer"></select>
 </div>
 <!-- Tabs -->
@@ -508,7 +691,7 @@ mark.sh.active{background:#ff6d01;color:#fff}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260910a"></script>
+<script src="app.js?v=20260912a"></script>
 </div>
 </body>
 </html>
