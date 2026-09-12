@@ -313,12 +313,22 @@ html[data-theme=dark] td.mc .p.neg,html[data-theme=dark] td.mc .s{color:var(--rd
 html[data-theme=dark] td.mc .rv{color:var(--bl)}
 html[data-theme=dark] td.mc .cm{color:var(--pk)}
 html[data-theme=dark] td.mc .cpa{color:var(--or)}
-/* ROAS 구간색 — 채도는 유지하고 명도만 낮춘 다크 톤(밝은 글자가 읽히도록) */
-html[data-theme=dark] .bg-r300{background:#0e4f5c!important}
-html[data-theme=dark] .bg-r200{background:#1b4d2b!important}
-html[data-theme=dark] .bg-r100{background:#5a4d00!important}
-html[data-theme=dark] .bg-r50{background:#5c2a2a!important}
-html[data-theme=dark] .bg-r0{background:#6e1f1f!important}
+/* ROAS 구간색(bg-r*)·증감 하이라이트(hl-*) 셀은 다크에서도 라이트와 똑같은 색으로 보인다.
+   배경은 라이트 규칙(.bg-r300 등)을 그대로 쓰고, 그 안의 글자만 라이트 모드 색으로 되돌려 밝은 배경 위에서 읽히게 한다. */
+html[data-theme=dark] td[class*="bg-r"],html[data-theme=dark] td.hl-down50,html[data-theme=dark] td.hl-down10,html[data-theme=dark] td.hl-up10,html[data-theme=dark] td.hl-up20{color:#222}
+html[data-theme=dark] td[class*="bg-r"] .r,html[data-theme=dark] td[class*="bg-r"] .cv,html[data-theme=dark] td.hl-down50 .r,html[data-theme=dark] td.hl-down10 .r,html[data-theme=dark] td.hl-up10 .r,html[data-theme=dark] td.hl-up20 .r,html[data-theme=dark] td.hl-down50 .cv,html[data-theme=dark] td.hl-down10 .cv,html[data-theme=dark] td.hl-up10 .cv,html[data-theme=dark] td.hl-up20 .cv{color:#000}
+html[data-theme=dark] td[class*="bg-r"] .p,html[data-theme=dark] td.hl-down50 .p,html[data-theme=dark] td.hl-down10 .p,html[data-theme=dark] td.hl-up10 .p,html[data-theme=dark] td.hl-up20 .p{color:#1a6b1a}
+html[data-theme=dark] td[class*="bg-r"] .p.neg,html[data-theme=dark] td[class*="bg-r"] .s,html[data-theme=dark] td.hl-down50 .p.neg,html[data-theme=dark] td.hl-down10 .p.neg,html[data-theme=dark] td.hl-up10 .p.neg,html[data-theme=dark] td.hl-up20 .p.neg,html[data-theme=dark] td.hl-down50 .s,html[data-theme=dark] td.hl-down10 .s,html[data-theme=dark] td.hl-up10 .s,html[data-theme=dark] td.hl-up20 .s{color:#d00}
+html[data-theme=dark] td[class*="bg-r"] .rv,html[data-theme=dark] td.hl-down50 .rv,html[data-theme=dark] td.hl-down10 .rv,html[data-theme=dark] td.hl-up10 .rv,html[data-theme=dark] td.hl-up20 .rv{color:#0000dd}
+html[data-theme=dark] td[class*="bg-r"] .cm,html[data-theme=dark] td.hl-down50 .cm,html[data-theme=dark] td.hl-down10 .cm,html[data-theme=dark] td.hl-up10 .cm,html[data-theme=dark] td.hl-up20 .cm{color:#c2185b}
+html[data-theme=dark] td[class*="bg-r"] .cpa,html[data-theme=dark] td.hl-down50 .cpa,html[data-theme=dark] td.hl-down10 .cpa,html[data-theme=dark] td.hl-up10 .cpa,html[data-theme=dark] td.hl-up20 .cpa{color:#e67e22}
+/* 밝은 셀 안의 인라인 색(app.js)도 라이트 값으로 — 아래 전역 인라인 매핑(회색→연회색 등)이 밝은 배경에서 묻히는 걸 막는다 */
+html[data-theme=dark] td[class*="bg-r"] [style*="color:#555"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#666"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#444"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#888"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#999"]{color:#444!important}
+html[data-theme=dark] td[class*="bg-r"] [style*="color:#000"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#111"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#222"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#333"]{color:#111!important}
+html[data-theme=dark] td[class*="bg-r"] [style*="color:#00d"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#0000dd"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#1a73e8"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#2563eb"]{color:#0000dd!important}
+html[data-theme=dark] td[class*="bg-r"] [style*="color:#d00"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#c00"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#a00"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#dc2626"]{color:#d00!important}
+html[data-theme=dark] td[class*="bg-r"] [style*="color:#16a34a"]{color:#16a34a!important}
+html[data-theme=dark] td[class*="bg-r"] [style*="color:#b45309"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#a15c00"],html[data-theme=dark] td[class*="bg-r"] [style*="color:#c60"]{color:#a15c00!important}
 html[data-theme=dark] td.fx{background:var(--sf)}
 html[data-theme=dark] td.fxa,html[data-theme=dark] td.budc{color:var(--mu)}
 html[data-theme=dark] .es-card{background:var(--sf);border-color:var(--bd)}
@@ -350,9 +360,7 @@ html[data-theme=dark] th.h-rate{background:#6d5aa8;color:#fff}
 html[data-theme=dark] th.h-result{background:#7c3aed;color:#fff}
 html[data-theme=dark] .mdt th{background:#4a3f6b;color:#e9e3f5;border-color:#3d3459}
 html[data-theme=dark] .prod-header{background:#2b4270!important;color:#fff!important}
-/* 하이라이트 — 색 자체는 의미가 있어 유지, 밝은 배경엔 어두운 글자 강제 */
-html[data-theme=dark] .hl-down50,html[data-theme=dark] .hl-down10,html[data-theme=dark] .hl-up10,html[data-theme=dark] .hl-up20{color:#111!important}
-html[data-theme=dark] .hl-down50 *,html[data-theme=dark] .hl-down10 *,html[data-theme=dark] .hl-up10 *,html[data-theme=dark] .hl-up20 *{color:#111!important}
+/* 하이라이트 — 색·글자 모두 라이트와 동일(위 규칙) */
 html[data-theme=dark] .hl-off{background:#000!important;outline:1px solid #555;outline-offset:-1px}
 html[data-theme=dark] .hl-ai{outline-color:var(--tx)!important}
 html[data-theme=dark] .color-picker{background:var(--sf2);border-color:var(--bd2);box-shadow:0 4px 12px rgba(0,0,0,.6)}
@@ -691,7 +699,7 @@ html[data-theme=dark] [style*="background:#4476b8"],html[data-theme=dark] [style
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260912a"></script>
+<script src="app.js?v=20260912b"></script>
 </div>
 </body>
 </html>
