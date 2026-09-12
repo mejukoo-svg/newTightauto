@@ -269,10 +269,12 @@ def product_records(pdaily):
 
 
 def run_products():
-    """상품별 실매출 Top10 → kpi_product_metrics. 본체(kpi_metrics)와 독립, 실패해도 무시."""
+    """상품별 실매출 Top10 → kpi_product_metrics. 본체(kpi_metrics)와 독립.
+    성공 시 True, 실패 시 False — 2026-08-27~09-12 제품DB RPC 401을 2주간 조용히 넘긴 사고 이후
+    main()이 False면 exit 1 로 워크플로를 실패시킨다(kpi_metrics 본체는 이미 저장된 뒤)."""
     if not PRODUCT_SB_KEY:
-        log.warning("⚠️ PRODUCT_SB_KEY 미설정 — 상품별 KPI 건너뜀")
-        return
+        log.error("⚠️ PRODUCT_SB_KEY 미설정 — 상품별 KPI 실패 처리")
+        return False
     try:
         earliest_week = gen_weeks(WEEKS_BACK)[-1][0]
         earliest_month = date(*map(int, MONTH_START.split("-")), 1)
@@ -291,18 +293,23 @@ def run_products():
                 print(f"  {r['rank']:>2}. {r['product']:<18} 매출 {fmt(r['revenue']):>12} · 판매 {fmt(r['sales']):>6} · 객단가 {fmt(round(r['aov']) if r['aov'] else 0):>7}")
         if DRY:
             log.info("[DRY RUN] 상품 upsert 생략")
-            return
+            return True
         sb_delete("kpi_product_metrics", f"period_start=gte.{win.isoformat()}")
         sb_upsert("kpi_product_metrics", recs)
         log.info("✅ 상품별 KPI(kpi_product_metrics) 완료")
+        return True
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8")[:300]
         log.error(f"⚠️ 상품별 KPI 실패 HTTP {e.code}: {body}")
         if e.code == 404:
             log.error("  → kpi_product_metrics 테이블 없음. sql/kpi_product_metrics.sql 실행 필요.")
+        if e.code == 401:
+            log.error("  → 제품DB kpi_product_daily 실행 권한 없음. PRODUCT_SB_KEY 가 service_role 키인지 확인.")
         log.error("  (kpi_metrics 본체엔 영향 없음)")
+        return False
     except Exception as e:
         log.error(f"⚠️ 상품별 KPI 실패: {e} (kpi_metrics 본체엔 영향 없음)")
+        return False
 
 
 def fmt(n):
@@ -330,8 +337,10 @@ def main():
         log.info("✅ kpi_metrics 완료")
     else:
         log.info("[DRY RUN] kpi_metrics upsert 생략.")
-    # 상품별 실매출 Top10 (독립 단계 — 실패해도 본체에 영향 없음)
-    run_products()
+    # 상품별 실매출 Top10 (독립 단계 — 본체 저장 뒤 실행, 실패하면 워크플로를 실패시켜 눈에 띄게 한다)
+    if not run_products():
+        log.error("❌ 상품별 KPI 실패 → exit 1 (kpi_metrics 본체는 저장 완료)")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
