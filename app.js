@@ -61,6 +61,9 @@ const HL_CONFIG={
   // 연한 회색 = 예산 -50% (감액 중 가장 강한 단계 — OFF 직전). 2026-08-23 추가.
   down50:{cls:'hl-down50',pct:-50,label:'-50%',bg:'#d0d0d0'},
   off:{cls:'hl-off',pct:null,label:'OFF',bg:'#000000'},watch:{cls:'hl-watch',pct:0,label:'복증',bg:'#ff9900'},
+  // 보라 = 이 소재를 같은 상품의 모든 ASC 세트에 복사(이동 아님). 소재별(cr) 탭 전용 — 예산 증감과 무관(pct null).
+  //   마킹 즉시 asc-copy Edge Function 의 dry-run 계획 모달이 뜨고, 확인해야 실제 복사된다(ascOpen).
+  asc:{cls:'hl-asc',pct:null,label:'ASC',bg:'#a78bfa'},
 };
 
 // ===== STATE =====
@@ -1950,7 +1953,7 @@ async function saveHLGgdg(id,c){
   renderGgdgTight();   // 안에서 GGDG_ROWS·abSyncBtnG 까지 갱신된다
 }
 function showCPGgdg(id,el){showCP(id,el);currentHlGgdg=true}
-function showCP(id,el){currentHlId=id;currentHlGgdg=false;const cp=document.getElementById('colorPicker');const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
+function showCP(id,el){currentHlId=id;currentHlGgdg=false;const cp=document.getElementById('colorPicker');const ca=document.getElementById('cpAsc');if(ca)ca.style.display=MODE==='cr'?'':'none';const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
   if(!confirm('추이차트 하이라이트가 삭제됩니다.\n메모는 날짜별로 남습니다(추이차트 메모칸·날짜탭 모두 유지).\n\n계속할까요?'))return;
   const tbl=hlTbl();const col=hlIdCol();
@@ -1984,7 +1987,14 @@ async function autoClearTrendHL(){
   await purgeStaleTrendHL();  // DB도 전날(<오늘0시) 행 삭제
   rerenderTrendView();
 }
-document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();if(currentHlId)(currentHlGgdg?saveHLGgdg:saveHL)(currentHlId,b.dataset.c);document.getElementById('colorPicker').classList.remove('show')})});
+document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();
+  const id=currentHlId,c=b.dataset.c;
+  if(id){
+    const pr=(currentHlGgdg?saveHLGgdg:saveHL)(id,c);
+    // ASC(보라) 는 마킹이 곧 실행 요청 — DB 저장이 끝난 뒤(서버가 마킹을 대조하므로) 복사 계획 모달을 연다
+    if(c==='asc'&&MODE==='cr'&&!currentHlGgdg)Promise.resolve(pr).then(()=>ascOpen(id));
+  }
+  document.getElementById('colorPicker').classList.remove('show')})});
 // .clickable = 하이라이트 지정 셀 전용 클래스(추이차트·디멘드젠). fx 유무와 무관하게 피커가 닫히지 않도록.
 document.addEventListener('click',e=>{if(!e.target.closest('.color-picker')&&!e.target.closest('.clickable'))document.getElementById('colorPicker').classList.remove('show')});
 
@@ -2225,7 +2235,7 @@ function renderDashboard(){
   h+='<div class="chart-card" style="margin-bottom:16px"><h3>📈 메타 매출 비중 <select id="dRevUnit"><option value="day" selected>일별</option><option value="week">주별</option><option value="month">월별</option></select><select id="dRevDays"><option value="14">14일</option><option value="30" selected>30일</option><option value="60">60일</option><option value="90">90일</option><option value="180">180일</option><option value="210">210일</option></select></h3><div style="position:relative;height:300px"><canvas id="chRevDaily"></canvas></div></div>';
 
   // 메타 일별 성과 테이블 (위 차트와 동일 기간 · 매출=메타 귀속 매출, 토스 전체 아님)
-  h+='<div class="chart-card" style="margin-bottom:16px"><h3>📋 메타 일별 성과 <span style="font-weight:400;color:#888;font-size:10px">매출=메타 귀속 매출 (토스 전체 아님) · 위 차트와 동일 기간</span></h3><div class="mdt-wrap" id="metaDailyTableWrap"></div></div>';
+  h+='<div class="chart-card" style="margin-bottom:16px"><h3>📋 메타 일별 성과 <span style="font-weight:400;color:#888;font-size:10px">매출=메타 귀속 매출 ('+(MODE==='gl'?'Stripe':'토스')+' 전체 아님) · 위 차트와 동일 기간</span></h3><div class="mdt-wrap" id="metaDailyTableWrap"></div></div>';
 
   // Stripe summary for global
   if(MODE==='gl'&&STRIPE_DATA.length){
@@ -2411,9 +2421,12 @@ function drawRevDaily(){
     daily[r.date].uc+=r.unique_clicks;
     daily[r.date].imp+=(r.impressions||0);
   });
-  // Toss 전체 매출 lookup
+  // 전체 매출 lookup — 국내=토스(KRW net_amount), 글로벌=Stripe(USD revenue_usd, 국가별 행 합산)
+  //   ※ 2026-09-14: 글로벌 탭도 TOSS_DATA 를 분모로 써서 메타비중이 국내 기준으로 나오던 버그 수정.
   const tossMap={};
-  TOSS_DATA.forEach(r=>{tossMap[r.date]=r.net_amount||0});
+  if(MODE==='gl')STRIPE_DATA.forEach(r=>{tossMap[r.date]=(tossMap[r.date]||0)+(+r.revenue_usd||0)});
+  else TOSS_DATA.forEach(r=>{tossMap[r.date]=r.net_amount||0});
+  const totLabel=MODE==='gl'?'Stripe전체':'토스전체';
 
   // 일/주/월 버킷팅 — 선택한 일수 창(dd) 안에서 합산 (주=월요일 시작 WM, 월=YYYY-MM)
   const bk={};const order=[];
@@ -2430,7 +2443,7 @@ function drawRevDaily(){
   const metaRevData=buckets.map(b=>b.metaRev);
   const tossRevData=buckets.map(b=>b.tossRev);
   const roasData=buckets.map(b=>b.spend>0?b.metaRev/b.spend*100:0);
-  // ★ 메타 비중 = Meta 매출(MP) / 토스 전체 매출 × 100
+  // ★ 메타 비중 = Meta 매출(MP) / 전체 매출(국내 토스·글로벌 Stripe) × 100
   const ratioData=buckets.map(b=>b.tossRev>0?b.metaRev/b.tossRev*100:0);
 
   if(dashCharts.revDaily)dashCharts.revDaily.destroy();
@@ -2440,7 +2453,7 @@ function drawRevDaily(){
     datasets:[
       {type:'bar',label:'순이익',data:profitData,backgroundColor:profitData.map(v=>v>=0?'rgba(22,163,74,0.35)':'rgba(220,38,38,0.35)'),borderColor:profitData.map(v=>v>=0?'#16a34a':'#dc2626'),borderWidth:1,yAxisID:'y',order:4},
       {type:'bar',label:'메타매출',data:metaRevData,backgroundColor:'rgba(37,99,235,0.25)',borderColor:'#2563eb',borderWidth:1,yAxisID:'y',order:3},
-      {type:'bar',label:'토스전체',data:tossRevData,backgroundColor:'rgba(139,92,246,0.2)',borderColor:'#8b5cf6',borderWidth:1,yAxisID:'y',order:2},
+      {type:'bar',label:totLabel,data:tossRevData,backgroundColor:'rgba(139,92,246,0.2)',borderColor:'#8b5cf6',borderWidth:1,yAxisID:'y',order:2},
       {type:'line',label:'ROAS%',data:roasData,borderColor:'#16a34a',backgroundColor:'transparent',borderWidth:2,pointRadius:2,yAxisID:'y1',order:1},
       {type:'line',label:'메타비중%',data:ratioData,borderColor:'#f59e0b',backgroundColor:'transparent',borderWidth:2,pointRadius:2,borderDash:[4,4],yAxisID:'y1',order:0},
     ]
@@ -4028,6 +4041,7 @@ async function abOpen(src){
   }
 }
 async function abApply(){
+  if(AB_KIND==='asc')return ascApply();   // 같은 모달을 ASC 소재 복사가 빌려 쓴다
   if(AB_BUSY||!AB_PLAN)return;
   const ids=abSelIds();
   if(!ids.length)return;
@@ -4059,12 +4073,140 @@ async function abApply(){
 }
 function abClose(){
   if(AB_BUSY)return;
+  AB_KIND='budget';ASC_PLAN=null;
   document.getElementById('abMask').classList.remove('show');
   document.getElementById('abGo').style.display='';
   document.getElementById('abCancel').textContent='취소';
   AB_PLAN=null;
 }
 document.getElementById('abMask').addEventListener('click',e=>{if(e.target.id==='abMask')abClose()});
+
+// ===== ASC 소재 복사 (소재별 탭 'ASC' 보라 마킹) =====
+// 소재별 탭에서 소재를 ASC(보라)로 마킹하면 그 광고를 '같은 상품명'의 모든 ASC 캠페인 세트에 복사한다.
+//   · 이동이 아니라 복사 — 원본 광고·세트는 그대로. ASC 세트에 새 광고(copied_ad_id)가 생긴다.
+//   · 상품명은 서버가 메타 캠페인명에서 다시 뽑는다(파이프라인 extract_product 규칙) — 화면 값 안 믿음.
+//   · 대상 세트에 같은 소재(creative/story/video/image 일치)가 이미 있으면 건너뜀. asc_copy_log 도 대조.
+//   · 흐름은 예산 적용과 같다: 비밀번호 → dry-run 계획 모달(abMask 재사용) → 확인 → 실제 복사.
+const ASC_FN=SB_URL+'/functions/v1/asc-copy';
+let AB_KIND='budget';   // 'budget' | 'asc' — abMask 모달을 누가 쓰고 있는지 (확인 버튼 분기)
+let ASC_PLAN=null;
+let ASC_ITEMS=[];
+
+// 소재별 탭에서 ASC 마킹된 소재 (id → ad_account_id 는 화면 행에서 찾는다; 없으면 서버가 계정 미등록으로 거절)
+function ascTargets(onlyId){
+  if(MODE!=='cr')return[];
+  const accOf={};(_srcAD()||[]).forEach(r=>{if(r.ad_id&&r.ad_account_id&&!accOf[r.ad_id])accOf[r.ad_id]=String(r.ad_account_id)});
+  const ids=onlyId?[onlyId]:Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]==='asc');
+  return ids.map(id=>({ad_id:String(id),ad_account_id:accOf[id]||''}));
+}
+async function ascCall(dryRun,select){
+  const r=await fetch(ASC_FN,{method:'POST',headers:await abAuthHeaders(),
+    body:JSON.stringify({mode:'cr',dryRun:dryRun,items:ASC_ITEMS,select:select||undefined})});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok||j.ok===false)throw new Error(j.error||('서버 오류 ('+r.status+')'));
+  return j;
+}
+async function ascOpen(adId){
+  if(MODE!=='cr'){alert('ASC 복사는 국내 소재별 탭에서만 가능합니다.');return}
+  ASC_ITEMS=ascTargets(adId);
+  if(!ASC_ITEMS.length){alert('ASC 로 마킹된 소재가 없습니다.');return}
+  if(!await abPwAsk())return;   // 취소하면 dry-run 조회조차 하지 않는다 (마킹은 남는다 — 다시 누르면 재시도)
+  AB_KIND='asc';ASC_PLAN=null;AB_PLAN=null;
+  document.getElementById('abMask').classList.add('show');
+  document.getElementById('abTitle').textContent='🟣 ASC 세트로 소재 복사';
+  document.getElementById('abSub').textContent='국내 소재별 · '+ASC_ITEMS.length+'개 소재 → 같은 상품의 모든 ASC 세트';
+  document.getElementById('abBody').innerHTML='<div style="padding:24px;text-align:center;color:#888">메타에서 ASC 캠페인·세트·기존 소재 확인 중…</div>';
+  document.getElementById('abMsg').textContent='';
+  const go=document.getElementById('abGo');go.disabled=true;go.textContent='확인 — ASC 세트에 복사';
+  try{
+    const j=await ascCall(true);
+    ASC_PLAN=j.plan||[];
+    ascRender(ASC_PLAN,false);
+  }catch(err){
+    document.getElementById('abBody').innerHTML='<div style="padding:24px;color:#a00">⚠ '+abEsc(err.message||err)+'</div>';
+  }
+}
+function ascRender(plan,applied){
+  const ckTh=applied?'':'<th class="ab-ckc"><input type="checkbox" id="ascAll" onclick="ascToggleAll(this)" title="전체 선택"></th>';
+  let h='<table><thead><tr>'+ckTh+'<th>소재(원본 광고)</th><th>상품</th><th>대상 ASC 캠페인</th><th>대상 세트</th><th>세트 상태</th><th>'+(applied?'결과':'비고')+'</th></tr></thead><tbody>';
+  plan.forEach(p=>{
+    const nameCell=abEsc(p.ad_name||'')+' <span class="ab-id">'+abEsc(p.ad_id)+'</span>'
+      +'<div style="color:#aaa;font-size:9px">'+abEsc(p.src_campaign_name||'')+(p.src_adset_name?' › '+abEsc(p.src_adset_name):'')+(p.src_status&&p.src_status!=='ACTIVE'?' · 원본 '+abEsc(p.src_status):'')+'</div>';
+    if(p.error||!p.targets||!p.targets.length){
+      h+='<tr class="ab-err">'+(applied?'':'<td class="ab-ckc"></td>')+'<td class="ab-name">'+nameCell+'</td><td>'+abEsc(p.product||'')+'</td><td colspan="4">⚠ '+abEsc(p.error||'대상 ASC 세트 없음')+'</td></tr>';
+      return;
+    }
+    p.targets.forEach((t,i)=>{
+      const can=t.action==='copy'&&!t.error;
+      // 중단된 ASC(캠페인·세트 PAUSED)는 넣어도 게재가 안 된다 → 기본 해제·전체선택 제외(체크하면 복사 가능)
+      const live=can&&t.adset_status==='ACTIVE'&&t.campaign_status==='ACTIVE';
+      const cls=t.error?'ab-err':(applied?(t.applied?'':'ab-skip'):(can?(live?'':'ab-conf'):'ab-skip'));
+      let last;
+      if(t.error)last='⚠ '+abEsc(t.error);
+      else if(applied)last=t.applied?'✅ 복사됨 <span class="ab-id">'+abEsc(t.copied_ad_id||'')+'</span>':'— '+abEsc(t.note||'건너뜀');
+      else last=abEsc(t.note||'복사 예정');
+      const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="asc-ck" data-key="'+abEsc(t.key)+'"'+(can?'':' disabled')+(live?' checked':' data-nobulk="1"')+' onclick="ascSelChanged()"></td>';
+      const stCls=t.adset_status==='ACTIVE'?'':' style="color:#a60"';
+      h+='<tr class="'+cls+'">'+ckTd
+        +(i===0?'<td class="ab-name" rowspan="'+p.targets.length+'">'+nameCell+'</td><td rowspan="'+p.targets.length+'" style="text-align:center;font-weight:600">'+abEsc(p.product||'')+'</td>':'')
+        +'<td class="ab-name">'+abEsc(t.campaign_name)+'</td>'
+        +'<td class="ab-name">'+abEsc(t.adset_name)+' <span class="ab-id">'+abEsc(t.adset_id)+'</span></td>'
+        +'<td'+stCls+'>'+abEsc(t.adset_status)+'</td>'
+        +'<td>'+last+'</td></tr>';
+    });
+  });
+  h+='</tbody></table>';
+  document.getElementById('abBody').innerHTML=h;
+  if(!applied)ascSelChanged();
+}
+function ascBoxes(){return[...document.querySelectorAll('#abBody .asc-ck:not(:disabled)')]}
+function ascSelKeys(){return ascBoxes().filter(b=>b.checked).map(b=>b.dataset.key)}
+function ascBulkBoxes(){return ascBoxes().filter(b=>!b.dataset.nobulk)}
+function ascToggleAll(el){ascBulkBoxes().forEach(b=>b.checked=el.checked);if(!el.checked)ascBoxes().forEach(b=>b.checked=false);ascSelChanged()}
+function ascSelChanged(){
+  if(!ASC_PLAN)return;
+  const boxes=ascBoxes(),n=ascSelKeys().length;
+  const bulk=ascBulkBoxes(),bn=bulk.filter(b=>b.checked).length;
+  const pausedN=boxes.length-bulk.length;
+  const all=document.getElementById('ascAll');
+  if(all){all.checked=bulk.length>0&&bn===bulk.length;all.indeterminate=n>0&&bn<bulk.length}
+  const skipN=ASC_PLAN.reduce((a,p)=>a+(p.targets||[]).filter(t=>t.action==='skip'&&!t.error).length,0);
+  const errN=ASC_PLAN.reduce((a,p)=>a+(p.error?1:(p.targets||[]).filter(t=>t.error).length),0);
+  const go=document.getElementById('abGo');
+  go.disabled=!n;
+  go.textContent=n?('확인 — '+n+'개 세트에 복사'):'복사할 세트를 선택하세요';
+  document.getElementById('abMsg').innerHTML=boxes.length
+    ? '선택 <b>'+n+'</b> / 복사 가능 '+boxes.length+'건'
+      +(skipN?' · '+skipN+'건 건너뜀(이미 있음)':'')
+      +(pausedN?' · '+pausedN+'건 중단된 ASC(기본 해제)':'')
+      +(errN?' · <span style="color:#a00">'+errN+'건 오류</span>':'')
+      +' — 원본은 그대로 두고 ASC 세트에 새 광고가 생깁니다(ACTIVE). 되돌리려면 Ads Manager 에서 새 광고를 삭제하세요'
+    : '복사할 대상이 없습니다'+(skipN?' · '+skipN+'건은 이미 있음':'')+(errN?' · <span style="color:#a00">'+errN+'건 오류</span>':'');
+}
+async function ascApply(){
+  if(AB_BUSY||!ASC_PLAN)return;
+  const keys=ascSelKeys();
+  if(!keys.length)return;
+  const picked=[];ASC_PLAN.forEach(p=>(p.targets||[]).forEach(t=>{if(keys.includes(t.key))picked.push(' · '+(p.ad_name||p.ad_id).slice(0,30)+'  →  '+(t.adset_name||t.adset_id).slice(0,34))}));
+  if(!confirm('선택한 '+keys.length+'개 ASC 세트에 소재를 실제로 복사합니다(ACTIVE 로 생성).\n\n'+picked.join('\n')
+    +'\n\n원본은 그대로 남습니다. 되돌리려면 Ads Manager 에서 새로 생긴 광고를 직접 삭제해야 합니다. 진행할까요?'))return;
+  AB_BUSY=true;
+  const go=document.getElementById('abGo');go.disabled=true;go.textContent='복사 중…';
+  try{
+    const j=await ascCall(false,keys);
+    ascRender(j.plan||[],true);
+    document.getElementById('abMsg').innerHTML='✅ <b>'+(j.applied||0)+'건</b> 복사'
+      +((j.failed||0)?' · <span style="color:#a00">'+j.failed+'건 실패</span>':'')
+      +' — 기록은 asc_copy_log 에 남고, 새 광고의 성과는 다음 소재별 파이프라인 실행 후 ASC 세트 행으로 나타납니다.';
+    document.getElementById('abCancel').textContent='닫기';
+    go.style.display='none';
+    ASC_PLAN=null;   // 같은 계획을 두 번 실행하지 못하게
+  }catch(err){
+    document.getElementById('abMsg').innerHTML='<span style="color:#a00">⚠ '+abEsc(err.message||err)+'</span>';
+    ascSelChanged();
+  }
+  AB_BUSY=false;
+}
 
 // ===== DATE PRODUCT =====
 const COUNTRY_LIST=['대만','홍콩','일본','싱가폴','싱가포르','멕시코','미국','한국','중국','베트남','태국','인도네시아','필리핀','말레이시아','인도'];

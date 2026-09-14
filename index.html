@@ -127,13 +127,14 @@ td.col-yday{border-left:3px solid #222!important;border-right:3px solid #222!imp
 .hl-up10{background:#88dd88!important}
 .hl-up20{background:#66eecc!important;font-weight:600}
 .hl-watch{background:#ff9900!important;color:#fff!important;font-weight:600}
+.hl-asc{background:#a78bfa!important;color:#fff!important;font-weight:600}   /* 보라 = 같은 상품 ASC 세트로 소재 복사 (소재별 탭 전용) */
 /* AI(오늘의퍼포먼스봇) 추천 하이라이트: 네모에 테두리로 사람 마킹과 구분. 사람이 클릭하면 source=user로 바뀌어 사라짐 */
 .hl-ai{outline:2px dashed #1e293b!important;outline-offset:-3px!important}
 .color-picker{position:absolute;background:#fff;border:1px solid #888;border-radius:6px;padding:6px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:1000;display:none;gap:4px}
 .color-picker.show{display:flex}
 .color-picker .cp-btn{width:28px;height:28px;border-radius:4px;cursor:pointer;border:2px solid transparent;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600}
 .color-picker .cp-btn:hover{border-color:#333}
-.cp-off{background:#000;color:#fff}.cp-d50{background:#d0d0d0}.cp-d20{background:#ff7777;color:#fff}.cp-d10{background:#ffcccc}.cp-u10{background:#88dd88}.cp-u20{background:#66eecc}.cp-watch{background:#ff9900;color:#fff}.cp-clear{background:#fff;border:1px solid #ccc}
+.cp-off{background:#000;color:#fff}.cp-d50{background:#d0d0d0}.cp-d20{background:#ff7777;color:#fff}.cp-d10{background:#ffcccc}.cp-u10{background:#88dd88}.cp-u20{background:#66eecc}.cp-watch{background:#ff9900;color:#fff}.cp-asc{background:#a78bfa;color:#fff}.cp-clear{background:#fff;border:1px solid #ccc}
 /* 메타 예산 적용 모달 — 실제 광고비를 움직이는 쓰기라 '현재→변경'을 전부 보여주고 승인받는다 */
 .ab-mask{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;display:none;align-items:center;justify-content:center}
 .ab-mask.show{display:flex}
@@ -656,6 +657,7 @@ html[data-theme=dark] [style*="background:#4476b8"],html[data-theme=dark] [style
 <div class="cp-btn cp-d10" data-c="down10">-10</div><div class="cp-btn cp-d20" data-c="down20">-20</div>
 <div class="cp-btn cp-d50" data-c="down50" title="예산 -50% (연한 회색)">-50</div>
 <div class="cp-btn cp-off" data-c="off">OFF</div><div class="cp-btn cp-watch" data-c="watch">복증</div>
+<div class="cp-btn cp-asc" data-c="asc" id="cpAsc" title="이 소재를 같은 상품의 모든 ASC 세트에 복사 (원본은 그대로 둠 · 소재별 탭 전용)" style="display:none">ASC</div>
 <div class="cp-btn cp-clear" data-c="">✕</div>
 </div>
 
@@ -699,7 +701,7 @@ html[data-theme=dark] [style*="background:#4476b8"],html[data-theme=dark] [style
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="app.js?v=20260912b"></script>
+<script src="app.js?v=20260914b"></script>
 </div>
 </body>
 </html>

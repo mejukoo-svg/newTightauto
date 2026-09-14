@@ -1,0 +1,486 @@
+// 소재별 탭 'ASC' 마킹 → 같은 상품의 모든 ASC 세트에 소재(광고) 복사
+//
+// 왜 Edge Function 인가: apply-budget 과 같은 이유. index.html 은 공개 소스라 Meta 쓰기 토큰을
+// 브라우저에 둘 수 없다. 토큰은 Edge Secret 에만 있고 브라우저는 "어느 소재를" 만 보낸다.
+//
+// 동작
+//   1) 로그인 JWT 검증 → ad_creative_highlights 의 현재 마킹이 'asc' 인지 대조(낡은 화면 방지)
+//   2) 원본 광고를 메타에서 읽어 소속 계정 대조 + 캠페인명에서 상품명 추출
+//      (파이프라인 국내_소재별_supabase.py 의 extract_product 와 같은 규칙)
+//   3) 같은 계정의 ASC 캠페인(이름에 'ASC' — smart_promotion_type 은 우리 계정에서 구분이 안 됨) 중
+//      상품명이 같은 것 → 그 하위 세트 전부가 대상
+//   4) 대상 세트에 같은 소재가 이미 있으면(creative id / story id / video id / image hash 일치) 건너뜀
+//      + asc_copy_log 에 성공 기록이 있으면 건너뜀
+//   5) dryRun=false 면 POST /{ad_id}/copies {adset_id, status_option} → asc_copy_log 기록
+//      ※ 이동이 아니라 복사다. 원본 광고·세트는 건드리지 않는다.
+//
+// 요청: POST { mode:'cr', dryRun:boolean, items:[{ad_id, ad_account_id}], select?:["<ad_id>|<adset_id>",…] }
+// 응답: { ok, dryRun, plan:[{ad_id, ad_name, product, targets:[{adset_id, action, note, error, applied, copied_ad_id}]}] }
+//
+// 배포: Edge Function 은 git push 로 배포되지 않는다 — apply-budget/README.md 의 절차대로 따로 배포할 것.
+
+const META_API_VERSION = "v21.0";
+const GRAPH = `https://graph.facebook.com/${META_API_VERSION}`;
+
+// 광고계정 → 토큰 환경변수명. apply-budget/index.ts 의 ACC_TOKEN_ENV 와 동일하게 유지할 것.
+// 소재 복사(POST /ads, /copies)는 예산 수정과 같은 ads_management + 계정 ADVERTISE 권한을 쓴다.
+const ACC_TOKEN_ENV: Record<string, string[]> = {
+  // 국내
+  "act_1270614404675034": ["META_TOKEN_1"],
+  "act_707835224206178": ["META_TOKEN_1"],
+  "act_1808141386564262": ["META_TOKEN_2_1", "META_TOKEN_2"],
+  // 글로벌
+  "act_1054081590008088": ["META_TOKEN_1"],
+  "act_2677707262628563": ["META_TOKEN_GlobalTT"],
+  "act_1335040608536838": ["META_TOKEN_GlobalTT"],
+  "act_993712016404855": ["META_TOKEN_ACT_9937"],
+  "act_1021437716898605": ["META_TOKEN_1"],
+  // 밴스드
+  "act_25183853061243175": ["META_TOKEN_VANCED"],
+  "act_1560037899174007": ["META_TOKEN_VANCED"],
+  "act_1286632473622244": ["META_TOKEN_VANCED"],
+};
+
+function tokenFor(acc: string): { envName: string; token: string } | null {
+  const names = ACC_TOKEN_ENV[acc];
+  if (!names) return null;
+  for (const n of names) {
+    const v = Deno.env.get(n) || "";
+    if (v) return { envName: n, token: v };
+  }
+  return { envName: names.join(" / "), token: "" };
+}
+
+// 마킹이 저장된 하이라이트 테이블 (index.html hlTbl() 과 동일). 소재 복사는 국내 소재별(cr)만.
+const HL_TBL: Record<string, { tbl: string; col: string }> = {
+  cr: { tbl: "ad_creative_highlights", col: "ad_id" },
+};
+const HL_TAG = "asc";
+// 복사된 광고의 초기 상태. ACTIVE = 바로 게재(죽은 소재를 ASC 에서 되살리는 용도라 원본이 꺼져 있어도 켠다).
+const STATUS_OPTION = "ACTIVE";
+
+const MAX_ITEMS = 50;
+const MAX_TARGETS = 200;
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_KEY = Deno.env.get("SB_SECRET_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+const DB_SCHEMA = "new-tightauto";
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
+
+// ── Supabase 헬퍼 ──────────────────────────────────────────────
+async function getUser(jwt: string) {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { Authorization: `Bearer ${jwt}`, apikey: SERVICE_KEY },
+  });
+  if (!r.ok) return null;
+  return await r.json();
+}
+
+async function sbSelect(table: string, query: string) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Accept-Profile": DB_SCHEMA,
+    },
+  });
+  if (!r.ok) return [];
+  return await r.json();
+}
+
+async function sbInsert(table: string, rows: unknown[]) {
+  if (!rows.length) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      "Content-Profile": DB_SCHEMA,
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify(rows),
+  }).catch(() => {});
+}
+
+// ── Meta 헬퍼 ─────────────────────────────────────────────────
+function metaErr(j: any): string {
+  const e = j?.error;
+  if (!e) return "";
+  return e.error_user_msg || e.message || JSON.stringify(e);
+}
+
+async function metaGet(path: string, params: Record<string, string>, token: string) {
+  const q = new URLSearchParams({ ...params, access_token: token });
+  const r = await fetch(`${GRAPH}/${path}?${q.toString()}`);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(metaErr(j) || `Meta GET ${r.status}`);
+  return j;
+}
+
+// 목록 엣지(campaigns/adsets/ads)를 paging.next 까지 전부 읽는다.
+async function metaList(path: string, params: Record<string, string>, token: string): Promise<any[]> {
+  const out: any[] = [];
+  let j = await metaGet(path, { limit: "200", ...params }, token);
+  out.push(...(j.data || []));
+  let next: string = j.paging?.next || "";
+  for (let i = 0; next && i < 20; i++) {
+    const r = await fetch(next);
+    j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(metaErr(j) || `Meta GET ${r.status}`);
+    out.push(...(j.data || []));
+    next = j.paging?.next || "";
+  }
+  return out;
+}
+
+async function metaPost(path: string, body: Record<string, string>, token: string) {
+  const form = new URLSearchParams({ ...body, access_token: token });
+  const r = await fetch(`${GRAPH}/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(metaErr(j) || `Meta POST ${r.status}`);
+  return j;
+}
+
+// ── 상품명 추출 — 국내_소재별_supabase.py extract_product 와 같은 규칙 ──────────
+// 캠페인명 → 세트명 순으로, 구분자로 쪼갠 첫 토큰(숫자만인 토큰은 건너뜀)에서 앞쪽 이모지를 벗긴 것.
+//   '집착_0623_ASC(2)_찐위닝' → '집착',  '💔재회_0603_ASC_부계' → '재회'
+function extractProduct(...sources: string[]): string {
+  for (const src of sources) {
+    if (!src) continue;
+    for (let t of String(src).trim().split(/[_\s\-/|,()\[\]]+/)) {
+      t = t.trim();
+      if (!t || /^\d+$/.test(t)) continue;
+      const cps = Array.from(t);
+      let i = 0;
+      for (; i < cps.length; i++) {
+        const c = cps[i];
+        if ((c >= "가" && c <= "힣") || (c >= "ㄱ" && c <= "ㅣ") ||
+            /^[\p{L}\p{N}]$/u.test(c) || c === "." || c === "%") break;
+      }
+      t = cps.slice(i).join("").trim();
+      if (t) return t;
+    }
+  }
+  return "기타";
+}
+
+// 실측(2026-09-14, act_1270614404675034): 우리 ASC 캠페인 31개 전부 smart_promotion_type 이
+// GUIDED_CREATION 으로 나온다(AUTOMATED_SHOPPING_ADS 아님) → 실제로는 캠페인명의 'ASC' 규칙이 판별한다.
+function isAscCampaign(c: any): boolean {
+  if (String(c?.smart_promotion_type || "") === "AUTOMATED_SHOPPING_ADS") return true;
+  return /asc/i.test(String(c?.name || ""));
+}
+
+// 소재의 지문 — 같은 영상/이미지를 쓰는 광고를 다른 creative id 로 만들어도 잡아낸다.
+const CREATIVE_FIELDS =
+  "creative{id,effective_object_story_id,object_story_spec{video_data{video_id,image_hash},link_data{image_hash,child_attachments{video_id,image_hash}}},asset_feed_spec{videos{video_id},images{hash}}}";
+
+function fingerprint(cr: any): Set<string> {
+  const s = new Set<string>();
+  if (!cr) return s;
+  if (cr.id) s.add(`cr:${cr.id}`);
+  if (cr.effective_object_story_id) s.add(`story:${cr.effective_object_story_id}`);
+  const oss = cr.object_story_spec || {};
+  const vd = oss.video_data || {};
+  if (vd.video_id) s.add(`vid:${vd.video_id}`);
+  const ld = oss.link_data || {};
+  if (ld.image_hash) s.add(`img:${ld.image_hash}`);
+  for (const ca of ld.child_attachments || []) {
+    if (ca?.video_id) s.add(`vid:${ca.video_id}`);
+    if (ca?.image_hash) s.add(`img:${ca.image_hash}`);
+  }
+  const afs = cr.asset_feed_spec || {};
+  for (const v of afs.videos || []) if (v?.video_id) s.add(`vid:${v.video_id}`);
+  for (const im of afs.images || []) if (im?.hash) s.add(`img:${im.hash}`);
+  return s;
+}
+
+function overlaps(a: Set<string>, b: Set<string>): boolean {
+  for (const k of a) if (b.has(k)) return true;
+  return false;
+}
+
+// ── 계정별 ASC 캠페인·세트·광고 캐시 (한 요청 안에서만) ───────────────────────
+type AscAdset = {
+  campaign_id: string; campaign_name: string; campaign_status: string; product: string;
+  adset_id: string; adset_name: string; adset_status: string;
+  fps?: Set<string>[]; // 세트 안 광고들의 지문 (지연 로딩)
+  ad_names?: string[];
+};
+const ascCache = new Map<string, AscAdset[]>();
+
+async function ascAdsetsOf(acc: string, token: string): Promise<AscAdset[]> {
+  if (ascCache.has(acc)) return ascCache.get(acc)!;
+  const camps = await metaList(`${acc}/campaigns`, {
+    fields: "id,name,effective_status,smart_promotion_type",
+    effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
+  }, token);
+  const out: AscAdset[] = [];
+  for (const c of camps) {
+    if (!isAscCampaign(c)) continue;
+    const sets = await metaList(`${c.id}/adsets`, {
+      fields: "id,name,effective_status",
+      effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
+    }, token);
+    for (const s of sets) {
+      out.push({
+        campaign_id: String(c.id), campaign_name: String(c.name || ""),
+        campaign_status: String(c.effective_status || ""), product: extractProduct(String(c.name || "")),
+        adset_id: String(s.id), adset_name: String(s.name || ""), adset_status: String(s.effective_status || ""),
+      });
+    }
+  }
+  ascCache.set(acc, out);
+  return out;
+}
+
+async function loadAdsetAds(t: AscAdset, token: string) {
+  if (t.fps) return;
+  // 삭제·보관된 광고는 지문 비교에서 뺀다 — 예전에 지운 소재를 다시 넣는 건 정상 동작이다.
+  const ads = (await metaList(`${t.adset_id}/ads`, {
+    fields: `id,name,effective_status,${CREATIVE_FIELDS}`,
+  }, token)).filter((a: any) => !/^(DELETED|ARCHIVED)$/.test(String(a.effective_status || "")));
+  t.fps = ads.map((a: any) => fingerprint(a.creative));
+  t.ad_names = ads.map((a: any) => String(a.name || ""));
+}
+
+// ── 계획 ──────────────────────────────────────────────────────
+type Target = {
+  key: string; // `${ad_id}|${adset_id}`
+  campaign_id: string; campaign_name: string; campaign_status: string;
+  adset_id: string; adset_name: string; adset_status: string;
+  action: "copy" | "skip";
+  note: string; error: string;
+  applied?: boolean; copied_ad_id?: string;
+};
+type Plan = {
+  ad_id: string; ad_name: string; ad_account_id: string;
+  product: string; src_campaign_name: string; src_adset_id: string; src_adset_name: string; src_status: string;
+  error: string;
+  targets: Target[];
+};
+
+function blank(item: any, err: string): Plan {
+  return {
+    ad_id: String(item?.ad_id ?? ""), ad_name: "", ad_account_id: String(item?.ad_account_id ?? ""),
+    product: "", src_campaign_name: "", src_adset_id: "", src_adset_name: "", src_status: "",
+    error: err, targets: [],
+  };
+}
+
+// 과거 성공 기록 — (ad_id, target_adset_id) 별 최근 1건
+async function fetchDone(adIds: string[]): Promise<Record<string, any>> {
+  if (!adIds.length) return {};
+  const inList = adIds.map((s) => `"${s}"`).join(",");
+  const rows: any[] = await sbSelect(
+    "asc_copy_log",
+    `select=ad_id,target_adset_id,copied_ad_id,applied_at&ok=is.true&ad_id=in.(${encodeURIComponent(inList)})&order=applied_at.desc`,
+  );
+  const m: Record<string, any> = {};
+  for (const r of rows) {
+    const k = `${r.ad_id}|${r.target_adset_id}`;
+    if (!m[k]) m[k] = r;
+  }
+  return m;
+}
+
+function kstStamp(iso: string): string {
+  const t = new Date(iso);
+  if (isNaN(t.getTime())) return "";
+  return new Date(t.getTime() + 9 * 3600 * 1000).toISOString().slice(5, 16).replace("T", " ");
+}
+
+async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record<string, any>): Promise<Plan> {
+  const id = String(item?.ad_id ?? "").trim();
+  const acc = String(item?.ad_account_id ?? "").trim();
+  if (!/^\d{9,}$/.test(id)) return blank(item, "메타 광고 ID 형식이 아님");
+  const sel = tokenFor(acc);
+  if (!sel) return blank(item, `등록되지 않은 광고계정: ${acc || "(없음)"}`);
+  if (!sel.token) return blank(item, `토큰 미설정: ${sel.envName}`);
+  const token = sel.token;
+
+  // 대시보드 표시와 DB 마킹이 어긋난 채로(새로고침 전 낡은 화면) 실행되는 것을 막는다.
+  if ((hlMap[id] || "") !== HL_TAG) {
+    return blank(item, `마킹 불일치 (DB=${hlMap[id] || "없음"}) — 새로고침 후 재시도`);
+  }
+
+  const p = blank(item, "");
+  try {
+    const a = await metaGet(id, {
+      fields: `id,name,status,effective_status,account_id,adset{id,name},campaign{id,name,smart_promotion_type},${CREATIVE_FIELDS}`,
+    }, token);
+    const owner = a.account_id ? `act_${a.account_id}` : "";
+    if (owner && owner !== acc) return blank(item, `광고가 ${owner} 소속인데 ${acc} 로 요청됨 — 새로고침 후 재시도`);
+    p.ad_name = String(a.name || "");
+    p.src_status = String(a.effective_status || a.status || "");
+    p.src_campaign_name = String(a.campaign?.name || "");
+    p.src_adset_id = String(a.adset?.id || "");
+    p.src_adset_name = String(a.adset?.name || "");
+    if (/^(DELETED|ARCHIVED)$/.test(p.src_status)) {
+      p.error = `원본 광고가 ${p.src_status} 상태 — 복사 불가`;
+      return p;
+    }
+    p.product = extractProduct(p.src_campaign_name, p.src_adset_name);
+    if (p.product === "기타") {
+      p.error = "캠페인명에서 상품명을 찾지 못함";
+      return p;
+    }
+    const srcFp = fingerprint(a.creative);
+    const srcAdsetId = p.src_adset_id;
+
+    const cands = (await ascAdsetsOf(acc, token)).filter((t) => t.product === p.product);
+    if (!cands.length) {
+      p.error = `'${p.product}' 상품의 ASC 캠페인이 이 계정에 없음`;
+      return p;
+    }
+    for (const t of cands) {
+      const tg: Target = {
+        key: `${id}|${t.adset_id}`,
+        campaign_id: t.campaign_id, campaign_name: t.campaign_name, campaign_status: t.campaign_status,
+        adset_id: t.adset_id, adset_name: t.adset_name, adset_status: t.adset_status,
+        action: "copy", note: "", error: "",
+      };
+      if (t.adset_id === srcAdsetId) {
+        tg.action = "skip"; tg.note = "원본이 이미 이 세트에 있음";
+        p.targets.push(tg); continue;
+      }
+      try {
+        await loadAdsetAds(t, token);
+      } catch (e) {
+        tg.action = "skip"; tg.error = "세트 광고 조회 실패: " + String((e as Error).message || e).slice(0, 200);
+        p.targets.push(tg); continue;
+      }
+      const dupIdx = (t.fps || []).findIndex((fp) => overlaps(fp, srcFp));
+      if (dupIdx >= 0) {
+        tg.action = "skip";
+        tg.note = "같은 소재가 이미 있음" + (t.ad_names?.[dupIdx] ? ` (${t.ad_names[dupIdx].slice(0, 30)})` : "");
+        p.targets.push(tg); continue;
+      }
+      const done = doneMap[tg.key];
+      if (done) {
+        tg.action = "skip";
+        tg.note = `${kstStamp(done.applied_at)} 이미 복사됨 (${done.copied_ad_id || ""})`;
+        p.targets.push(tg); continue;
+      }
+      if (t.adset_status !== "ACTIVE") tg.note = `세트 ${t.adset_status} — 복사해도 게재 안 됨`;
+      p.targets.push(tg);
+    }
+  } catch (e) {
+    p.error = String((e as Error).message || e).slice(0, 400);
+  }
+  return p;
+}
+
+// ── 엔트리 ────────────────────────────────────────────────────
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method !== "POST") return json({ ok: false, error: "POST only" }, 405);
+
+  const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  if (!jwt) return json({ ok: false, error: "인증 없음" }, 401);
+  const user = await getUser(jwt);
+  if (!user?.id) return json({ ok: false, error: "로그인이 필요합니다" }, 401);
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ ok: false, error: "JSON 파싱 실패" }, 400);
+  }
+
+  const mode = String(body?.mode || "");
+  const dryRun = body?.dryRun !== false; // 기본은 안전한 dry-run
+  const items = Array.isArray(body?.items) ? body.items : [];
+  const select: Set<string> | null = Array.isArray(body?.select) ? new Set(body.select.map(String)) : null;
+
+  if (!(mode in HL_TBL)) return json({ ok: false, error: "ASC 복사는 국내 소재별(cr) 탭에서만 가능합니다" }, 400);
+  if (!items.length) return json({ ok: false, error: "복사할 소재가 없습니다" }, 400);
+  if (items.length > MAX_ITEMS) return json({ ok: false, error: `한 번에 ${MAX_ITEMS}개까지만 복사할 수 있습니다` }, 400);
+
+  const { tbl, col } = HL_TBL[mode];
+  const hlRows: any[] = await sbSelect(tbl, `select=${col},highlight`);
+  const hlMap: Record<string, string> = {};
+  for (const r of hlRows) if (r?.[col]) hlMap[String(r[col])] = String(r.highlight ?? "");
+
+  const seen = new Set<string>();
+  const uniq = items.filter((it: any) => {
+    const k = String(it?.ad_id ?? "");
+    if (!k || seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  const doneMap = await fetchDone(uniq.map((it: any) => String(it.ad_id)));
+
+  const plans: Plan[] = [];
+  for (const it of uniq) plans.push(await planOne(it, hlMap, doneMap));
+
+  const nTargets = plans.reduce((n, p) => n + p.targets.filter((t) => t.action === "copy").length, 0);
+  if (nTargets > MAX_TARGETS) return json({ ok: false, error: `복사 대상이 ${nTargets}건 — 한 번에 ${MAX_TARGETS}건까지만` }, 400);
+
+  if (dryRun) return json({ ok: true, dryRun: true, actor: user.email || "", plan: plans });
+
+  // ── 실제 복사 ──
+  const logs: any[] = [];
+  for (const p of plans) {
+    if (p.error) continue;
+    const token = tokenFor(p.ad_account_id)?.token || "";
+    for (const t of p.targets) {
+      if (t.action !== "copy" || t.error) { t.applied = false; continue; }
+      if (select && !select.has(t.key)) { t.applied = false; t.note = (t.note ? t.note + " / " : "") + "선택 안 함"; continue; }
+      try {
+        const j = await metaPost(`${p.ad_id}/copies`, {
+          adset_id: t.adset_id,
+          status_option: STATUS_OPTION,
+          rename_options: JSON.stringify({ rename_strategy: "NO_RENAME" }),
+        }, token);
+        const copied = String(j.copied_ad_id || j.ad_object_ids?.find?.((o: any) => o?.ad_object_type === "ad")?.copied_id || j.id || "");
+        t.applied = true;
+        t.copied_ad_id = copied;
+      } catch (e) {
+        t.applied = false;
+        t.error = String((e as Error).message || e).slice(0, 400);
+      }
+      logs.push({
+        actor: user.email || user.id,
+        region: mode,
+        ad_id: p.ad_id,
+        ad_name: p.ad_name,
+        ad_account_id: p.ad_account_id,
+        product: p.product,
+        src_campaign_name: p.src_campaign_name,
+        src_adset_id: p.src_adset_id,
+        target_campaign_id: t.campaign_id,
+        target_campaign_name: t.campaign_name,
+        target_adset_id: t.adset_id,
+        target_adset_name: t.adset_name,
+        copied_ad_id: t.copied_ad_id || null,
+        status_option: STATUS_OPTION,
+        ok: !!t.applied,
+        error: t.error || null,
+      });
+    }
+  }
+  await sbInsert("asc_copy_log", logs);
+
+  const okN = logs.filter((l) => l.ok).length;
+  const errN = logs.filter((l) => !l.ok).length;
+  return json({ ok: true, dryRun: false, actor: user.email || "", applied: okN, failed: errN, plan: plans });
+});
