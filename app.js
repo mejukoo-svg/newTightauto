@@ -1952,8 +1952,23 @@ async function saveHLGgdg(id,c){
   KR_HL[id]=c||null;HIGHLIGHTS[id]=c||null;   // 표시는 hlClassGgdg(KR_HL) 로 읽는다 — 글로벌 모드에서도 동일
   renderGgdgTight();   // 안에서 GGDG_ROWS·abSyncBtnG 까지 갱신된다
 }
+// 세트 탭(국내 추이차트)에서 ▶ 로 펼친 하위 소재 행의 하이라이트.
+//   저장소는 소재별 탭과 같은 ad_creative_highlights(CR_HL) — 그래서 여기서 ASC(보라)를 찍어도
+//   소재별 탭과 asc-copy 서버가 같은 마킹을 본다. 세트 저장소(adset_highlights)·human_advice_marks 는 건드리지 않는다
+//   (세트 증감액 조언 학습 데이터에 소재 마킹이 섞이면 안 된다).
+let currentHlCr=null;   // {id, acc, el} — 하위 소재 행에서 피커를 열었을 때만 채워진다
+function showCPCr(id,acc,el){showCP(id,el);currentHlCr={id:id,acc:acc||'',el:el};const ca=document.getElementById('cpAsc');if(ca)ca.style.display=''}
+async function saveHLCr(id,c,el){
+  const body={ad_id:id,highlight:c||null,updated_at:new Date().toISOString()};
+  await fetch(SB_URL+'/rest/v1/ad_creative_highlights',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
+  CR_HL[id]=c||null;   // 소재별 탭으로 넘어가면 HIGHLIGHTS=CR_HL 이라 그대로 보인다
+  const _t=new Date();
+  const tDate=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
+  await fetch(SB_URL+'/rest/v1/ad_creative_daily?date=eq.'+tDate+'&ad_id=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})}).catch(()=>{});
+  if(el){Object.values(HL_CONFIG).forEach(h=>el.classList.remove(h.cls));if(c&&HL_CONFIG[c])el.classList.add(HL_CONFIG[c].cls)}
+}
 function showCPGgdg(id,el){showCP(id,el);currentHlGgdg=true}
-function showCP(id,el){currentHlId=id;currentHlGgdg=false;const cp=document.getElementById('colorPicker');const ca=document.getElementById('cpAsc');if(ca)ca.style.display=MODE==='cr'?'':'none';const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
+function showCP(id,el){currentHlId=id;currentHlGgdg=false;currentHlCr=null;const cp=document.getElementById('colorPicker');const ca=document.getElementById('cpAsc');if(ca)ca.style.display=MODE==='cr'?'':'none';const r=el.getBoundingClientRect();cp.style.left=(r.left+window.scrollX)+'px';cp.style.top=(r.bottom+window.scrollY+4)+'px';cp.classList.add('show')}
 async function clearAllHighlights(){
   if(!confirm('추이차트 하이라이트가 삭제됩니다.\n메모는 날짜별로 남습니다(추이차트 메모칸·날짜탭 모두 유지).\n\n계속할까요?'))return;
   const tbl=hlTbl();const col=hlIdCol();
@@ -1988,11 +2003,12 @@ async function autoClearTrendHL(){
   rerenderTrendView();
 }
 document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b.addEventListener('click',e=>{e.stopPropagation();
-  const id=currentHlId,c=b.dataset.c;
+  const id=currentHlId,c=b.dataset.c,cr=currentHlCr;
   if(id){
-    const pr=(currentHlGgdg?saveHLGgdg:saveHL)(id,c);
+    const pr=cr?saveHLCr(id,c,cr.el):(currentHlGgdg?saveHLGgdg:saveHL)(id,c);
     // ASC(보라) 는 마킹이 곧 실행 요청 — DB 저장이 끝난 뒤(서버가 마킹을 대조하므로) 복사 계획 모달을 연다
-    if(c==='asc'&&MODE==='cr'&&!currentHlGgdg)Promise.resolve(pr).then(()=>ascOpen(id));
+    //   소재별 탭(MODE cr) 또는 세트 탭에서 펼친 하위 소재 행(cr 컨텍스트) 둘 다.
+    if(c==='asc'&&!currentHlGgdg&&(cr||MODE==='cr'))Promise.resolve(pr).then(()=>ascOpen(id,cr?cr.acc:''));
   }
   document.getElementById('colorPicker').classList.remove('show')})});
 // .clickable = 하이라이트 지정 셀 전용 클래스(추이차트·디멘드젠). fx 유무와 무관하게 피커가 닫히지 않도록.
@@ -3210,9 +3226,13 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       ? '<a href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_ad_ids='+c.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 (Meta Ads Manager) — 좌측 상단 검토 탭 클릭" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
     const cells=dd.map(d=>{const r=c.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'" style="background:#fff8e1">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,null,ctr,r.results_mp>0?r.spend/r.results_mp:0)+'</td>'}).join('');
+    // 국내 세트 탭에서만 소재명 칸 클릭 → 색상 피커(ASC 포함). 저장은 소재별 탭과 같은 ad_creative_highlights.
+    //   하이라이트 클래스는 !important 배경이라 인라인 #fff8e1 을 덮는다.
+    const crHl=(MODE==='kr'&&CR_HL[c.id]&&HL_CONFIG[CR_HL[c.id]])?' '+HL_CONFIG[CR_HL[c.id]].cls:'';
+    const crCk=MODE==='kr'?' clickable" onclick="showCPCr(\''+c.id+'\',\''+String(c.acc||'').replace(/[^\w]/g,'')+'\',this)"':'"';
     tr.innerHTML=(showAcc?'<td class="fx fxa" style="background:#fff8e1"></td>':'')
       +'<td class="fx fx0" style="background:#fff8e1"></td>'
-      +'<td class="fx fx1" style="background:#fff8e1;padding-left:24px" title="'+anEsc+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
+      +'<td class="fx fx1'+crHl+crCk+' style="background:#fff8e1;padding-left:24px" title="'+anEsc+(MODE==='kr'?' — 클릭해 마킹(ASC=같은 상품 ASC 세트로 복사)':'')+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
       +'<td class="idc" style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
       +(showChg?'<td style="background:#fff8e1"></td><td style="background:#fff8e1"></td>':'')
       +'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr,null,c._ctr,c._mp>0?c._s/c._mp:0)+'</td>'
@@ -4093,11 +4113,10 @@ let ASC_PLAN=null;
 let ASC_ITEMS=[];
 
 // 소재별 탭에서 ASC 마킹된 소재 (id → ad_account_id 는 화면 행에서 찾는다; 없으면 서버가 계정 미등록으로 거절)
-function ascTargets(onlyId){
-  if(MODE!=='cr')return[];
-  const accOf={};(_srcAD()||[]).forEach(r=>{if(r.ad_id&&r.ad_account_id&&!accOf[r.ad_id])accOf[r.ad_id]=String(r.ad_account_id)});
-  const ids=onlyId?[onlyId]:Object.keys(HIGHLIGHTS).filter(k=>HIGHLIGHTS[k]==='asc');
-  return ids.map(id=>({ad_id:String(id),ad_account_id:accOf[id]||''}));
+function ascTargets(onlyId,acc){
+  const accOf={};(CR_AD||[]).forEach(r=>{if(r.ad_id&&r.ad_account_id&&!accOf[r.ad_id])accOf[r.ad_id]=String(r.ad_account_id)});
+  const ids=onlyId?[onlyId]:Object.keys(CR_HL).filter(k=>CR_HL[k]==='asc');
+  return ids.map(id=>({ad_id:String(id),ad_account_id:(onlyId&&acc)||accOf[id]||''}));
 }
 async function ascCall(dryRun,select){
   const r=await fetch(ASC_FN,{method:'POST',headers:await abAuthHeaders(),
@@ -4106,9 +4125,9 @@ async function ascCall(dryRun,select){
   if(!r.ok||j.ok===false)throw new Error(j.error||('서버 오류 ('+r.status+')'));
   return j;
 }
-async function ascOpen(adId){
-  if(MODE!=='cr'){alert('ASC 복사는 국내 소재별 탭에서만 가능합니다.');return}
-  ASC_ITEMS=ascTargets(adId);
+async function ascOpen(adId,acc){
+  if(MODE!=='cr'&&MODE!=='kr'){alert('ASC 복사는 국내 소재별 탭 또는 국내 세트 탭의 하위 소재에서만 가능합니다.');return}
+  ASC_ITEMS=ascTargets(adId,acc);
   if(!ASC_ITEMS.length){alert('ASC 로 마킹된 소재가 없습니다.');return}
   if(!await abPwAsk())return;   // 취소하면 dry-run 조회조차 하지 않는다 (마킹은 남는다 — 다시 누르면 재시도)
   AB_KIND='asc';ASC_PLAN=null;AB_PLAN=null;
