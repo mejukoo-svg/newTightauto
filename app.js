@@ -4163,14 +4163,15 @@ function ascRender(plan,applied){
     }
     p.targets.forEach((t,i)=>{
       const can=t.action==='copy'&&!t.error;
-      // 중단된 ASC(캠페인·세트 PAUSED)는 넣어도 게재가 안 된다 → 기본 해제·전체선택 제외(체크하면 복사 가능)
-      const live=can&&t.adset_status==='ACTIVE'&&t.campaign_status==='ACTIVE';
-      const cls=t.error?'ab-err':(applied?(t.applied?'':'ab-skip'):(can?(live?'':'ab-conf'):'ab-skip'));
+      // 중단된 ASC(캠페인·세트 PAUSED)에도 기본 포함 — 광고만 넣고 ASC 는 켜지 않는다(2026-09-15 결정).
+      //   나중에 그 ASC 를 켜면 이미 들어가 있는 소재가 같이 돈다. 색으로만 중단 상태를 표시.
+      const paused=can&&!(t.adset_status==='ACTIVE'&&t.campaign_status==='ACTIVE');
+      const cls=t.error?'ab-err':(applied?(t.applied?'':'ab-skip'):(can?(paused?'ab-conf':''):'ab-skip'));
       let last;
       if(t.error)last='⚠ '+abEsc(t.error);
       else if(applied)last=t.applied?'✅ 복사됨 <span class="ab-id">'+abEsc(t.copied_ad_id||'')+'</span>':'— '+abEsc(t.note||'건너뜀');
       else last=abEsc(t.note||'복사 예정');
-      const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="asc-ck" data-key="'+abEsc(t.key)+'"'+(can?'':' disabled')+(live?' checked':' data-nobulk="1"')+' onclick="ascSelChanged()"></td>';
+      const ckTd=applied?'':'<td class="ab-ckc"><input type="checkbox" class="asc-ck" data-key="'+abEsc(t.key)+'"'+(can?' checked':' disabled')+' onclick="ascSelChanged()"></td>';
       const stCls=t.adset_status==='ACTIVE'?'':' style="color:#a60"';
       h+='<tr class="'+cls+'">'+ckTd
         +(i===0?'<td class="ab-name" rowspan="'+p.targets.length+'">'+nameCell+'</td><td rowspan="'+p.targets.length+'" style="text-align:center;font-weight:600">'+abEsc(p.product||'')+'</td>':'')
@@ -4186,15 +4187,13 @@ function ascRender(plan,applied){
 }
 function ascBoxes(){return[...document.querySelectorAll('#abBody .asc-ck:not(:disabled)')]}
 function ascSelKeys(){return ascBoxes().filter(b=>b.checked).map(b=>b.dataset.key)}
-function ascBulkBoxes(){return ascBoxes().filter(b=>!b.dataset.nobulk)}
-function ascToggleAll(el){ascBulkBoxes().forEach(b=>b.checked=el.checked);if(!el.checked)ascBoxes().forEach(b=>b.checked=false);ascSelChanged()}
+function ascToggleAll(el){ascBoxes().forEach(b=>b.checked=el.checked);ascSelChanged()}
 function ascSelChanged(){
   if(!ASC_PLAN)return;
   const boxes=ascBoxes(),n=ascSelKeys().length;
-  const bulk=ascBulkBoxes(),bn=bulk.filter(b=>b.checked).length;
-  const pausedN=boxes.length-bulk.length;
+  const pausedN=ASC_PLAN.reduce((a,p)=>a+(p.targets||[]).filter(t=>t.action==='copy'&&!t.error&&!(t.adset_status==='ACTIVE'&&t.campaign_status==='ACTIVE')).length,0);
   const all=document.getElementById('ascAll');
-  if(all){all.checked=bulk.length>0&&bn===bulk.length;all.indeterminate=n>0&&bn<bulk.length}
+  if(all){all.checked=boxes.length>0&&n===boxes.length;all.indeterminate=n>0&&n<boxes.length}
   const skipN=ASC_PLAN.reduce((a,p)=>a+(p.targets||[]).filter(t=>t.action==='skip'&&!t.error).length,0);
   const errN=ASC_PLAN.reduce((a,p)=>a+(p.error?1:(p.targets||[]).filter(t=>t.error).length),0);
   const go=document.getElementById('abGo');
@@ -4203,7 +4202,7 @@ function ascSelChanged(){
   document.getElementById('abMsg').innerHTML=boxes.length
     ? '선택 <b>'+n+'</b> / 복사 가능 '+boxes.length+'건'
       +(skipN?' · '+skipN+'건 건너뜀(이미 있음)':'')
-      +(pausedN?' · '+pausedN+'건 중단된 ASC(기본 해제)':'')
+      +(pausedN?' · '+pausedN+'건은 중단된 ASC(광고만 추가, 켜지 않음)':'')
       +(errN?' · <span style="color:#a00">'+errN+'건 오류</span>':'')
       +' — 원본은 그대로 두고 ASC 세트에 새 광고가 생깁니다(ACTIVE). 되돌리려면 Ads Manager 에서 새 광고를 삭제하세요'
     : '복사할 대상이 없습니다'+(skipN?' · '+skipN+'건은 이미 있음':'')+(errN?' · <span style="color:#a00">'+errN+'건 오류</span>':'');

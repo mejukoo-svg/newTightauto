@@ -13,6 +13,8 @@
 //      + asc_copy_log 에 성공 기록이 있으면 건너뜀
 //   5) dryRun=false 면 POST /{ad_id}/copies {adset_id, status_option} → asc_copy_log 기록
 //      ※ 이동이 아니라 복사다. 원본 광고·세트는 건드리지 않는다.
+//      ※ 중단(PAUSED)된 ASC 세트에도 넣는다. 캠페인·세트의 status 는 읽기만 하고 절대 바꾸지 않는다 —
+//        꺼진 ASC 는 꺼진 채로 두고, 나중에 사람이 켜면 들어가 있던 소재가 같이 돈다.
 //
 // 요청: POST { mode:'cr', region:'kr'|'gl', dryRun:boolean, items:[{ad_id, ad_account_id}], select?:["<ad_id>|<adset_id>",…] }
 //   region: 상품 매칭 규칙 선택. kr = 캠페인명 첫 토큰(국내_소재별 extract_product), gl = 국가+상품(글로벌 canon, 아래 glKey)
@@ -464,7 +466,10 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
         tg.note = `${kstStamp(done.applied_at)} 이미 복사됨 (${done.copied_ad_id || ""})`;
         p.targets.push(tg); continue;
       }
-      if (t.adset_status !== "ACTIVE") tg.note = `세트 ${t.adset_status} — 복사해도 게재 안 됨`;
+      // 중단된 ASC 에도 광고를 넣는다(켜지는 않는다 — 여기서 캠페인·세트 status 는 절대 수정하지 않음).
+      if (t.adset_status !== "ACTIVE" || t.campaign_status !== "ACTIVE") {
+        tg.note = `${t.campaign_status !== "ACTIVE" ? "캠페인" : "세트"} ${t.campaign_status !== "ACTIVE" ? t.campaign_status : t.adset_status} — 광고만 추가, ASC 는 켜지 않음`;
+      }
       p.targets.push(tg);
     }
   } catch (e) {

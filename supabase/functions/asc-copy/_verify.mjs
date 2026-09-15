@@ -91,7 +91,7 @@ check(pA && pA.product === "집착" && !pA.error, "A: 상품=집착 " + (pA?.err
 check(pA.targets.length === 2, "A: 대상 2세트(집착 ASC 만, 구미호·일반 제외) → " + pA.targets.map((t) => t.adset_name).join(", "));
 const tS1 = pA.targets.find((t) => t.adset_id === S1), tS2 = pA.targets.find((t) => t.adset_id === S2);
 check(tS1 && tS1.action === "skip" && /이미 있음/.test(tS1.note), "A→S1: 같은 영상(V1) 이미 있음 → skip: " + tS1?.note);
-check(tS2 && tS2.action === "copy" && /PAUSED/.test(tS2.note), "A→S2: copy (세트 PAUSED 안내): " + tS2?.note);
+check(tS2 && tS2.action === "copy" && /PAUSED/.test(tS2.note) && /켜지 않음/.test(tS2.note), "A→S2: copy (중단 ASC 에도 넣되 켜지 않음): " + tS2?.note);
 check(pB && /마킹 불일치/.test(pB.error), "B: 마킹 없음 → 거절: " + pB?.error);
 check(pC && /ASC 캠페인이 이 계정에 없음/.test(pC.error) && pC.product === "재물", "C: 재물 ASC 없음 → 오류: " + pC?.error);
 check(!calls.some((c) => c.method === "POST" && /copies/.test(c.url)), "dry-run 에서 /copies 호출 없음");
