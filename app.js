@@ -1957,14 +1957,17 @@ async function saveHLGgdg(id,c){
 //   소재별 탭과 asc-copy 서버가 같은 마킹을 본다. 세트 저장소(adset_highlights)·human_advice_marks 는 건드리지 않는다
 //   (세트 증감액 조언 학습 데이터에 소재 마킹이 섞이면 안 된다).
 let currentHlCr=null;   // {id, acc, el} — 하위 소재 행에서 피커를 열었을 때만 채워진다
-function showCPCr(id,acc,el){showCP(id,el);currentHlCr={id:id,acc:acc||'',el:el};const ca=document.getElementById('cpAsc');if(ca)ca.style.display=''}
+//   글로벌 세트 탭(gl)의 하위 소재도 같은 저장소를 쓴다(ad_id 는 계정을 넘어 유일). 서버엔 region:'gl' 로 알려
+//   국가+상품 규칙으로 같은 국가의 ASC 만 찾게 한다('대만_무당' 소재를 '미국_무당_ASC' 에 넣지 않도록).
+function showCPCr(id,acc,el){showCP(id,el);currentHlCr={id:id,acc:acc||'',el:el,region:MODE==='gl'?'gl':'kr'};const ca=document.getElementById('cpAsc');if(ca)ca.style.display=''}
 async function saveHLCr(id,c,el){
   const body={ad_id:id,highlight:c||null,updated_at:new Date().toISOString()};
   await fetch(SB_URL+'/rest/v1/ad_creative_highlights',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify(body)});
   CR_HL[id]=c||null;   // 소재별 탭으로 넘어가면 HIGHLIGHTS=CR_HL 이라 그대로 보인다
   const _t=new Date();
   const tDate=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
-  await fetch(SB_URL+'/rest/v1/ad_creative_daily?date=eq.'+tDate+'&ad_id=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})}).catch(()=>{});
+  // 날짜탭용 영구 기록은 국내 소재 테이블에만 highlight 컬럼이 있다 (global_ad_creative_daily 엔 없음)
+  if(MODE!=='gl')await fetch(SB_URL+'/rest/v1/ad_creative_daily?date=eq.'+tDate+'&ad_id=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({highlight:c||null})}).catch(()=>{});
   if(el){Object.values(HL_CONFIG).forEach(h=>el.classList.remove(h.cls));if(c&&HL_CONFIG[c])el.classList.add(HL_CONFIG[c].cls)}
 }
 function showCPGgdg(id,el){showCP(id,el);currentHlGgdg=true}
@@ -2008,7 +2011,7 @@ document.getElementById('colorPicker').querySelectorAll('.cp-btn').forEach(b=>{b
     const pr=cr?saveHLCr(id,c,cr.el):(currentHlGgdg?saveHLGgdg:saveHL)(id,c);
     // ASC(보라) 는 마킹이 곧 실행 요청 — DB 저장이 끝난 뒤(서버가 마킹을 대조하므로) 복사 계획 모달을 연다
     //   소재별 탭(MODE cr) 또는 세트 탭에서 펼친 하위 소재 행(cr 컨텍스트) 둘 다.
-    if(c==='asc'&&!currentHlGgdg&&(cr||MODE==='cr'))Promise.resolve(pr).then(()=>ascOpen(id,cr?cr.acc:''));
+    if(c==='asc'&&!currentHlGgdg&&(cr||MODE==='cr'))Promise.resolve(pr).then(()=>ascOpen(id,cr?cr.acc:'',cr?cr.region:'kr'));
   }
   document.getElementById('colorPicker').classList.remove('show')})});
 // .clickable = 하이라이트 지정 셀 전용 클래스(추이차트·디멘드젠). fx 유무와 무관하게 피커가 닫히지 않도록.
@@ -3228,11 +3231,12 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     const cells=dd.map(d=>{const r=c.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'" style="background:#fff8e1">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,null,ctr,r.results_mp>0?r.spend/r.results_mp:0)+'</td>'}).join('');
     // 국내 세트 탭에서만 소재명 칸 클릭 → 색상 피커(ASC 포함). 저장은 소재별 탭과 같은 ad_creative_highlights.
     //   하이라이트 클래스는 !important 배경이라 인라인 #fff8e1 을 덮는다.
-    const crHl=(MODE==='kr'&&CR_HL[c.id]&&HL_CONFIG[CR_HL[c.id]])?' '+HL_CONFIG[CR_HL[c.id]].cls:'';
-    const crCk=MODE==='kr'?' clickable" onclick="showCPCr(\''+c.id+'\',\''+String(c.acc||'').replace(/[^\w]/g,'')+'\',this)"':'"';
+    const crOK=(MODE==='kr'||MODE==='gl');
+    const crHl=(crOK&&CR_HL[c.id]&&HL_CONFIG[CR_HL[c.id]])?' '+HL_CONFIG[CR_HL[c.id]].cls:'';
+    const crCk=crOK?' clickable" onclick="showCPCr(\''+c.id+'\',\''+String(c.acc||'').replace(/[^\w]/g,'')+'\',this)"':'"';
     tr.innerHTML=(showAcc?'<td class="fx fxa" style="background:#fff8e1"></td>':'')
       +'<td class="fx fx0" style="background:#fff8e1"></td>'
-      +'<td class="fx fx1'+crHl+crCk+' style="background:#fff8e1;padding-left:24px" title="'+anEsc+(MODE==='kr'?' — 클릭해 마킹(ASC=같은 상품 ASC 세트로 복사)':'')+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
+      +'<td class="fx fx1'+crHl+crCk+' style="background:#fff8e1;padding-left:24px" title="'+anEsc+(crOK?' — 클릭해 마킹(ASC=같은 상품 ASC 세트로 복사)':'')+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
       +'<td class="idc" style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
       +(showChg?'<td style="background:#fff8e1"></td><td style="background:#fff8e1"></td>':'')
       +'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr,null,c._ctr,c._mp>0?c._s/c._mp:0)+'</td>'
@@ -4111,6 +4115,7 @@ const ASC_FN=SB_URL+'/functions/v1/asc-copy';
 let AB_KIND='budget';   // 'budget' | 'asc' — abMask 모달을 누가 쓰고 있는지 (확인 버튼 분기)
 let ASC_PLAN=null;
 let ASC_ITEMS=[];
+let ASC_REGION='kr';   // 'kr' | 'gl' — 서버의 상품 매칭 규칙(국내=첫 토큰, 글로벌=국가+상품)
 
 // 소재별 탭에서 ASC 마킹된 소재 (id → ad_account_id 는 화면 행에서 찾는다; 없으면 서버가 계정 미등록으로 거절)
 function ascTargets(onlyId,acc){
@@ -4120,20 +4125,21 @@ function ascTargets(onlyId,acc){
 }
 async function ascCall(dryRun,select){
   const r=await fetch(ASC_FN,{method:'POST',headers:await abAuthHeaders(),
-    body:JSON.stringify({mode:'cr',dryRun:dryRun,items:ASC_ITEMS,select:select||undefined})});
+    body:JSON.stringify({mode:'cr',region:ASC_REGION,dryRun:dryRun,items:ASC_ITEMS,select:select||undefined})});
   const j=await r.json().catch(()=>({}));
   if(!r.ok||j.ok===false)throw new Error(j.error||('서버 오류 ('+r.status+')'));
   return j;
 }
-async function ascOpen(adId,acc){
-  if(MODE!=='cr'&&MODE!=='kr'){alert('ASC 복사는 국내 소재별 탭 또는 국내 세트 탭의 하위 소재에서만 가능합니다.');return}
+async function ascOpen(adId,acc,region){
+  if(MODE!=='cr'&&MODE!=='kr'&&MODE!=='gl'){alert('ASC 복사는 소재별 탭 또는 국내·글로벌 세트 탭의 하위 소재에서만 가능합니다.');return}
+  ASC_REGION=region==='gl'?'gl':'kr';
   ASC_ITEMS=ascTargets(adId,acc);
   if(!ASC_ITEMS.length){alert('ASC 로 마킹된 소재가 없습니다.');return}
   if(!await abPwAsk())return;   // 취소하면 dry-run 조회조차 하지 않는다 (마킹은 남는다 — 다시 누르면 재시도)
   AB_KIND='asc';ASC_PLAN=null;AB_PLAN=null;
   document.getElementById('abMask').classList.add('show');
   document.getElementById('abTitle').textContent='🟣 ASC 세트로 소재 복사';
-  document.getElementById('abSub').textContent='국내 소재별 · '+ASC_ITEMS.length+'개 소재 → 같은 상품의 모든 ASC 세트';
+  document.getElementById('abSub').textContent=(ASC_REGION==='gl'?'글로벌 · ':'국내 · ')+ASC_ITEMS.length+'개 소재 → 같은 '+(ASC_REGION==='gl'?'국가·상품':'상품')+'의 모든 ASC 세트';
   document.getElementById('abBody').innerHTML='<div style="padding:24px;text-align:center;color:#888">메타에서 ASC 캠페인·세트·기존 소재 확인 중…</div>';
   document.getElementById('abMsg').textContent='';
   const go=document.getElementById('abGo');go.disabled=true;go.textContent='확인 — ASC 세트에 복사';

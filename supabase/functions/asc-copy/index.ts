@@ -14,7 +14,8 @@
 //   5) dryRun=false 면 POST /{ad_id}/copies {adset_id, status_option} → asc_copy_log 기록
 //      ※ 이동이 아니라 복사다. 원본 광고·세트는 건드리지 않는다.
 //
-// 요청: POST { mode:'cr', dryRun:boolean, items:[{ad_id, ad_account_id}], select?:["<ad_id>|<adset_id>",…] }
+// 요청: POST { mode:'cr', region:'kr'|'gl', dryRun:boolean, items:[{ad_id, ad_account_id}], select?:["<ad_id>|<adset_id>",…] }
+//   region: 상품 매칭 규칙 선택. kr = 캠페인명 첫 토큰(국내_소재별 extract_product), gl = 국가+상품(글로벌 canon, 아래 glKey)
 // 응답: { ok, dryRun, plan:[{ad_id, ad_name, product, targets:[{adset_id, action, note, error, applied, copied_ad_id}]}] }
 //
 // 배포: Edge Function 은 git push 로 배포되지 않는다 — apply-budget/README.md 의 절차대로 따로 배포할 것.
@@ -51,10 +52,11 @@ function tokenFor(acc: string): { envName: string; token: string } | null {
   return { envName: names.join(" / "), token: "" };
 }
 
-// 마킹이 저장된 하이라이트 테이블 (index.html hlTbl() 과 동일). 소재 복사는 국내 소재별(cr)만.
+// 마킹이 저장된 하이라이트 테이블. 국내·글로벌 소재 모두 ad_creative_highlights(ad_id 는 계정을 넘어 유일) 를 쓴다.
 const HL_TBL: Record<string, { tbl: string; col: string }> = {
   cr: { tbl: "ad_creative_highlights", col: "ad_id" },
 };
+const REGIONS = new Set(["kr", "gl"]);
 const HL_TAG = "asc";
 // 복사된 광고의 초기 상태. ACTIVE = 바로 게재(죽은 소재를 ASC 에서 되살리는 용도라 원본이 꺼져 있어도 켠다).
 const STATUS_OPTION = "ACTIVE";
@@ -181,6 +183,87 @@ function extractProduct(...sources: string[]): string {
   return "기타";
 }
 
+// ── 글로벌 상품 키 — app.js 의 GL_NON_PRODUCT_TOKENS / GL_PRODUCT_CANON 과 같은 값 ──────────
+// 글로벌 캠페인명은 '{국가}_{상품}_…_ASC_…' 꼴이고 같은 상품 ASC 가 국가별로 따로 있다
+// ('미국_무당_ASC_미국' / '대만_무당_ASC_전세계중국어' …). 언어가 다르므로 **국가 + 상품** 이 같아야 대상이다.
+//   국가 = 첫 국가 토큰(전세계·간체 같은 광역 토큰은 실제 국가가 없을 때만 WW 로),  상품 = canonical 영문명(없으면 원 토큰)
+const GL_COUNTRY: Record<string, string> = {
+  "대만": "TW", "tw": "TW", "taiwan": "TW", "홍콩": "HK", "hk": "HK", "hongkong": "HK",
+  "일본": "JP", "jp": "JP", "japan": "JP", "태국": "TH", "th": "TH", "thailand": "TH",
+  "미국": "US", "us": "US", "usa": "US", "호주": "AU", "au": "AU", "australia": "AU",
+  "싱가포르": "SG", "싱가폴": "SG", "sg": "SG", "singapore": "SG",
+  "말레이시아": "MY", "my": "MY", "malaysia": "MY", "멕시코": "MX", "mx": "MX", "mexico": "MX",
+  "한국": "KR", "kr": "KR", "korea": "KR", "중국": "CN", "cn": "CN", "china": "CN",
+  "마카오": "MO", "mo": "MO", "macau": "MO", "베트남": "VN", "vn": "VN", "vietnam": "VN",
+  "영국": "GB", "gb": "GB", "uk": "GB",
+  "전세계": "WW", "worldwide": "WW", "global": "WW", "간체": "WW", "번체": "WW", "sc": "WW", "tc": "WW",
+};
+const GL_CANON: Record<string, string> = {
+  "solo": "solo", "솔로": "solo",
+  "shaman": "shaman", "무당": "shaman", "mudang": "shaman", "moodang": "shaman", "샤먼": "shaman", "범산": "shaman",
+  "mzpian": "mzpian", "무녀": "mzpian",
+  "possessive": "possessive", "집착": "possessive", "clinger": "possessive",
+  "job": "job", "커리어": "job",
+  "again": "again", "재회": "again",
+  "againjami": "againjami", "재회자미두수": "againjami",
+  "adult": "adult", "18금": "adult",
+  "adult29": "adult29", "29금": "adult29",
+  "starsun": "starsun", "별선": "starsun",
+  "starsea": "starsea", "별해": "starsea",
+  "money": "money", "재물운": "money",
+  "gender": "gender", "home": "home", "marry": "marry", "1%": "1%",
+  "desirezodiac": "desirezodiac", "shyshy": "shyshy",
+  "구미호": "구미호", "속궁합": "속궁합",
+};
+// 상품이 될 수 없는 구조 토큰 (글로벌_소재별_supabase.py SKIP_WORDS 의 비국가 부분 + 우리 네이밍 마커)
+const GL_SKIP = new Set(["asc", "cbo", "abo", "dpa", "advantage", "campaign", "adset", "ad", "ads", "set", "purchase",
+  "conversion", "traffic", "v1", "v2", "v3", "v4", "v5", "test", "new", "old", "copy", "sajutight", "ttsaju", "saju", "tight",
+  "asia", "broad", "interest", "lookalike", "retarget", "custom", "전환캠페인", "복제", "사본", "인플", "인플루언서",
+  "troas", "tcpa", "x2", "x4", "2nd", "국내", "글로벌"]);
+
+function stripEmoji(t: string): string {
+  const cps = Array.from(t);
+  let i = 0;
+  for (; i < cps.length; i++) {
+    const c = cps[i];
+    if ((c >= "\uAC00" && c <= "\uD7A3") || (c >= "\u3131" && c <= "\u3163") || /^[\p{L}\p{N}]$/u.test(c) || c === "." || c === "%") break;
+  }
+  return cps.slice(i).join("").trim();
+}
+
+function glKey(...sources: string[]): { key: string; label: string } {
+  for (const src of sources) {
+    if (!src) continue;
+    const toks = String(src).trim().split(/[_\s\-/|,()\[\]]+/).map((t) => stripEmoji(t)).filter(Boolean);
+    let country = "", ww = "", product = "";
+    for (const raw of toks) {
+      const k = raw.toLowerCase();
+      if (/^\d+$/.test(k)) continue;
+      const cc = GL_COUNTRY[k];
+      if (cc) {
+        if (cc === "WW") { if (!ww) ww = "WW"; } else if (!country) country = cc;
+        continue;
+      }
+      if (product) continue;
+      if (GL_CANON[k]) { product = GL_CANON[k]; continue; }
+      if (GL_SKIP.has(k) || k.length < 2) continue;
+      product = k;
+    }
+    if (product) {
+      const c = country || ww;
+      return { key: `${c}|${product}`, label: `${c || "?"} ${product}` };
+    }
+  }
+  return { key: "", label: "" };
+}
+
+// region 별 상품 키. kr 은 첫 토큰 규칙(extractProduct), gl 은 국가+상품.
+function productKey(region: string, campaignName: string, adsetName: string): { key: string; label: string } {
+  if (region === "gl") return glKey(campaignName, adsetName);
+  const p = extractProduct(campaignName, adsetName);
+  return p === "기타" ? { key: "", label: "" } : { key: p, label: p };
+}
+
 // 실측(2026-09-14, act_1270614404675034): 우리 ASC 캠페인 31개 전부 smart_promotion_type 이
 // GUIDED_CREATION 으로 나온다(AUTOMATED_SHOPPING_ADS 아님) → 실제로는 캠페인명의 'ASC' 규칙이 판별한다.
 function isAscCampaign(c: any): boolean {
@@ -226,8 +309,9 @@ type AscAdset = {
 };
 const ascCache = new Map<string, AscAdset[]>();
 
-async function ascAdsetsOf(acc: string, token: string): Promise<AscAdset[]> {
-  if (ascCache.has(acc)) return ascCache.get(acc)!;
+async function ascAdsetsOf(acc: string, token: string, region: string): Promise<AscAdset[]> {
+  const ck = `${region}:${acc}`;
+  if (ascCache.has(ck)) return ascCache.get(ck)!;
   const camps = await metaList(`${acc}/campaigns`, {
     fields: "id,name,effective_status,smart_promotion_type",
     effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
@@ -242,12 +326,12 @@ async function ascAdsetsOf(acc: string, token: string): Promise<AscAdset[]> {
     for (const s of sets) {
       out.push({
         campaign_id: String(c.id), campaign_name: String(c.name || ""),
-        campaign_status: String(c.effective_status || ""), product: extractProduct(String(c.name || "")),
+        campaign_status: String(c.effective_status || ""), product: productKey(region, String(c.name || ""), "").key,
         adset_id: String(s.id), adset_name: String(s.name || ""), adset_status: String(s.effective_status || ""),
       });
     }
   }
-  ascCache.set(acc, out);
+  ascCache.set(ck, out);
   return out;
 }
 
@@ -307,7 +391,7 @@ function kstStamp(iso: string): string {
   return new Date(t.getTime() + 9 * 3600 * 1000).toISOString().slice(5, 16).replace("T", " ");
 }
 
-async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record<string, any>): Promise<Plan> {
+async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record<string, any>, region: string): Promise<Plan> {
   const id = String(item?.ad_id ?? "").trim();
   const acc = String(item?.ad_account_id ?? "").trim();
   if (!/^\d{9,}$/.test(id)) return blank(item, "메타 광고 ID 형식이 아님");
@@ -337,17 +421,18 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
       p.error = `원본 광고가 ${p.src_status} 상태 — 복사 불가`;
       return p;
     }
-    p.product = extractProduct(p.src_campaign_name, p.src_adset_name);
-    if (p.product === "기타") {
+    const pk = productKey(region, p.src_campaign_name, p.src_adset_name);
+    p.product = pk.label;
+    if (!pk.key) {
       p.error = "캠페인명에서 상품명을 찾지 못함";
       return p;
     }
     const srcFp = fingerprint(a.creative);
     const srcAdsetId = p.src_adset_id;
 
-    const cands = (await ascAdsetsOf(acc, token)).filter((t) => t.product === p.product);
+    const cands = (await ascAdsetsOf(acc, token, region)).filter((t) => t.product === pk.key);
     if (!cands.length) {
-      p.error = `'${p.product}' 상품의 ASC 캠페인이 이 계정에 없음`;
+      p.error = `'${p.product}' ${region === "gl" ? "국가·상품" : "상품"}의 ASC 캠페인이 이 계정에 없음`;
       return p;
     }
     for (const t of cands) {
@@ -406,11 +491,13 @@ Deno.serve(async (req) => {
   }
 
   const mode = String(body?.mode || "");
+  const region = String(body?.region || "kr");
   const dryRun = body?.dryRun !== false; // 기본은 안전한 dry-run
   const items = Array.isArray(body?.items) ? body.items : [];
   const select: Set<string> | null = Array.isArray(body?.select) ? new Set(body.select.map(String)) : null;
 
-  if (!(mode in HL_TBL)) return json({ ok: false, error: "ASC 복사는 국내 소재별(cr) 탭에서만 가능합니다" }, 400);
+  if (!(mode in HL_TBL)) return json({ ok: false, error: "ASC 복사는 소재(cr) 마킹에서만 가능합니다" }, 400);
+  if (!REGIONS.has(region)) return json({ ok: false, error: `알 수 없는 region: ${region}` }, 400);
   if (!items.length) return json({ ok: false, error: "복사할 소재가 없습니다" }, 400);
   if (items.length > MAX_ITEMS) return json({ ok: false, error: `한 번에 ${MAX_ITEMS}개까지만 복사할 수 있습니다` }, 400);
 
@@ -430,7 +517,7 @@ Deno.serve(async (req) => {
   const doneMap = await fetchDone(uniq.map((it: any) => String(it.ad_id)));
 
   const plans: Plan[] = [];
-  for (const it of uniq) plans.push(await planOne(it, hlMap, doneMap));
+  for (const it of uniq) plans.push(await planOne(it, hlMap, doneMap, region));
 
   const nTargets = plans.reduce((n, p) => n + p.targets.filter((t) => t.action === "copy").length, 0);
   if (nTargets > MAX_TARGETS) return json({ ok: false, error: `복사 대상이 ${nTargets}건 — 한 번에 ${MAX_TARGETS}건까지만` }, 400);
@@ -460,7 +547,7 @@ Deno.serve(async (req) => {
       }
       logs.push({
         actor: user.email || user.id,
-        region: mode,
+        region: region,
         ad_id: p.ad_id,
         ad_name: p.ad_name,
         ad_account_id: p.ad_account_id,

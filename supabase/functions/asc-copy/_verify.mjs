@@ -111,7 +111,48 @@ const logRows = logPost ? JSON.parse(logPost.body) : [];
 check(logRows.length === 1 && logRows[0].ok === true && logRows[0].target_adset_id === S2 && logRows[0].product === "집착" && logRows[0].actor === "tester@x", "asc_copy_log 1건 기록");
 check(r.applied === 1 && r.failed === 0, "applied=1 failed=0");
 
-console.log("3) 상품 추출 규칙");
+console.log("3) 글로벌 — 국가+상품 매칭");
+const GACC = "act_2677707262628563", GTOK = "TOK-GL";
+globalThis.__ENV.META_TOKEN_GlobalTT = GTOK;
+const AD_G = "120260000000000001";
+const GC = { twMudang1: "120270000000000001", twMudangWW: "120270000000000002", usMudang: "120270000000000003", twMunyeo: "120270000000000004", twMudangNormal: "120270000000000005" };
+const GS = { twMudang1: "120280000000000001", twMudangWW: "120280000000000002", usMudang: "120280000000000003", twMunyeo: "120280000000000004", twMudangNormal: "120280000000000005" };
+HL[AD_G] = "asc";
+ADS[AD_G] = { id: AD_G, name: "대만_무당_소재G", status: "ACTIVE", effective_status: "ACTIVE", account_id: GACC.slice(4),
+  adset: { id: GS.twMudangNormal, name: "대만_shaman_tw_광범위" }, campaign: { id: GC.twMudangNormal, name: "대만_shaman_tw_전환캠페인" }, creative: CR("cr_G", "VG") };
+const GCAMPS = [
+  { id: GC.twMudang1, name: "대만_무당_ASC", effective_status: "ACTIVE" },
+  { id: GC.twMudangWW, name: "대만_무당_ASC_전세계중국어_tROAS", effective_status: "ACTIVE" },
+  { id: GC.usMudang, name: "미국_무당_ASC_미국", effective_status: "ACTIVE" },
+  { id: GC.twMunyeo, name: "대만_무녀_tw_ASC_tCPA", effective_status: "ACTIVE" },
+  { id: GC.twMudangNormal, name: "대만_shaman_tw_전환캠페인", effective_status: "ACTIVE" },
+];
+for (const k of Object.keys(GC)) ADSETS[GC[k]] = [{ id: GS[k], name: k, effective_status: "ACTIVE" }];
+const prevFetch = globalThis.fetch;
+globalThis.fetch = async (url, opts = {}) => {
+  const u = String(url), method = (opts.method || "GET").toUpperCase();
+  const tokIn = method === "POST" ? new URLSearchParams(opts.body || "").get("access_token") : new URLSearchParams(u.split("?")[1] || "").get("access_token");
+  if (u.includes("graph.facebook.com") && tokIn === GTOK) {
+    calls.push({ method, url: u, body: opts.body });
+    const ok = (j) => ({ ok: true, status: 200, json: async () => j });
+    const path = u.match(/graph\.facebook\.com\/v[\d.]+\/([^?]+)/)[1];
+    if (path === `${GACC}/campaigns`) return ok({ data: GCAMPS });
+    if (path.endsWith("/adsets")) return ok({ data: ADSETS[path.split("/")[0]] || [] });
+    if (path.endsWith("/ads")) return ok({ data: [] });
+    if (ADS[path]) return ok(ADS[path]);
+    return { ok: false, status: 404, json: async () => ({ error: { message: "nf " + path } }) };
+  }
+  return prevFetch(url, opts);
+};
+r = await (await handler(req({ mode: "cr", region: "gl", dryRun: true, items: [{ ad_id: AD_G, ad_account_id: GACC }] }))).json();
+const pG = r.plan[0];
+check(pG && !pG.error && pG.product === "TW shaman", "G: 국가+상품 = TW shaman (shaman↔무당 canon): " + (pG?.error || pG?.product));
+const gNames = (pG?.targets || []).map((t) => t.adset_name).sort().join(",");
+check(gNames === "twMudang1,twMudangWW", "G: 대만_무당 ASC 2개만 (미국 무당·대만 무녀·일반 제외) → " + gNames);
+r = await (await handler(req({ mode: "cr", region: "xx", dryRun: true, items: [{ ad_id: AD_G, ad_account_id: GACC }] }))).json();
+check(r.ok === false && /region/.test(r.error), "알 수 없는 region 거절: " + r.error);
+
+console.log("4) 상품 추출 규칙");
 // 핸들러 내부 함수를 직접 못 부르므로 캠페인명→상품 매핑은 위 시나리오(🔥집착_… → 집착, 💵재물_… → 재물)로 확인됨.
 console.log(fails ? `\n✗ ${fails} 실패` : "\n✓ 전부 통과");
 process.exit(fails ? 1 : 0);
