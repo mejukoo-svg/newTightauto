@@ -126,24 +126,41 @@ function metaErr(j: any): string {
   return e.error_user_msg || e.message || JSON.stringify(e);
 }
 
+// 요청 한도(rate limit) — "이 광고 계정에서 너무 많은 요청이 있습니다". 일시적이라 잠깐 쉬고 다시 시도한다.
+//   2026-09-15 실사고: ASC 세트마다 세트·광고를 따로 조회하고 확인 시 그걸 또 반복해 계정당 수십 호출이
+//   1분에 몰렸다 → 호출은 계정당 3번(캠페인·세트·광고 일괄)으로 줄이고, 그래도 걸리면 3s·6s·12s 재시도.
+const RATE_CODES = new Set([4, 17, 32, 613, 80000, 80001, 80002, 80003, 80004]);
+function isRateLimited(j: any): boolean {
+  const e = j?.error || {};
+  return RATE_CODES.has(Number(e.code)) || !!e.is_transient || /too many|너무 많은 요청/i.test(String(e.message || e.error_user_msg || ""));
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function metaFetch(url: string, init: RequestInit | undefined, label: string) {
+  let last: any = {};
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt) await sleep(3000 * 2 ** (attempt - 1));
+    const r = await fetch(url, init);
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) return j;
+    last = j;
+    if (!isRateLimited(j)) throw new Error(metaErr(j) || `${label} ${r.status}`);
+  }
+  throw new Error((metaErr(last) || `${label} 요청 한도`) + " (재시도 3회 후 실패 — 1~2분 뒤 다시 시도)");
+}
+
 async function metaGet(path: string, params: Record<string, string>, token: string) {
   const q = new URLSearchParams({ ...params, access_token: token });
-  const r = await fetch(`${GRAPH}/${path}?${q.toString()}`);
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(metaErr(j) || `Meta GET ${r.status}`);
-  return j;
+  return await metaFetch(`${GRAPH}/${path}?${q.toString()}`, undefined, "Meta GET");
 }
 
 // 목록 엣지(campaigns/adsets/ads)를 paging.next 까지 전부 읽는다.
 async function metaList(path: string, params: Record<string, string>, token: string): Promise<any[]> {
   const out: any[] = [];
-  let j = await metaGet(path, { limit: "200", ...params }, token);
+  let j = await metaGet(path, { limit: "500", ...params }, token);
   out.push(...(j.data || []));
   let next: string = j.paging?.next || "";
   for (let i = 0; next && i < 20; i++) {
-    const r = await fetch(next);
-    j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(metaErr(j) || `Meta GET ${r.status}`);
+    j = await metaFetch(next, undefined, "Meta GET");
     out.push(...(j.data || []));
     next = j.paging?.next || "";
   }
@@ -152,14 +169,11 @@ async function metaList(path: string, params: Record<string, string>, token: str
 
 async function metaPost(path: string, body: Record<string, string>, token: string) {
   const form = new URLSearchParams({ ...body, access_token: token });
-  const r = await fetch(`${GRAPH}/${path}`, {
+  return await metaFetch(`${GRAPH}/${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: form.toString(),
-  });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(metaErr(j) || `Meta POST ${r.status}`);
-  return j;
+  }, "Meta POST");
 }
 
 // ── 상품명 추출 — 국내_소재별_supabase.py extract_product 와 같은 규칙 ──────────
@@ -302,49 +316,72 @@ function overlaps(a: Set<string>, b: Set<string>): boolean {
   return false;
 }
 
-// ── 계정별 ASC 캠페인·세트·광고 캐시 (한 요청 안에서만) ───────────────────────
+// ── 계정별 ASC 캠페인·세트·광고 — 계정당 3호출로 일괄 조회 ──
+//   ① act/campaigns  ② act/adsets (campaign.id IN ASC 캠페인들)  ③ act/ads (adset.id IN **대상 세트만**, 지문용)
+//   세트·캠페인마다 따로 부르면 ASC 30개 계정에서 60+ 호출이 되고, 확인 단계의 재계획까지 합쳐 한도에 걸린다.
+//   ③ 은 같은 상품의 세트만 묶어 부른다 — 계정의 ASC 세트 전부(실측 23세트·688광고)를 한 번에 달라고 하면
+//   "Please reduce the amount of data" 로 거절되고, limit 100 페이징으로도 39초가 걸린다.
+//   캐시는 짧은 TTL 로 모듈에 둔다 — dry-run 직후 확인을 누르면 같은 인스턴스에선 호출 0 으로 재계획한다.
+//   (복사 직후 지문이 잠깐 낡을 수 있지만 asc_copy_log 대조가 같은 소재 재투입을 막는다.)
 type AscAdset = {
   campaign_id: string; campaign_name: string; campaign_status: string; product: string;
   adset_id: string; adset_name: string; adset_status: string;
-  fps?: Set<string>[]; // 세트 안 광고들의 지문 (지연 로딩)
-  ad_names?: string[];
+  fps: Set<string>[]; // 세트 안 광고들의 지문 (loadAdsFor 가 채운다)
+  ad_names: string[];
+  loaded?: boolean;
 };
-const ascCache = new Map<string, AscAdset[]>();
+const CACHE_TTL_MS = 120_000;
+const ascCache = new Map<string, { at: number; sets: AscAdset[] }>();
 
 async function ascAdsetsOf(acc: string, token: string, region: string): Promise<AscAdset[]> {
   const ck = `${region}:${acc}`;
-  if (ascCache.has(ck)) return ascCache.get(ck)!;
-  const camps = await metaList(`${acc}/campaigns`, {
+  const hit = ascCache.get(ck);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.sets;
+  const camps = (await metaList(`${acc}/campaigns`, {
     fields: "id,name,effective_status,smart_promotion_type",
     effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
-  }, token);
+  }, token)).filter(isAscCampaign);
   const out: AscAdset[] = [];
-  for (const c of camps) {
-    if (!isAscCampaign(c)) continue;
-    const sets = await metaList(`${c.id}/adsets`, {
-      fields: "id,name,effective_status",
+  if (camps.length) {
+    const byCamp = new Map<string, any>(camps.map((c: any) => [String(c.id), c]));
+    const sets = await metaList(`${acc}/adsets`, {
+      fields: "id,name,effective_status,campaign_id",
       effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
+      filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: [...byCamp.keys()] }]),
     }, token);
     for (const s of sets) {
+      const c = byCamp.get(String(s.campaign_id));
+      if (!c) continue;
       out.push({
         campaign_id: String(c.id), campaign_name: String(c.name || ""),
         campaign_status: String(c.effective_status || ""), product: productKey(region, String(c.name || ""), "").key,
         adset_id: String(s.id), adset_name: String(s.name || ""), adset_status: String(s.effective_status || ""),
+        fps: [], ad_names: [],
       });
     }
   }
-  ascCache.set(ck, out);
+  ascCache.set(ck, { at: Date.now(), sets: out });
   return out;
 }
 
-async function loadAdsetAds(t: AscAdset, token: string) {
-  if (t.fps) return;
+// 대상 세트들의 광고를 한 번에 읽어 지문을 채운다(이미 읽은 세트는 건너뜀). creative 필드가 무거워 limit 100.
+async function loadAdsFor(acc: string, targets: AscAdset[], token: string) {
+  const need = targets.filter((t) => !t.loaded);
+  if (!need.length) return;
   // 삭제·보관된 광고는 지문 비교에서 뺀다 — 예전에 지운 소재를 다시 넣는 건 정상 동작이다.
-  const ads = (await metaList(`${t.adset_id}/ads`, {
-    fields: `id,name,effective_status,${CREATIVE_FIELDS}`,
+  const ads = (await metaList(`${acc}/ads`, {
+    limit: "100",
+    fields: `id,name,effective_status,adset_id,${CREATIVE_FIELDS}`,
+    filtering: JSON.stringify([{ field: "adset.id", operator: "IN", value: need.map((t) => t.adset_id) }]),
   }, token)).filter((a: any) => !/^(DELETED|ARCHIVED)$/.test(String(a.effective_status || "")));
-  t.fps = ads.map((a: any) => fingerprint(a.creative));
-  t.ad_names = ads.map((a: any) => String(a.name || ""));
+  const bySet = new Map<string, AscAdset>(need.map((t) => [t.adset_id, t]));
+  for (const t of need) { t.fps = []; t.ad_names = []; t.loaded = true; }
+  for (const a of ads) {
+    const t = bySet.get(String(a.adset_id));
+    if (!t) continue;
+    t.fps.push(fingerprint(a.creative));
+    t.ad_names.push(String(a.name || ""));
+  }
 }
 
 // ── 계획 ──────────────────────────────────────────────────────
@@ -433,6 +470,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
     const srcAdsetId = p.src_adset_id;
 
     const cands = (await ascAdsetsOf(acc, token, region)).filter((t) => t.product === pk.key);
+    if (cands.length) await loadAdsFor(acc, cands.filter((t) => t.adset_id !== srcAdsetId), token);
     if (!cands.length) {
       p.error = `'${p.product}' ${region === "gl" ? "국가·상품" : "상품"}의 ASC 캠페인이 이 계정에 없음`;
       return p;
@@ -448,13 +486,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
         tg.action = "skip"; tg.note = "원본이 이미 이 세트에 있음";
         p.targets.push(tg); continue;
       }
-      try {
-        await loadAdsetAds(t, token);
-      } catch (e) {
-        tg.action = "skip"; tg.error = "세트 광고 조회 실패: " + String((e as Error).message || e).slice(0, 200);
-        p.targets.push(tg); continue;
-      }
-      const dupIdx = (t.fps || []).findIndex((fp) => overlaps(fp, srcFp));
+      const dupIdx = t.fps.findIndex((fp) => overlaps(fp, srcFp));
       if (dupIdx >= 0) {
         tg.action = "skip";
         tg.note = "같은 소재가 이미 있음" + (t.ad_names?.[dupIdx] ? ` (${t.ad_names[dupIdx].slice(0, 30)})` : "");

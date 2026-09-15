@@ -67,8 +67,20 @@ globalThis.fetch = async (url, opts = {}) => {
     return ok({ copied_ad_id: "NEW_" + b.get("adset_id"), ad_object_ids: [{ ad_object_type: "ad", source_id: path.split("/")[0], copied_id: "NEW_" + b.get("adset_id") }] });
   }
   if (path === `${ACC}/campaigns`) return ok({ data: CAMPS });
-  if (path.endsWith("/adsets")) return ok({ data: ADSETS[path.split("/")[0]] || [] });
-  if (path.endsWith("/ads")) return ok({ data: SET_ADS[path.split("/")[0]] || [] });
+  // 일괄 엣지: act/adsets (campaign.id IN) · act/ads (adset.id IN) — filtering 값을 존중한다
+  const flt = (() => { try { return JSON.parse(q.get("filtering") || "[]")[0] || {}; } catch { return {}; } })();
+  if (path === `${ACC}/adsets`) {
+    const ids = new Set((flt.value || []).map(String));
+    const data = [];
+    for (const [cid, sets] of Object.entries(ADSETS)) if (ids.has(cid)) for (const s of sets) data.push({ ...s, campaign_id: cid });
+    return ok({ data });
+  }
+  if (path === `${ACC}/ads`) {
+    const ids = new Set((flt.value || []).map(String));
+    const data = [];
+    for (const [sid, ads] of Object.entries(SET_ADS)) if (ids.has(sid)) for (const a of ads) data.push({ ...a, adset_id: sid });
+    return ok({ data });
+  }
   if (ADS[path]) return ok(ADS[path]);
   return { ok: false, status: 404, json: async () => ({ error: { message: "Unsupported get request: " + path } }) };
 };
@@ -96,6 +108,26 @@ check(pB && /마킹 불일치/.test(pB.error), "B: 마킹 없음 → 거절: " +
 check(pC && /ASC 캠페인이 이 계정에 없음/.test(pC.error) && pC.product === "재물", "C: 재물 ASC 없음 → 오류: " + pC?.error);
 check(!calls.some((c) => c.method === "POST" && /copies/.test(c.url)), "dry-run 에서 /copies 호출 없음");
 
+{
+  const gets = calls.filter((c) => c.method === "GET" && /graph\.facebook/.test(c.url) && !/\/1202500000000000/.test(c.url));
+  check(gets.length === 3, "계정당 목록 호출 3회(campaigns/adsets 일괄 + 대상 세트 ads 일괄) → " + gets.length);
+  const adsCall = gets.find((c) => /\/ads\?/.test(c.url));
+  const fv = JSON.parse(new URLSearchParams(adsCall.url.split("?")[1]).get("filtering"))[0].value.sort();
+  check(fv.join(",") === [S1, S2].sort().join(",") && /limit=100/.test(adsCall.url), "ads 일괄 조회는 같은 상품 세트(S1,S2)만 · limit 100 → " + fv.join(","));
+}
+console.log("1b) 요청 한도 재시도");
+{
+  const orig = globalThis.fetch; let n = 0;
+  globalThis.fetch = async (url, opts) => {
+    if (/\/copies$/.test(String(url)) && n++ === 0) return { ok: false, status: 400, json: async () => ({ error: { code: 17, message: "(#17) 이 광고 계정에서 너무 많은 요청이 있습니다." } }) };
+    return orig(url, opts);
+  };
+  const t0 = Date.now();
+  const rr = await (await handler(req({ mode: "cr", dryRun: false, items: [{ ad_id: AD_A, ad_account_id: ACC }], select: [`${AD_A}|${S2}`] }))).json();
+  globalThis.fetch = orig;
+  const tt = rr.plan[0].targets.find((t) => t.adset_id === S2);
+  check(n === 2 && tt.applied === true && Date.now() - t0 >= 2900, "code 17 → 3s 후 재시도 성공 (" + (Date.now() - t0) + "ms)");
+}
 console.log("2) apply (select A|S2)");
 calls = [];
 r = await (await handler(req({ mode: "cr", dryRun: false, items: [{ ad_id: AD_A, ad_account_id: ACC }], select: [`${AD_A}|${S2}`] }))).json();
@@ -137,8 +169,13 @@ globalThis.fetch = async (url, opts = {}) => {
     const ok = (j) => ({ ok: true, status: 200, json: async () => j });
     const path = u.match(/graph\.facebook\.com\/v[\d.]+\/([^?]+)/)[1];
     if (path === `${GACC}/campaigns`) return ok({ data: GCAMPS });
-    if (path.endsWith("/adsets")) return ok({ data: ADSETS[path.split("/")[0]] || [] });
-    if (path.endsWith("/ads")) return ok({ data: [] });
+    if (path === `${GACC}/adsets`) {
+      const ids = new Set((JSON.parse(new URLSearchParams(u.split("?")[1] || "").get("filtering") || "[{}]")[0].value || []).map(String));
+      const data = [];
+      for (const [cid, sets] of Object.entries(ADSETS)) if (ids.has(cid)) for (const s of sets) data.push({ ...s, campaign_id: cid });
+      return ok({ data });
+    }
+    if (path === `${GACC}/ads`) return ok({ data: [] });
     if (ADS[path]) return ok(ADS[path]);
     return { ok: false, status: 404, json: async () => ({ error: { message: "nf " + path } }) };
   }
