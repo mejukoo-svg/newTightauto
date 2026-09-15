@@ -43,7 +43,7 @@ const ADSETS = {
   [CAMP_NORMAL]: [{ id: S4, name: "집착 일반", effective_status: "ACTIVE" }],
 };
 const SET_ADS = {
-  [S1]: [{ id: "9001", name: "집착_소재A_복제", effective_status: "ACTIVE", creative: CR("cr_A2", "V1") }, { id: "9002", name: "지운것", effective_status: "DELETED", creative: CR("cr_A3", "V1") }],
+  [S1]: [{ id: "9001", name: "집착_소재A", effective_status: "ACTIVE", creative: CR("cr_A2", "V1") }, { id: "9002", name: "지운것", effective_status: "DELETED", creative: CR("cr_A3", "V1") }],
   [S2]: [{ id: "9003", name: "다른소재", effective_status: "ACTIVE", creative: CR("cr_X", "V7") }],
   [S3]: [],
 };
@@ -67,7 +67,7 @@ globalThis.fetch = async (url, opts = {}) => {
     return ok({ id: "NEW_" + b.get("adset_id") });
   }
   if (method === "POST" && path.endsWith("/copies")) throw new Error("/copies 는 더 이상 쓰지 않는다 (standard enhancements 거부)");
-  if (path === `${ACC}/campaigns`) return ok({ data: CAMPS });
+  if (path === `${ACC}/campaigns`) return ok({ data: CAMPS.map((c) => ({ ...c, adsets: { data: ADSETS[c.id] || [] } })) });
   // 일괄 엣지: act/adsets (campaign.id IN) · act/ads (adset.id IN) — filtering 값을 존중한다
   const flt = (() => { try { return JSON.parse(q.get("filtering") || "[]")[0] || {}; } catch { return {}; } })();
   if (path === `${ACC}/adsets`) {
@@ -103,7 +103,7 @@ const pA = r.plan.find((p) => p.ad_id === AD_A), pB = r.plan.find((p) => p.ad_id
 check(pA && pA.product === "집착" && !pA.error, "A: 상품=집착 " + (pA?.error || ""));
 check(pA.targets.length === 2, "A: 대상 2세트(집착 ASC 만, 구미호·일반 제외) → " + pA.targets.map((t) => t.adset_name).join(", "));
 const tS1 = pA.targets.find((t) => t.adset_id === S1), tS2 = pA.targets.find((t) => t.adset_id === S2);
-check(tS1 && tS1.action === "skip" && /이미 있음/.test(tS1.note), "A→S1: 같은 영상(V1) 이미 있음 → skip: " + tS1?.note);
+check(tS1 && tS1.action === "skip" && /이미 있음/.test(tS1.note), "A→S1: 같은 이름 광고 이미 있음 → skip: " + tS1?.note);
 check(tS2 && tS2.action === "copy" && /PAUSED/.test(tS2.note) && /켜지 않음/.test(tS2.note), "A→S2: copy (중단 ASC 에도 넣되 켜지 않음): " + tS2?.note);
 check(pB && /마킹 불일치/.test(pB.error), "B: 마킹 없음 → 거절: " + pB?.error);
 check(pC && /ASC 캠페인이 이 계정에 없음/.test(pC.error) && pC.product === "재물", "C: 재물 ASC 없음 → 오류: " + pC?.error);
@@ -111,10 +111,10 @@ check(!calls.some((c) => c.method === "POST" && /graph\.facebook/.test(c.url)), 
 
 {
   const gets = calls.filter((c) => c.method === "GET" && /graph\.facebook/.test(c.url) && !/\/1202500000000000/.test(c.url));
-  check(gets.length === 3, "계정당 목록 호출 3회(campaigns/adsets 일괄 + 대상 세트 ads 일괄) → " + gets.length);
+  check(gets.length === 2, "계정당 목록 호출 2회(campaigns+중첩 adsets, 대상 세트 ads) → " + gets.length);
   const adsCall = gets.find((c) => /\/ads\?/.test(c.url));
   const fv = JSON.parse(new URLSearchParams(adsCall.url.split("?")[1]).get("filtering"))[0].value.sort();
-  check(fv.join(",") === [S1, S2].sort().join(",") && /limit=100/.test(adsCall.url), "ads 일괄 조회는 같은 상품 세트(S1,S2)만 · limit 100 → " + fv.join(","));
+  check(fv.join(",") === [S1, S2].sort().join(",") && !/video_id/.test(adsCall.url), "ads 일괄 조회는 같은 상품 세트(S1,S2)만 · 최소 필드 → " + fv.join(","));
 }
 console.log("1b) 요청 한도 재시도");
 {
@@ -128,6 +128,20 @@ console.log("1b) 요청 한도 재시도");
   globalThis.fetch = orig;
   const tt = rr.plan[0].targets.find((t) => t.adset_id === S2);
   check(n === 2 && tt.applied === true && Date.now() - t0 >= 2900, "code 17 → 3s 후 재시도 성공 (" + (Date.now() - t0) + "ms)");
+}
+console.log("1c) 한도 초과(회복 51분) → 즉시 안내");
+{
+  const orig = globalThis.fetch; let n = 0;
+  globalThis.fetch = async (url, opts) => {
+    if (/\/ads$/.test(String(url)) && (opts?.method || "GET") === "POST") { n++; return { ok: false, status: 400, headers: new Headers({ "x-business-use-case-usage": JSON.stringify({ "1270614404675034": [{ type: "ads_management", call_count: 1, total_cputime: 125, total_time: 602, estimated_time_to_regain_access: 51, ads_api_access_tier: "development_access" }] }) }), json: async () => ({ error: { code: 80004, message: "이 광고 계정에서 너무 많은 요청이 있습니다." } }) }; }
+    return orig(url, opts);
+  };
+  const t0 = Date.now();
+  const rr = await (await handler(req({ mode: "cr", dryRun: false, items: [{ ad_id: AD_A, ad_account_id: ACC }], select: [`${AD_A}|${S2}`] }))).json();
+  globalThis.fetch = orig;
+  const tt = rr.plan[0].targets.find((t) => t.adset_id === S2);
+  check(n === 1 && !tt.applied && /602%/.test(tt.error) && /51분/.test(tt.error) && Date.now() - t0 < 1500, "재시도 없이 즉시 실패 + 사용률·회복시간 안내: " + tt.error);
+  check(rr.usage && rr.usage[ACC] && rr.usage[ACC].pct === 602, "응답 usage 에 계정 사용률 포함");
 }
 console.log("2) apply (select A|S2)");
 calls = [];
@@ -169,7 +183,7 @@ globalThis.fetch = async (url, opts = {}) => {
     calls.push({ method, url: u, body: opts.body });
     const ok = (j) => ({ ok: true, status: 200, json: async () => j });
     const path = u.match(/graph\.facebook\.com\/v[\d.]+\/([^?]+)/)[1];
-    if (path === `${GACC}/campaigns`) return ok({ data: GCAMPS });
+    if (path === `${GACC}/campaigns`) return ok({ data: GCAMPS.map((c) => ({ ...c, adsets: { data: ADSETS[c.id] || [] } })) });
     if (path === `${GACC}/adsets`) {
       const ids = new Set((JSON.parse(new URLSearchParams(u.split("?")[1] || "").get("filtering") || "[{}]")[0].value || []).map(String));
       const data = [];

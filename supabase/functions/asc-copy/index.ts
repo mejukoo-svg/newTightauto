@@ -139,17 +139,53 @@ function isRateLimited(j: any): boolean {
   return RATE_CODES.has(Number(e.code)) || !!e.is_transient || /too many|너무 많은 요청/i.test(String(e.message || e.error_user_msg || ""));
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// 메타 비즈니스 사용량 헤더(x-business-use-case-usage). 실측(2026-09-15): 이 앱의 ads_management 는
+// **development_access 등급**이라 시간 예산이 매우 작다 — 소재 조회 몇 번에 total_time 이 600% 까지 갔고
+// estimated_time_to_regain_access 가 51분이었다. 이 상태에선 몇 초 재시도가 무의미하므로 바로 안내한다.
+type Usage = { pct: number; regainMin: number; tier: string };
+const lastUsage = new Map<string, Usage>(); // 계정 → 최근 사용량 (응답에 실어 UI 가 보여준다)
+function readUsage(r: Response): Usage | null {
+  try {
+    const raw = r.headers.get("x-business-use-case-usage");
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    let best: Usage | null = null;
+    for (const [acc, arr] of Object.entries(j)) {
+      for (const u of arr as any[]) {
+        if (u.type !== "ads_management") continue;
+        const cur: Usage = {
+          pct: Math.max(Number(u.total_time || 0), Number(u.total_cputime || 0), Number(u.call_count || 0)),
+          regainMin: Number(u.estimated_time_to_regain_access || 0),
+          tier: String(u.ads_api_access_tier || ""),
+        };
+        lastUsage.set(`act_${acc}`, cur);
+        if (!best || cur.pct > best.pct) best = cur;
+      }
+    }
+    return best;
+  } catch { return null; }
+}
+function usageNote(u: Usage | null): string {
+  if (!u) return "";
+  return ` [계정 API 사용률 ${u.pct}%${u.regainMin ? ` · 약 ${u.regainMin}분 후 회복` : ""}${u.tier === "development_access" ? " · 앱 등급 development" : ""}]`;
+}
+
 async function metaFetch(url: string, init: RequestInit | undefined, label: string) {
-  let last: any = {};
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt) await sleep(3000 * 2 ** (attempt - 1));
+  let last: any = {}, usage: Usage | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await sleep(4000 * attempt);
     const r = await fetch(url, init);
+    usage = readUsage(r) || usage;
     const j = await r.json().catch(() => ({}));
     if (r.ok) return j;
     last = j;
     if (!isRateLimited(j)) throw new Error(metaErr(j) || `${label} ${r.status}`);
+    // 회복까지 분 단위로 남았으면 재시도가 무의미 — 바로 안내
+    if (usage && usage.regainMin > 0) break;
   }
-  throw new Error((metaErr(last) || `${label} 요청 한도`) + " (재시도 3회 후 실패 — 1~2분 뒤 다시 시도)");
+  throw new Error((metaErr(last) || `${label} 요청 한도`) + usageNote(usage) +
+    (usage && usage.regainMin > 0 ? "" : " (재시도 후 실패 — 1~2분 뒤 다시 시도)"));
 }
 
 async function metaGet(path: string, params: Record<string, string>, token: string) {
@@ -291,9 +327,7 @@ function isAscCampaign(c: any): boolean {
   return /asc/i.test(String(c?.name || ""));
 }
 
-// 소재의 지문 — 같은 영상/이미지를 쓰는 광고를 다른 creative id 로 만들어도 잡아낸다.
-const CREATIVE_FIELDS =
-  "creative{id,effective_object_story_id,object_story_spec{video_data{video_id,image_hash},link_data{image_hash,child_attachments{video_id,image_hash}}},asset_feed_spec{videos{video_id},images{hash}}}";
+// 소재의 지문. creative 의 하위 필드(video_id/asset_feed 등)는 있으면 쓰고, 없으면 id·story id 만으로 비교한다.
 
 function fingerprint(cr: any): Set<string> {
   const s = new Set<string>();
@@ -334,28 +368,22 @@ type AscAdset = {
   ad_names: string[];
   loaded?: boolean;
 };
-const CACHE_TTL_MS = 120_000;
+const CACHE_TTL_MS = 600_000; // 10분 — 캠페인/세트 구조는 자주 안 바뀌고, 우리 복사분은 asc_copy_log 가 막는다
 const ascCache = new Map<string, { at: number; sets: AscAdset[] }>();
 
 async function ascAdsetsOf(acc: string, token: string, region: string): Promise<AscAdset[]> {
   const ck = `${region}:${acc}`;
   const hit = ascCache.get(ck);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.sets;
+  // 캠페인 + 하위 세트를 중첩 필드로 한 번에 (development 등급 시간 예산 절약)
   const camps = (await metaList(`${acc}/campaigns`, {
-    fields: "id,name,effective_status,smart_promotion_type",
+    fields: "id,name,effective_status,adsets.limit(50){id,name,effective_status}",
     effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
   }, token)).filter(isAscCampaign);
   const out: AscAdset[] = [];
-  if (camps.length) {
-    const byCamp = new Map<string, any>(camps.map((c: any) => [String(c.id), c]));
-    const sets = await metaList(`${acc}/adsets`, {
-      fields: "id,name,effective_status,campaign_id",
-      effective_status: JSON.stringify(["ACTIVE", "PAUSED"]),
-      filtering: JSON.stringify([{ field: "campaign.id", operator: "IN", value: [...byCamp.keys()] }]),
-    }, token);
-    for (const s of sets) {
-      const c = byCamp.get(String(s.campaign_id));
-      if (!c) continue;
+  for (const c of camps) {
+    for (const s of (c.adsets?.data || [])) {
+      if (!/^(ACTIVE|PAUSED|CAMPAIGN_PAUSED)$/.test(String(s.effective_status || ""))) continue;
       out.push({
         campaign_id: String(c.id), campaign_name: String(c.name || ""),
         campaign_status: String(c.effective_status || ""), product: productKey(region, String(c.name || ""), "").key,
@@ -368,14 +396,17 @@ async function ascAdsetsOf(acc: string, token: string, region: string): Promise<
   return out;
 }
 
-// 대상 세트들의 광고를 한 번에 읽어 지문을 채운다(이미 읽은 세트는 건너뜀). creative 필드가 무거워 limit 100.
+// 대상 세트들의 광고를 한 번에 읽어 지문을 채운다(이미 읽은 세트는 건너뜀).
+//   지문은 creative id + effective_object_story_id 만 — video_id/asset_feed 까지 펼치면 호출이 무거워
+//   development 등급 예산을 금방 소진한다(2026-09-15). 우리 복사분은 creative_id 가 같아 잡히고,
+//   같은 이름의 광고도 중복으로 본다(fingerprint 에 name 키 포함).
 async function loadAdsFor(acc: string, targets: AscAdset[], token: string) {
   const need = targets.filter((t) => !t.loaded);
   if (!need.length) return;
   // 삭제·보관된 광고는 지문 비교에서 뺀다 — 예전에 지운 소재를 다시 넣는 건 정상 동작이다.
   const ads = (await metaList(`${acc}/ads`, {
-    limit: "100",
-    fields: `id,name,effective_status,adset_id,${CREATIVE_FIELDS}`,
+    limit: "200",
+    fields: "id,name,effective_status,adset_id,creative{id,effective_object_story_id}",
     filtering: JSON.stringify([{ field: "adset.id", operator: "IN", value: need.map((t) => t.adset_id) }]),
   }, token)).filter((a: any) => !/^(DELETED|ARCHIVED)$/.test(String(a.effective_status || "")));
   const bySet = new Map<string, AscAdset>(need.map((t) => [t.adset_id, t]));
@@ -383,7 +414,9 @@ async function loadAdsFor(acc: string, targets: AscAdset[], token: string) {
   for (const a of ads) {
     const t = bySet.get(String(a.adset_id));
     if (!t) continue;
-    t.fps.push(fingerprint(a.creative));
+    const fp = fingerprint(a.creative);
+    if (a.name) fp.add(`name:${String(a.name).trim()}`);
+    t.fps.push(fp);
     t.ad_names.push(String(a.name || ""));
   }
 }
@@ -452,7 +485,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
   const p = blank(item, "");
   try {
     const a = await metaGet(id, {
-      fields: `id,name,status,effective_status,account_id,conversion_domain,adset{id,name},campaign{id,name,smart_promotion_type},${CREATIVE_FIELDS}`,
+      fields: "id,name,status,effective_status,account_id,conversion_domain,adset{id,name},campaign{id,name},creative{id,effective_object_story_id}",
     }, token);
     const owner = a.account_id ? `act_${a.account_id}` : "";
     if (owner && owner !== acc) return blank(item, `광고가 ${owner} 소속인데 ${acc} 로 요청됨 — 새로고침 후 재시도`);
@@ -478,6 +511,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
       return p;
     }
     const srcFp = fingerprint(a.creative);
+    if (p.ad_name) srcFp.add(`name:${p.ad_name.trim()}`);
     const srcAdsetId = p.src_adset_id;
 
     const cands = (await ascAdsetsOf(acc, token, region)).filter((t) => t.product === pk.key);
@@ -570,7 +604,8 @@ Deno.serve(async (req) => {
   const nTargets = plans.reduce((n, p) => n + p.targets.filter((t) => t.action === "copy").length, 0);
   if (nTargets > MAX_TARGETS) return json({ ok: false, error: `복사 대상이 ${nTargets}건 — 한 번에 ${MAX_TARGETS}건까지만` }, 400);
 
-  if (dryRun) return json({ ok: true, dryRun: true, actor: user.email || "", plan: plans });
+  const usage = Object.fromEntries(lastUsage);
+  if (dryRun) return json({ ok: true, dryRun: true, actor: user.email || "", plan: plans, usage });
 
   // ── 실제 복사 ──
   const logs: any[] = [];
@@ -619,5 +654,5 @@ Deno.serve(async (req) => {
 
   const okN = logs.filter((l) => l.ok).length;
   const errN = logs.filter((l) => !l.ok).length;
-  return json({ ok: true, dryRun: false, actor: user.email || "", applied: okN, failed: errN, plan: plans });
+  return json({ ok: true, dryRun: false, actor: user.email || "", applied: okN, failed: errN, plan: plans, usage: Object.fromEntries(lastUsage) });
 });
