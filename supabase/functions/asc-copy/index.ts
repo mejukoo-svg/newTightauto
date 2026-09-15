@@ -11,8 +11,12 @@
 //      상품명이 같은 것 → 그 하위 세트 전부가 대상
 //   4) 대상 세트에 같은 소재가 이미 있으면(creative id / story id / video id / image hash 일치) 건너뜀
 //      + asc_copy_log 에 성공 기록이 있으면 건너뜀
-//   5) dryRun=false 면 POST /{ad_id}/copies {adset_id, status_option} → asc_copy_log 기록
+//   5) dryRun=false 면 POST /act_X/ads {adset_id, creative:{creative_id: 원본 크리에이티브}, status} → asc_copy_log 기록
 //      ※ 이동이 아니라 복사다. 원본 광고·세트는 건드리지 않는다.
+//      ※ /{ad_id}/copies 를 쓰지 않는다 — 2026-09-15 실측: 크리에이티브를 새로 만들며 "기본 개선 사항(standard
+//        enhancements) 필드 지원 중단"(subcode 3858504) 으로 전부 거부됐다. 기존 크리에이티브를 id 로 참조해
+//        광고만 만들면 통과한다(validate_only 로 확인). tracking_specs 는 넘기지 않는다 — 원본의 게시물 참여
+//        추적이 원본 post 를 가리켜 권한 오류(#200)가 나고, 비우면 메타가 세트 픽셀 기준 기본값을 채운다.
 //      ※ 중단(PAUSED)된 ASC 세트에도 넣는다. 캠페인·세트의 status 는 읽기만 하고 절대 바꾸지 않는다 —
 //        꺼진 ASC 는 꺼진 채로 두고, 나중에 사람이 켜면 들어가 있던 소재가 같이 돈다.
 //
@@ -395,6 +399,7 @@ type Target = {
 };
 type Plan = {
   ad_id: string; ad_name: string; ad_account_id: string;
+  creative_id: string; conversion_domain: string;
   product: string; src_campaign_name: string; src_adset_id: string; src_adset_name: string; src_status: string;
   error: string;
   targets: Target[];
@@ -403,7 +408,7 @@ type Plan = {
 function blank(item: any, err: string): Plan {
   return {
     ad_id: String(item?.ad_id ?? ""), ad_name: "", ad_account_id: String(item?.ad_account_id ?? ""),
-    product: "", src_campaign_name: "", src_adset_id: "", src_adset_name: "", src_status: "",
+    creative_id: "", conversion_domain: "", product: "", src_campaign_name: "", src_adset_id: "", src_adset_name: "", src_status: "",
     error: err, targets: [],
   };
 }
@@ -447,7 +452,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
   const p = blank(item, "");
   try {
     const a = await metaGet(id, {
-      fields: `id,name,status,effective_status,account_id,adset{id,name},campaign{id,name,smart_promotion_type},${CREATIVE_FIELDS}`,
+      fields: `id,name,status,effective_status,account_id,conversion_domain,adset{id,name},campaign{id,name,smart_promotion_type},${CREATIVE_FIELDS}`,
     }, token);
     const owner = a.account_id ? `act_${a.account_id}` : "";
     if (owner && owner !== acc) return blank(item, `광고가 ${owner} 소속인데 ${acc} 로 요청됨 — 새로고침 후 재시도`);
@@ -456,6 +461,12 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
     p.src_campaign_name = String(a.campaign?.name || "");
     p.src_adset_id = String(a.adset?.id || "");
     p.src_adset_name = String(a.adset?.name || "");
+    p.creative_id = String(a.creative?.id || "");
+    p.conversion_domain = String(a.conversion_domain || "");
+    if (!p.creative_id) {
+      p.error = "원본 광고의 크리에이티브 id 를 읽지 못함";
+      return p;
+    }
     if (/^(DELETED|ARCHIVED)$/.test(p.src_status)) {
       p.error = `원본 광고가 ${p.src_status} 상태 — 복사 불가`;
       return p;
@@ -570,14 +581,16 @@ Deno.serve(async (req) => {
       if (t.action !== "copy" || t.error) { t.applied = false; continue; }
       if (select && !select.has(t.key)) { t.applied = false; t.note = (t.note ? t.note + " / " : "") + "선택 안 함"; continue; }
       try {
-        const j = await metaPost(`${p.ad_id}/copies`, {
+        const body: Record<string, string> = {
+          name: p.ad_name,
           adset_id: t.adset_id,
-          status_option: STATUS_OPTION,
-          rename_options: JSON.stringify({ rename_strategy: "NO_RENAME" }),
-        }, token);
-        const copied = String(j.copied_ad_id || j.ad_object_ids?.find?.((o: any) => o?.ad_object_type === "ad")?.copied_id || j.id || "");
+          creative: JSON.stringify({ creative_id: p.creative_id }),
+          status: STATUS_OPTION,
+        };
+        if (p.conversion_domain) body.conversion_domain = p.conversion_domain;
+        const j = await metaPost(`${p.ad_account_id}/ads`, body, token);
         t.applied = true;
-        t.copied_ad_id = copied;
+        t.copied_ad_id = String(j.id || "");
       } catch (e) {
         t.applied = false;
         t.error = String((e as Error).message || e).slice(0, 400);

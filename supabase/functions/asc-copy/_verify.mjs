@@ -62,10 +62,11 @@ globalThis.fetch = async (url, opts = {}) => {
   // POST 는 토큰이 폼 본문에 실린다
   const tokIn = method === "POST" ? new URLSearchParams(opts.body || "").get("access_token") : q.get("access_token");
   if (tokIn !== TOK) return { ok: false, status: 400, json: async () => ({ error: { message: "bad token" } }) };
-  if (method === "POST" && path.endsWith("/copies")) {
+  if (method === "POST" && path === `${ACC}/ads`) {
     const b = new URLSearchParams(opts.body);
-    return ok({ copied_ad_id: "NEW_" + b.get("adset_id"), ad_object_ids: [{ ad_object_type: "ad", source_id: path.split("/")[0], copied_id: "NEW_" + b.get("adset_id") }] });
+    return ok({ id: "NEW_" + b.get("adset_id") });
   }
+  if (method === "POST" && path.endsWith("/copies")) throw new Error("/copies 는 더 이상 쓰지 않는다 (standard enhancements 거부)");
   if (path === `${ACC}/campaigns`) return ok({ data: CAMPS });
   // 일괄 엣지: act/adsets (campaign.id IN) · act/ads (adset.id IN) — filtering 값을 존중한다
   const flt = (() => { try { return JSON.parse(q.get("filtering") || "[]")[0] || {}; } catch { return {}; } })();
@@ -106,7 +107,7 @@ check(tS1 && tS1.action === "skip" && /이미 있음/.test(tS1.note), "A→S1: �
 check(tS2 && tS2.action === "copy" && /PAUSED/.test(tS2.note) && /켜지 않음/.test(tS2.note), "A→S2: copy (중단 ASC 에도 넣되 켜지 않음): " + tS2?.note);
 check(pB && /마킹 불일치/.test(pB.error), "B: 마킹 없음 → 거절: " + pB?.error);
 check(pC && /ASC 캠페인이 이 계정에 없음/.test(pC.error) && pC.product === "재물", "C: 재물 ASC 없음 → 오류: " + pC?.error);
-check(!calls.some((c) => c.method === "POST" && /copies/.test(c.url)), "dry-run 에서 /copies 호출 없음");
+check(!calls.some((c) => c.method === "POST" && /graph\.facebook/.test(c.url)), "dry-run 에서 메타 쓰기 호출 없음");
 
 {
   const gets = calls.filter((c) => c.method === "GET" && /graph\.facebook/.test(c.url) && !/\/1202500000000000/.test(c.url));
@@ -119,7 +120,7 @@ console.log("1b) 요청 한도 재시도");
 {
   const orig = globalThis.fetch; let n = 0;
   globalThis.fetch = async (url, opts) => {
-    if (/\/copies$/.test(String(url)) && n++ === 0) return { ok: false, status: 400, json: async () => ({ error: { code: 17, message: "(#17) 이 광고 계정에서 너무 많은 요청이 있습니다." } }) };
+    if (/\/ads$/.test(String(url)) && (opts?.method || "GET") === "POST" && n++ === 0) return { ok: false, status: 400, json: async () => ({ error: { code: 17, message: "(#17) 이 광고 계정에서 너무 많은 요청이 있습니다." } }) };
     return orig(url, opts);
   };
   const t0 = Date.now();
@@ -131,10 +132,10 @@ console.log("1b) 요청 한도 재시도");
 console.log("2) apply (select A|S2)");
 calls = [];
 r = await (await handler(req({ mode: "cr", dryRun: false, items: [{ ad_id: AD_A, ad_account_id: ACC }], select: [`${AD_A}|${S2}`] }))).json();
-const copies = calls.filter((c) => c.method === "POST" && /copies/.test(c.url));
-check(copies.length === 1 && copies[0].url.includes(`/${AD_A}/copies`), "/copies 1회 호출 (원본 A)");
+const copies = calls.filter((c) => c.method === "POST" && new RegExp(`/${ACC}/ads$`).test(c.url));
+check(copies.length === 1, "act/ads POST 1회 (creative_id 참조 생성)");
 const cb = new URLSearchParams(copies[0]?.body || "");
-check(cb.get("adset_id") === S2 && cb.get("status_option") === "ACTIVE" && /NO_RENAME/.test(cb.get("rename_options") || ""), "adset_id=S2, ACTIVE, NO_RENAME");
+check(cb.get("adset_id") === S2 && cb.get("status") === "ACTIVE" && JSON.parse(cb.get("creative") || "{}").creative_id === "cr_A" && cb.get("name") === "집착_소재A" && !cb.has("tracking_specs"), "adset_id=S2, ACTIVE, creative_id=cr_A, 이름 유지, tracking_specs 미전달");
 const t2 = r.plan[0].targets.find((t) => t.adset_id === S2);
 if (!t2?.applied) console.log("   dbg:", JSON.stringify(t2), "| planErr:", r.plan[0].error);
 check(t2.applied === true && t2.copied_ad_id === "NEW_" + S2, "응답에 copied_ad_id: " + t2.copied_ad_id);

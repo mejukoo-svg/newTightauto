@@ -11,7 +11,7 @@
 3. 모달에 "소재 → 대상 ASC 캠페인/세트/상태/비고" 가 나열된다
    - 같은 소재가 이미 있는 세트 → `건너뜀`
    - 중단(PAUSED)된 ASC 에도 기본 포함 — 광고만 추가하고 **ASC 는 켜지 않는다**(status 는 읽기만). 주황색으로 표시
-4. `확인 — N개 세트에 복사` → 실제 `POST /{ad_id}/copies` → 결과 표 + `asc_copy_log` 기록
+4. `확인 — N개 세트에 복사` → 실제 `POST /act_X/ads`(원본 creative_id 참조) → 결과 표 + `asc_copy_log` 기록
 
 ## 서버 동작
 
@@ -26,9 +26,15 @@
    - 실측: 우리 ASC 캠페인은 `smart_promotion_type=GUIDED_CREATION` 으로 나와 API 필드로는 못 가른다 → 이름 규칙
 5. 대상 세트의 기존 광고(삭제·보관 제외)와 **소재 지문** 비교 — creative id / effective_object_story_id /
    video_id / image_hash 중 하나라도 겹치면 "이미 있음" 으로 건너뜀. `asc_copy_log` 의 성공 기록도 대조.
-6. `dryRun:false` 면 `POST /{ad_id}/copies { adset_id, status_option:ACTIVE, rename_options:NO_RENAME }`
+6. `dryRun:false` 면 `POST /act_X/ads { name:원본이름, adset_id, creative:{creative_id:원본}, status:ACTIVE }`
+   - **`/{ad_id}/copies` 는 쓰지 않는다** — 크리에이티브를 새로 만들다 "기본 개선 사항(standard enhancements)
+     필드 지원 중단"(subcode 3858504)으로 전부 거부됐다(2026-09-15 실측). 기존 크리에이티브를 id 로
+     참조해 광고만 만들면 통과한다.
+   - `tracking_specs` 는 넘기지 않는다 — 원본의 게시물 참여 추적이 원본 post 를 가리켜 #200 이 난다.
+     비우면 메타가 세트 픽셀 기준 기본값을 채운다.
    - ACTIVE 로 만드는 이유: 죽은 소재를 ASC 에서 되살리는 용도라 원본이 꺼져 있어도 바로 게재
    - 이름을 바꾸지 않아 소재별 탭에서 원본과 같은 이름으로 ASC 세트 행에 나타난다(ad_id 는 다름)
+   - 종료일이 지난 예약 세트(일정 실험 ASC 등)는 메타가 광고 추가를 거부한다 → 그 행만 오류로 표시
 7. `asc_copy_log` 에 (원본 ad_id, 대상 세트, copied_ad_id, ok/error) 기록
 
 UTM 은 광고 URL 의 `{{adset.id}}`/`{{ad.id}}` 매크로가 그대로 복사되므로 새 광고의 성과는
