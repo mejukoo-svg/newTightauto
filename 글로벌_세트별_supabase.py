@@ -587,20 +587,28 @@ class SupabaseClient:
             log.error(f"  ❌ select 예외: {e}")
         return []
 
-    def upsert(self, table, records, chunk_size=500):
+    def upsert(self, table, records, chunk_size=500, tries=3):
+        """chunk 단위 upsert. 일시 장애(Connection reset 등)는 재시도한다.
+        ★ 성과 테이블은 기존 행을 지운 뒤에 이 함수를 부른다 — 한 번 죽으면 그 날짜는 행 자체가 증발한다.
+        (2026-09-16: 첫 배치 500행이 Connection reset 으로 죽어 9/11~9/16 이 통째로 사라짐)"""
         url = f"{self.base_url}/rest/v1/{table}"
         total = len(records); success = 0
         for i in range(0, total, chunk_size):
             chunk = self._sanitize(records[i:i+chunk_size])
-            try:
-                resp = req_lib.post(url, headers=self.headers, json=chunk, timeout=60)
-                if resp.status_code in [200, 201]:
-                    success += len(chunk)
-                    log.info(f"  ✅ upsert {success}/{total}")
-                else:
+            for _t in range(tries):
+                try:
+                    resp = req_lib.post(url, headers=self.headers, json=chunk, timeout=60)
+                    if resp.status_code in [200, 201]:
+                        success += len(chunk)
+                        log.info(f"  ✅ upsert {success}/{total}")
+                        break
                     log.error(f"  ❌ upsert: HTTP {resp.status_code} | {resp.text[:300]}")
-            except Exception as e:
-                log.error(f"  ❌ upsert 예외: {e}")
+                    if resp.status_code < 500:
+                        break            # 4xx(스키마/권한)는 재시도해도 똑같다
+                except Exception as e:
+                    log.error(f"  ❌ upsert 예외(행 {i}~{i+len(chunk)}, 시도 {_t+1}/{tries}): {type(e).__name__}: {e}")
+                if _t < tries - 1:
+                    time.sleep(3 * (_t + 1))
             time.sleep(0.5)
         return success
 
@@ -621,6 +629,7 @@ class SupabaseClient:
 # 메인
 # =========================================================
 def main():
+    _INCOMPLETE = []      # 부분 업서트 사고 기록 — 비어있지 않으면 exit 1
     log.info("=" * 60)
     log.info("🌏 글로벌 Meta + Mixpanel + Stripe → Supabase")
     log.info("=" * 60)
@@ -1062,7 +1071,12 @@ def main():
                 sb.delete("global_ad_performance_daily", f"date=eq.{_dt}&adset_id=in.({_chunk})")
             _deleted_dates += 1
         log.info(f"  🧹 구 country 분할 행 정리: {_deleted_dates}일 × 세트")
-        sb.upsert("global_ad_performance_daily", records)
+        _ok = sb.upsert("global_ad_performance_daily", records)
+        if _ok < len(records):
+            # 삭제는 끝났는데 업서트가 일부만 성공하면 그 날짜는 행이 사라진 채로 남는다.
+            # 재시도로도 못 채우면 잡을 실패시켜야 사람이 알아참는다(조용한 구멍 금지).
+            _INCOMPLETE.append(f"global_ad_performance_daily {_ok}/{len(records)}행")
+            log.error(f"  ❌ upsert 미완료 {_ok}/{len(records)} — 삭제된 날짜가 빈 채로 남았습니다.")
 
     # 6.5) 예산 자가교정 — 표시범위(BUDGET_HIST_DAYS) 전체 저장 예산을 activities 재구성값으로
     #   맞춘다(국내와 동일 취지). 부분 업서트(budget_usd 컬럼만, 타 컬럼 불변).
@@ -1104,6 +1118,10 @@ def main():
         log.info(f"  (주의: 이 Stripe 합은 본 스크립트 수집분=TW/HK/JP/TH/SG, USD통화·일본 별도수집분 제외될 수 있음)")
 
     log.info("\n" + "=" * 60)
+    if _INCOMPLETE:
+        log.error("❌ 글로벌 파이프라인 부분 실패: " + " / ".join(_INCOMPLETE))
+        log.error("=" * 60)
+        sys.exit(1)
     log.info("✅ 글로벌 파이프라인 완료!")
     log.info("=" * 60)
 
