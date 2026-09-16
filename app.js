@@ -814,6 +814,12 @@ function rowId(r){return MODE==='cr'?(r.ad_id||''):(r.adset_id||'')}
 function rowName1(r){return MODE==='cr'?(r.ad_name||'').slice(0,25):(r.adset_name||'').slice(0,25)}
 function rowIdLabel(){return MODE==='cr'?'소재 ID':'세트 ID'}
 function rowNameLabel(){return MODE==='cr'?'소재':'세트'}
+// 추이차트 1번 컬럼 — 세트 모드(kr/gl/vn)는 캠페인명, 국내소재(cr)는 소재가 속한 '세트명'.
+//   소재는 캠페인명만 보면 어느 세트에 붙었는지 알 수 없어 세트명이 훨씬 유용하다(2026-09-16).
+//   캠페인명은 검색 대상(rowCnSearch)에 남겨 키워드 필터는 그대로 동작한다.
+function rowCn(r){return MODE==='cr'?(r.adset_name||''):(r.campaign_name||'')}
+function rowCnLabel(){return MODE==='cr'?'세트':'캠페인'}
+function rowCnSearch(a){return (a.cn||'')+' '+(a.camp||'')+' '+(a.an||'')+' '+(a.id||'')}
 
 // ===== 국가 필터 (vn/gl: country grain 데이터를 adset당 1행으로) =====
 const _COUNTRY_MODES={vn:1,gl:1};   // country 컬럼이 있는 모드
@@ -2565,6 +2571,9 @@ function curBudMap(rows,accFilter){
 }
 // 세트 정렬 비교자 — 예산↓ → (동률·예산없음) 전날 지출↓ → 7일 지출↓
 function budCmp(a,b){return (( b._bud||0)-(a._bud||0))||((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))}
+// 판매수순 비교자 — 최근 기간(7일·주월은 표시구간) MP 판매수↓ → 전날 지출↓ → 기간 지출↓
+//   _mp 는 각 차트가 세트 집계 시 채운다(일별·주월=results_mp 합, 상품별=_sm.mp, 틱톡=orders).
+function salesCmp(a,b){return ((b._mp||0)-(a._mp||0))||((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))}
 
 // ===== 세트필터 키워드 파서 (모든 추이차트 공용) =====
 //   단어 하나만 넣으면 예전처럼 '포함' 검색이고, 여러 단어를 조합해 AND/OR/제외를 쓸 수 있다.
@@ -2603,6 +2612,7 @@ function kwTest(groups,text){
 //   모든 추이차트(일별·주월·보조지표·대만·상품별·틱톡)가 이 값 하나를 공유한다.
 //   budget   = 💸 예산순(기본) — 현재 일예산 큰 순
 //   spend    = 지출순 — 전날(주월은 최근 기간) 지출 큰 순 (예전 기본값)
+//   sales    = 🛒 판매수순 — 최근 7일(주월은 표시구간) MP 판매수 큰 순 (2026-09-16 추가)
 //   category = 카테고리 — 원본 밑에 변형(복제·tROAS 등)을 계보로 묶어 붙임(dvTreeOrder)
 let TSORT=(function(){try{return localStorage.getItem('tsort')||'budget'}catch(e){return 'budget'}})();
 function tSortMode(){return TSORT}
@@ -2615,12 +2625,14 @@ function setTSort(v){
 // 시작 시 각 탭 드롭다운을 저장값으로 맞춘다(스크립트가 body 끝에서 실행 → 즉시 + DOMContentLoaded 양쪽).
 function _syncTSortSel(){document.querySelectorAll('.tsort-sel').forEach(el=>{el.value=TSORT})}
 _syncTSortSel();document.addEventListener('DOMContentLoaded',_syncTSortSel);
-// 상품(📦) 그룹 정렬 — 예산순일 때만 예산 합 기준, 나머지는 기존대로 최근 지출 기준.
-//   byProd[k] = {yS:최근 지출 합, bud:예산 합}
+// 상품(📦) 그룹 정렬 — 예산순은 예산 합, 판매수순은 판매수 합, 나머지는 기존대로 최근 지출 기준.
+//   byProd[k] = {yS:최근 지출 합, bud:예산 합, mp:판매수 합}
 function orderProdKeys(byProd){
   const m=tSortMode();
   return Object.keys(byProd).sort((a,b)=>m==='budget'
     ?((byProd[b].bud-byProd[a].bud)||(byProd[b].yS-byProd[a].yS))
+    :m==='sales'
+    ?(((byProd[b].mp||0)-(byProd[a].mp||0))||(byProd[b].yS-byProd[a].yS))
     :(byProd[b].yS-byProd[a].yS));
 }
 // 상품 안의 세트 정렬 — 카테고리 모드에서만 계보(원본+변형) 배치를 쓴다.
@@ -2628,6 +2640,7 @@ function orderSets(arr){
   const m=tSortMode();
   if(m==='category')return dvTreeOrder(arr,MODE==='kr'||MODE==='gl');
   dvTreeOrder(arr,false);          // 계보 플래그 초기화(└ 들여쓰기·🧬 토글 제거)
+  if(m==='sales')return arr.sort(salesCmp);
   return m==='spend'?arr.sort((a,b)=>((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))):arr.sort(budCmp);
 }
 
@@ -2738,7 +2751,7 @@ function renderTrend(opts){
   //   HR_MODES 를 직접 안 보는 이유: 그 const 는 파일 맨 아래라 여기서 참조하면 TDZ 위험이 있다.
   const hrOK=(MODE==='kr'||MODE==='gl'||MODE==='vn');
   const byA={};
-  ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
+  ROWS.forEach(r=>{if(!dd.includes(r.date))return;if(accFilter&&!accFilter(r))return;const rid=rowId(r);if(!byA[rid])byA[rid]={cn:rowCn(r),camp:r.campaign_name||'',an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',d:{}};byA[rid].d[r.date]=r});
   // 예산 변화 판정용 '전체 히스토리' 맵 (표시기간 dd 밖의 직전일도 포함해야 가장 오래된 열의 증감도 판정 가능).
   //   dd 로만 비교하면 표시구간 첫 열은 비교 대상(직전일)이 없어 항상 테두리가 안 떴음.
   const budHist={};
@@ -2748,7 +2761,7 @@ function renderTrend(opts){
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;a._bud=BUD[a.id]||0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
   const tKw=kwParse(document.getElementById(filterElId).value);
-  if(tKw)list=list.filter(a=>kwTest(tKw,(a.cn||'')+' '+(a.an||'')+' '+(a.id||'')));
+  if(tKw)list=list.filter(a=>kwTest(tKw,rowCnSearch(a)));
   // ★ perf: 7일 + 어제 모두 지출 0 인 비활성 세트는 "개별 행"만 숨김 (DOM 부담 감소).
   //   단, 종합/소계/일별 합계는 전체 세트 기준으로 계산해야 추이차트(주간) 합과 일치한다.
   //   (예전엔 list 자체를 필터해 합계가 과거 구간에서 누락됐음)
@@ -2776,7 +2789,7 @@ function renderTrend(opts){
   const budTh=showChg?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것">예산</th>':'';
   const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';  // 종합·소계 행의 빈 계정칸
-  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">'+rowCnLabel()+'</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
   const legend=AUX?'<div class="r">CTR</div><div class="cv">CVR</div><div class="cm">CPM</div><div class="s">구매당비용</div>':'<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
   // 종합 행도 셀을 누르면 시간별 화면이 열린다 — 그 날짜의 '여기 보이는 모든 세트' 합.
   //   묶음(세트 목록 + 일별 값)은 HR_GROUPS 에 담아두고 행에는 열쇠(data-hrg)만 심는다.
@@ -2785,8 +2798,8 @@ function renderTrend(opts){
   dd.forEach(d=>{const x=totD[d];const yd=d===yDay?' col-yday':'';const roas=x.s>0?x.r/x.s*100:0;const cvr=x.uc>0&&x.mp>0?x.mp/x.uc*100:0;const cpm=x.imp>0?x.s/x.imp*1000:0;const ctr=x.imp>0?x.uc/x.imp*100:0;const hc=(hrOK&&x.s>0);h+='<td class="mc '+RC(roas)+yd+(hc?' hr-cell':'')+'"'+(hc?' data-hd="'+d+'"':'')+'>'+(AUX?MCAUX(x.s,x.r,x.uc,x.mp,x.imp):MC(roas,x.p,x.s,x.r,cvr,cpm,ctr,x.mp>0?x.s/x.mp:0))+'</td>'});
   h+='</tr>';
   // Group by product
-  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0};byProd[p].adsets.push(a);byProd[p].yS+=a._yS;byProd[p].bud+=(a._bud||0)});
-  // 정렬은 상단 드롭다운(💸예산순 / 지출순 / 카테고리)이 결정 — orderProdKeys·orderSets 참고.
+  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0,mp:0};byProd[p].adsets.push(a);byProd[p].yS+=a._yS;byProd[p].bud+=(a._bud||0);byProd[p].mp+=(a._mp||0)});
+  // 정렬은 상단 드롭다운(💸예산순 / 지출순 / 🛒판매수순 / 카테고리)이 결정 — orderProdKeys·orderSets 참고.
   orderProdKeys(byProd).forEach(prod=>{
     const g=byProd[prod];
     const pS=g.adsets.reduce((a,x)=>a+x._s,0),pR=g.adsets.reduce((a,x)=>a+x._r,0),pRoas=pS>0?pR/pS*100:0;
@@ -3018,7 +3031,7 @@ function renderTrendAgg(gran){
   // rowId 별 · 컬럼별 합산
   const byA={};
   AD.forEach(r=>{if(!dd.includes(r.date))return;const ck=colKey(r.date);const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',b:{}};
+    if(!byA[rid])byA[rid]={cn:rowCn(r),camp:r.campaign_name||'',an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',b:{}};
     const b=byA[rid].b;if(!b[ck])b[ck]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
     b[ck].s+=r.spend;b[ck].r+=r.revenue;b[ck].p+=r.profit;b[ck].mp+=r.results_mp;b[ck].uc+=r.unique_clicks;b[ck].imp+=(r.impressions||0)});
   const BUD=curBudMap(AD);   // 정렬 기준용 현재 일예산
@@ -3027,7 +3040,7 @@ function renderTrendAgg(gran){
     a._recentS=a.b[recentCol]?a.b[recentCol].s:0;a._bud=BUD[a.id]||0;a._yS=a._recentS;return a});
   // 세트필터 (공용 #tFilter)
   const tKw=kwParse(document.getElementById('tFilter').value);
-  if(tKw)list=list.filter(a=>kwTest(tKw,(a.cn||'')+' '+(a.an||'')+' '+(a.id||'')));
+  if(tKw)list=list.filter(a=>kwTest(tKw,rowCnSearch(a)));
   const ths=cols.map(ck=>'<th style="min-width:var(--cw)">'+colLabel(ck)+'</th>').join('');
   // 광고 계정 컬럼(캠페인 왼쪽) — 일별 뷰(renderTrend)와 동일하게 국내·글로벌만
   const showAcc=MODE==='kr'||MODE==='gl';
@@ -3047,13 +3060,13 @@ function renderTrendAgg(gran){
   const timp=cols.reduce((a,ck)=>a+totC[ck].imp,0),tcpm=timp>0?ts/timp*1000:0;
   const tmp=cols.reduce((a,ck)=>a+totC[ck].mp,0),tuc=cols.reduce((a,ck)=>a+totC[ck].uc,0),tcvr=tuc>0&&tmp>0?tmp/tuc*100:0,tctr=timp>0?tuc/timp*100:0;
   const legend='<div class="r">ROAS</div><div class="p">순이익</div><div class="s">지출금액</div><div class="rv">매출</div><div class="cv">CVR(CTR)</div><div class="cm">CPM</div><div class="cpa">구매당비용</div>';
-  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">캠페인</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+'<th>전체</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">'+rowCnLabel()+'</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+'<th>전체</th>'+ths+'</tr></thead><tbody>';
   if(hrOK)hrPutGroup(TBL,'all','종합',list,hrDaily(totC));
   h+='<tr class="sr"'+(hrOK?' data-hrg="'+TBL+'|all"':'')+'>'+accTdSr+'<td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8">'+legend+'</td>'+budTdSr+'<td class="mc '+RC(troas)+'">'+MC(troas,tp,ts,tr,tcvr,tcpm,tctr,tmp>0?ts/tmp:0)+'</td>';
   cols.forEach(ck=>{h+=cell(totC[ck],ck)});
   h+='</tr>';
   // 상품별 그룹
-  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0};byProd[p].adsets.push(a);byProd[p].yS+=a._recentS;byProd[p].bud+=(a._bud||0)});
+  const byProd={};list.forEach(a=>{const p=a.product||'기타';if(!byProd[p])byProd[p]={adsets:[],yS:0,bud:0,mp:0};byProd[p].adsets.push(a);byProd[p].yS+=a._recentS;byProd[p].bud+=(a._bud||0);byProd[p].mp+=(a._mp||0)});
   // 정렬은 일별 뷰와 같은 드롭다운(💸예산순 / 지출순 / 카테고리)을 따른다. 여기선 '지출'=최근 기간 지출.
   orderProdKeys(byProd).forEach(prod=>{
     const g=byProd[prod];
@@ -3288,16 +3301,17 @@ function renderTrendProduct(){
     if(prodSort[p]===undefined)prodSort[p]=0;
     if(isWeek){if(ck===recentCol)prodSort[p]+=r.spend}else{if(r.date===yDay)prodSort[p]+=r.spend}
     const rid=rowId(r);
-    if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:p,d:{}};
+    if(!byA[rid])byA[rid]={cn:rowCn(r),camp:r.campaign_name||'',an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:p,d:{}};
     const b=ensure(byA[rid].d,ck);
     b.s+=r.spend;b.r+=r.revenue;b.p+=r.profit;b.mp+=r.results_mp;b.uc+=r.unique_clicks;b.imp+=(r.impressions||0);
   });
   const aggCols=src=>{const o={s:0,r:0,p:0,mp:0,uc:0,imp:0};sumCols.forEach(ck=>{const t=src[ck];if(t){o.s+=t.s;o.r+=t.r;o.p+=t.p;o.mp+=t.mp;o.uc+=t.uc;o.imp+=t.imp}});return o};
   // 정렬 기준용 현재 일예산 (2026-08-20: 지출 순 → 예산 순으로 변경)
   const BUD=curBudMap(AD);
-  const prodBud={};Object.values(byA).forEach(a=>{a._bud=BUD[a.id]||0;prodBud[a.product]=(prodBud[a.product]||0)+a._bud});
-  // 상품 정렬 — 예산순이면 예산 합↓, 그 외(지출순·카테고리)는 기존대로 전날/최근주 지출↓
-  const _byP={};Object.keys(prodCol).forEach(k=>{_byP[k]={bud:prodBud[k]||0,yS:prodSort[k]||0}});
+  const prodBud={},prodMp={};Object.values(byA).forEach(a=>{a._bud=BUD[a.id]||0;prodBud[a.product]=(prodBud[a.product]||0)+a._bud;
+    a._mp=aggCols(a.d).mp;prodMp[a.product]=(prodMp[a.product]||0)+a._mp});   // 판매수순 정렬 키(표시구간 MP 판매수 합)
+  // 상품 정렬 — 예산순이면 예산 합↓, 판매수순이면 판매수 합↓, 그 외(지출순·카테고리)는 기존대로 전날/최근주 지출↓
+  const _byP={};Object.keys(prodCol).forEach(k=>{_byP[k]={bud:prodBud[k]||0,yS:prodSort[k]||0,mp:prodMp[k]||0}});
   const sortedProds=orderProdKeys(_byP);
   // Detail items + summary metrics
   const allItems=Object.values(byA).map(a=>{const sm=aggCols(a.d);a._sm=sm;a._roas=sm.s>0?sm.r/sm.s*100:0;a._cvr=sm.uc>0&&sm.mp>0?sm.mp/sm.uc*100:0;a._ctr=sm.imp>0?sm.uc/sm.imp*100:0;a._cpm=sm.imp>0?sm.s/sm.imp*1000:0;a._sortV=isWeek?((a.d[recentCol]&&a.d[recentCol].s)||0):((a.d[yDay]&&a.d[yDay].s)||0);return a});
@@ -3324,6 +3338,8 @@ function renderTrendProduct(){
   sortedProds.forEach(prod=>{
     const items=allItems.filter(a=>a.product===prod).sort((a,b)=>tSortMode()==='budget'
       ?(((b._bud||0)-(a._bud||0))||(b._sortV-a._sortV))
+      :tSortMode()==='sales'
+      ?(((b._mp||0)-(a._mp||0))||(b._sortV-a._sortV))
       :(b._sortV-a._sortV));
     if(!items.length)return;
     const sm=aggCols(prodCol[prod]);const roasS=sm.s>0?sm.r/sm.s*100:0;const cpmS=sm.imp>0?sm.s/sm.imp*1000:0;
@@ -3352,17 +3368,17 @@ function renderChange(){
   const d7=DATES.slice(0,7);   // '7일' 요약 컬럼(고정 KPI, 보기 무관)
   // 세트별: 기간(period)별 지출·매출 + 최근일 원본(7일 KPI용)
   const byA={};
-  AD.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={cn:r.campaign_name,an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,p:{},d:{}};const o=byA[rid].p[pkey(r.date)]||(byA[rid].p[pkey(r.date)]={s:0,r:0});o.s+=r.spend;o.r+=r.revenue;byA[rid].d[r.date]=r});
+  AD.forEach(r=>{const rid=rowId(r);if(!byA[rid])byA[rid]={cn:rowCn(r),camp:r.campaign_name||'',an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,p:{},d:{}};const o=byA[rid].p[pkey(r.date)]||(byA[rid].p[pkey(r.date)]={s:0,r:0});o.s+=r.spend;o.r+=r.revenue;byA[rid].d[r.date]=r});
   let list=Object.values(byA).map(a=>{let s=0,rv=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue}});a._s=s;a._r=rv;a._roas=s>0?rv/s*100:0;return a}).sort((a,b)=>b._s-a._s);
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID 포함 세트만 (종합 합계도 필터 결과 기준)
   const tKw=kwParse(document.getElementById('cFilter')?.value);
-  if(tKw)list=list.filter(a=>kwTest(tKw,(a.cn||'')+' '+(a.an||'')+' '+(a.id||'')));
+  if(tKw)list=list.filter(a=>kwTest(tKw,rowCnSearch(a)));
   // 컬럼(기간) — 최신순
   const limit=view==='day'?30:view==='week'?16:6;
   const cols=(view==='day'?DATES.slice():[...new Set(AD.map(r=>pkey(r.date)))].sort().reverse()).slice(0,limit);
   const ths=cols.map(k=>{const yd=(view==='day'&&k===yDay)?' col-yday':'';return'<th class="'+yd+'" style="min-width:var(--cw)">'+colLabel(k)+'</th>'}).join('');
   const totP={};cols.forEach(k=>{let s=0,r=0;list.forEach(a=>{const o=a.p[k];if(o){s+=o.s;r+=o.r}});totP[k]={s,r}});
-  let h='<thead><tr><th style="min-width:200px;text-align:left">캠페인</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
+  let h='<thead><tr><th style="min-width:200px;text-align:left">'+rowCnLabel()+'</th><th style="min-width:200px;text-align:left">'+rowNameLabel()+'</th><th>'+rowIdLabel()+'</th><th>7일</th>'+ths+'</tr></thead><tbody>';
   const ts=list.reduce((a,x)=>a+x._s,0),tr=list.reduce((a,x)=>a+x._r,0);
   h+='<tr class="sr"><td class="fx fx0" style="background:#e8e8e8">종합</td><td class="fx fx1" style="background:#e8e8e8"></td><td class="mc" style="font-size:9px;text-align:left;line-height:1.4;background:#e8e8e8"><div class="r">ROAS</div><div class="p">증감률</div><div class="s">지출금액</div><div class="rv">매출</div></td><td class="mc">'+MC(ts>0?tr/ts*100:0,tr-ts,ts,tr,0)+'</td>';
   cols.forEach((k,i)=>{const x=totP[k];const roas=x.s>0?x.r/x.s*100:0;let chg=0;if(i<cols.length-1){const pr=totP[cols[i+1]];if(pr&&pr.s>0)chg=(x.s-pr.s)/pr.s*100}const yd=(view==='day'&&k===yDay)?' col-yday':'';
@@ -6834,7 +6850,7 @@ function renderTiktok(){
   let list=Object.values(byC);
   if(kw)list=list.filter(a=>kwTest(kw,(a.cn||'')+' '+(a.gn||'')+' '+(a.id||'')));
   list.forEach(a=>{let s=0,rv=0,o=0,im=0,ims=0;d7.forEach(d=>{const x=a.d[d];if(x){s+=x.spend;rv+=x.revenue;o+=x.orders;if(x.impressions>0){im+=x.impressions;ims+=x.spend}}});
-    a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;
+    a._s=s;a._r=rv;a._p=rv-s;a._o=o;a._mp=o;a._roas=s>0?rv/s*100:0;a._cpa=o>0?s/o:0;   // _mp = 판매수순 정렬 키(공용)
     // CPM 은 '지출합/노출합' 가중평균 — 일별 CPM 을 평균 내면 틀린다.
     // 분자는 노출이 있는 날의 지출(ims)만 — CPM 이 없는 날(2026-09-01 이전·리포트에 노출 없음)의
     // 지출까지 더하면 그만큼 CPM 이 부풀려진다.
@@ -6842,7 +6858,7 @@ function renderTiktok(){
     a._yS=a.d[yDay]?a.d[yDay].spend:0;
     // 일예산: 시트 값이 '-100,000' 같은 문자열이라 숫자만 뽑아 정렬 기준으로 쓴다.
     a._bud=Math.abs(parseFloat(String(a.bud||'').replace(/[^0-9.\-]/g,''))||0);});
-  list.sort((a,b)=>tSortMode()==='budget'?((b._bud-a._bud)||(b._yS-a._yS)||(b._s-a._s)):((b._yS-a._yS)||(b._s-a._s)));
+  list.sort((a,b)=>tSortMode()==='budget'?((b._bud-a._bud)||(b._yS-a._yS)||(b._s-a._s)):tSortMode()==='sales'?salesCmp(a,b):((b._yS-a._yS)||(b._s-a._s)));
   const ths=dd.map(d=>{const w=WD(d);const yd=d===yDay?' col-yday':'';return'<th class="'+(w==='일'?'sun':'')+yd+'" style="min-width:var(--cw)">'+DK(d)+'('+w+')</th>'}).join('');
   const colSpan=dd.length+4;  // 캠페인/ID/일예산/7일
   const agg=(items,d)=>{let s=0,r=0,o=0,im=0,ims=0;items.forEach(a=>{const x=a.d[d];if(x){s+=x.spend;r+=x.revenue;o+=x.orders;if(x.impressions>0){im+=x.impressions;ims+=x.spend}}});return{s,r,o,im,ims,p:r-s,roas:s>0?r/s*100:0,cpa:o>0?s/o:0,cpm:im>0?ims/im*1000:0}};
@@ -6856,7 +6872,7 @@ function renderTiktok(){
     +'<td style="background:#e8e8e8"></td>'   // 일예산 칸은 색 없이 비워둔다
     +'<td class="mc '+RC(T.roas)+'">'+TTC(T.roas,T.p,T.s,T.r,T.o,T.cpa,T.cpm)+'</td>'+cellsOf(list)+'</tr>';
   // 📦 상품별
-  const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0,bud:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s;byProd[p].bud+=a._bud});
+  const byProd={};list.forEach(a=>{const p=a.product;if(!byProd[p])byProd[p]={items:[],yS:0,s:0,bud:0,mp:0};byProd[p].items.push(a);byProd[p].yS+=a._yS;byProd[p].s+=a._s;byProd[p].bud+=a._bud;byProd[p].mp+=a._mp});
   orderProdKeys(byProd).forEach(prod=>{
     const g=byProd[prod];const P7=sum7(g.items);
     h+='<tr><td colspan="'+colSpan+'" class="prod-header">📦 '+prod+' ('+g.items.length+'개) 전날 '+money(g.yS)+' · 7일 ROAS '+P7.roas.toFixed(0)+'%</td></tr>';
