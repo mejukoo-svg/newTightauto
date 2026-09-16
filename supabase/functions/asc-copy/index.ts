@@ -17,6 +17,11 @@
 //        enhancements) 필드 지원 중단"(subcode 3858504) 으로 전부 거부됐다. 기존 크리에이티브를 id 로 참조해
 //        광고만 만들면 통과한다(validate_only 로 확인). tracking_specs 는 넘기지 않는다 — 원본의 게시물 참여
 //        추적이 원본 post 를 가리켜 권한 오류(#200)가 나고, 비우면 메타가 세트 픽셀 기준 기본값을 채운다.
+//      ※ "이 크리에이티브는 이미 사용된 적이 있습니다 … 공감·댓글·공유가 다른 게시물에 통합"(subcode 1885535/1885536)
+//        = 원본 광고의 페이지 게시물이 수정돼 메타가 참여를 다른 게시물로 합친 경우. 그 크리에이티브는 어떤 새 광고에도
+//        못 쓴다(2026-09-16 실측, 대만_무당 툰영상_강현_260914). 새 게시물을 만들려면(object_story_spec) 페이지 권한이
+//        필요한데 이 계정의 쓰기 토큰엔 없다 → 계획 단계에서 validate_only 로 미리 잡고, 같은 계정에서 이름·IG 미디어가
+//        같은 형제 광고(Ads Manager 복제분 등) 중 쓸 수 있는 크리에이티브를 찾아 대체한다. 없으면 오류로 안내.
 //      ※ 중단(PAUSED)된 ASC 세트에도 넣는다. 캠페인·세트의 status 는 읽기만 하고 절대 바꾸지 않는다 —
 //        꺼진 ASC 는 꺼진 채로 두고, 나중에 사람이 켜면 들어가 있던 소재가 같이 돈다.
 //
@@ -180,7 +185,11 @@ async function metaFetch(url: string, init: RequestInit | undefined, label: stri
     const j = await r.json().catch(() => ({}));
     if (r.ok) return j;
     last = j;
-    if (!isRateLimited(j)) throw new Error(metaErr(j) || `${label} ${r.status}`);
+    if (!isRateLimited(j)) {
+      const err = new Error(metaErr(j) || `${label} ${r.status}`);
+      (err as any).meta = j?.error || null; // 호출자가 subcode 로 분기할 수 있게
+      throw err;
+    }
     // 회복까지 분 단위로 남았으면 재시도가 무의미 — 바로 안내
     if (usage && usage.regainMin > 0) break;
   }
@@ -421,6 +430,60 @@ async function loadAdsFor(acc: string, targets: AscAdset[], token: string) {
   }
 }
 
+// ── 크리에이티브 재사용 가능 검사 ─────────────────────────────
+// 광고를 실제로 만들지 않고(validate_only) 대상 세트에 creative_id 로 광고를 만들 수 있는지 본다.
+const UNUSABLE_SUBCODES = new Set([1885535, 1885536]);
+async function validateCreative(acc: string, adsetId: string, creativeId: string, name: string, token: string): Promise<{ ok: boolean; unusable: boolean; msg: string }> {
+  try {
+    await metaPost(`${acc}/ads`, {
+      name, adset_id: adsetId, status: "PAUSED",
+      creative: JSON.stringify({ creative_id: creativeId }),
+      execution_options: JSON.stringify(["validate_only"]),
+    }, token);
+    return { ok: true, unusable: false, msg: "" };
+  } catch (e) {
+    const m = (e as any)?.meta || {};
+    const msg = String((e as Error).message || e);
+    const unusable = UNUSABLE_SUBCODES.has(Number(m.error_subcode)) || /이미 사용된 적|다시 홍보할 수 없|has been used before|cannot be used in other ads/i.test(msg);
+    return { ok: false, unusable, msg };
+  }
+}
+
+// 원본 크리에이티브가 못 쓰는 것일 때, 같은 계정에서 이름이 같은 형제 광고(복제분 등)의 크리에이티브를 후보로 검사한다.
+//   같은 IG 미디어(source_instagram_media_id)면 우선, 없으면 이름만 같은 것. 최신순으로 최대 5개만 validate.
+type Sibling = { ad_id: string; adset_name: string; creative_id: string; story: string; ig: string; created: string };
+async function findReusableSibling(acc: string, adName: string, origCreative: string, origIg: string, adsetId: string, token: string): Promise<{ sib: Sibling | null; tried: number }> {
+  if (!adName) return { sib: null, tried: 0 };
+  const rows = await metaList(`${acc}/ads`, {
+    limit: "100",
+    fields: "id,name,effective_status,created_time,adset{name},creative{id,effective_object_story_id,source_instagram_media_id}",
+    filtering: JSON.stringify([{ field: "ad.name", operator: "CONTAIN", value: adName }]),
+  }, token);
+  const sibs: Sibling[] = rows
+    .filter((a: any) => String(a.name || "").trim() === adName.trim())
+    .filter((a: any) => !/^(DELETED|ARCHIVED)$/.test(String(a.effective_status || "")))
+    .filter((a: any) => a.creative?.id && String(a.creative.id) !== origCreative)
+    .map((a: any) => ({
+      ad_id: String(a.id), adset_name: String(a.adset?.name || ""), creative_id: String(a.creative.id),
+      story: String(a.creative.effective_object_story_id || ""), ig: String(a.creative.source_instagram_media_id || ""),
+      created: String(a.created_time || ""),
+    }))
+    .filter((x: Sibling) => !origIg || !x.ig || x.ig === origIg)
+    .sort((a: Sibling, b: Sibling) => (b.ig === origIg ? 1 : 0) - (a.ig === origIg ? 1 : 0) || b.created.localeCompare(a.created));
+  // 같은 크리에이티브를 여러 광고가 쓰면 한 번만 검사
+  const seen = new Set<string>();
+  let tried = 0;
+  for (const x of sibs) {
+    if (seen.has(x.creative_id)) continue;
+    seen.add(x.creative_id);
+    if (tried >= 5) break;
+    tried++;
+    const v = await validateCreative(acc, adsetId, x.creative_id, adName, token);
+    if (v.ok) return { sib: x, tried };
+  }
+  return { sib: null, tried };
+}
+
 // ── 계획 ──────────────────────────────────────────────────────
 type Target = {
   key: string; // `${ad_id}|${adset_id}`
@@ -432,7 +495,7 @@ type Target = {
 };
 type Plan = {
   ad_id: string; ad_name: string; ad_account_id: string;
-  creative_id: string; conversion_domain: string;
+  creative_id: string; creative_note: string; conversion_domain: string;
   product: string; src_campaign_name: string; src_adset_id: string; src_adset_name: string; src_status: string;
   error: string;
   targets: Target[];
@@ -441,7 +504,7 @@ type Plan = {
 function blank(item: any, err: string): Plan {
   return {
     ad_id: String(item?.ad_id ?? ""), ad_name: "", ad_account_id: String(item?.ad_account_id ?? ""),
-    creative_id: "", conversion_domain: "", product: "", src_campaign_name: "", src_adset_id: "", src_adset_name: "", src_status: "",
+    creative_id: "", creative_note: "", conversion_domain: "", product: "", src_campaign_name: "", src_adset_id: "", src_adset_name: "", src_status: "",
     error: err, targets: [],
   };
 }
@@ -485,7 +548,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
   const p = blank(item, "");
   try {
     const a = await metaGet(id, {
-      fields: "id,name,status,effective_status,account_id,conversion_domain,adset{id,name},campaign{id,name},creative{id,effective_object_story_id}",
+      fields: "id,name,status,effective_status,account_id,conversion_domain,adset{id,name},campaign{id,name},creative{id,effective_object_story_id,source_instagram_media_id}",
     }, token);
     const owner = a.account_id ? `act_${a.account_id}` : "";
     if (owner && owner !== acc) return blank(item, `광고가 ${owner} 소속인데 ${acc} 로 요청됨 — 새로고침 후 재시도`);
@@ -519,6 +582,24 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
     if (!cands.length) {
       p.error = `'${p.product}' ${region === "gl" ? "국가·상품" : "상품"}의 ASC 캠페인이 이 계정에 없음`;
       return p;
+    }
+    // 원본 크리에이티브가 새 광고에 쓰일 수 있는지 미리 확인 — 게시물 병합(1885535)이면 형제 광고의 크리에이티브로 대체
+    const probe = cands.find((t) => t.adset_id !== srcAdsetId);
+    if (probe) {
+      const v = await validateCreative(acc, probe.adset_id, p.creative_id, p.ad_name, token);
+      if (!v.ok && v.unusable) {
+        const origIg = String(a.creative?.source_instagram_media_id || "");
+        const { sib, tried } = await findReusableSibling(acc, p.ad_name, p.creative_id, origIg, probe.adset_id, token);
+        if (!sib) {
+          p.error = `원본 크리에이티브 ${p.creative_id} 는 게시물 병합으로 재사용 불가(메타: ${v.msg.slice(0, 80)}…)` +
+            ` — 같은 이름의 형제 광고 ${tried}건에서도 쓸 수 있는 크리에이티브 없음. Ads Manager 에서 이 광고를 복제해(새 게시물 생성) 그 광고를 마킹하세요`;
+          return p;
+        }
+        p.creative_note = `원본 크리에이티브 ${p.creative_id} 는 게시물 병합으로 재사용 불가 → 형제 광고 ${sib.ad_id}(${sib.adset_name.slice(0, 30)}) 의 크리에이티브 ${sib.creative_id} 로 대체`;
+        p.creative_id = sib.creative_id;
+        srcFp.add(`cr:${sib.creative_id}`);
+        if (sib.story) srcFp.add(`story:${sib.story}`);
+      }
     }
     for (const t of cands) {
       const tg: Target = {

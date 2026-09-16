@@ -4156,7 +4156,8 @@ function ascRender(plan,applied){
   let h='<table><thead><tr>'+ckTh+'<th>소재(원본 광고)</th><th>상품</th><th>대상 ASC 캠페인</th><th>대상 세트</th><th>세트 상태</th><th>'+(applied?'결과':'비고')+'</th></tr></thead><tbody>';
   plan.forEach(p=>{
     const nameCell=abEsc(p.ad_name||'')+' <span class="ab-id">'+abEsc(p.ad_id)+'</span>'
-      +'<div style="color:#aaa;font-size:9px">'+abEsc(p.src_campaign_name||'')+(p.src_adset_name?' › '+abEsc(p.src_adset_name):'')+(p.src_status&&p.src_status!=='ACTIVE'?' · 원본 '+abEsc(p.src_status):'')+'</div>';
+      +'<div style="color:#aaa;font-size:9px">'+abEsc(p.src_campaign_name||'')+(p.src_adset_name?' › '+abEsc(p.src_adset_name):'')+(p.src_status&&p.src_status!=='ACTIVE'?' · 원본 '+abEsc(p.src_status):'')+'</div>'
+      +(p.creative_note?'<div class="ab-warn" style="font-size:9px;margin-top:2px">⚠ '+abEsc(p.creative_note)+'</div>':'');
     if(p.error||!p.targets||!p.targets.length){
       h+='<tr class="ab-err">'+(applied?'':'<td class="ab-ckc"></td>')+'<td class="ab-name">'+nameCell+'</td><td>'+abEsc(p.product||'')+'</td><td colspan="4">⚠ '+abEsc(p.error||'대상 ASC 세트 없음')+'</td></tr>';
       return;
