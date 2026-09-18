@@ -26,7 +26,9 @@
 //        꺼진 ASC 는 꺼진 채로 두고, 나중에 사람이 켜면 들어가 있던 소재가 같이 돈다.
 //
 // 요청: POST { mode:'cr', region:'kr'|'gl', dryRun:boolean, items:[{ad_id, ad_account_id}], select?:["<ad_id>|<adset_id>",…] }
-//   region: 상품 매칭 규칙 선택. kr = 캠페인명 첫 토큰(국내_소재별 extract_product), gl = 국가+상품(글로벌 canon, 아래 glKey)
+//   region: 상품 매칭 규칙 선택. kr = 캠페인명 첫 토큰(국내_소재별 extract_product), gl = 상품만(글로벌 canon, 아래 glKey)
+//     ※ gl 은 2026-09-18 부터 국가를 따지지 않는다 — 대만 소재도 홍콩·전세계 ASC 에 전부 넣는다(사용자 결정).
+//       9/15~9/17 은 국가+상품 키였음(대만_무당 → 대만_무당_ASC* 만).
 // 응답: { ok, dryRun, plan:[{ad_id, ad_name, product, targets:[{adset_id, action, note, error, applied, copied_ad_id}]}] }
 //
 // 배포: Edge Function 은 git push 로 배포되지 않는다 — apply-budget/README.md 의 절차대로 따로 배포할 것.
@@ -315,14 +317,15 @@ function glKey(...sources: string[]): { key: string; label: string } {
       product = k;
     }
     if (product) {
+      // 키는 상품만(국가 무시) — 라벨엔 원본 국가를 남겨 모달에서 어디서 온 소재인지 보이게 한다.
       const c = country || ww;
-      return { key: `${c}|${product}`, label: `${c || "?"} ${product}` };
+      return { key: product, label: `${c || "?"} ${product}` };
     }
   }
   return { key: "", label: "" };
 }
 
-// region 별 상품 키. kr 은 첫 토큰 규칙(extractProduct), gl 은 국가+상품.
+// region 별 상품 키. kr 은 첫 토큰 규칙(extractProduct), gl 은 상품만(국가 무시).
 function productKey(region: string, campaignName: string, adsetName: string): { key: string; label: string } {
   if (region === "gl") return glKey(campaignName, adsetName);
   const p = extractProduct(campaignName, adsetName);
@@ -580,7 +583,7 @@ async function planOne(item: any, hlMap: Record<string, string>, doneMap: Record
     const cands = (await ascAdsetsOf(acc, token, region)).filter((t) => t.product === pk.key);
     if (cands.length) await loadAdsFor(acc, cands.filter((t) => t.adset_id !== srcAdsetId), token);
     if (!cands.length) {
-      p.error = `'${p.product}' ${region === "gl" ? "국가·상품" : "상품"}의 ASC 캠페인이 이 계정에 없음`;
+      p.error = `'${p.product}' 상품의 ASC 캠페인이 이 계정에 없음`;
       return p;
     }
     // 원본 크리에이티브가 새 광고에 쓰일 수 있는지 미리 확인 — 게시물 병합(1885535)이면 형제 광고의 크리에이티브로 대체
