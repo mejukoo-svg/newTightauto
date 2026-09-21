@@ -2059,24 +2059,7 @@ function _memoHistHtml(id,today){
   return h+'</div>';
 }
 // ===== MEMO =====
-// 날짜탭 메모: perfTbl.memo (해당 날짜·영구저장) — 하이라이트 전체삭제와 무관하게 유지
-async function saveMemo(date,id,memo,el){
-  const m=(memo&&memo.trim())?memo:null;
-  const tbl=perfTbl();
-  const idCol=hlIdCol();
-  // 1) 날짜탭 원본(perfTbl.memo) — 행 있으면 갱신
-  await fetch(SB_URL+'/rest/v1/'+tbl+'?date=eq.'+date+'&'+idCol+'=eq.'+id,{method:'PATCH',headers:{...SBH,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify({memo:m})});
-  // 2) durable 저장소(daily_memos) — 행 존재 무관(B)
-  fetch(SB_URL+'/rest/v1/daily_memos',{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({date,entity_id:id,region:MODE,memo:m,updated_at:new Date().toISOString()})}).catch(()=>{});
-  DMEMO[_dmKey(MODE,date,id)]=m;memoIdxInvalidate();
-  // 3) 추이차트에도 반영(C) — 하이라이트 테이블 memo + HL_MEMO. 다음 렌더에 추이차트 메모칸에 표시.
-  fetch(SB_URL+'/rest/v1/'+hlTbl(),{method:'POST',headers:{...SBH,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates'},body:JSON.stringify({[hlIdCol()]:id,memo:m,updated_at:new Date().toISOString()})}).catch(()=>{});
-  HL_MEMO[id]=m;
-  // 메모리 동기화 — 탭/모드 전환 후에도 유지
-  _syncRowField(id, date, 'memo', m);
-  const ind=el.parentNode.querySelector('.memo-saved');if(ind){ind.classList.add('show');setTimeout(()=>ind.classList.remove('show'),1500)}
-}
-// 추이차트 메모: 하이라이트 테이블 memo 컬럼에 저장(전체삭제 시 함께 제거) +
+// 추이차트·날짜탭 공용 메모(둘 다 '오늘' 날짜 키로 호출 → 항상 같은 값): 하이라이트 테이블 memo 컬럼에 저장(전체삭제 시 함께 제거) +
 //   날짜탭(perfTbl.memo)에도 해당 날짜로 영구저장 → 추이차트에서만 하이라이트와 함께 사라짐.
 async function saveTrendMemo(date,id,memo,el){
   const m=(memo&&memo.trim())?memo:null;
@@ -3563,6 +3546,7 @@ function renderDateTab(){
   const selEnd=document.getElementById('dtEnd');
   const _yd=new Date();_yd.setDate(_yd.getDate()-1);
   const yDay=_yd.getFullYear()+'-'+String(_yd.getMonth()+1).padStart(2,'0')+'-'+String(_yd.getDate()).padStart(2,'0');
+  const _td=new Date();const dtToday=_td.getFullYear()+'-'+String(_td.getMonth()+1).padStart(2,'0')+'-'+String(_td.getDate()).padStart(2,'0');
   // 옵션 초기화 — DATES 가 바뀔 때마다 다시 만든다.
   //   ⚠️ 예전엔 '최초 1회'(options.length 로 판정)만 채웠다. 그래서
   //     ① 캐시로 먼저 그린 뒤 fresh 데이터가 도착해 renderDateTab 이 다시 불려도 날짜 목록이 옛날 그대로 남고
@@ -3754,9 +3738,10 @@ function renderDateTab(){
     const hlLabel=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].label:'';const hlPct=hl&&HL_CONFIG[hl]?HL_CONFIG[hl].pct:null;
     const cbud=curBud[rid]?curBud[rid].b:(+r.budget||0);  // 현재(최신일) 예산
     let resultB='';if(cbud&&hlPct!==null){resultB=hl==='off'?'OFF':money(Math.round(cbud*(1+hlPct/100)))}
-    // durable(daily_memos) 우선, 없으면 perfTbl.memo — 글로벌 지연적재로 perfTbl에 안 써진 메모도 표시.
-    const _dm=DMEMO[_dmKey(MODE,r.date,rid)];
-    const mv=((_dm!=null?_dm:r.memo)||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // 메모: 추이차트 '오늘 메모'와 같은 키(MODE|오늘|id) — 하이라이트처럼 선택 날짜와 무관하게 두 탭이 같은 값을 본다.
+    //   ⚠️ 예전엔 선택 날짜(r.date) 키를 썼는데 날짜탭 기본값이 '어제'라 추이차트(오늘)와 어긋났다(2026-09-18).
+    //   지난 메모(선택 날짜 포함)는 아래 이력에 날짜와 함께 나열된다.
+    const mv=_mEsc(DMEMO[_dmKey(MODE,dtToday,rid)]||'');
     const name2=(MODE==='cr'?(r.ad_name||''):(r.adset_name||'')).slice(0,30);
     h+='<tr>';
     h+='<td style="text-align:left" class="'+hlCls+'">'+(r.campaign_name||'').slice(0,30)+'</td>';
@@ -3782,8 +3767,8 @@ function renderDateTab(){
     h+='<td style="text-align:right" title="현재 메타 예산(최신 스냅샷)">'+money(cbud)+'</td>';
     h+='<td class="'+hlCls+' clickable" data-id="'+rid+'" onclick="showCP(\''+rid+'\',this)" title="클릭해 증감액 마킹 — 추이차트와 연동됩니다"'+' style="text-align:center;font-weight:600">'+(hlLabel||'<span style="color:#ccc;font-weight:400">+</span>')+'</td>';
     h+='<td class="'+hlCls+'" style="text-align:right;font-weight:600">'+resultB+'</td>';
-    // 메모는 가장 최근 날짜(r.date)에 저장됨
-    h+='<td class="memo-cell"><textarea class="memo-input" placeholder="메모" data-date="'+r.date+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mv+'</textarea><span class="memo-saved">✓</span></td>';
+    // 저장도 추이차트와 같은 경로(saveTrendMemo, 오늘 날짜) → 한 번 쓰면 두 탭 모두 즉시 같은 값.
+    h+='<td class="memo-cell"><textarea class="memo-input" rows="3" placeholder="오늘 메모" data-date="'+dtToday+'" data-id="'+rid+'" onkeydown="if(event.key===\'Enter\'&&(event.ctrlKey||event.metaKey)){event.preventDefault();this.blur()}" onblur="saveTrendMemo(this.dataset.date,this.dataset.id,this.value,this)">'+mv+'</textarea><span class="memo-saved">✓</span>'+_memoHistHtml(rid,dtToday)+'</td>';
     h+='</tr>';
   });
   h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
