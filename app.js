@@ -4917,7 +4917,9 @@ const DV_DUP=[
   {rx:/[(（]\s*\d{1,2}\s*[)）]\s*$/,tag:'복제'},
   // '첫광고-1' — 하이픈+번호로 붙인 복제(글로벌 태국 세트에서 쓴다).
   //   앞이 숫자면 걷지 않는다 — '260503-02'는 날짜 뒤 일련번호라 걷으면 키가 통째로 사라진다.
-  {rx:/(?<![0-9])[\s_]*[-–]\s*\d{1,2}\s*$/,tag:'복제'},
+  //   ⚠️ lookbehind (?<![0-9]) 를 쓰지 않는다 — Safari/iOS 16.4 미만은 정규식 리터럴 파싱 자체가 실패해
+  //     app.js 전체가 SyntaxError 로 죽는다(로그인 버튼 무반응, 2026-09-21). 앞 글자를 캡처해 rep 로 되돌린다.
+  {rx:/(^|[^0-9])[\s_]*[-–]\s*\d{1,2}\s*$/,rep:'$1',tag:'복제'},
   {rx:/[_\-\s]+재업로드$/,tag:'재업로드'},
 ];
 // 변형 마커는 이름 '꼬리'에 구분자와 함께 붙은 것만 인정한다.
@@ -5026,7 +5028,7 @@ const DV_DATE=/^\d{4,8}$/;
 // 메타 기본 이름(이름을 안 바꾼 세트) — 상품이 달라도 이름이 같아 한 가족으로 잘못 묶인다 → 계보에서 제외.
 const DV_DEFAULT=/^(새\s*(판매|트래픽|참여|앱|전환)?\s*광고\s*세트|new\s+.*ad\s*set)\s*\d*$/i;
 
-function dvStripAll(s,rx){let p;do{p=s;s=s.replace(rx,'')}while(s!==p);return s}
+function dvStripAll(s,rx,rep){let p;rep=rep||'';do{p=s;s=s.replace(rx,rep)}while(s!==p);return s}
 
 // 세트 이름 → {kind:'orig'|'dup'|'var', tags:[], key, label}
 // ★ 이름은 NFC 로 정규화한 뒤 판정한다 — 메타에서 내려오는 한글이 NFD(자모 분리)인 경우가 있어
@@ -5058,13 +5060,13 @@ function dvClassify(name){
   let work=stripVar(s);
   let dup=false;
   for(const d of DV_DUP){
-    if(d.rx.test(work)){dup=true;if(tags.indexOf(d.tag)<0)tags.push(d.tag);work=dvStripAll(work,d.rx)}
+    if(d.rx.test(work)){dup=true;if(tags.indexOf(d.tag)<0)tags.push(d.tag);work=dvStripAll(work,d.rx,d.rep)}
   }
   if(dup){
     // 배수 표기(x2/x4)는 복제 마커가 있을 때만 제거. 1~2자리 + 토큰 끝에서만 —
     //   'ex0808'(인플루언서 핸들) 같은 이름의 x를 먹지 않게 한다.
     work=dvStripAll(work,/\s*[xX]\s*\d{1,2}(?=[_\s]|$)/);
-    for(const d of DV_DUP)work=dvStripAll(work,d.rx);
+    for(const d of DV_DUP)work=dvStripAll(work,d.rx,d.rep);
     work=stripVar(work);   // xN 제거로 꼬리에 드러난 변형 마커 재수거(예 '[복제]…_전세계중국어x4')
   }
   // 복제+변형 동시 보유 → '복제'로 센다(증액 목적의 복제가 1차 성격, 변형은 태그로 표시)
