@@ -2769,7 +2769,7 @@ function renderTrend(opts){
   // 예산 컬럼(세트ID ↔ 메모 사이) — 값은 정렬(💸 예산순)·증감 테두리가 쓰는 것과 같은
   //   '현재 예산' 스냅샷(curBudMap = 세트별 최신 보유일의 budget). 날짜별 값이 아니다.
   //   종합·소계 칸은 비워둔다: CBO 캠페인은 같은 예산이 소속 세트마다 반복돼 세로합이 뻥튀기된다.
-  const budTh=showChg?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것">예산</th>':'';
+  const budTh=showChg?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것. 일정(심야만 등) 예약 세트는 일예산이 없어 총예산÷일정기간으로 환산한 값, ASC/CBO 세트는 캠페인 예산">예산</th>':'';
   const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';  // 종합·소계 행의 빈 계정칸
   let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">'+rowCnLabel()+'</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
@@ -3031,7 +3031,7 @@ function renderTrendAgg(gran){
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';
   // 예산 컬럼 — 일별 뷰(renderTrend)와 같은 자리(세트ID 오른쪽). 주/월엔 메모가 없어 그 다음이 '전체'.
   const showBud=MODE==='kr'||MODE==='gl';
-  const budTh=showBud?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것">예산</th>':'';
+  const budTh=showBud?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것. 일정(심야만 등) 예약 세트는 일예산이 없어 총예산÷일정기간으로 환산한 값, ASC/CBO 세트는 캠페인 예산">예산</th>':'';
   const budTdSr=showBud?'<td style="background:#e8e8e8"></td>':'';   // 종합·소계는 합산 금지라 빈칸
   const colSpan=cols.length+4+(showAcc?1:0)+(showBud?1:0);
   const cell=(t,ck)=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;
@@ -3696,7 +3696,7 @@ function renderDateTab(){
   h+='<th class="h-mp">이익</th>';
   h+='<th class="h-mp">ROAS</th>';
   h+='<th class="h-mp">CVR</th>';
-  h+='<th class="h-budget" title="현재 메타 예산(각 세트 최신일 스냅샷) — 선택한 날짜와 무관하게 지금 값">예산</th>';
+  h+='<th class="h-budget" title="현재 메타 예산(각 세트 최신일 스냅샷) — 선택한 날짜와 무관하게 지금 값. 일정(심야만 등) 예약 세트는 총예산÷일정기간 환산값, ASC/CBO 세트는 캠페인 예산">예산</th>';
   h+='<th class="h-rate">증액률</th>';
   h+='<th class="h-result">변동예산</th>';
   h+='<th class="h-memo">메모</th>';

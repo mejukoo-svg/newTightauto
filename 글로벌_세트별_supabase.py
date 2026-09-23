@@ -24,6 +24,7 @@ from decimal import Decimal
 import requests as req_lib
 
 from budget_history import fetch_budget_events, BudgetHistory
+from budget_resolve import enrich_budgets, lifetime_to_daily
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 logging.getLogger("stripe").setLevel(logging.WARNING)  # Stripe SDK 요청 로그(페이지당 2줄) 소음 억제
@@ -353,12 +354,24 @@ def _extract_action_window(al, types, window_key):
             except: return 0
     return 0
 
-def fetch_adset_budgets(ad_account_id):
-    # effective_status 는 ACTIVE 뿐 아니라 PAUSED 계열까지 포함(ARCHIVED/DELETED만 제외).
-    #   ACTIVE만 조회하면 최근 지출은 있었으나 꺼진 세트가 budget_map 에서 빠져 날짜탭
-    #   예산 컬럼이 0/과거값으로 고착됐다(국내와 동일 이슈). 폴백 없어 세트 증가분은 페이지네이션뿐.
+def fetch_adset_budgets(ad_account_id, relevant_ids=None):
+    """세트별 '현재 일예산'(raw USD cents). 부수효과: ADSET_CAMPAIGN 을 채운다.
+
+       effective_status 는 ACTIVE 뿐 아니라 PAUSED 계열까지 포함(ARCHIVED/DELETED만 제외).
+         ACTIVE만 조회하면 최근 지출은 있었으나 꺼진 세트가 budget_map 에서 빠져 날짜탭
+         예산 컬럼이 0/과거값으로 고착됐다(국내와 동일 이슈).
+
+       ※ 예산이 daily_budget 에 없는 경우도 처리한다 (budget_resolve 참고):
+         · 일정(심야만 등) 세트 → lifetime_budget(총예산)을 기간으로 나눈 일예산
+         · ASC/CBO 캠페인 세트  → 캠페인 예산 폴백. 국내엔 있었지만 글로벌엔 아예 없어
+                                  '대만_외모정병_ASC' 같은 세트가 추이차트에서 예산 칸이 비었다.
+         · ARCHIVED 세트        → 상태 필터에서 빠지므로 id 로 직접 조회
+
+       relevant_ids: 최근 insights 가 있어 실제로 표에 뜨는 이 계정 세트 id 집합.
+         보강 조회를 이 집합으로만 한정해 API 부하를 묶는다."""
     url = f"{META_BASE_URL}/{ad_account_id}/adsets"
-    params = {'fields':'id,daily_budget,campaign_id','limit':500,
+    # lifetime_budget·start/end_time 도 같은 호출로 받는다 — 일정 세트는 일예산이 없다.
+    params = {'fields':'id,daily_budget,lifetime_budget,start_time,end_time,campaign_id','limit':500,
         'filtering':json.dumps([{'field':'effective_status','operator':'IN','value':[
             'ACTIVE','PAUSED','CAMPAIGN_PAUSED','ADSET_PAUSED','IN_PROCESS',
             'WITH_ISSUES','PENDING_REVIEW','PENDING_BILLING_INFO','DISAPPROVED','PREAPPROVED']}])}
@@ -370,14 +383,24 @@ def fetch_adset_budgets(ad_account_id):
             budget = row.get('daily_budget', '0')
             cid = row.get('campaign_id', '')
             if asid and cid: ADSET_CAMPAIGN[asid] = cid  # activities CBO 이벤트 적용용
-            try: results[asid] = int(float(budget)) if budget else 0
-            except: results[asid] = 0
+            try: b = int(float(budget)) if budget else 0
+            except: b = 0
+            if b <= 0:
+                # 일정(예약 노출) 세트 — 총예산 ÷ 일정기간 = 일예산 환산.
+                b = lifetime_to_daily(row.get('lifetime_budget'), row.get('start_time'), row.get('end_time'))
+            results[asid] = b if b > 0 else 0
         next_url = data.get('paging', {}).get('next')
         if next_url:
             time.sleep(1)
             try: resp = req_lib.get(next_url, timeout=120); data = resp.json() if resp.status_code == 200 else None
             except: data = None
         else: break
+
+    # 보강 — ARCHIVED 세트 직접조회 + 캠페인 예산(ASC·CBO) 폴백. 대상은 relevant_ids 로 한정.
+    if relevant_ids:
+        enrich_budgets(META_BASE_URL, meta_api_get, get_token(ad_account_id),
+                       results, relevant_ids,
+                       adset_campaign=ADSET_CAMPAIGN, log=log, label=ad_account_id)
     return results
 
 
@@ -684,20 +707,24 @@ def main():
     log.info(f"✅ Meta: {sum(len(v) for v in meta_data.values())}건")
 
     # 2.4) 세트→캠페인명 맵 — MP 결제의 시장/통화를 캠페인명(hk/tw)으로 판별하기 위해 채운다.
+    #      동시에 계정별 '실제로 표에 뜨는 세트' 집합도 모은다 → 2.5 예산 보강 대상 한정용.
+    _rel_by_acc = {}
     for _rows in meta_data.values():
         for _mr in _rows:
             _asid = _mr.get('adset_id')
             if _asid and _mr.get('campaign_name'):
                 ADSET_CAMPAIGN_NAME[str(_asid)] = _mr['campaign_name']
+            if _asid and _mr.get('ad_account_id'):
+                _rel_by_acc.setdefault(_mr['ad_account_id'], set()).add(str(_asid))
     log.info(f"✅ 세트→캠페인명 맵: {len(ADSET_CAMPAIGN_NAME)}개")
 
     # 2.5) 예산
     log.info("\n2.5단계: 예산 조회")
     budget_map = {}
     for acc_id in ALL_AD_ACCOUNTS:
-        budget_map.update(fetch_adset_budgets(acc_id))
+        budget_map.update(fetch_adset_budgets(acc_id, _rel_by_acc.get(acc_id, set())))
         time.sleep(1)
-    log.info(f"✅ 예산: {len(budget_map)}개")
+    log.info(f"✅ 예산: {len(budget_map)}개 (0 아닌 값 {sum(1 for v in budget_map.values() if v)}개)")
 
     # 2.6) 예산 변경이력(activities) → 일자별 예산 재구성기 (평탄화 방지)
     log.info("\n2.6단계: 예산 변경이력(activities) 수집")

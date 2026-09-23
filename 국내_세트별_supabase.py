@@ -31,6 +31,7 @@ from decimal import Decimal
 import requests as req_lib
 
 from budget_history import fetch_budget_events, BudgetHistory
+from budget_resolve import enrich_budgets, lifetime_to_daily
 
 # =========================================================
 # 로깅 설정
@@ -448,13 +449,19 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
          꺼진 세트가 budget_map 에서 빠져 예산 0/과거값으로 고착됐다(날짜탭 예산 컬럼
          불일치의 주원인). 꺼진 세트도 현재 메타 예산을 받아야 대시보드와 일치한다.
 
+       ※ 예산이 daily_budget 에 없는 경우도 함께 처리한다 (budget_resolve 참고):
+         · 일정(심야만·오전제외 등) 세트 → lifetime_budget(총예산)을 기간으로 나눈 일예산
+         · ASC/CBO 캠페인 세트        → 캠페인 daily_budget / 총예산환산
+         · ARCHIVED 세트              → 상태 필터에서 빠지므로 id 로 직접 조회
+
        relevant_ids: 최근 insights 가 있어 실제로 예산이 기록될 세트 id 집합.
-         주면 CBO 캠페인 예산 폴백(세트당 순차 호출)을 이 집합으로 한정해 API 부하를
-         줄인다(넓힌 필터로 세트가 ~10배 늘어도 폴백은 대시보드에 뜨는 세트만). None이면
-         전체 폴백(하위호환)."""
+         주면 보강 조회(세트 직접조회 + 캠페인 예산 폴백)를 이 집합으로 한정해 API 부하를
+         줄인다(넓힌 필터로 세트가 ~10배 늘어도 보강은 대시보드에 뜨는 세트만). None이면
+         보강 없이 목록 조회 결과만 반환."""
     url = f"{META_BASE_URL}/{ad_account_id}/adsets"
     params = {
-        "fields": "id,daily_budget,campaign_id",
+        # lifetime_budget·start/end_time 도 같은 호출로 받는다 — 일정 세트는 일예산이 없다.
+        "fields": "id,daily_budget,lifetime_budget,start_time,end_time,campaign_id",
         "limit": 500,
         "filtering": json.dumps(
             [{"field": "effective_status", "operator": "IN", "value": [
@@ -466,7 +473,6 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
     }
 
     adset_results = {}
-    needs_campaign = {}
 
     data = meta_api_get(url, params, token=get_token(ad_account_id))
     while data:
@@ -482,12 +488,13 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
                 budget_int = int(float(budget)) if budget else 0
             except Exception:
                 budget_int = 0
-            if budget_int > 0:
-                adset_results[asid] = budget_int
-            else:
-                adset_results[asid] = 0
-                if campaign_id:
-                    needs_campaign[asid] = campaign_id
+            if budget_int <= 0:
+                # 일정(예약 노출) 세트 — 메타가 일예산을 못 쓰게 해 총예산만 있다.
+                #   총예산 ÷ 일정기간 = 일예산 환산 (그냥 총예산을 넣으면 정렬·증감이 부풀려짐)
+                budget_int = lifetime_to_daily(
+                    row.get("lifetime_budget"), row.get("start_time"), row.get("end_time"))
+            # 0 으로 남은 세트는 아래 보강 단계가 캠페인 예산(ADSET_CAMPAIGN)으로 이어받는다.
+            adset_results[asid] = budget_int if budget_int > 0 else 0
         next_url = data.get("paging", {}).get("next")
         if next_url:
             time.sleep(1)
@@ -499,30 +506,14 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
         else:
             break
 
-    # ASC 캠페인 예산 폴백 — 실제 기록에 쓰일 세트만(최근 insights 있는 세트)로 한정.
-    #   넓힌 상태 필터로 세트가 수백~천 개로 늘어도 폴백은 대시보드 대상만 순차 호출.
-    if relevant_ids is not None:
-        needs_campaign = {k: v for k, v in needs_campaign.items() if k in relevant_ids}
-    if needs_campaign:
-        unique_campaigns = set(needs_campaign.values())
-        campaign_budgets = {}
-        for cid in unique_campaigns:
-            try:
-                camp_data = meta_api_get(
-                    f"{META_BASE_URL}/{cid}",
-                    {"fields": "id,daily_budget"},
-                    token=get_token(ad_account_id),
-                )
-                if camp_data:
-                    cb = camp_data.get("daily_budget", "0")
-                    campaign_budgets[cid] = int(float(cb)) if cb else 0
-                time.sleep(0.5)
-            except Exception:
-                pass
-        for asid, cid in needs_campaign.items():
-            camp_budget = campaign_budgets.get(cid, 0)
-            if camp_budget > 0:
-                adset_results[asid] = camp_budget
+    # 보강 — 실제 기록에 쓰일 세트만(최근 insights 있는 세트)로 한정.
+    #   ① ARCHIVED 라 위 목록에서 빠진 세트를 id 로 직접 조회
+    #   ② 그래도 0이면 캠페인 예산(ASC·CBO. 일예산 → 없으면 총예산환산)으로 폴백
+    #   넓힌 상태 필터로 세트가 수백~천 개로 늘어도 보강은 대시보드 대상만 배치 호출.
+    if relevant_ids:
+        enrich_budgets(META_BASE_URL, meta_api_get, get_token(ad_account_id),
+                       adset_results, relevant_ids,
+                       adset_campaign=ADSET_CAMPAIGN, log=log, label=ad_account_id)
 
     return adset_results
 
@@ -834,12 +825,16 @@ def main():
     # =======================================================
     log.info(f"\n3단계: 예산 조회")
     budget_map = {}
-    # 예산이 실제로 기록될(최근 insights 있는) 세트 → 캠페인 폴백을 이걸로 한정.
-    _relevant_ids = set(adset_to_account.keys())
+    # 예산이 실제로 기록될(최근 insights 있는) 세트 → 보강 조회를 이걸로 한정.
+    #   계정별로 쪼개 넘긴다 — 남의 계정 세트를 그 계정 토큰으로 직접 조회하면 헛도는 호출이 된다.
+    _rel_by_acc = {}
+    for _aid, _acc in adset_to_account.items():
+        _rel_by_acc.setdefault(_acc, set()).add(str(_aid))
 
     with ThreadPoolExecutor(max_workers=BUDGET_WORKERS) as pool:
         futs = {
-            pool.submit(fetch_adset_budgets, acc, _relevant_ids): acc for acc in ALL_AD_ACCOUNTS
+            pool.submit(fetch_adset_budgets, acc, _rel_by_acc.get(acc, set())): acc
+            for acc in ALL_AD_ACCOUNTS
         }
         for f in as_completed(futs):
             try:

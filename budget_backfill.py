@@ -128,6 +128,7 @@ def _standalone():
     import logging
     import requests as req_lib
     from budget_history import fetch_budget_events, BudgetHistory
+    from budget_resolve import enrich_budgets, lifetime_to_daily
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     log = logging.getLogger("budbackfill")
@@ -158,25 +159,71 @@ def _standalone():
            "Content-Type": "application/json",
            "Accept-Profile": SCHEMA, "Content-Profile": SCHEMA}
 
-    def build_hist(accounts_tokens):
+    def _api_get(url, params=None, token=None):
+        """budget_resolve 가 쓰는 메타 GET (파이프라인의 meta_api_get 과 같은 규약)."""
+        p = dict(params or {}); p["access_token"] = token
+        try:
+            r = req_lib.get(url, params=p, timeout=60)
+            return r.json() if r.status_code == 200 else None
+        except Exception:
+            return None
+
+    def _table_adsets(table, budget_col, id_col="adset_id"):
+        """백필 대상 구간에서 '예산이 비어 있는' 저장행의 (계정 → 세트id) — 보강 대상 한정용.
+           ARCHIVED 라 계정 세트목록에서 빠진 세트도 여기엔 남아 있어 함께 건진다."""
+        out = {}
+        off = 0
+        while True:
+            u = (f"{SB_URL}/rest/v1/{table}?select=ad_account_id,{id_col}"
+                 f"&date=gte.{start_iso}&or=({budget_col}.is.null,{budget_col}.eq.0)"
+                 f"&limit=1000&offset={off}")
+            try:
+                ch = req_lib.get(u, headers={**SBH, "Prefer": ""}, timeout=60).json()
+            except Exception:
+                break
+            if not isinstance(ch, list) or not ch:
+                break
+            for r in ch:
+                acc = str(r.get("ad_account_id") or "")
+                aid = str(r.get(id_col) or "")
+                if acc and aid:
+                    out.setdefault(acc, set()).add(aid)
+            if len(ch) < 1000:
+                break
+            off += 1000
+        return out
+
+    def build_hist(accounts_tokens, table=None, budget_col=None):
         bh = BudgetHistory(KST)
         cur = {}
         a2c = {}
+        rel = _table_adsets(table, budget_col) if table and budget_col else {}
         for acc, tok in accounts_tokens.items():
             if not tok:
                 log.warning(f"  ⚠️ 토큰 없음: {acc}"); continue
             evs = fetch_budget_events(BASE, acc, tok, since, until, req_lib, log, max_pages=120)
             bh.add_events(evs)
-            # 현재 예산 + 세트→캠페인
-            url = f"{BASE}/{acc}/adsets?" + _qs({"fields": "id,daily_budget,campaign_id",
-                                                 "limit": 500, "access_token": tok})
+            # 현재 예산 + 세트→캠페인 (일정 세트는 일예산이 없어 총예산·기간도 함께 읽는다)
+            url = f"{BASE}/{acc}/adsets?" + _qs(
+                {"fields": "id,daily_budget,lifetime_budget,start_time,end_time,campaign_id",
+                 "limit": 500, "access_token": tok})
             pg = 0
             while url and pg < 30:
                 j = req_lib.get(url, timeout=60).json()
                 for a in j.get("data", []):
                     aid = str(a["id"]); a2c[aid] = str(a.get("campaign_id") or "")
-                    db = a.get("daily_budget"); cur[aid] = int(float(db)) if db else 0
+                    db = a.get("daily_budget")
+                    try: b = int(float(db)) if db else 0
+                    except (TypeError, ValueError): b = 0
+                    if b <= 0:   # 일정(예약 노출) 세트 → 총예산 ÷ 기간
+                        b = lifetime_to_daily(a.get("lifetime_budget"),
+                                              a.get("start_time"), a.get("end_time"))
+                    cur[aid] = b
                 url = j.get("paging", {}).get("next"); pg += 1
+            # 저장 행의 예산이 빈 세트만 → 직접조회 + 캠페인(ASC·CBO) 폴백.
+            #   대상을 못 좁혔으면(테이블 미지정) 계정 전체를 다시 훑지 않고 건너뛴다 — API 폭주 방지.
+            enrich_budgets(BASE, _api_get, tok, cur, rel.get(acc, set()),
+                           adset_campaign=a2c, log=log, label=acc[-6:])
             log.info(f"  📈 {acc[-6:]}: 이벤트 {len(evs)}건")
         bh.set_adset_campaign(a2c)
         return bh, cur
@@ -186,7 +233,7 @@ def _standalone():
           "act_707835224206178": os.environ.get("META_TOKEN_1", ""),
           "act_1808141386564262": os.environ.get("META_TOKEN_2", "")}
     log.info("=== 국내 activities 수집 ===")
-    kr_bh, kr_cur = build_hist(KR)
+    kr_bh, kr_cur = build_hist(KR, "ad_performance_daily", "budget")
     reconcile_budget(SB_URL, SBH, "ad_performance_daily", "budget",
                      kr_bh, kr_cur, lambda raw: int(round(raw)),
                      start_iso, end_iso, req_lib, log, tol=0.5, dry_run=not APPLY,
@@ -202,7 +249,7 @@ def _standalone():
           "act_993712016404855": _g9937,
           "act_1021437716898605": _g1}
     log.info("=== 글로벌 activities 수집 ===")
-    gl_bh, gl_cur = build_hist(GL)
+    gl_bh, gl_cur = build_hist(GL, "global_ad_performance_daily", "budget_usd")
     reconcile_budget(SB_URL, SBH, "global_ad_performance_daily", "budget_usd",
                      gl_bh, gl_cur, lambda raw: round(raw / 100, 2),
                      start_iso, end_iso, req_lib, log, tol=0.01, dry_run=not APPLY,
