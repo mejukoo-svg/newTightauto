@@ -440,7 +440,7 @@ def parse_insights(rows, date_str, date_obj, ad_account_id=""):
     return parsed
 
 
-def fetch_adset_budgets(ad_account_id, relevant_ids=None):
+def fetch_adset_budgets(ad_account_id, relevant_ids=None, lifetime_ids=None):
     """광고 세트별 일 예산 조회 (ASC 캠페인 예산 폴백 포함).
        부수효과: ADSET_CAMPAIGN(세트→캠페인) 맵을 채운다 → activities CBO 이벤트 적용용.
 
@@ -493,6 +493,8 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
                 #   총예산 ÷ 일정기간 = 일예산 환산 (그냥 총예산을 넣으면 정렬·증감이 부풀려짐)
                 budget_int = lifetime_to_daily(
                     row.get("lifetime_budget"), row.get("start_time"), row.get("end_time"))
+                if budget_int > 0 and lifetime_ids is not None:
+                    lifetime_ids.add(asid)
             # 0 으로 남은 세트는 아래 보강 단계가 캠페인 예산(ADSET_CAMPAIGN)으로 이어받는다.
             adset_results[asid] = budget_int if budget_int > 0 else 0
         next_url = data.get("paging", {}).get("next")
@@ -513,7 +515,8 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
     if relevant_ids:
         enrich_budgets(META_BASE_URL, meta_api_get, get_token(ad_account_id),
                        adset_results, relevant_ids,
-                       adset_campaign=ADSET_CAMPAIGN, log=log, label=ad_account_id)
+                       adset_campaign=ADSET_CAMPAIGN, log=log, label=ad_account_id,
+                       lifetime_ids=lifetime_ids)
 
     return adset_results
 
@@ -831,9 +834,13 @@ def main():
     for _aid, _acc in adset_to_account.items():
         _rel_by_acc.setdefault(_acc, set()).add(str(_aid))
 
+    # 총예산(일정) 기반으로 값을 낸 세트 — activities 재구성을 쓰면 안 되는 목록.
+    #   set 은 스레드에서 add 만 하므로 GIL 아래서 안전하다.
+    LIFETIME_SETS = set()
+
     with ThreadPoolExecutor(max_workers=BUDGET_WORKERS) as pool:
         futs = {
-            pool.submit(fetch_adset_budgets, acc, _rel_by_acc.get(acc, set())): acc
+            pool.submit(fetch_adset_budgets, acc, _rel_by_acc.get(acc, set()), LIFETIME_SETS): acc
             for acc in ALL_AD_ACCOUNTS
         }
         for f in as_completed(futs):
@@ -842,7 +849,7 @@ def main():
             except Exception as e:
                 log.error(f"  ❌ 예산 오류: {e}")
 
-    log.info(f"✅ 예산: {len(budget_map)}개 세트")
+    log.info(f"✅ 예산: {len(budget_map)}개 세트 (총예산환산 {len(LIFETIME_SETS)}개)")
 
     # =======================================================
     # 3.5) 예산 변경이력(activities) → 일자별 예산 재구성기
@@ -1130,9 +1137,20 @@ def main():
             budget_raw_cur = budget_map.get(asid, 0)
             budget_cur = round(budget_raw_cur / bdiv * fx) if budget_raw_cur > 0 else 0
             _pb = prev_budget.get((iso_date, str(asid)))
-            if iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
+            # ★ 오늘 칸은 언제나 '지금 메타에 설정된 값'이 정답이다.
+            #   activities 재구성보다 먼저 본다 — 메타 activities 는 최근 변경을 조용히
+            #   누락하는 일이 있어(실측 2026-09-24: +20% 적용 뒤에도 재구성값이 적용 전
+            #   180,000 에 머물러 대시보드 예산이 증액을 며칠째 못 따라갔다) 오늘 칸에
+            #   쓰면 '지금 예산'이 아니라 '메타가 기억하는 옛 예산'을 보여주게 된다.
+            #   재구성은 과거 날짜의 증감 테두리를 복원하는 용도로만 남긴다.
+            # ★ 총예산(일정) 세트는 재구성 자체를 쓰지 않는다 — activities 이벤트 값이
+            #   일예산이 아니라 총예산이라 기간 배수만큼 부풀려진다(LIFETIME_SETS).
+            _use_hist = bud_hist.has_events_for(asid) and asid not in LIFETIME_SETS
+            if iso_date == _pe and budget_cur > 0:
+                budget_val = budget_cur
+            elif iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
                 budget_val = _pb
-            elif bud_hist.has_events_for(asid):
+            elif _use_hist:
                 b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
                 budget_val = round(b_raw / bdiv * fx) if b_raw > 0 else 0
             elif iso_date == _pe:
@@ -1204,7 +1222,8 @@ def main():
         log.info(f"\n6.5단계: 예산 자가교정 ({_bs}~{_be2})")
         reconcile_budget(sb.base_url, sb.headers, "ad_performance_daily", "budget",
                          bud_hist, budget_map, lambda raw: int(round(raw)),
-                         _bs, _be2, req_lib, log, tol=0.5, reliable_from=_rel_from)
+                         _bs, _be2, req_lib, log, tol=0.5, reliable_from=_rel_from,
+                         skip_hist_ids=LIFETIME_SETS, today_iso=_be2)
     except Exception as _e:
         log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 

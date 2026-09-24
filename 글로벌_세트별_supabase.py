@@ -354,7 +354,7 @@ def _extract_action_window(al, types, window_key):
             except: return 0
     return 0
 
-def fetch_adset_budgets(ad_account_id, relevant_ids=None):
+def fetch_adset_budgets(ad_account_id, relevant_ids=None, lifetime_ids=None):
     """세트별 '현재 일예산'(raw USD cents). 부수효과: ADSET_CAMPAIGN 을 채운다.
 
        effective_status 는 ACTIVE 뿐 아니라 PAUSED 계열까지 포함(ARCHIVED/DELETED만 제외).
@@ -388,6 +388,7 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
             if b <= 0:
                 # 일정(예약 노출) 세트 — 총예산 ÷ 일정기간 = 일예산 환산.
                 b = lifetime_to_daily(row.get('lifetime_budget'), row.get('start_time'), row.get('end_time'))
+                if b > 0 and lifetime_ids is not None: lifetime_ids.add(asid)
             results[asid] = b if b > 0 else 0
         next_url = data.get('paging', {}).get('next')
         if next_url:
@@ -400,7 +401,8 @@ def fetch_adset_budgets(ad_account_id, relevant_ids=None):
     if relevant_ids:
         enrich_budgets(META_BASE_URL, meta_api_get, get_token(ad_account_id),
                        results, relevant_ids,
-                       adset_campaign=ADSET_CAMPAIGN, log=log, label=ad_account_id)
+                       adset_campaign=ADSET_CAMPAIGN, log=log, label=ad_account_id,
+                       lifetime_ids=lifetime_ids)
     return results
 
 
@@ -721,8 +723,10 @@ def main():
     # 2.5) 예산
     log.info("\n2.5단계: 예산 조회")
     budget_map = {}
+    # 총예산(일정) 기반으로 값을 낸 세트 — activities 재구성을 쓰면 안 되는 목록.
+    LIFETIME_SETS = set()
     for acc_id in ALL_AD_ACCOUNTS:
-        budget_map.update(fetch_adset_budgets(acc_id, _rel_by_acc.get(acc_id, set())))
+        budget_map.update(fetch_adset_budgets(acc_id, _rel_by_acc.get(acc_id, set()), LIFETIME_SETS))
         time.sleep(1)
     log.info(f"✅ 예산: {len(budget_map)}개 (0 아닌 값 {sum(1 for v in budget_map.values() if v)}개)")
 
@@ -1044,9 +1048,15 @@ def main():
             budget_raw_cur = budget_map.get(asid, 0)
             budget_cur = round(budget_raw_cur / 100, 2) if budget_raw_cur > 0 else 0
             _pb = prev_budget.get((iso_date, str(asid)))
-            if iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
+            # ★ 오늘 칸은 언제나 '지금 메타에 설정된 값'. activities 재구성은 최근 변경을
+            #   조용히 누락해 증액을 며칠째 못 따라가는 일이 있다(국내와 동일 실측).
+            # ★ 총예산(일정) 세트는 이벤트 값이 총예산이라 재구성 자체를 쓰지 않는다.
+            _use_hist = bud_hist.has_events_for(asid) and asid not in LIFETIME_SETS
+            if iso_date == _be and budget_cur > 0:
+                budget_val = budget_cur
+            elif iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
                 budget_val = _pb
-            elif bud_hist.has_events_for(asid):
+            elif _use_hist:
                 b_raw = bud_hist.raw_on(asid, iso_date, budget_raw_cur)
                 budget_val = round(b_raw / 100, 2) if b_raw > 0 else 0
             elif iso_date == _be:
@@ -1115,7 +1125,8 @@ def main():
         reconcile_budget(sb.base_url, sb.headers, "global_ad_performance_daily", "budget_usd",
                          bud_hist, budget_map, lambda raw: round(raw / 100, 2),
                          _bs, _be2, req_lib, log, tol=0.01, extra_cols=("country",),
-                         reliable_from=_rel_from)
+                         reliable_from=_rel_from,
+                         skip_hist_ids=LIFETIME_SETS, today_iso=_be2)
     except Exception as _e:
         log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 

@@ -2552,6 +2552,72 @@ function curBudMap(rows,accFilter){
   });
   const out={};Object.keys(last).forEach(k=>{out[k]=last[k].b});return out;
 }
+// ===== 실시간 예산 (current-budgets Edge Function) =====
+// 예산 컬럼은 원래 파이프라인이 시간당 한 번 찍는 스냅샷이라, 증감액을 적용한 직후나
+// Ads Manager 에서 직접 바꾼 뒤에는 옛 값을 보여줬다. (게다가 파이프라인은 메타
+// activities 로 값을 복원하는데 메타가 최근 변경을 조용히 누락하면 며칠씩 고착됐다.)
+// → 화면을 그린 뒤 메타에서 '지금 값'을 직접 읽어 덮어쓴다. 읽기 전용이라 아무것도 바꾸지 않는다.
+//   · 값이 도착하면 예산 컬럼뿐 아니라 정렬(💸 예산순)·날짜탭 '변동예산'도 같은 값을 쓴다.
+//   · 함수가 아직 배포 안 됐거나 실패하면 조용히 DB 스냅샷 그대로 둔다(화면은 계속 동작).
+const CB_FN=SB_URL+'/functions/v1/current-budgets';
+const LIVE_BUD_MODES={kr:1,gl:1,vn:1};   // 세트 단위 모드만 (cr=소재는 예산 개념 없음)
+const LIVE_BUD={};        // mode → {adset_id: 값(저장 컬럼과 같은 단위)}
+const LIVE_BUD_AT={};     // mode → 마지막 성공 시각(ms)
+const LIVE_BUD_BUSY={};   // mode → 진행 중
+const LIVE_BUD_TTL=120000;      // 2분 — 그 안이면 다시 묻지 않는다
+const LIVE_BUD_FAIL_TTL=600000; // 실패 후 재시도 간격 10분 — 함수 미배포/권한 오류에 매 렌더 두드리지 않게
+let LIVE_BUD_ERR='';      // 마지막 실패 사유(뱃지 툴팁용)
+let LIVE_BUD_FAIL_AT=0;   // 마지막 실패 시각(ms)
+
+// 스냅샷 맵에 실시간 값을 덮어쓴다. 실시간 값이 없는 세트는 스냅샷 그대로 둔다.
+function applyLiveBud(map){
+  const lb=LIVE_BUD[MODE];if(!lb)return map;
+  Object.keys(lb).forEach(k=>{const v=+lb[k];if(v>0)map[k]=v});
+  return map;
+}
+// 예산 컬럼 옆 상태 뱃지 — '언제 기준 값인지'를 숨기지 않는다.
+function liveBudBadge(){
+  if(!LIVE_BUD_MODES[MODE])return'';
+  const at=LIVE_BUD_AT[MODE];
+  if(at){const m=Math.max(0,Math.round((Date.now()-at)/60000));
+    return' <span class="lb-ok" title="메타에서 직접 읽은 지금 예산">⚡'+(m?m+'분 전':'now')+'</span>'}
+  if(LIVE_BUD_BUSY[MODE])return' <span class="lb-wait" title="메타에서 현재 예산 읽는 중">…</span>';
+  return LIVE_BUD_ERR?' <span class="lb-err" title="'+_mEsc(LIVE_BUD_ERR)+' — 파이프라인 스냅샷 값입니다">⚠</span>':'';
+}
+// 화면에 뜬 세트들의 '지금 예산'을 읽어 온다. 값이 달라졌을 때만 다시 그린다.
+async function ensureLiveBudgets(items){
+  const mode=MODE;
+  if(!LIVE_BUD_MODES[mode]||!items||!items.length)return;
+  if(LIVE_BUD_BUSY[mode])return;
+  if(LIVE_BUD_AT[mode]&&Date.now()-LIVE_BUD_AT[mode]<LIVE_BUD_TTL)return;
+  if(LIVE_BUD_FAIL_AT&&Date.now()-LIVE_BUD_FAIL_AT<LIVE_BUD_FAIL_TTL)return;
+  LIVE_BUD_BUSY[mode]=true;
+  try{
+    const {data}=await SBC.auth.getSession();
+    const tk=data&&data.session?data.session.access_token:'';
+    if(!tk)throw new Error('로그인 세션 없음');
+    const r=await fetch(CB_FN,{method:'POST',
+      headers:{'Authorization':'Bearer '+tk,'Content-Type':'application/json','apikey':SB_KEY},
+      body:JSON.stringify({mode:mode,items:items})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||j.ok===false)throw new Error(j.error||('서버 오류 ('+r.status+')'));
+    const next={};let changed=false;
+    const prev=LIVE_BUD[mode]||{};
+    Object.keys(j.budgets||{}).forEach(k=>{
+      const v=+(j.budgets[k]||{}).value;if(!(v>0))return;
+      next[k]=v;if(prev[k]!==v)changed=true;
+    });
+    if(Object.keys(prev).length!==Object.keys(next).length)changed=true;
+    LIVE_BUD[mode]=next;LIVE_BUD_AT[mode]=Date.now();LIVE_BUD_ERR='';LIVE_BUD_FAIL_AT=0;
+    if(changed&&MODE===mode){const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t)}
+  }catch(e){
+    LIVE_BUD_ERR=String(e&&e.message||e);LIVE_BUD_FAIL_AT=Date.now();
+    console.warn('[실시간 예산] 실패 — DB 스냅샷 사용:',LIVE_BUD_ERR);
+  }finally{LIVE_BUD_BUSY[mode]=false}
+}
+// 예산 적용(⚡)·ASC 복사 직후엔 TTL 을 무시하고 바로 다시 읽는다.
+function invalidateLiveBud(){Object.keys(LIVE_BUD_AT).forEach(k=>delete LIVE_BUD_AT[k]);LIVE_BUD_FAIL_AT=0}
+
 // 세트 정렬 비교자 — 예산↓ → (동률·예산없음) 전날 지출↓ → 7일 지출↓
 function budCmp(a,b){return (( b._bud||0)-(a._bud||0))||((b._yS||0)-(a._yS||0))||((b._s||0)-(a._s||0))}
 // 판매수순 비교자 — 최근 기간(7일·주월은 표시구간) MP 판매수↓ → 전날 지출↓ → 기간 지출↓
@@ -2740,7 +2806,7 @@ function renderTrend(opts){
   const budHist={};
   ROWS.forEach(r=>{if(accFilter&&!accFilter(r))return;const b=+(r.budget)||0;if(b>0){const rid=rowId(r);(budHist[rid]||(budHist[rid]={}))[r.date]=b}});
   // 정렬 기준용 '현재 일예산' 맵 (표시기간 밖 날짜까지 포함한 최신 예산)
-  const BUD=curBudMap(ROWS,accFilter);
+  const BUD=applyLiveBud(curBudMap(ROWS,accFilter));
   let list=Object.values(byA).map(a=>{let s=0,rv=0,p=0,uc=0,mp=0,imp=0;d7.forEach(d=>{if(a.d[d]){s+=a.d[d].spend;rv+=a.d[d].revenue;p+=a.d[d].profit;uc+=a.d[d].unique_clicks;mp+=a.d[d].results_mp;imp+=(a.d[d].impressions||0)}});a._s=s;a._r=rv;a._p=p;a._roas=s>0?rv/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;a._yS=a.d[yDay]?a.d[yDay].spend:0;a._bud=BUD[a.id]||0;return a});
   // 세트필터: 키워드 입력 시 캠페인/세트명/ID에 키워드가 포함된 세트만 표시 (종합·소계도 필터 결과 기준)
   const tKw=kwParse(document.getElementById(filterElId).value);
@@ -2769,7 +2835,7 @@ function renderTrend(opts){
   // 예산 컬럼(세트ID ↔ 메모 사이) — 값은 정렬(💸 예산순)·증감 테두리가 쓰는 것과 같은
   //   '현재 예산' 스냅샷(curBudMap = 세트별 최신 보유일의 budget). 날짜별 값이 아니다.
   //   종합·소계 칸은 비워둔다: CBO 캠페인은 같은 예산이 소속 세트마다 반복돼 세로합이 뻥튀기된다.
-  const budTh=showChg?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것. 일정(심야만 등) 예약 세트는 일예산이 없어 총예산÷일정기간으로 환산한 값, ASC/CBO 세트는 캠페인 예산">예산</th>':'';
+  const budTh=showChg?'<th class="hbud" title="지금 메타에 설정돼 있는 일예산 — 표시 기간과 무관. ⚡ 표시가 있으면 메타에서 직접 읽은 값이고, 없으면 파이프라인 스냅샷이다. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것. 일정(심야만 등) 예약 세트는 일예산이 없어 총예산÷일정기간으로 환산한 값, ASC/CBO 세트는 캠페인 예산">예산'+liveBudBadge()+'</th>':'';
   const accTh=showAcc?'<th class="hacc" style="text-align:left;white-space:nowrap">광고 계정</th>':'';
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';  // 종합·소계 행의 빈 계정칸
   let h='<thead><tr>'+accTh+'<th class="hcn" style="text-align:left;white-space:nowrap">'+rowCnLabel()+'</th><th class="han" style="text-align:left;white-space:nowrap">'+rowNameLabel()+'</th><th class="hid">'+rowIdLabel()+'</th>'+budTh+chgTh+memoTh+'<th>7일</th>'+ths+'</tr></thead><tbody>';
@@ -2830,6 +2896,8 @@ function renderTrend(opts){
   h+='</tbody>';tblEl.innerHTML=h;
   tblEl.dataset.daysEl=daysElId; // 소재펼침(caret)이 올바른 기간 컨트롤을 읽도록
   requestAnimationFrame(()=>{_fitNameCols(tblEl);_initColResize(tblEl);_fixSticky(tblEl)});
+  // 화면에 뜬 세트들의 '지금 예산'을 메타에서 읽어 온다(값이 바뀌면 이 함수가 다시 불린다).
+  if(showChg)ensureLiveBudgets(list.map(a=>({adset_id:a.id,ad_account_id:a.acc})));
 }
 // 캠페인·세트 컬럼 폭을 '세트 행의 가장 긴 이름'에 딱 맞춘다(--fit-cn/--fit-an CSS 변수).
 //   소재를 펼치면 소재명이 세트 컬럼(fx1)에 들어가는데, 소재명은 세트명보다 훨씬 길어
@@ -3017,7 +3085,7 @@ function renderTrendAgg(gran){
     if(!byA[rid])byA[rid]={cn:rowCn(r),camp:r.campaign_name||'',an:MODE==='cr'?(r.ad_name||''):(r.adset_name||''),id:rid,product:r.product,acc:r.ad_account_id||'',b:{}};
     const b=byA[rid].b;if(!b[ck])b[ck]={s:0,r:0,p:0,mp:0,uc:0,imp:0};
     b[ck].s+=r.spend;b[ck].r+=r.revenue;b[ck].p+=r.profit;b[ck].mp+=r.results_mp;b[ck].uc+=r.unique_clicks;b[ck].imp+=(r.impressions||0)});
-  const BUD=curBudMap(AD);   // 정렬 기준용 현재 일예산
+  const BUD=applyLiveBud(curBudMap(AD));   // 정렬 기준용 현재 일예산(실시간 값 우선)
   let list=Object.values(byA).map(a=>{let s=0,r=0,p=0,uc=0,mp=0,imp=0;cols.forEach(ck=>{const b=a.b[ck];if(b){s+=b.s;r+=b.r;p+=b.p;uc+=b.uc;mp+=b.mp;imp+=b.imp}});
     a._s=s;a._r=r;a._p=p;a._roas=s>0?r/s*100:0;a._cvr=uc>0&&mp>0?mp/uc*100:0;a._ctr=imp>0?uc/imp*100:0;a._cpm=imp>0?s/imp*1000:0;a._uc=uc;a._mp=mp;a._imp=imp;
     a._recentS=a.b[recentCol]?a.b[recentCol].s:0;a._bud=BUD[a.id]||0;a._yS=a._recentS;return a});
@@ -3031,7 +3099,7 @@ function renderTrendAgg(gran){
   const accTdSr=showAcc?'<td class="fx fxa" style="background:#e8e8e8"></td>':'';
   // 예산 컬럼 — 일별 뷰(renderTrend)와 같은 자리(세트ID 오른쪽). 주/월엔 메모가 없어 그 다음이 '전체'.
   const showBud=MODE==='kr'||MODE==='gl';
-  const budTh=showBud?'<th class="hbud" title="현재 일예산(각 세트 최신일 스냅샷) — 표시 기간과 무관하게 지금 값. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것. 일정(심야만 등) 예약 세트는 일예산이 없어 총예산÷일정기간으로 환산한 값, ASC/CBO 세트는 캠페인 예산">예산</th>':'';
+  const budTh=showBud?'<th class="hbud" title="지금 메타에 설정돼 있는 일예산 — 표시 기간과 무관. ⚡ 표시가 있으면 메타에서 직접 읽은 값이고, 없으면 파이프라인 스냅샷이다. CBO 캠페인은 세트마다 같은 값이 반복되므로 세로로 더하지 말 것. 일정(심야만 등) 예약 세트는 총예산÷일정기간 환산값, ASC/CBO 세트는 캠페인 예산">예산'+liveBudBadge()+'</th>':'';
   const budTdSr=showBud?'<td style="background:#e8e8e8"></td>':'';   // 종합·소계는 합산 금지라 빈칸
   const colSpan=cols.length+4+(showAcc?1:0)+(showBud?1:0);
   const cell=(t,ck)=>{if(!t||!t.s)return'<td></td>';const roas=t.s>0?t.r/t.s*100:0;const cvr=t.uc>0&&t.mp>0?t.mp/t.uc*100:0;const cpm=t.imp>0?t.s/t.imp*1000:0;const ctr=t.imp>0?t.uc/t.imp*100:0;
@@ -3290,7 +3358,7 @@ function renderTrendProduct(){
   });
   const aggCols=src=>{const o={s:0,r:0,p:0,mp:0,uc:0,imp:0};sumCols.forEach(ck=>{const t=src[ck];if(t){o.s+=t.s;o.r+=t.r;o.p+=t.p;o.mp+=t.mp;o.uc+=t.uc;o.imp+=t.imp}});return o};
   // 정렬 기준용 현재 일예산 (2026-08-20: 지출 순 → 예산 순으로 변경)
-  const BUD=curBudMap(AD);
+  const BUD=applyLiveBud(curBudMap(AD));
   const prodBud={},prodMp={};Object.values(byA).forEach(a=>{a._bud=BUD[a.id]||0;prodBud[a.product]=(prodBud[a.product]||0)+a._bud;
     a._mp=aggCols(a.d).mp;prodMp[a.product]=(prodMp[a.product]||0)+a._mp});   // 판매수순 정렬 키(표시구간 MP 판매수 합)
   // 상품 정렬 — 예산순이면 예산 합↓, 판매수순이면 판매수 합↓, 그 외(지출순·카테고리)는 기존대로 전날/최근주 지출↓
@@ -3696,7 +3764,7 @@ function renderDateTab(){
   h+='<th class="h-mp">이익</th>';
   h+='<th class="h-mp">ROAS</th>';
   h+='<th class="h-mp">CVR</th>';
-  h+='<th class="h-budget" title="현재 메타 예산(각 세트 최신일 스냅샷) — 선택한 날짜와 무관하게 지금 값. 일정(심야만 등) 예약 세트는 총예산÷일정기간 환산값, ASC/CBO 세트는 캠페인 예산">예산</th>';
+  h+='<th class="h-budget" title="지금 메타에 설정돼 있는 예산 — 선택한 날짜와 무관. ⚡ 표시가 있으면 메타에서 직접 읽은 값이고, 없으면 파이프라인 스냅샷이다. 일정(심야만 등) 예약 세트는 총예산÷일정기간 환산값, ASC/CBO 세트는 캠페인 예산">예산'+liveBudBadge()+'</th>';
   h+='<th class="h-rate">증액률</th>';
   h+='<th class="h-result">변동예산</th>';
   h+='<th class="h-memo">메모</th>';
@@ -3731,6 +3799,8 @@ function renderDateTab(){
   //   과거 예산 복원은 증감 테두리용으로 그대로 유지 → 날짜탭 표시만 변경)
   const curBud={};
   AD.forEach(r=>{const rid=rowId(r);if(!rid)return;const p=curBud[rid];if(!p||r.date>p.d)curBud[rid]={d:r.date,b:+r.budget||0}});
+  // 실시간 값이 있으면 그쪽이 정답 — '변동예산'(증감률 적용 결과)도 같은 기준으로 계산된다.
+  {const lb=LIVE_BUD[MODE];if(lb)Object.keys(lb).forEach(k=>{const v=+lb[k];if(v>0)curBud[k]={d:'live',b:v}})}
 
   // 데이터 rows
   rows.forEach(r=>{
@@ -3774,6 +3844,8 @@ function renderDateTab(){
   h+='</tbody>';document.getElementById('dtTbl').innerHTML=h;
   DT_ROWS=rows;  // '메타에 예산 적용' 버튼이 화면에 실제로 보이는 세트만 대상으로 삼기 위해 보관
   abSyncBtn();
+  // 화면에 뜬 세트들의 '지금 예산'을 메타에서 직접 읽어 온다(도착하면 다시 그린다).
+  ensureLiveBudgets(rows.map(r=>({adset_id:rowId(r),ad_account_id:r.ad_account_id||''})).filter(x=>x.adset_id));
 }
 
 // ===== 메타 예산 적용 (날짜탭 → Edge Function) =====
@@ -4086,7 +4158,10 @@ async function abApply(){
     abRender(j.plan||[],true);
     document.getElementById('abMsg').innerHTML='✅ <b>'+(j.applied||0)+'건</b> 적용'
       +((j.failed||0)?' · <span style="color:#a00">'+j.failed+'건 실패</span>':'')
-      +' — 선택한 세트만 표시됩니다. 기록은 budget_apply_log 에 남고, 대시보드 예산 컬럼은 다음 파이프라인 실행 후 갱신됩니다.';
+      +' — 선택한 세트만 표시됩니다. 기록은 budget_apply_log 에 남고, 예산 컬럼은 곧바로 메타에서 다시 읽어 갱신됩니다.';
+    // 방금 바꾼 값이 화면에 그대로 남지 않도록 실시간 예산 캐시를 버리고 다시 읽는다.
+    invalidateLiveBud();
+    {const t=document.querySelector('.tab.active');if(t)renderTab(t.dataset.t)}
     document.getElementById('abCancel').textContent='닫기';
     go.style.display='none';
     AB_PLAN=null;   // 같은 계획을 두 번 적용하지 못하게 (복리 적용 방지)

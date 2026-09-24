@@ -113,13 +113,17 @@ def _batch_get(api_get, base_url, token, ids, fields, log=None):
 
 
 def enrich_budgets(base_url, api_get, token, results, relevant_ids,
-                   adset_campaign=None, log=None, label=""):
+                   adset_campaign=None, log=None, label="", lifetime_ids=None):
     """계정 스윕 결과(results: 세트id→raw 예산)를 제자리 보강한다.
 
        results        : 세트 목록 조회로 이미 채운 dict (0 = 아직 모름)
        relevant_ids   : 이 계정에서 실제로 표에 뜨는 세트 id 집합 (보강 대상 한정)
        adset_campaign : 세트→캠페인 맵. 주면 여기서 알아낸 매핑도 채워 넣는다
                         (activities CBO 이벤트 적용에 쓰인다)
+       lifetime_ids   : set 을 주면 '총예산을 환산해 값을 낸 세트' id 를 담아 돌려준다.
+                        ★ 이 세트들은 activities(예산 변경이력) 재구성을 쓰면 안 된다 —
+                          이벤트 값이 일예산이 아니라 총예산이라 그대로 쓰면 기간 배수만큼
+                          부풀려진다(실측: 5일 일정 720,000 총예산이 720,000 일예산으로 표시).
        반환: {'direct': n, 'lifetime': n, 'campaign': n} — 무엇으로 몇 개를 채웠는지"""
     stat = {"direct": 0, "lifetime": 0, "campaign": 0}
     if not relevant_ids:
@@ -146,6 +150,8 @@ def enrich_budgets(base_url, api_get, token, results, relevant_ids,
             d = lifetime_to_daily(o.get("lifetime_budget"), o.get("start_time"), o.get("end_time"))
             if d > 0:
                 results[aid] = d
+                if lifetime_ids is not None:
+                    lifetime_ids.add(aid)
                 stat["lifetime"] += 1
                 continue
             if cid:
@@ -170,6 +176,7 @@ def enrich_budgets(base_url, api_get, token, results, relevant_ids,
             if not o:
                 continue
             b = _num(o.get("daily_budget"))
+            _from_life = False
             if b <= 0:
                 # 캠페인 총예산(CBO lifetime) → 일예산 환산.
                 #   ★ 기간은 세트 자신의 일정을 먼저 쓴다. 캠페인의 start/stop_time 은
@@ -180,7 +187,10 @@ def enrich_budgets(base_url, api_get, token, results, relevant_ids,
                 if b <= 0:
                     b = lifetime_to_daily(o.get("lifetime_budget"),
                                           o.get("start_time"), o.get("stop_time"))
+                _from_life = b > 0
             if b > 0:
+                if _from_life and lifetime_ids is not None:
+                    lifetime_ids.add(aid)
                 # CBO 는 한 캠페인 예산을 소속 세트가 나눠 쓴다 — 대시보드 관례대로
                 # 세트마다 같은 값을 반복해 넣는다(세로로 더하지 말 것: 예산 컬럼 툴팁 참고).
                 results[aid] = b

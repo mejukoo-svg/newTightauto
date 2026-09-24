@@ -29,13 +29,19 @@ BUDGET_HIST_DAYS_DEFAULT = 180
 def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budget_map,
                      transform, start_iso, end_iso, req_lib, log=None,
                      id_col="adset_id", tol=0.5, dry_run=False, extra_cols=(),
-                     reliable_from=None):
+                     reliable_from=None, skip_hist_ids=(), today_iso=None):
     """[start_iso, end_iso] 구간 저장행의 budget_col 을 activities 재구성값으로 교정.
        - has_events_for(세트)=True → raw_on 재구성값
        - False & 현재예산>0        → 현재값(변경 없음 = 평탄)
        - False & 현재예산 미상(0)   → 기존값 보존(교정 안 함)
        extra_cols: 부분 업서트 시 충돌키를 맞추기 위해 함께 읽어 되돌려 보낼 컬럼
                    (예: 글로벌 테이블 PK 에 포함된 'country'). 값은 갱신하지 않고 그대로 echo.
+
+       skip_hist_ids: activities 재구성을 쓰면 안 되는 세트 id 집합 —
+         총예산(일정) 기반 세트. 이벤트 값이 일예산이 아니라 총예산이라 그대로 쓰면
+         기간 배수만큼 부풀려진다. 이 세트들은 현재값(budget_map)으로만 채운다.
+       today_iso (YYYY-MM-DD): '오늘'. 오늘 행은 재구성보다 현재값을 우선한다 —
+         메타 activities 가 최근 변경을 누락해도 예산 컬럼이 '지금 값'을 보이게.
 
        reliable_from (YYYY-MM-DD): activities 를 '완전하다'고 믿는 시작일.
          ★ 이 날짜 이전(=오래된 구간)에서는 저장값이 이미 있으면(>0) 덮어쓰지 않는다.
@@ -80,7 +86,10 @@ def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budge
             if _sv0 > 0 and not bud_hist.has_event_on(aid, d):
                 kept += 1
                 continue
-        if bud_hist.has_events_for(aid):
+        _use_hist = bud_hist.has_events_for(aid) and aid not in skip_hist_ids
+        if today_iso and d == today_iso and cur > 0:
+            val = transform(cur)          # 오늘 = 지금 메타값 (재구성보다 우선)
+        elif _use_hist:
             raw = bud_hist.raw_on(aid, d, cur)
             val = transform(raw) if raw and raw > 0 else 0
         elif cur > 0:
