@@ -29,7 +29,8 @@ BUDGET_HIST_DAYS_DEFAULT = 180
 def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budget_map,
                      transform, start_iso, end_iso, req_lib, log=None,
                      id_col="adset_id", tol=0.5, dry_run=False, extra_cols=(),
-                     reliable_from=None, skip_hist_ids=(), today_iso=None):
+                     reliable_from=None, skip_hist_ids=(), today_iso=None,
+                     distrust_stale_hist=False):
     """[start_iso, end_iso] 구간 저장행의 budget_col 을 activities 재구성값으로 교정.
        - has_events_for(세트)=True → raw_on 재구성값
        - False & 현재예산>0        → 현재값(변경 없음 = 평탄)
@@ -42,6 +43,9 @@ def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budge
          기간 배수만큼 부풀려진다. 이 세트들은 현재값(budget_map)으로만 채운다.
        today_iso (YYYY-MM-DD): '오늘'. 오늘 행은 재구성보다 현재값을 우선한다 —
          메타 activities 가 최근 변경을 누락해도 예산 컬럼이 '지금 값'을 보이게.
+       distrust_stale_hist: True 면 '오늘 재구성값 ≠ 현재값'인 세트의 재구성을 통째로 버린다
+         (BudgetHistory.trustworthy_now 참고). today_iso 가 있어야 판정할 수 있다.
+         이력이 불완전한 세트를 오늘만 고치면 어제까지 옛 값이 남아 없던 증감 테두리가 생긴다.
 
        reliable_from (YYYY-MM-DD): activities 를 '완전하다'고 믿는 시작일.
          ★ 이 날짜 이전(=오래된 구간)에서는 저장값이 이미 있으면(>0) 덮어쓰지 않는다.
@@ -72,6 +76,17 @@ def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budge
 
     updates = []
     kept = 0
+    _trust = {}   # 세트별 '재구성을 믿어도 되나' 캐시
+
+    def _hist_ok(aid, cur):
+        if not (distrust_stale_hist and today_iso):
+            return True
+        v = _trust.get(aid)
+        if v is None:
+            v = bud_hist.trustworthy_now(aid, today_iso, cur)
+            _trust[aid] = v
+        return v
+
     for r in rows:
         aid = str(r.get(id_col))
         d = r.get("date")
@@ -86,7 +101,8 @@ def reconcile_budget(sb_base_url, sb_headers, table, budget_col, bud_hist, budge
             if _sv0 > 0 and not bud_hist.has_event_on(aid, d):
                 kept += 1
                 continue
-        _use_hist = bud_hist.has_events_for(aid) and aid not in skip_hist_ids
+        _use_hist = (bud_hist.has_events_for(aid) and aid not in skip_hist_ids
+                     and _hist_ok(aid, cur))
         if today_iso and d == today_iso and cur > 0:
             val = transform(cur)          # 오늘 = 지금 메타값 (재구성보다 우선)
         elif _use_hist:

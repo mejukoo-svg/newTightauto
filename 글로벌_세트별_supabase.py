@@ -992,6 +992,16 @@ def main():
     #      · 매출: mp_value_map(건별 통화→USD 환산)을 세트 단위로 합산(mp country 무시).
     #      · 지출/지표: Meta breakdown 행들을 비한국(KR viewer 제외)만 합산.
     log.info(f"\n5단계: 병합 (캠페인명 기반 country)")
+    # 세트별 '재구성을 믿어도 되나' 판정 캐시
+    _hist_ok_memo = {}
+
+    def _hist_ok(asid, cur_raw):
+        v = _hist_ok_memo.get(asid)
+        if v is None:
+            v = bud_hist.trustworthy_now(asid, _be, cur_raw)
+            _hist_ok_memo[asid] = v
+        return v
+
     records = []
     matched_local = 0.0  # 진단용: adset_id 매칭에 성공해 귀속된 mp 매출(USD) 합
     # mp (date, adset) → USD 매출/건수 (mp country 무시하고 세트 단위 합산)
@@ -1051,7 +1061,10 @@ def main():
             # ★ 오늘 칸은 언제나 '지금 메타에 설정된 값'. activities 재구성은 최근 변경을
             #   조용히 누락해 증액을 며칠째 못 따라가는 일이 있다(국내와 동일 실측).
             # ★ 총예산(일정) 세트는 이벤트 값이 총예산이라 재구성 자체를 쓰지 않는다.
-            _use_hist = bud_hist.has_events_for(asid) and asid not in LIFETIME_SETS
+            #   재구성이 '지금 값'조차 못 맞추면 이력이 불완전한 것이므로 통째로 버린다
+            #   (국내와 동일 — 안 그러면 없던 증감 테두리가 오늘 칸에 그려진다).
+            _use_hist = (bud_hist.has_events_for(asid) and asid not in LIFETIME_SETS
+                         and _hist_ok(asid, budget_raw_cur))
             if iso_date == _be and budget_cur > 0:
                 budget_val = budget_cur
             elif iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
@@ -1126,7 +1139,7 @@ def main():
                          bud_hist, budget_map, lambda raw: round(raw / 100, 2),
                          _bs, _be2, req_lib, log, tol=0.01, extra_cols=("country",),
                          reliable_from=_rel_from,
-                         skip_hist_ids=LIFETIME_SETS, today_iso=_be2)
+                         skip_hist_ids=LIFETIME_SETS, today_iso=_be2, distrust_stale_hist=True)
     except Exception as _e:
         log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 

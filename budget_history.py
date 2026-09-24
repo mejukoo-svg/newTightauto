@@ -174,6 +174,25 @@ class BudgetHistory:
         de = self._day_end(date_str)
         return any(d0 <= ts <= de for ts, _o, _n in evs)
 
+    def trustworthy_now(self, adset_id, date_str, cur_raw):
+        """이 세트의 재구성을 믿어도 되나 — '오늘' 재구성값이 지금 실제 예산과 같은가.
+
+           메타 activities 는 이벤트를 조용히 누락한다(모듈 docstring 실측). 누락되면
+           재구성이 옛 값에 고정되는데, 그걸 그대로 쓰면 며칠~몇 달 전 예산이 화면에 남는다.
+           실측(2026-09-24):
+             · 120247521906330231 — 09-23·09-24 두 번 +20% 적용했는데 activities 의
+               마지막 이벤트는 09-15(→180,000). 재구성 180,000 vs 실제 259,200.
+             · 120245541416550231 — activities 의 유일한 이벤트가 03-29(→360,000).
+               재구성 360,000 vs 실제 150,000. 반 년 묵은 값이 화면에 떠 있었다.
+
+           재구성이 '지금'을 못 맞추면 그 세트의 이력은 불완전하다는 뜻이므로 통째로 쓰지 않는다.
+           (현재값만 알면 평탄하게라도 옳은 값을 보여줄 수 있다. 틀린 이력으로 그린 증감
+            테두리는 '오늘 갑자기 −58% 감액'처럼 없던 사건을 만들어낸다.)
+           cur_raw 를 모르면(0) 판단할 수 없으니 예전처럼 재구성을 쓴다."""
+        if not cur_raw or cur_raw <= 0:
+            return True
+        return self.raw_on(adset_id, date_str, cur_raw) == cur_raw
+
     def reliable_from(self, today):
         """'재구성이 완전하다'고 볼 수 있는 시작일(YYYY-MM-DD). today 는 date/datetime."""
         return (today - timedelta(days=RELIABLE_DAYS)).strftime("%Y-%m-%d")

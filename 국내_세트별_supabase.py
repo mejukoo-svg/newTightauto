@@ -1092,6 +1092,16 @@ def main():
     records = []
     product_stats = defaultdict(lambda: {"spend": 0, "revenue": 0, "count": 0})
 
+    # 세트별 '재구성을 믿어도 되나' 판정 캐시 (같은 세트를 날짜 수만큼 다시 묻지 않도록)
+    _hist_ok_memo = {}
+
+    def _hist_ok(asid, cur_raw):
+        v = _hist_ok_memo.get(asid)
+        if v is None:
+            v = bud_hist.trustworthy_now(asid, _pe, cur_raw)
+            _hist_ok_memo[asid] = v
+        return v
+
     for dk, rows in meta_date_data.items():
         # dk → ISO date
         parts = dk.split("/")
@@ -1145,7 +1155,11 @@ def main():
             #   재구성은 과거 날짜의 증감 테두리를 복원하는 용도로만 남긴다.
             # ★ 총예산(일정) 세트는 재구성 자체를 쓰지 않는다 — activities 이벤트 값이
             #   일예산이 아니라 총예산이라 기간 배수만큼 부풀려진다(LIFETIME_SETS).
-            _use_hist = bud_hist.has_events_for(asid) and asid not in LIFETIME_SETS
+            #   재구성이 '지금 값'조차 못 맞추는 세트는 이력이 불완전한 것이므로 통째로 버린다 —
+            #   안 그러면 오늘만 현재값이 되고 어제까지는 옛 값이라, 있지도 않은 증감 테두리가
+            #   오늘 칸에 그려진다(실측 120245541416550231: 재구성 360,000 vs 실제 150,000).
+            _use_hist = (bud_hist.has_events_for(asid) and asid not in LIFETIME_SETS
+                         and _hist_ok(asid, budget_raw_cur))
             if iso_date == _pe and budget_cur > 0:
                 budget_val = budget_cur
             elif iso_date < _rel_from and _pb and not bud_hist.has_event_on(asid, iso_date):
@@ -1223,7 +1237,7 @@ def main():
         reconcile_budget(sb.base_url, sb.headers, "ad_performance_daily", "budget",
                          bud_hist, budget_map, lambda raw: int(round(raw)),
                          _bs, _be2, req_lib, log, tol=0.5, reliable_from=_rel_from,
-                         skip_hist_ids=LIFETIME_SETS, today_iso=_be2)
+                         skip_hist_ids=LIFETIME_SETS, today_iso=_be2, distrust_stale_hist=True)
     except Exception as _e:
         log.warning(f"  ⚠️ 예산 자가교정 스킵: {type(_e).__name__}: {_e}")
 
