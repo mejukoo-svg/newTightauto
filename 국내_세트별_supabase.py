@@ -168,8 +168,21 @@ def _strip_leading_emojis(text):
     return text[i:].strip()
 
 
+# 상품이 아니라 '운영 목적'을 적어 둔 토큰 — 상품 후보에서 건너뛴다.
+#   캠페인이 상품 단위가 아니라 운영 단위로 묶인 경우가 있다. 예) '심야만_캠페인_260922' 에는
+#   무당·무녀·재회 세트가 함께 들어간다. 첫 토큰을 그대로 상품으로 쓰면 추이차트에 '📦 심야만'
+#   이라는 가짜 상품 그룹이 생겨 원본 세트와 떨어져 버렸다(2026-09-25 수정).
+#   이런 토큰은 건너뛰고 세트 이름에서 진짜 상품을 찾는다 —
+#   '무당_260814_aiUGC이불체험_전세계한국어_심야만' → 무당.
+_NON_PRODUCT_RX = re.compile(
+    r"^(심야|야간|주간|오전|오후|주말|평일)(만|타임|캠페인|테스트|시간제외(테스트)?)?$"
+    r"|^(심야|야간)?캠페인$|^(테스트|test|실험|임시)$",
+    re.IGNORECASE,
+)
+
+
 def extract_product(adset_name, campaign_name=""):
-    """캠페인 이름에서 상품명 추출. 순수 숫자(날짜)는 건너뛰기."""
+    """캠페인 이름에서 상품명 추출. 순수 숫자(날짜)·운영용 토큰은 건너뛰기."""
     for source in [campaign_name, adset_name]:
         if not source:
             continue
@@ -184,6 +197,9 @@ def extract_product(adset_name, campaign_name=""):
             # 순수 숫자(0626, 1003, 260213 등 날짜)는 건너뛰기
             if re.match(r"^\d+$", token):
                 continue
+            # 운영용 토큰이면 이 소스는 포기하고 다음 소스(세트 이름)에서 찾는다.
+            if _NON_PRODUCT_RX.match(token):
+                break
             return token
     return "기타"
 

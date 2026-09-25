@@ -152,7 +152,11 @@ SKIP_WORDS = {"tw","kr","hk","my","sg","id","jp","th","vn","ph","asia","taiwan",
     "singapore","malaysia","thailand","broad","interest","lookalike","retarget","custom","asc","cbo","abo",
     "dpa","advantage","campaign","adset","ad","ads","set","purchase","conversion","traffic",
     "v1","v2","v3","v4","v5","test","new","old","copy","sajutight","ttsaju","saju","tight",
-    "대만","일본","홍콩","한국","국내","글로벌","태국","台灣","台湾","日本","香港"}
+    "대만","일본","홍콩","한국","국내","글로벌","태국","台灣","台湾","日本","香港",
+    # 상품이 아니라 '운영 목적'을 적어 둔 캠페인 토큰 — 건너뛰고 세트 이름에서 상품을 찾는다.
+    #   '대만_심야캠페인' 에는 무당·무녀·스님·외모정병 세트가 함께 들어간다. 이걸 상품으로 쓰면
+    #   추이차트에 '📦 심야캠페인' 가짜 그룹이 생겨 원본 세트와 떨어진다(2026-09-25 수정).
+    "심야","심야만","심야캠페인","야간","야간캠페인","주간","오전","오후","주말","평일","캠페인","실험","임시"}
 
 def extract_product(adset_name, campaign_name=None):
     for name in [campaign_name, adset_name]:
