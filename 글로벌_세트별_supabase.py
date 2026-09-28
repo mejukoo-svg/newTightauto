@@ -790,12 +790,20 @@ def main():
         else:
             mp_raw.extend(res)
         chunk_start = chunk_end + timedelta(days=1)
-    today_res = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
-    if today_res is None:
-        log.error(f"  ❌ Mixpanel 수집 실패: 오늘({TODAY:%Y-%m-%d}) → 기존 매출 보존")
-        _mark_uncovered(TODAY, TODAY)
+    # 오늘(KST) 별도 호출 — MP export 의 from/to 는 UTC 날짜라, KST 00:00~09:00 엔 KST 오늘이 아직 UTC 미래 날짜여서
+    #   export 가 실패하고 '수집 실패 → 기존 매출 보존'으로 빠져 오늘 매출이 아침마다 옛 값에 고정됐다(2026-09-28 발견).
+    #   그 시간대의 KST 오늘 결제는 위 청크(to=어제 KST = 오늘 UTC)에 이미 들어 있으므로 호출을 건너뛴다.
+    #   (국내_세트별_supabase.py 의 mp_today_str <= utc_today 처리와 동일)
+    _utc_today = datetime.fromtimestamp(SNAPSHOT_TS if SNAPSHOT_TS > 0 else time.time(), timezone.utc).strftime('%Y-%m-%d')
+    if TODAY.strftime('%Y-%m-%d') <= _utc_today:
+        today_res = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
+        if today_res is None:
+            log.error(f"  ❌ Mixpanel 수집 실패: 오늘({TODAY:%Y-%m-%d}) → 기존 매출 보존")
+            _mark_uncovered(TODAY, TODAY)
+        else:
+            mp_raw.extend(today_res)
     else:
-        mp_raw.extend(today_res)
+        log.info(f"  ── 오늘({TODAY:%Y-%m-%d} KST)은 아직 UTC {_utc_today} — 앞 청크에 포함, 별도 호출 생략 ──")
     # 스냅샷 컷오프 — 기준시각 이후 결제 제외 (세트·소재 동일 시점 정합)
     #   결제시각(ts)뿐 아니라 Mixpanel 처리시각(pt=mp_processing_time_ms)도 자른다(2026-09-28): 세트·소재 job 이
     #   export 를 서로 다른 시각에 호출하면, 결제시각은 기준 이전이지만 늦게 적재된 이벤트가 나중 job 에만 잡혀
