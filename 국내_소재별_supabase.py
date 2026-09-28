@@ -262,7 +262,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     a_val = float(raw_a) if raw_a else 0.0
                     v_val = float(raw_v) if raw_v else 0.0
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'utm_content':ut or '','utm_term':uterm or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_id':props.get('order_id') or ''})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'pt':int(props.get('mp_processing_time_ms') or 0)//1000,'utm_content':ut or '','utm_term':uterm or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_id':props.get('order_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -415,9 +415,12 @@ def main():
     today_data = fetch_mixpanel_data(TODAY.strftime('%Y-%m-%d'), TODAY.strftime('%Y-%m-%d'))
     if today_data: mp_raw.extend(today_data)
     # 스냅샷 컷오프 — 기준시각 이후 결제 제외 (세트·소재 동일 시점 정합)
+    #   결제시각(ts)뿐 아니라 Mixpanel 처리시각(pt=mp_processing_time_ms)도 자른다(2026-09-28): 세트·소재 job 이
+    #   export 를 서로 다른 시각에 호출하면, 결제시각은 기준 이전이지만 늦게 적재된 이벤트가 나중 job 에만 잡혀
+    #   하루 1~3건씩 어긋났다. 처리시각까지 자르면 두 job 이 같은 이벤트 집합을 본다. (pt 없으면 결제시각만)
     if SNAPSHOT_TS > 0:
         _bn = len(mp_raw)
-        mp_raw = [r for r in mp_raw if not r.get('ts') or r['ts'] <= SNAPSHOT_TS]
+        mp_raw = [r for r in mp_raw if (not r.get('ts') or r['ts'] <= SNAPSHOT_TS) and (not r.get('pt') or r['pt'] <= SNAPSHOT_TS)]
         log.info(f"  ⏱️ 스냅샷 컷오프 {datetime.fromtimestamp(SNAPSHOT_TS, KST):%m-%d %H:%M} KST: {_bn} → {len(mp_raw)}건")
     log.info(f"✅ Mixpanel: {len(mp_raw)}건")
 
@@ -509,8 +512,12 @@ def main():
         # 4) 세트 안에서 소재 배분 — utm_content 가 그 세트의 그날 지출 소재면 그 소재, 아니면 '(소재 미상)'
         df_d['ad_key'] = [c if (c and AD_DAY_ADSET.get((d, c)) == t) else UNATTR_PREFIX + t
                           for d, t, c in zip(df_d['date'], df_d['utm_term'].astype(str), df_d['utm_content'].astype(str))]
-        _un = df_d['ad_key'].str.startswith(UNATTR_PREFIX)
-        log.info(f"  🧩 소재 배분: 소재 매칭 {int((~_un).sum())}건 · (소재 미상) {int(_un.sum())}건 (₩{int(df_d.loc[_un, 'revenue'].sum()):,})")
+        # 진단 로그 — 실제 행이 되는 범위(그날 Meta 행이 있는 세트)만 센다(창 밖 날짜·지출 없는 세트 결제는 세트·소재 모두 버림)
+        _SETDAY = {(d, a) for (d, _ad), a in AD_DAY_ADSET.items()}
+        _inrow = [(d, t) in _SETDAY for d, t in zip(df_d['date'], df_d['utm_term'].astype(str))]
+        _un = df_d['ad_key'].str.startswith(UNATTR_PREFIX) & pd.Series(_inrow, index=df_d.index)
+        _rv = df_d.loc[_un, 'revenue'].sum(); _tv = df_d.loc[pd.Series(_inrow, index=df_d.index), 'revenue'].sum()
+        log.info(f"  🧩 소재 배분(행 대상 {sum(_inrow)}건): (소재 미상) {int(_un.sum())}건 · ₩{int(_rv):,} ({(_rv / _tv * 100) if _tv else 0:.1f}%)")
         for (d, ak), v in df_d.groupby(['date','ad_key'])['revenue'].sum().items():
             if d and ak: mp_value_map[(d, str(ak))] = v
         for (d, ak), c in df_d.groupby(['date','ad_key']).size().items():
@@ -522,10 +529,11 @@ def main():
     #   (spend 등 Meta-side 지표는 항상 최신값으로 갱신 — 가드 대상은 매출/구매수뿐)
     #   ※ 이 가드가 없어 7/4~7/21 구간이 KST 경계 누락값(~70%)으로 덮여 고착됐다.
     #   ★ (2026-09-28) 소재 단위 → 세트 단위 판정으로 변경. 매출이 세트 안에서 소재↔(소재 미상)로 옮겨가면
-    #     소재 단위 가드는 옛 값을 붙잡아 이중계상한다. 그래서 '세트의 새 구매수 합 < 기존 합'일 때만
-    #     그 세트 소재들(+(소재 미상))의 기존 값을 통째로 보존한다.
+    #     소재 단위 가드는 옛 값을 붙잡아 이중계상한다. 그래서 '세트의 새 구매수 합 < 세트 테이블(ad_performance_daily)
+    #     기존 구매수'일 때만 — 즉 세트 로더의 가드가 발동하는 것과 같은 조건에서만 — 그 세트 소재들의 기존 값을 보존한다.
+    #     (세트·소재 job 은 동시에 시작해 둘 다 이번 회차 쓰기 전 상태를 읽는다)
     prev_attr = {}
-    prev_set_cnt = defaultdict(int)   # (date, adset_id) → 기존 저장 구매수 합
+    prev_set_cnt = defaultdict(int)   # (date, adset_id) → 세트 테이블 기존 구매수
     _ps = DATA_REFRESH_START.strftime("%Y-%m-%d")
     _pe = TODAY.strftime("%Y-%m-%d")
     _off = 0
@@ -542,11 +550,26 @@ def main():
         for _row in _chunk:
             prev_attr[(_row.get("date"), str(_row.get("ad_id")))] = (
                 int(_row.get("results_mp") or 0), float(_row.get("revenue") or 0.0))
-            prev_set_cnt[(_row.get("date"), str(_row.get("adset_id")))] += int(_row.get("results_mp") or 0)
         if len(_chunk) < 1000:
             break
         _off += 1000
-    log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 로드")
+    _off = 0
+    while True:
+        _u = (f"{sb.base_url}/rest/v1/ad_performance_daily?select=date,adset_id,results_mp"
+              f"&date=gte.{_ps}&date=lte.{_pe}&order=date.asc,adset_id.asc&limit=1000&offset={_off}")
+        try:
+            _chunk = req_lib.get(_u, headers={**sb.headers, "Prefer": ""}, timeout=60).json()
+        except Exception as _e:
+            log.warning(f"  ⚠️ 세트 기존 귀속 읽기 실패(가드 비활성화): {_e}")
+            _chunk = []
+        if not isinstance(_chunk, list) or not _chunk:
+            break
+        for _row in _chunk:
+            prev_set_cnt[(_row.get("date"), str(_row.get("adset_id")))] = int(_row.get("results_mp") or 0)
+        if len(_chunk) < 1000:
+            break
+        _off += 1000
+    log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 · 세트 {len(prev_set_cnt)}건 로드")
 
     # 4) 병합
     log.info(f"\n4단계: 병합")

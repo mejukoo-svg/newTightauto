@@ -620,6 +620,7 @@ def fetch_mixpanel_data(from_date, to_date):
                         "distinct_id": props.get("distinct_id"),
                         "date": ds,
                         "ts": int(ts) if ts else 0,
+                        "pt": int(props.get("mp_processing_time_ms") or 0) // 1000,
                         "utm_term": ut or "",
                         "utm_source": us or "",
                         "amount": amount_val,
@@ -950,9 +951,12 @@ def main():
             mp_raw.extend(today_data)
 
     # 스냅샷 컷오프 — 기준시각 이후 결제 제외 (세트·소재 동일 시점 정합)
+    #   결제시각(ts)뿐 아니라 Mixpanel 처리시각(pt=mp_processing_time_ms)도 자른다(2026-09-28): 세트·소재 job 이
+    #   export 를 서로 다른 시각에 호출하면, 결제시각은 기준 이전이지만 늦게 적재된 이벤트가 나중 job 에만 잡혀
+    #   하루 1~3건씩 어긋났다. 처리시각까지 자르면 두 job 이 같은 이벤트 집합을 본다. (pt 없으면 결제시각만)
     if SNAPSHOT_TS > 0:
         _bn = len(mp_raw)
-        mp_raw = [r for r in mp_raw if not r.get('ts') or r['ts'] <= SNAPSHOT_TS]
+        mp_raw = [r for r in mp_raw if (not r.get('ts') or r['ts'] <= SNAPSHOT_TS) and (not r.get('pt') or r['pt'] <= SNAPSHOT_TS)]
         log.info(f"  ⏱️ 스냅샷 컷오프 {datetime.fromtimestamp(SNAPSHOT_TS, KST):%m-%d %H:%M} KST: {_bn} → {len(mp_raw)}건")
     log.info(f"✅ Mixpanel 총: {len(mp_raw)}건")
 

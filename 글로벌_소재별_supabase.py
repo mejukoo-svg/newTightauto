@@ -421,7 +421,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     cur_explicit = str(cur_explicit).strip().upper() if cur_explicit else ''
                     # 주문번호: 대만=merchant_uid/주문번호, 한국=order_id. 중복 결제 판단 1차 키.
                     order_no = props.get('merchant_uid') or props.get('주문번호') or props.get('order_id') or props.get('imp_uid') or ''
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'utm_content':ut or '','utm_term':uterm or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip(),'cur_explicit':cur_explicit})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'pt':int(props.get('mp_processing_time_ms') or 0)//1000,'utm_content':ut or '','utm_term':uterm or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_no':str(order_no).strip(),'country':str(country).strip(),'cur_explicit':cur_explicit})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -628,9 +628,12 @@ def main():
     else:
         mp_raw.extend(today_res)
     # 스냅샷 컷오프 — 기준시각 이후 결제 제외 (세트·소재 동일 시점 정합)
+    #   결제시각(ts)뿐 아니라 Mixpanel 처리시각(pt=mp_processing_time_ms)도 자른다(2026-09-28): 세트·소재 job 이
+    #   export 를 서로 다른 시각에 호출하면, 결제시각은 기준 이전이지만 늦게 적재된 이벤트가 나중 job 에만 잡혀
+    #   하루 1~3건씩 어긋났다. 처리시각까지 자르면 두 job 이 같은 이벤트 집합을 본다. (pt 없으면 결제시각만)
     if SNAPSHOT_TS > 0:
         _bn = len(mp_raw)
-        mp_raw = [r for r in mp_raw if not r.get('ts') or r['ts'] <= SNAPSHOT_TS]
+        mp_raw = [r for r in mp_raw if (not r.get('ts') or r['ts'] <= SNAPSHOT_TS) and (not r.get('pt') or r['pt'] <= SNAPSHOT_TS)]
         log.info(f"  ⏱️ 스냅샷 컷오프 {datetime.fromtimestamp(SNAPSHOT_TS, KST):%m-%d %H:%M} KST: {_bn} → {len(mp_raw)}건")
     log.info(f"✅ Mixpanel: {len(mp_raw)}건" + (f" · ⚠️ 수집실패 보존 {len(uncovered)}일" if uncovered else ""))
 
@@ -749,8 +752,12 @@ def main():
         # 3) 세트 안에서 소재 배분 — utm_content 가 그 세트의 그날 지출 소재면 그 소재, 아니면 '(소재 미상)'
         df_d['ad_key'] = [c if (c and AD_DAY_ADSET.get((d, c)) == t) else UNATTR_PREFIX + t
                           for d, t, c in zip(df_d['date'], df_d['utm_term'].astype(str), df_d['utm_content'].astype(str))]
-        _un = df_d['ad_key'].str.startswith(UNATTR_PREFIX)
-        log.info(f"  🧩 소재 배분: 소재 매칭 {int((~_un).sum())}건 · (소재 미상) {int(_un.sum())}건 (${float(df_d.loc[_un, 'rev_usd'].sum()):,.0f})")
+        # 진단 로그 — 실제 행이 되는 범위(그날 Meta 행이 있는 세트)만 센다(창 밖 날짜·지출 없는 세트 결제는 세트·소재 모두 버림)
+        _SETDAY = {(d, a) for (d, _ad), a in AD_DAY_ADSET.items()}
+        _inrow = [(d, t) in _SETDAY for d, t in zip(df_d['date'], df_d['utm_term'].astype(str))]
+        _un = df_d['ad_key'].str.startswith(UNATTR_PREFIX) & pd.Series(_inrow, index=df_d.index)
+        _rv = df_d.loc[_un, 'rev_usd'].sum(); _tv = df_d.loc[pd.Series(_inrow, index=df_d.index), 'rev_usd'].sum()
+        log.info(f"  🧩 소재 배분(행 대상 {sum(_inrow)}건): (소재 미상) {int(_un.sum())}건 · ${float(_rv):,.0f} ({(_rv / _tv * 100) if _tv else 0:.1f}%)")
         for (d, ak, cc), v in df_d.groupby(['date','ad_key','country'])['rev_usd'].sum().items():
             if d and ak: mp_value_map[(d, str(ak), str(cc))] = v   # ★ USD 단위
         for (d, ak, cc), c in df_d.groupby(['date','ad_key','country']).size().items():
