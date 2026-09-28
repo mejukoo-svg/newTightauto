@@ -529,11 +529,13 @@ def main():
     #   (spend 등 Meta-side 지표는 항상 최신값으로 갱신 — 가드 대상은 매출/구매수뿐)
     #   ※ 이 가드가 없어 7/4~7/21 구간이 KST 경계 누락값(~70%)으로 덮여 고착됐다.
     #   ★ (2026-09-28) 소재 단위 → 세트 단위 판정으로 변경. 매출이 세트 안에서 소재↔(소재 미상)로 옮겨가면
-    #     소재 단위 가드는 옛 값을 붙잡아 이중계상한다. 그래서 '세트의 새 구매수 합 < 세트 테이블(ad_performance_daily)
-    #     기존 구매수'일 때만 — 즉 세트 로더의 가드가 발동하는 것과 같은 조건에서만 — 그 세트 소재들의 기존 값을 보존한다.
+    #     소재 단위 가드는 옛 값을 붙잡아 이중계상한다. 그래서 판정은 세트 로더와 같은 조건 —
+    #     '세트의 새 구매수 합 < 세트 테이블(ad_performance_daily) 기존 구매수' — 으로 하고, 발동하면 세트 로더가
+    #     기존 세트 값을 유지하므로 소재 쪽은 새 배분을 그대로 쓰되 (기존 세트 값 − 새 합) 차이를 그 세트의
+    #     '(소재 미상)' 행에 얹어 소재 소계 = 세트 값을 맞춘다.
     #     (세트·소재 job 은 동시에 시작해 둘 다 이번 회차 쓰기 전 상태를 읽는다)
     prev_attr = {}
-    prev_set_cnt = defaultdict(int)   # (date, adset_id) → 세트 테이블 기존 구매수
+    prev_set = {}   # (date, adset_id) → 세트 테이블 기존 (구매수, 매출)
     _ps = DATA_REFRESH_START.strftime("%Y-%m-%d")
     _pe = TODAY.strftime("%Y-%m-%d")
     _off = 0
@@ -555,7 +557,7 @@ def main():
         _off += 1000
     _off = 0
     while True:
-        _u = (f"{sb.base_url}/rest/v1/ad_performance_daily?select=date,adset_id,results_mp"
+        _u = (f"{sb.base_url}/rest/v1/ad_performance_daily?select=date,adset_id,results_mp,revenue"
               f"&date=gte.{_ps}&date=lte.{_pe}&order=date.asc,adset_id.asc&limit=1000&offset={_off}")
         try:
             _chunk = req_lib.get(_u, headers={**sb.headers, "Prefer": ""}, timeout=60).json()
@@ -565,11 +567,12 @@ def main():
         if not isinstance(_chunk, list) or not _chunk:
             break
         for _row in _chunk:
-            prev_set_cnt[(_row.get("date"), str(_row.get("adset_id")))] = int(_row.get("results_mp") or 0)
+            prev_set[(_row.get("date"), str(_row.get("adset_id")))] = (
+                int(_row.get("results_mp") or 0), float(_row.get("revenue") or 0.0))
         if len(_chunk) < 1000:
             break
         _off += 1000
-    log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 · 세트 {len(prev_set_cnt)}건 로드")
+    log.info(f"  🛡️ only-raise 가드: 기존 귀속 {len(prev_attr)}건 · 세트 {len(prev_set)}건 로드")
 
     # 4) 병합
     log.info(f"\n4단계: 병합")
@@ -578,16 +581,19 @@ def main():
     n_unattr = 0
     for dk, rows in meta_data.items():
         parts = dk.split('/'); iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
-        # 세트 단위 only-raise 판정: 이 세트의 새 구매수 합(소재 + (소재 미상)) < 기존 합이면 세트 통째로 기존 보존
+        # 세트 단위 only-raise 판정 — 세트 로더와 같은 조건: 새 구매수 합(소재 + (소재 미상)) < 세트 테이블 기존 구매수.
+        #   발동 시 세트 로더는 기존 (구매수, 매출)을 유지 → 그 차이를 (소재 미상)에 얹을 보정값으로 기록.
         rep_by_adset = {}
         for mr in rows:
             if mr.get('adset_id'): rep_by_adset.setdefault(str(mr['adset_id']), mr)
-        guard_set = set()
+        guard_adj = {}   # adset_id → (구매수 보정, 매출 보정)
         for asid in rep_by_adset:
-            new_cnt = mp_count_map.get((dk, UNATTR_PREFIX + asid), 0) + sum(
-                mp_count_map.get((dk, str(mr['ad_id'])), 0) for mr in rows if str(mr.get('adset_id')) == asid and mr.get('ad_id'))
-            if new_cnt < prev_set_cnt.get((iso_date, asid), 0):
-                guard_set.add(asid)
+            keys = [UNATTR_PREFIX + asid] + [str(mr['ad_id']) for mr in rows if str(mr.get('adset_id')) == asid and mr.get('ad_id')]
+            new_cnt = sum(mp_count_map.get((dk, k), 0) for k in keys)
+            new_rev = sum(float(mp_value_map.get((dk, k), 0.0)) for k in keys)
+            p_cnt, p_rev = prev_set.get((iso_date, asid), (0, 0.0))
+            if new_cnt < p_cnt:
+                guard_adj[asid] = (p_cnt - new_cnt, p_rev - new_rev)
         for mr in rows:
             ad_id = mr['ad_id']
             if not ad_id: continue
@@ -595,11 +601,6 @@ def main():
             # ★ Mixpanel 매칭: (date_key, ad_id)
             mpc = mp_count_map.get((dk, ad_id), 0)
             mpv = mp_value_map.get((dk, ad_id), 0.0)
-            # ★ only-raise 가드(세트 단위): 세트 합이 기존보다 낮으면(부실 fetch 등) 기존 보존
-            if str(mr['adset_id']) in guard_set:
-                _prev = prev_attr.get((iso_date, str(ad_id)), (0, 0.0))
-                mpc, mpv = _prev[0], _prev[1]
-                _guarded += 1
             revenue = float(mpv)
             profit = revenue - spend
             roas = (revenue / spend * 100) if spend > 0 else 0
@@ -628,10 +629,10 @@ def main():
             ak = UNATTR_PREFIX + asid
             mpc = mp_count_map.get((dk, ak), 0)
             mpv = float(mp_value_map.get((dk, ak), 0.0))
-            if asid in guard_set:
-                _prev = prev_attr.get((iso_date, ak), (0, 0.0))
-                mpc, mpv = _prev[0], _prev[1]
-            if mpv <= 0 and mpc <= 0: continue
+            if asid in guard_adj:   # only-raise 가드 발동 세트 — 세트 로더가 유지한 기존 값과의 차이를 여기 얹는다
+                mpc += guard_adj[asid][0]; mpv += guard_adj[asid][1]
+                _guarded += 1
+            if mpv == 0 and mpc == 0: continue
             budget_raw = budget_map.get(r0['adset_id'], 0)
             records.append({
                 'date': iso_date, 'ad_id': ak,
@@ -645,7 +646,7 @@ def main():
                 'roas': 0, 'cvr': 0, 'budget': budget_raw if budget_raw > 0 else 0,
             })
             n_unattr += 1
-    log.info(f"✅ 레코드: {len(records)}개 (그중 (소재 미상) {n_unattr}행)" + (f" · 🛡️ 기존 귀속 보존 {_guarded}행" if _guarded else ""))
+    log.info(f"✅ 레코드: {len(records)}개 (그중 (소재 미상) {n_unattr}행)" + (f" · 🛡️ 가드 발동 세트 {_guarded}개(차이를 (소재 미상)에 반영)" if _guarded else ""))
 
     # 5) Supabase upsert
     log.info(f"\n5단계: Supabase upsert ({len(records)}행)")
