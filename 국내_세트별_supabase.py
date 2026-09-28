@@ -102,7 +102,11 @@ def is_meta_source(src):
 
 # 실행 설정
 KST = timezone(timedelta(hours=9))
-TODAY = datetime.now(KST).replace(tzinfo=None)
+# ★ 스냅샷 기준시각 (2026-09-28): 전체 파이프라인(supabase.yml)이 세트·소재 job 에 같은 SNAPSHOT_TS(epoch초)를 넘긴다.
+#   두 로더가 같은 시각을 "지금"으로 보고 그 이후 MP 결제는 이번 회차에서 제외 → 세트 매출 = 소재 소계 (오늘 칸 포함).
+#   미설정(단독 실행)이면 기존대로 실행 시각.
+SNAPSHOT_TS = int(os.environ.get("SNAPSHOT_TS", "0") or 0)
+TODAY = (datetime.fromtimestamp(SNAPSHOT_TS, KST) if SNAPSHOT_TS > 0 else datetime.now(KST)).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2025, 1, 1)
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
@@ -945,6 +949,11 @@ def main():
         if today_data:
             mp_raw.extend(today_data)
 
+    # 스냅샷 컷오프 — 기준시각 이후 결제 제외 (세트·소재 동일 시점 정합)
+    if SNAPSHOT_TS > 0:
+        _bn = len(mp_raw)
+        mp_raw = [r for r in mp_raw if not r.get('ts') or r['ts'] <= SNAPSHOT_TS]
+        log.info(f"  ⏱️ 스냅샷 컷오프 {datetime.fromtimestamp(SNAPSHOT_TS, KST):%m-%d %H:%M} KST: {_bn} → {len(mp_raw)}건")
     log.info(f"✅ Mixpanel 총: {len(mp_raw)}건")
 
     # Mixpanel 집계: (date, adset_id) → revenue, count
@@ -1019,7 +1028,7 @@ def main():
         #   · 1일창(86400s): 접점~결제 간격 24h 이내만(과거 광고 과귀속 방지).
         #   · 백필된 행은 다음 결제의 접점으로 쓰지 않음(체이닝 24h 초과 확장 방지).
         #   과거 글로벌은 무제한 백필로 Stripe 초과(over-attribution)해 비활성화됨(2026-05-06) →
-        #   여기선 라스트터치+24h 로 좁혀 재도입. 세트 전용(utm_term=adset_id)이라 소재별엔 무영향.
+        #   여기선 라스트터치+24h 로 좁혀 재도입. 소재별(국내_소재별_supabase.py)도 같은 규칙을 ad_id 로 적용(2026-09-28).
         BACKFILL_WINDOW_SEC = 86400
         if "ts" not in df_d.columns:
             df_d["ts"] = 0
