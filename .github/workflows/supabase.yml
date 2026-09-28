@@ -86,11 +86,24 @@ jobs:
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
         run: python 국내_소재별_supabase.py
 
+  # ─── 글로벌 스냅샷 기준시각 ───
+  # 세트·소재 job 이 같은 시각을 기준으로 Meta/MP 를 수집하게 해서 세트 매출 = 소재 소계 (오늘 칸 포함).
+  global-snapshot:
+    name: ⏱️ 글로벌 스냅샷 시각
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ts: ${{ steps.ts.outputs.ts }}
+    steps:
+      - id: ts
+        run: echo "ts=$(date +%s)" >> "$GITHUB_OUTPUT"
+
   # ─── 글로벌 (국내와 동시 실행) ───
   global:
     name: 🌏 글로벌 Meta+Stripe
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    needs: global-snapshot
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -112,14 +125,15 @@ jobs:
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+          SNAPSHOT_TS: ${{ needs.global-snapshot.outputs.ts }}
         run: python 글로벌_세트별_supabase.py
 
-  # ─── 글로벌 소재별 (글로벌 세트별 끝나면) ───
+  # ─── 글로벌 소재별 (세트와 동시 실행 · 같은 스냅샷 시각) ───
   global-creative:
     name: 🌏 글로벌 소재별
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    needs: global
+    needs: global-snapshot
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -140,6 +154,7 @@ jobs:
           SUPABASE_DB_SCHEMA: ${{ secrets.SUPABASE_DB_SCHEMA }}
           FULL_REFRESH: ${{ github.event.inputs.full_refresh || 'false' }}
           REFRESH_DAYS: ${{ github.event.inputs.refresh_days || '10' }}
+          SNAPSHOT_TS: ${{ needs.global-snapshot.outputs.ts }}
         run: python 글로벌_소재별_supabase.py
 
   # ─── 밴스드 세트별 (독립 실행) ───

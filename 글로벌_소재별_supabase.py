@@ -86,7 +86,11 @@ def is_meta_source(src):
 KOREA_CC = {"KR", "KOR", "SOUTH KOREA", "KOREA, REPUBLIC OF", "REPUBLIC OF KOREA", "한국", "대한민국"}
 
 KST = timezone(timedelta(hours=9))
-TODAY = datetime.now(KST).replace(tzinfo=None)
+# ★ 스냅샷 기준시각 (2026-09-28): 전체 파이프라인(supabase.yml)이 세트·소재 job 에 같은 SNAPSHOT_TS(epoch초)를 넘긴다.
+#   두 로더가 같은 시각을 "지금"으로 보고 그 이후 MP 결제는 이번 회차에서 제외 → 세트 매출 = 소재 소계 (오늘 칸 포함).
+#   미설정(단독 워크플로·로컬 실행)이면 기존대로 실행 시각.
+SNAPSHOT_TS = int(os.environ.get("SNAPSHOT_TS", "0") or 0)
+TODAY = (datetime.fromtimestamp(SNAPSHOT_TS, KST) if SNAPSHOT_TS > 0 else datetime.now(KST)).replace(tzinfo=None)
 FULL_REFRESH = os.environ.get("FULL_REFRESH", "false").lower() == "true"
 FULL_REFRESH_START = datetime(2025, 12, 1)
 REFRESH_DAYS = int(os.environ.get("REFRESH_DAYS", "10"))
@@ -581,6 +585,11 @@ def main():
         _mark_uncovered(TODAY, TODAY)
     else:
         mp_raw.extend(today_res)
+    # 스냅샷 컷오프 — 기준시각 이후 결제 제외 (세트·소재 동일 시점 정합)
+    if SNAPSHOT_TS > 0:
+        _bn = len(mp_raw)
+        mp_raw = [r for r in mp_raw if not r.get('ts') or r['ts'] <= SNAPSHOT_TS]
+        log.info(f"  ⏱️ 스냅샷 컷오프 {datetime.fromtimestamp(SNAPSHOT_TS, KST):%m-%d %H:%M} KST: {_bn} → {len(mp_raw)}건")
     log.info(f"✅ Mixpanel: {len(mp_raw)}건" + (f" · ⚠️ 수집실패 보존 {len(uncovered)}일" if uncovered else ""))
 
     # 3.5) Stripe 통화 인덱스 — MP 결제의 실제 청구통화를 (amount,시각)으로 건별 복원하기 위함
