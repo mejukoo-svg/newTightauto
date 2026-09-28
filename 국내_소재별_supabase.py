@@ -84,6 +84,10 @@ DATA_REFRESH_START = TODAY - timedelta(days=REFRESH_DAYS - 1)
 # =========================================================
 # 유틸리티
 # =========================================================
+# '(소재 미상)' 행 ad_id 접두어 — 세트에는 귀속되지만 그날 지출 소재로 못 붙인 매출을 세트별로 모은다 (2026-09-28).
+UNATTR_PREFIX = "unattr_"
+UNATTR_AD_NAME = "(소재 미상)"
+
 def clean_id(val):
     if val is None: return ""
     s = str(val).strip()
@@ -245,6 +249,10 @@ def fetch_mixpanel_data(from_date, to_date):
                     ut = None
                     for k in ['utm_content','UTM_Content','UTM Content']:
                         if k in props and props[k]: ut = clean_id(str(props[k]).strip()); break
+                    # utm_term = adset_id — 결제의 세트 귀속(세트 로더와 동일 기준)
+                    uterm = None
+                    for k in ['utm_term','UTM_Term','UTM Term']:
+                        if k in props and props[k]: uterm = clean_id(str(props[k]).strip()); break
                     # 채널 판별용 utm_source (Meta 결제만 귀속)
                     us = ''
                     for k in ['utm_source','UTM_Source','UTM Source']:
@@ -254,7 +262,7 @@ def fetch_mixpanel_data(from_date, to_date):
                     a_val = float(raw_a) if raw_a else 0.0
                     v_val = float(raw_v) if raw_v else 0.0
                     revenue = a_val if a_val > 0 else (v_val if v_val > 0 else 0.0)
-                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'utm_content':ut or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_id':props.get('order_id') or ''})
+                    data.append({'distinct_id':props.get('distinct_id'),'date':ds,'ts':int(ts) if ts else 0,'utm_content':ut or '','utm_term':uterm or '','utm_source':us or '','revenue':revenue,'서비스':props.get('서비스',''),'insert_id':props.get('$insert_id') or props.get('insert_id') or '','order_id':props.get('order_id') or ''})
                 except: pass
             log.info(f"  ✅ 파싱: {len(data)}건")
             return data
@@ -290,6 +298,18 @@ class SupabaseClient:
                 row[k] = v
             clean.append(row)
         return clean
+
+    def delete(self, table, query):
+        """DELETE ... where <query>. query 예: 'date=eq.2026-07-01&ad_id=in.(a,b)'"""
+        url = f"{self.base_url}/rest/v1/{table}?{query}"
+        try:
+            resp = req_lib.delete(url, headers=self.headers, timeout=60)
+            if resp.status_code in [200, 204]:
+                return True
+            log.error(f"  ❌ delete: HTTP {resp.status_code} | {resp.text[:200]}")
+        except Exception as e:
+            log.error(f"  ❌ delete 예외: {e}")
+        return False
 
     def upsert(self, table, records, chunk_size=500):
         url = f"{self.base_url}/rest/v1/{table}"
@@ -401,22 +421,29 @@ def main():
         log.info(f"  ⏱️ 스냅샷 컷오프 {datetime.fromtimestamp(SNAPSHOT_TS, KST):%m-%d %H:%M} KST: {_bn} → {len(mp_raw)}건")
     log.info(f"✅ Mixpanel: {len(mp_raw)}건")
 
-    # Mixpanel 집계 (utm_content = ad_id)
+    # Mixpanel 집계 — 세트 귀속(utm_term) 우선 + 세트 안에서 소재(utm_content) 배분 (2026-09-28)
+    #   결제 1건의 '세트'는 세트 로더(국내_세트별_supabase.py)와 똑같은 규칙으로 정한다:
+    #   utm_term · 채널분류 · insert_id/order_id dedup · 라스트터치 24h 크로스셀 백필.
+    #   '소재'는 그 결제의 utm_content 가 그 세트의 그날 지출 소재일 때만 붙이고, 못 붙인 매출
+    #   (광고 id 없음·다른 세트 광고·그날 지출 없는 광고)은 세트별 '(소재 미상)' 행으로 모은다 → 소재 소계 = 세트 매출.
     import pandas as pd
-    mp_value_map = {}; mp_count_map = {}
+    mp_value_map = {}; mp_count_map = {}   # (date, ad_key) · ad_key = ad_id 또는 UNATTR_PREFIX+adset_id
+    AD_DAY_ADSET = {(dk, str(mr['ad_id'])): str(mr['adset_id'])
+                    for dk, rows in meta_data.items() for mr in rows if mr.get('ad_id')}
     if mp_raw:
         df = pd.DataFrame(mp_raw)
 
         def _norm(x):
             s = str(x).strip() if x is not None else ''
             return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
-        df['utm_content'] = df['utm_content'].apply(_norm)
+        for _c in ('utm_term', 'utm_content'):
+            if _c not in df.columns: df[_c] = ''
+            df[_c] = df[_c].apply(_norm)
 
-        # 0) 채널 분류 (meta / organic / other) — 세트(국내_세트별_supabase.py)와 동일 (2026-09-28).
-        #   - other(google 등): 직전 Meta 방문의 stale utm_content 오귀속 차단 → 통째로 제외.
-        #   - organic(utm_source 빈값): 크로스셀로 utm 소실된 결제. 자기 utm 불신 → 비운 뒤
-        #     같은 유저의 직전 Meta 결제(라스트터치·24h)에서만 상속 (2단계 백필).
-        #   - meta: 자기 utm_content(=ad_id) 사용.
+        # 0) 채널 분류 (meta / organic / other) — 세트와 동일.
+        #   - other(google 등): stale utm 오귀속 차단 → 통째로 제외.
+        #   - organic(utm_source 빈값): 크로스셀로 utm 소실된 결제 → 자기 utm 불신, 2단계에서 직전 Meta 결제로부터만 상속.
+        #   - meta: 자기 utm_term(=adset_id)·utm_content(=ad_id) 사용.
         if 'utm_source' not in df.columns: df['utm_source'] = ''
         def _src_class(us):
             if is_meta_source(us): return 'meta'
@@ -424,80 +451,86 @@ def main():
         df['_src'] = df['utm_source'].apply(_src_class)
         _bn = len(df); _no = int((df['_src'] == 'other').sum())
         df = df[df['_src'] != 'other'].copy()
-        df.loc[df['_src'] == 'organic', 'utm_content'] = ''  # organic 자기 utm 불신 → Meta 라스트터치에서만 상속
+        df.loc[df['_src'] == 'organic', ['utm_term', 'utm_content']] = ''
         log.info(f"  🔵 채널 분류: 전체 {_bn} → meta+organic {len(df)}건 (other 타채널 {_no}건 제외)")
 
-        # 1) $insert_id 기준 dedup (Mixpanel canonical)
+        # 1) $insert_id dedup — 세트와 동일(insert_id 없는 행은 필드 조합으로 추가 dedup)
         if 'insert_id' in df.columns:
             df_iid = df[df['insert_id'].astype(str).str.len() > 0]
             df_no_iid = df[df['insert_id'].astype(str).str.len() == 0]
             df_iid = df_iid.drop_duplicates(subset=['insert_id'], keep='first')
+            df_no_iid = df_no_iid.drop_duplicates(subset=['date', 'distinct_id', '서비스', 'utm_term', 'revenue'], keep='first')
             df_d = pd.concat([df_iid, df_no_iid], ignore_index=True)
         else:
             df_d = df.drop_duplicates(subset=['date','distinct_id','서비스'], keep='first')
 
-        # 1.5) order_id 기준 주문 단위 dedup (결제완료/payment_complete 이중발화 방지)
-        #   한 주문이 두 이벤트명 + 재시도로 평균 ~3.3회 발화하는데, 발화마다 insert_id 가
-        #   달라 위 insert_id dedup 으로는 안 걸러진다 → groupby sum 에서 같은 주문 매출이
-        #   2~3배 중복 합산되어 특정 (date, ad_id) 귀속이 과대계상된다(소재탭 매출 부풀림).
-        #   세트 파이프라인(국내_세트별_supabase.py)과 동일 처리 — Toss 실매출 ±0.5% 검증된 집계.
-        #   같은 order_id 그룹에서 utm_content 보유 & 최대 revenue 행을 1건만 보존(귀속 유실 방지).
+        # 1.5) order_id 주문 단위 dedup (결제완료/payment_complete 이중발화 방지) — 세트와 동일(utm_term 보유 행 우선)
         if 'order_id' in df_d.columns:
             df_d['_oid'] = df_d['order_id'].astype(str).str.strip()
             _has_oid = df_d['_oid'].str.len() > 0
             _with = df_d[_has_oid].copy()
             _without = df_d[~_has_oid]
-            _with['_hasu'] = (_with['utm_content'].astype(str).str.len() > 0).astype(int)
+            _with['_hasu'] = (_with['utm_term'].astype(str).str.len() > 0).astype(int)
             _with = (_with.sort_values(['_oid','_hasu','revenue'], ascending=[True, False, False])
                           .drop_duplicates(subset=['_oid'], keep='first')
                           .drop(columns=['_hasu']))
             df_d = pd.concat([_with, _without], ignore_index=True).drop(columns=['_oid'])
             log.info(f"  🧹 order_id 주문단위 dedup 후: {len(df_d)}건")
 
-        # 2) utm_content 백필 — 크로스셀 회수 (라스트터치 · 1일창 · 소재 그레인) (2026-09-28)
-        #   기존 '(date, distinct_id) 같은 날 첫 utm_content 채움'은 organic 을 0단계에서 이미 버려
-        #   크로스셀을 회수 못 했고, 세트 규칙과도 달라 소재 소계가 세트 매출보다 매일 ~2% 작았다.
-        #   세트와 같은 규칙(직전 24h 내 마지막 Meta 결제의 소재로만 상속 · 백필행은 다음 접점으로 안 씀)을 ad_id 로 적용.
+        # 2) utm_term 백필 — 크로스셀 회수 (라스트터치 · 24h) · 세트와 동일 규칙.
+        #   상속할 때 그 접점 결제의 utm_content(소재)도 함께 상속한다(세트·소재 귀속이 같은 접점에서 나오도록).
         BACKFILL_WINDOW_SEC = 86400
         if 'ts' not in df_d.columns: df_d['ts'] = 0
         df_d = df_d.reset_index(drop=True)
-        df_d['_ismeta'] = (df_d['_src'] == 'meta') & (df_d['utm_content'].astype(str).str.len() > 0)
+        df_d['_ismeta'] = (df_d['_src'] == 'meta') & (df_d['utm_term'].astype(str).str.len() > 0)
         _s = df_d.sort_values(['distinct_id', 'ts'], kind='mergesort').reset_index(drop=False)
-        _T = _s['utm_content'].astype(str).tolist(); _TS = _s['ts'].fillna(0).astype('int64').tolist()
+        _T = _s['utm_term'].astype(str).tolist(); _C = _s['utm_content'].astype(str).tolist()
+        _TS = _s['ts'].fillna(0).astype('int64').tolist()
         _D = _s['distinct_id'].astype(str).tolist(); _M = _s['_ismeta'].tolist(); _IX = _s['index'].tolist()
-        _ld = None; _lt = None; _lts = None; _rec = {}
+        _ld = None; _lt = None; _lc = None; _lts = None; _rec = {}
         for _i in range(len(_s)):
             _d = _D[_i]
-            if _d != _ld: _ld = _d; _lt = None; _lts = None
+            if _d != _ld: _ld = _d; _lt = None; _lc = None; _lts = None
             if _d in ('', 'None', 'nan', 'null'): continue
             if _T[_i]:
-                if _M[_i] and _TS[_i] > 0: _lt = _T[_i]; _lts = _TS[_i]  # 라스트터치 갱신
+                if _M[_i] and _TS[_i] > 0: _lt = _T[_i]; _lc = _C[_i]; _lts = _TS[_i]  # 라스트터치 갱신
             else:
-                if _lt and _TS[_i] > 0 and _lts and 0 <= _TS[_i] - _lts <= BACKFILL_WINDOW_SEC: _rec[_IX[_i]] = _lt
+                if _lt and _TS[_i] > 0 and _lts and 0 <= _TS[_i] - _lts <= BACKFILL_WINDOW_SEC: _rec[_IX[_i]] = (_lt, _lc)
         _rec_rev = float(df_d.loc[list(_rec.keys()), 'revenue'].sum()) if _rec else 0.0
-        for _oi, _t in _rec.items(): df_d.at[_oi, 'utm_content'] = _t
+        for _oi, (_t, _c) in _rec.items():
+            df_d.at[_oi, 'utm_term'] = _t
+            if not df_d.at[_oi, 'utm_content']: df_d.at[_oi, 'utm_content'] = _c
         log.info(f"  🔗 크로스셀 백필(라스트터치·24h): {len(_rec)}건 회수 · 매출 ₩{int(_rec_rev):,}")
 
-        # 3) utm_content 채워진 이벤트만 attribution (미회수 organic 제외)
-        df_d = df_d[df_d['utm_content'].astype(str).str.len() > 0]
-
+        # 3) utm_term 채워진 결제만 귀속 (미회수 organic 제외)
+        df_d = df_d[df_d['utm_term'].astype(str).str.len() > 0].copy()
         log.info(f"  📊 매출 합계 (크로스셀 백필 적용): ₩{int(df_d['revenue'].sum()):,}")
-        for (d, ut), v in df_d.groupby(['date','utm_content'])['revenue'].sum().items():
-            if d and ut: mp_value_map[(d, str(ut))] = v
-        for (d, ut), c in df_d.groupby(['date','utm_content']).size().items():
-            if d and ut: mp_count_map[(d, str(ut))] = c
+
+        # 4) 세트 안에서 소재 배분 — utm_content 가 그 세트의 그날 지출 소재면 그 소재, 아니면 '(소재 미상)'
+        df_d['ad_key'] = [c if (c and AD_DAY_ADSET.get((d, c)) == t) else UNATTR_PREFIX + t
+                          for d, t, c in zip(df_d['date'], df_d['utm_term'].astype(str), df_d['utm_content'].astype(str))]
+        _un = df_d['ad_key'].str.startswith(UNATTR_PREFIX)
+        log.info(f"  🧩 소재 배분: 소재 매칭 {int((~_un).sum())}건 · (소재 미상) {int(_un.sum())}건 (₩{int(df_d.loc[_un, 'revenue'].sum()):,})")
+        for (d, ak), v in df_d.groupby(['date','ad_key'])['revenue'].sum().items():
+            if d and ak: mp_value_map[(d, str(ak))] = v
+        for (d, ak), c in df_d.groupby(['date','ad_key']).size().items():
+            if d and ak: mp_count_map[(d, str(ak))] = c
 
     # ── only-raise 가드용: 현재 저장된 귀속(results_mp/revenue) 미리 읽기 ──
     #   국내_세트별_supabase.py 의 동일 가드를 이식(2026-08-04).
     #   부실/부분 실패한 Mixpanel fetch 가 이미 정상인 과거 귀속을 '낮추지' 못하게 한다.
     #   (spend 등 Meta-side 지표는 항상 최신값으로 갱신 — 가드 대상은 매출/구매수뿐)
     #   ※ 이 가드가 없어 7/4~7/21 구간이 KST 경계 누락값(~70%)으로 덮여 고착됐다.
+    #   ★ (2026-09-28) 소재 단위 → 세트 단위 판정으로 변경. 매출이 세트 안에서 소재↔(소재 미상)로 옮겨가면
+    #     소재 단위 가드는 옛 값을 붙잡아 이중계상한다. 그래서 '세트의 새 구매수 합 < 기존 합'일 때만
+    #     그 세트 소재들(+(소재 미상))의 기존 값을 통째로 보존한다.
     prev_attr = {}
+    prev_set_cnt = defaultdict(int)   # (date, adset_id) → 기존 저장 구매수 합
     _ps = DATA_REFRESH_START.strftime("%Y-%m-%d")
     _pe = TODAY.strftime("%Y-%m-%d")
     _off = 0
     while True:
-        _u = (f"{sb.base_url}/rest/v1/ad_creative_daily?select=date,ad_id,results_mp,revenue"
+        _u = (f"{sb.base_url}/rest/v1/ad_creative_daily?select=date,ad_id,adset_id,results_mp,revenue"
               f"&date=gte.{_ps}&date=lte.{_pe}&order=date.asc,ad_id.asc&limit=1000&offset={_off}")
         try:
             _chunk = req_lib.get(_u, headers={**sb.headers, "Prefer": ""}, timeout=60).json()
@@ -509,6 +542,7 @@ def main():
         for _row in _chunk:
             prev_attr[(_row.get("date"), str(_row.get("ad_id")))] = (
                 int(_row.get("results_mp") or 0), float(_row.get("revenue") or 0.0))
+            prev_set_cnt[(_row.get("date"), str(_row.get("adset_id")))] += int(_row.get("results_mp") or 0)
         if len(_chunk) < 1000:
             break
         _off += 1000
@@ -518,8 +552,19 @@ def main():
     log.info(f"\n4단계: 병합")
     records = []
     _guarded = 0
+    n_unattr = 0
     for dk, rows in meta_data.items():
         parts = dk.split('/'); iso_date = f"20{parts[0]}-{parts[1]}-{parts[2]}"
+        # 세트 단위 only-raise 판정: 이 세트의 새 구매수 합(소재 + (소재 미상)) < 기존 합이면 세트 통째로 기존 보존
+        rep_by_adset = {}
+        for mr in rows:
+            if mr.get('adset_id'): rep_by_adset.setdefault(str(mr['adset_id']), mr)
+        guard_set = set()
+        for asid in rep_by_adset:
+            new_cnt = mp_count_map.get((dk, UNATTR_PREFIX + asid), 0) + sum(
+                mp_count_map.get((dk, str(mr['ad_id'])), 0) for mr in rows if str(mr.get('adset_id')) == asid and mr.get('ad_id'))
+            if new_cnt < prev_set_cnt.get((iso_date, asid), 0):
+                guard_set.add(asid)
         for mr in rows:
             ad_id = mr['ad_id']
             if not ad_id: continue
@@ -527,11 +572,10 @@ def main():
             # ★ Mixpanel 매칭: (date_key, ad_id)
             mpc = mp_count_map.get((dk, ad_id), 0)
             mpv = mp_value_map.get((dk, ad_id), 0.0)
-            # ★ only-raise 가드: 새 귀속이 기존 저장값보다 낮으면(부실 fetch 등) 기존 보존
-            _prev = prev_attr.get((iso_date, str(ad_id)))
-            if _prev and mpc < _prev[0]:
-                mpc = _prev[0]
-                mpv = _prev[1]
+            # ★ only-raise 가드(세트 단위): 세트 합이 기존보다 낮으면(부실 fetch 등) 기존 보존
+            if str(mr['adset_id']) in guard_set:
+                _prev = prev_attr.get((iso_date, str(ad_id)), (0, 0.0))
+                mpc, mpv = _prev[0], _prev[1]
                 _guarded += 1
             revenue = float(mpv)
             profit = revenue - spend
@@ -555,12 +599,47 @@ def main():
                 'revenue': round(revenue, 2), 'profit': round(profit, 2),
                 'roas': round(roas, 2), 'cvr': round(cvr, 4), 'budget': budget_val,
             })
-    log.info(f"✅ 레코드: {len(records)}개" + (f" · 🛡️ 기존 귀속 보존 {_guarded}행" if _guarded else ""))
+        # (소재 미상) 행 — 세트에는 귀속됐지만 그날 지출 소재로 못 붙인 매출. 지출 0, 매출/건수만.
+        #   세트 로더는 그날 Meta 행이 있는 세트에만 매출을 싣는다 → 같은 조건(그날 소재 행이 있는 세트)에서만 만든다.
+        for asid, r0 in rep_by_adset.items():
+            ak = UNATTR_PREFIX + asid
+            mpc = mp_count_map.get((dk, ak), 0)
+            mpv = float(mp_value_map.get((dk, ak), 0.0))
+            if asid in guard_set:
+                _prev = prev_attr.get((iso_date, ak), (0, 0.0))
+                mpc, mpv = _prev[0], _prev[1]
+            if mpv <= 0 and mpc <= 0: continue
+            budget_raw = budget_map.get(r0['adset_id'], 0)
+            records.append({
+                'date': iso_date, 'ad_id': ak,
+                'campaign_name': r0['campaign_name'], 'adset_name': r0['adset_name'],
+                'adset_id': r0['adset_id'], 'ad_name': UNATTR_AD_NAME,
+                'ad_account_id': r0['ad_account_id'], 'product': extract_product(r0['adset_name'], r0['campaign_name']),
+                'spend': 0, 'cost_per_result': 0, 'purchase_roas_meta': 0,
+                'cpm': 0, 'reach': 0, 'impressions': 0, 'unique_clicks': 0, 'unique_ctr': 0,
+                'cost_per_click': 0, 'frequency': 0, 'results_meta': 0, 'results_mp': mpc,
+                'revenue': round(mpv, 2), 'profit': round(mpv, 2),
+                'roas': 0, 'cvr': 0, 'budget': budget_raw if budget_raw > 0 else 0,
+            })
+            n_unattr += 1
+    log.info(f"✅ 레코드: {len(records)}개 (그중 (소재 미상) {n_unattr}행)" + (f" · 🛡️ 기존 귀속 보존 {_guarded}행" if _guarded else ""))
 
     # 5) Supabase upsert
     log.info(f"\n5단계: Supabase upsert ({len(records)}행)")
     if records:
         sb.upsert("ad_creative_daily", records)
+
+    # 5-1) 이번 회차에 안 생긴 옛 (소재 미상) 행 정리 — 매출이 소재로 옮겨갔거나 사라진 경우 stale 방지.
+    _keep = {(r['date'], r['ad_id']) for r in records if str(r['ad_id']).startswith(UNATTR_PREFIX)}
+    _stale = defaultdict(list)
+    for (_d, _aid) in prev_attr:
+        if str(_aid).startswith(UNATTR_PREFIX) and (_d, _aid) not in _keep:
+            _stale[_d].append(_aid)
+    for _d, _ids in _stale.items():
+        for i in range(0, len(_ids), 100):
+            sb.delete("ad_creative_daily", f"date=eq.{_d}&ad_id=in.({','.join(_ids[i:i+100])})")
+    if _stale:
+        log.info(f"  🧹 stale (소재 미상) 행 삭제: {sum(len(v) for v in _stale.values())}행")
 
     log.info("\n" + "=" * 60)
     log.info("✅ 소재별 파이프라인 완료!")

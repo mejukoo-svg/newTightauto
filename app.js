@@ -3287,15 +3287,16 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
     const tr=document.createElement('tr');
     tr.className='creative-expanded';
     tr.setAttribute('data-parent',adsetId);
+    const isUn=String(c.id).startsWith(UNATTR_PREFIX_JS);   // (소재 미상) — 지출 0, 매출/건수만
     const anEsc=(c.an||'').replace(/"/g,'&quot;');
     const accNum=String(c.acc||'').replace(/^act_/,'');
-    const idCell=accNum
+    const idCell=isUn?'—':accNum
       ? '<a href="https://adsmanager.facebook.com/adsmanager/manage/ads/edit/standalone?act='+accNum+'&selected_ad_ids='+c.id+'&nav_source=no_referrer" target="_blank" rel="noopener noreferrer" style="color:#1877f2;text-decoration:none" title="광고 (Meta Ads Manager) — 좌측 상단 검토 탭 클릭" onclick="event.stopPropagation()">'+c.id+' 👁</a>'
       : c.id;
-    const cells=dd.map(d=>{const r=c.d[d];const yd=d===yDay?' col-yday':'';if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'" style="background:#fff8e1">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,null,ctr,r.results_mp>0?r.spend/r.results_mp:0)+'</td>'}).join('');
+    const cells=dd.map(d=>{const r=c.d[d];const yd=d===yDay?' col-yday':'';if(isUn)return UNC(r&&r.revenue,r&&r.results_mp,yd);if(!r||!r.spend)return'<td class="'+yd+'" style="background:#fff8e1"></td>';const ctr=r.impressions>0?(r.unique_clicks||0)/r.impressions*100:0;return'<td class="mc '+RC(r.roas)+yd+'" style="background:#fff8e1">'+MC(r.roas,r.profit,r.spend,r.revenue,r.cvr,null,ctr,r.results_mp>0?r.spend/r.results_mp:0)+'</td>'}).join('');
     // 국내 세트 탭에서만 소재명 칸 클릭 → 색상 피커(ASC 포함). 저장은 소재별 탭과 같은 ad_creative_highlights.
     //   하이라이트 클래스는 !important 배경이라 인라인 #fff8e1 을 덮는다.
-    const crOK=(MODE==='kr'||MODE==='gl');
+    const crOK=(MODE==='kr'||MODE==='gl')&&!isUn;
     const crHl=(crOK&&CR_HL[c.id]&&HL_CONFIG[CR_HL[c.id]])?' '+HL_CONFIG[CR_HL[c.id]].cls:'';
     const crCk=crOK?' clickable" onclick="showCPCr(\''+c.id+'\',\''+String(c.acc||'').replace(/[^\w]/g,'')+'\',this)"':'"';
     tr.innerHTML=(showAcc?'<td class="fx fxa" style="background:#fff8e1"></td>':'')
@@ -3303,7 +3304,7 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
       +'<td class="fx fx1'+crHl+crCk+' style="background:#fff8e1;padding-left:24px" title="'+anEsc+(crOK?' — 클릭해 마킹(ASC=같은 상품 ASC 세트로 복사)':'')+'"><span style="color:#888">┗</span> '+(c.an||'')+'</td>'
       +'<td class="idc" style="font-size:9px;background:#fff8e1">'+idCell+'</td>'
       +(showChg?'<td style="background:#fff8e1"></td><td style="background:#fff8e1"></td>':'')
-      +'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr,null,c._ctr,c._mp>0?c._s/c._mp:0)+'</td>'
+      +(isUn?UNC(c._r,c._mp,''):'<td class="mc '+RC(c._roas)+'" style="background:#fff8e1">'+MC(c._roas,c._p,c._s,c._r,c._cvr,null,c._ctr,c._mp>0?c._s/c._mp:0)+'</td>')
       +cells;
     trs.push(tr);
   });
@@ -3314,6 +3315,14 @@ async function toggleAdsetCreatives(adsetId, anchorRow){
   const _tbl=anchorRow.closest('table');
   _fixSticky(_tbl||document.getElementById('tTbl'),trs);
   if(caret)caret.textContent='▼';
+}
+
+// (소재 미상) 행 — 파이프라인(국내/글로벌_소재별_supabase.py)이 세트에는 귀속됐지만 그날 지출 소재로 못 붙인 매출을
+//   ad_id='unattr_<adset_id>' 로 적재한다(2026-09-28). 지출이 0이라 MC() 는 빈 칸을 그리므로 매출·건수만 표시.
+const UNATTR_PREFIX_JS='unattr_';
+function UNC(rev,mp,yd){
+  if(!rev&&!mp)return'<td class="'+yd+'" style="background:#fff8e1"></td>';
+  return'<td class="mc'+yd+'" style="background:#fff8e1" title="세트에는 귀속됐지만 소재로 못 붙인 매출 (결제에 광고 ID 없음 · 다른 세트 광고 · 그날 지출 없는 광고)"><div class="rv">'+money(rev||0)+'</div><div class="cv" style="color:#888">'+(mp||0)+'건</div></td>';
 }
 
 // 전체 소재 보기 — '더 보기' 클릭 시 호출
