@@ -37,7 +37,7 @@ index.html '🟢 구글 디멘드젠'(국내 탭, renderGgdgTight)이 이 테이
 의존성: pip install google-ads requests
 """
 
-import os, re, sys, json, logging
+import os, re, sys, json, logging, time
 from datetime import datetime, timedelta, timezone, date
 from collections import defaultdict
 from urllib.parse import urlparse, parse_qs
@@ -370,10 +370,17 @@ def fetch_mp(tight_camp_ids, ad_to_group, group_meta):
         log.warning("  ⏭  Mixpanel 자격증명 없음 — 매출측 스킵")
         return (defaultdict(float), defaultdict(int),
                 defaultdict(float), defaultdict(int))
-    r = req_lib.get("https://data.mixpanel.com/api/2.0/export",
-                    params={"from_date": START_ISO, "to_date": MP_END_ISO,
-                            "event": json.dumps(MP_EVENTS), "project_id": MP_PID},
-                    auth=(MP_USER, MP_SECRET), timeout=600)
+    # 429(시간당/동시 쿼리 한도) 재시도 — 세트·소재 job 동시 실행(2026-09-28)으로 export 동시 호출이 늘어
+    #   이 스크립트만 재시도가 없어 429 로 실패했다(9/28 16:00 회차). 다른 MP 로더와 같은 30/60/90초 백오프.
+    for _attempt in range(4):
+        r = req_lib.get("https://data.mixpanel.com/api/2.0/export",
+                        params={"from_date": START_ISO, "to_date": MP_END_ISO,
+                                "event": json.dumps(MP_EVENTS), "project_id": MP_PID},
+                        auth=(MP_USER, MP_SECRET), timeout=600)
+        if r.status_code != 429 or _attempt == 3:
+            break
+        _w = 30 + _attempt * 30
+        log.warning(f"  ⏳ Mixpanel 429 → {_w}s 대기 ({_attempt + 1}/4)"); time.sleep(_w)
     r.raise_for_status()
     rates = get_krw_rates()    # 비KRW 결제(대만 TWD 등) KRW 환산용
     rev = defaultdict(float)   # rev[(ad_group_id, date)]
