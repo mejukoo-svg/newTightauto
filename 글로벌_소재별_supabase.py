@@ -599,11 +599,20 @@ def main():
             return '' if s.lower() in ('', 'none', 'undefined', 'null') else s
         df['utm_content'] = df['utm_content'].apply(_norm)
 
-        # 0) Meta 채널 결제만 귀속 (google 등 타채널의 stale utm_content 오염 차단) — 세트와 동일
-        if 'utm_source' in df.columns:
-            _bn = len(df)
-            df = df[df['utm_source'].apply(is_meta_source)]
-            log.info(f"  🔵 Meta 소스 필터: {_bn} → {len(df)}건 (비-Meta {_bn - len(df)}건 제외)")
+        # 0) 채널 분류 (meta / organic / other) — 세트(글로벌_세트별_supabase.py)와 동일 (2026-09-28).
+        #   - other(google/tiktok 등): 직전 Meta 방문의 stale utm_content 오귀속 차단 → 통째로 제외.
+        #   - organic(utm_source 빈값): 크로스셀로 utm 소실된 결제. 자기 utm 불신 → 비운 뒤
+        #     같은 유저의 직전 Meta 결제(라스트터치·24h)에서만 상속 (2단계 백필).
+        #   - meta: 자기 utm_content(=ad_id) 사용.
+        if 'utm_source' not in df.columns: df['utm_source'] = ''
+        def _src_class(us):
+            if is_meta_source(us): return 'meta'
+            return 'organic' if str(us).strip() == '' else 'other'
+        df['_src'] = df['utm_source'].apply(_src_class)
+        _bn = len(df); _no = int((df['_src'] == 'other').sum())
+        df = df[df['_src'] != 'other'].copy()
+        df.loc[df['_src'] == 'organic', 'utm_content'] = ''  # organic 자기 utm 불신 → Meta 라스트터치에서만 상속
+        log.info(f"  🔵 채널 분류: 전체 {_bn} → meta+organic {len(df)}건 (other 타채널 {_no}건 제외)")
 
         # 1) 중복 결제 dedup — 주문번호(order_no) 우선 (2026-06-08)
         #    같은 주문번호 = 같은 주문 = 1건. order_no: 대만=merchant_uid/주문번호, 한국=order_id.
@@ -629,10 +638,33 @@ def main():
         df_d = pd.concat([df_ord, df_no], ignore_index=True)
         log.info(f"  주문번호 dedup: 주문있음 {n_a}->{len(df_ord)} · 주문없음 {n_b}->{len(df_no)} · 합계 {len(df_d)}")
 
-        # 2) utm_content 비어있는 organic 결제 제외 (글로벌 세트 스크래퍼와 동일 정책)
+        # 2) utm_content 백필 — 크로스셀 회수 (라스트터치 · 1일창 · 소재 그레인) (2026-09-28)
+        #   세트 로더는 2026-07-07부터 크로스셀을 직전 Meta 세트로 백필하는데 소재는 organic 을 그냥 버려서
+        #   "소재 소계 < 세트 매출"로 어긋났다(예: 9/27 본걸 세트 $397 vs 소재 $347 — 크로스셀 1건).
+        #   세트와 같은 규칙(직전 24h 내 마지막 Meta 결제의 소재로만 상속 · 백필행은 다음 접점으로 안 씀)을 ad_id 로 적용.
+        BACKFILL_WINDOW_SEC = 86400
+        if 'ts' not in df_d.columns: df_d['ts'] = 0
+        df_d = df_d.reset_index(drop=True)
+        df_d['_ismeta'] = (df_d['_src'] == 'meta') & (df_d['utm_content'].astype(str).str.len() > 0)
+        _s = df_d.sort_values(['distinct_id', 'ts'], kind='mergesort').reset_index(drop=False)
+        _T = _s['utm_content'].astype(str).tolist(); _TS = _s['ts'].fillna(0).astype('int64').tolist()
+        _D = _s['distinct_id'].astype(str).tolist(); _M = _s['_ismeta'].tolist(); _IX = _s['index'].tolist()
+        _ld = None; _lt = None; _lts = None; _rec = {}
+        for _i in range(len(_s)):
+            _d = _D[_i]
+            if _d != _ld: _ld = _d; _lt = None; _lts = None
+            if _d in ('', 'None', 'nan', 'null'): continue
+            if _T[_i]:
+                if _M[_i] and _TS[_i] > 0: _lt = _T[_i]; _lts = _TS[_i]  # 라스트터치 갱신
+            else:
+                if _lt and _TS[_i] > 0 and _lts and 0 <= _TS[_i] - _lts <= BACKFILL_WINDOW_SEC: _rec[_IX[_i]] = _lt
+        _rec_rev = float(df_d.loc[list(_rec.keys()), 'revenue'].sum()) if _rec else 0.0
+        for _oi, _t in _rec.items(): df_d.at[_oi, 'utm_content'] = _t
+        log.info(f"  🔗 크로스셀 백필(라스트터치·24h): {len(_rec)}건 회수 · 매출 {_rec_rev:,.0f} local")
+
         before_n = len(df_d)
         df_d = df_d[df_d['utm_content'].astype(str).str.len() > 0]
-        log.info(f"  utm_content filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 organic 제외)")
+        log.info(f"  utm_content filter: {before_n} -> {len(df_d)} ({before_n - len(df_d)}건 미회수 organic 제외)")
 
         # 3) (구) Logical payment dedup — 주문번호 dedup(1단계)으로 대체됨 (2026-06-08).
         #    주문번호 없는 행만 1단계 (B) 에서 복합키 fallback 처리.
