@@ -724,6 +724,7 @@ const GL_PRODUCT_CANON={
   'solo':'solo','솔로':'solo',
   'shaman':'shaman','무당':'shaman','mudang':'shaman','moodang':'shaman','샤먼':'shaman','범산':'shaman',
   'mzpian':'mzpian','무녀':'mzpian',
+  '스님':'스님','파천':'스님',               // 파천 = 스님 상품 (2026-10-06 사용자 결정)
   'possessive':'possessive','집착':'possessive','clinger':'possessive',
   'job':'job','커리어':'job',
   'again':'again','재회':'again',
