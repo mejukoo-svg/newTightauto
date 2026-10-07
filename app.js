@@ -2160,7 +2160,15 @@ function renderDashboard(){
       vncTw=Math.max(0,Math.min(vncTw,mtd));
       pureRev=Math.max(0,mtd-vncTw);
       if(mtd>0){vncShare=vncTw/mtd*100;pureShare=pureRev/mtd*100;}
+    }else{
+      // 국내: 실적(토스)을 '순수 국내'와 '밴스드 국내 기여'로 분리. 밴스드 국내 = 대만(VN_TW_ACC) 외 밴스드 계정의 대상 월 누적 매출(KRW).
+      (VN_AD||[]).forEach(r=>{if(String(r.ad_account_id||'')!==VN_TW_ACC&&r.date>=monthStart&&r.date<=endYmd)vncTw+=(+r.revenue||0)});
+      vncTw=Math.max(0,Math.min(vncTw,mtd));
+      pureRev=Math.max(0,mtd-vncTw);
+      if(mtd>0){vncShare=vncTw/mtd*100;pureShare=pureRev/mtd*100;}
     }
+    const pureLabel=MODE==='gl'?'순수 글로벌':'순수 국내';
+    const vncLabel=MODE==='gl'?'밴스드 대만':'밴스드 국내';
     const labelFlag=MODE==='kr'?'🇰🇷 국내':'🌏 글로벌';
     const bg=MODE==='kr'?'linear-gradient(135deg,#f0f7ff,#e6f0fb)':'linear-gradient(135deg,#fef6f0,#fbe9d8)';
     const bd=MODE==='kr'?'#b8d4e8':'#e8c8a8';
@@ -2191,12 +2199,12 @@ function renderDashboard(){
         +'<span style="margin-left:auto;color:'+barColor+';font-size:22px;font-weight:700">'+pct.toFixed(1)+'%</span>'
         +'</div>'
         +'<div style="display:flex;background:#e0e6ee;border-radius:4px;height:10px;margin-top:10px;overflow:hidden">'
-        +'<div style="background:'+barColor+';height:100%;width:'+(MODE==='gl'?pureW:barW)+'%;transition:width 0.5s" title="순수 글로벌"></div>'
-        +(MODE==='gl'?'<div style="background:'+vncColor+';height:100%;width:'+vncW+'%;transition:width 0.5s" title="밴스드 대만"></div>':'')
+        +'<div style="background:'+barColor+';height:100%;width:'+pureW+'%;transition:width 0.5s" title="'+pureLabel+'"></div>'
+        +'<div style="background:'+vncColor+';height:100%;width:'+vncW+'%;transition:width 0.5s" title="'+vncLabel+'"></div>'
         +'</div>'
-        +(MODE==='gl'&&vncTw>0?'<div style="display:flex;gap:18px;margin-top:9px;font-size:11.5px;flex-wrap:wrap;align-items:center">'
-          +'<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+barColor+';display:inline-block"></span><b style="color:#555">순수 글로벌</b> '+fmt(pureRev)+' <span style="color:#888">('+pureShare.toFixed(1)+'%)</span></span>'
-          +'<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+vncColor+';display:inline-block"></span><b style="color:#555">🎯 밴스드 대만 기여</b> '+fmt(vncTw)+' <span style="color:#888">('+vncShare.toFixed(1)+'%)</span></span>'
+        +(vncTw>0?'<div style="display:flex;gap:18px;margin-top:9px;font-size:11.5px;flex-wrap:wrap;align-items:center">'
+          +'<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+barColor+';display:inline-block"></span><b style="color:#555">'+pureLabel+'</b> '+fmt(pureRev)+' <span style="color:#888">('+pureShare.toFixed(1)+'%)</span></span>'
+          +'<span style="display:flex;align-items:center;gap:5px"><span style="width:11px;height:11px;border-radius:2px;background:'+vncColor+';display:inline-block"></span><b style="color:#555">🎯 '+vncLabel+' 기여</b> '+fmt(vncTw)+' <span style="color:#888">('+vncShare.toFixed(1)+'%)</span></span>'
           +'</div>':'')
         +'</div>';
     }else{
