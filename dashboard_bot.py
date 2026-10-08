@@ -21,13 +21,13 @@ dashboard_bot.py — 대시보드(Supabase) 지표를 가공해 마케팅 채널
   py dashboard_bot.py --dry-run --dates 2026-06-27,2026-06-28   # 특정 두 날짜로 검증
   py dashboard_bot.py --kr-only | --gl-only
   py dashboard_bot.py --dry-run --exp-only   # 🧪 실험 현황 알림만 미리보기
-  py dashboard_bot.py --no-exp               # 실험 현황 알림 끄기
+  py dashboard_bot.py --exp                  # 실험 현황 알림 켜기(기본 꺼짐)
   py dashboard_bot.py --no-shot              # 실험 현황을 캡처 없이 텍스트로 게시
 
 ※ '전체 종합' 공식은 calc_kr_total / calc_gl_total 에 분리해 두었다(아래 주석 참고).
    예시 숫자와 대조해 이 두 함수만 조정하면 된다.
 ※ 채널에 나가는 메시지는 3개다: ①퍼포먼스 표 ②그 스레드 댓글(증감액 조언)
-   ③🧪 실험 현황 · 오늘의 변화(별도 메시지, 변화 있는 날만).
+   ③🧪 실험 현황 · 오늘의 변화(별도 메시지, 변화 있는 날만) — 2026-10-08부터 기본 꺼짐, --exp 로 켬.
    ③은 대시보드 실험현황 카드를 그대로 캡처한 그림 + 짧은 텍스트 요약으로 나간다
    (표를 슬랙 코드블록으로 옮기면 정렬·색이 깨진다). 캡처가 안 되면 종전 전문 텍스트로 폴백.
    캡처에는 playwright(chromium)가 필요하다 — 워크플로에서 설치한다.
@@ -39,8 +39,9 @@ BASE = Path(__file__).parent
 DRY = "--dry-run" in sys.argv
 KR_ONLY = "--kr-only" in sys.argv
 GL_ONLY = "--gl-only" in sys.argv
-NO_EXP = "--no-exp" in sys.argv    # 🧪 실험 현황 알림 끄기
 EXP_ONLY = "--exp-only" in sys.argv  # 실험 현황 알림만 (퍼포먼스 표·조언 생략)
+# 🧪 실험 현황 알림은 기본 꺼짐(2026-10-08 사용자 지시: 국내·글로벌 모두 안 올림). --exp 로만 켠다.
+NO_EXP = not ("--exp" in sys.argv or EXP_ONLY)
 NO_SHOT = "--no-shot" in sys.argv  # 실험 현황 캡처 끄기(텍스트 전문으로 게시)
 DAYS_BACK = 1  # 0=어제vs오늘, 1=그제vs어제(완결일) ← 11시 전송은 완결일 비교 권장
 
